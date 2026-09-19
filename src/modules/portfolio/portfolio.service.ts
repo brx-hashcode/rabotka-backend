@@ -36,8 +36,8 @@ export interface PortfolioImageView {
 
 export interface PortfolioItemView {
   id: string;
-  title: string;
-  description: string;
+  /** Null on an images-only publication. */
+  description: string | null;
   position: number;
   createdAt: Date;
   images: PortfolioImageView[];
@@ -87,10 +87,16 @@ export class PortfolioService {
     dto: CreatePortfolioItemDto,
     files: Express.Multer.File[],
   ): Promise<PortfolioItemView> {
-    if (!files || files.length === 0) {
-      throw new BadRequestException('Au moins une image est requise');
+    // Text, images, or both — the one rule a publication has to satisfy. An
+    // image was mandatory before, which is what made "je suis disponible cette
+    // semaine" impossible to post.
+    const text = dto.description?.trim() || null;
+    if (!text && (!files || files.length === 0)) {
+      throw new BadRequestException(
+        'Ajoutez du texte ou au moins une image à votre publication.',
+      );
     }
-    if (files.length > MAX_IMAGES_PER_ITEM) {
+    if (files && files.length > MAX_IMAGES_PER_ITEM) {
       throw new BadRequestException(
         `Maximum ${MAX_IMAGES_PER_ITEM} images par réalisation`,
       );
@@ -116,13 +122,12 @@ export class PortfolioService {
       );
     }
 
-    const uploaded = await this.uploadAll(files);
+    const uploaded = files?.length ? await this.uploadAll(files) : [];
 
     const item = await this.prisma.portfolioItem.create({
       data: {
         profile_id: profileId,
-        title: dto.title,
-        description: dto.description,
+        description: text,
         position: itemCount,
         images: {
           create: uploaded.map((u, i) => ({
@@ -157,19 +162,34 @@ export class PortfolioService {
   ): Promise<PortfolioItemView> {
     await this.assertOwnedItem(profileId, itemId);
 
+    // An empty string is how the client clears the text, so it has to survive
+    // as null rather than be written as ''. Clearing it on a post with no
+    // photos would leave a publication that is nothing at all.
+    const text =
+      dto.description !== undefined
+        ? dto.description.trim() || null
+        : undefined;
+    if (text === null) {
+      const imageCount = await this.prisma.portfolioImage.count({
+        where: { portfolio_item_id: itemId },
+      });
+      if (imageCount === 0) {
+        throw new BadRequestException(
+          'Une publication sans image doit garder son texte.',
+        );
+      }
+    }
+
     const item = await this.prisma.portfolioItem.update({
       where: { id: itemId },
       data: {
-        ...(dto.title !== undefined ? { title: dto.title } : {}),
-        ...(dto.description !== undefined
-          ? { description: dto.description }
-          : {}),
+        ...(text !== undefined ? { description: text } : {}),
         ...(dto.position !== undefined ? { position: dto.position } : {}),
       },
       include: { images: { orderBy: { position: 'asc' } } },
     });
 
-    if (dto.title !== undefined || dto.description !== undefined) {
+    if (text !== undefined) {
       this.reindex(profileId);
     }
     return this.toItemView(item);
@@ -237,6 +257,20 @@ export class PortfolioService {
       select: { id: true, storage_key: true },
     });
     if (!image) throw new NotFoundException('Image non trouvée');
+
+    // The other half of the "text or images" rule. This method never had a
+    // last-image guard, which was harmless only because a publication could
+    // not be created without text; now it is the one way to empty a post out
+    // completely.
+    const item = await this.prisma.portfolioItem.findUnique({
+      where: { id: itemId },
+      select: { description: true, _count: { select: { images: true } } },
+    });
+    if (item && item._count.images <= 1 && !item.description?.trim()) {
+      throw new BadRequestException(
+        'Une publication sans texte doit garder au moins une image.',
+      );
+    }
 
     await this.deleteFromStorage([image.storage_key]);
     await this.prisma.portfolioImage.delete({ where: { id: image.id } });
@@ -406,15 +440,13 @@ export class PortfolioService {
 
   private toItemView(item: {
     id: string;
-    title: string;
-    description: string;
+    description: string | null;
     position: number;
     created_at: Date;
     images: Array<{ id: string; image_url: string; position: number }>;
   }): PortfolioItemView {
     return {
       id: item.id,
-      title: item.title,
       description: item.description,
       position: item.position,
       createdAt: item.created_at,

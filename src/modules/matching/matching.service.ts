@@ -240,7 +240,7 @@ export class MatchingService {
     completed_count?: number;
     total_terminal_count?: number;
     rejected_categories?: string[];
-    portfolio_items?: Array<{ title: string; description: string | null }>;
+    portfolio_items?: Array<{ description: string | null }>;
   }): string {
     const parts: string[] = [
       `${profile.first_name} ${profile.last_name}`.trim(),
@@ -298,9 +298,14 @@ export class MatchingService {
     }
 
     // Portfolio realizations (worker showcase)
+    //
+    // Text only. A publication can now be photos with nothing written, and
+    // there is nothing to embed in a photo — it contributes to the profile by
+    // being seen, not by being searched.
     if (profile.portfolio_items && profile.portfolio_items.length > 0) {
       const realizations = profile.portfolio_items
-        .map((p) => (p.description ? `${p.title} — ${p.description}` : p.title))
+        .map((p) => p.description?.trim())
+        .filter((text): text is string => !!text)
         .join('; ');
       if (realizations) parts.push(`Réalisations: ${realizations}`);
     }
@@ -710,7 +715,7 @@ export class MatchingService {
             take: 10,
           },
           portfolio_items: {
-            select: { title: true, description: true },
+            select: { description: true },
             orderBy: { position: 'asc' },
           },
         },

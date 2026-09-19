@@ -1,22 +1,31 @@
 import { Transform } from 'class-transformer';
-import { IsString, MinLength, MaxLength } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsString, IsOptional, MaxLength } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreatePortfolioItemDto {
-  @ApiProperty({ description: 'Titre de la réalisation', maxLength: 120 })
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
-  @IsString()
-  @MinLength(3)
-  @MaxLength(120)
-  title!: string;
-
-  @ApiProperty({
-    description: 'Description de la réalisation',
+  @ApiPropertyOptional({
+    description:
+      'Texte de la publication. Facultatif si au moins une image est envoyée.',
     maxLength: 1000,
   })
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsOptional()
   @IsString()
-  @MinLength(3)
   @MaxLength(1000)
-  description!: string;
+  description?: string;
+
+  /**
+   * Accepted and ignored. Publications no longer have a title.
+   *
+   * Only here because the global pipe runs with `forbidNonWhitelisted`, so
+   * dropping the field outright would 400 every create coming from a web
+   * client still running the previous bundle — which is every open tab until
+   * it reloads. Delete this once that traffic has rolled over.
+   *
+   * @deprecated
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  title?: string;
 }

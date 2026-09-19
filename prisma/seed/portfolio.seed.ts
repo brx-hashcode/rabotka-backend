@@ -19,7 +19,8 @@ type DemoWorker = {
   address: string;
   slug: string;
   description: string;
-  items: Array<{ title: string; description: string; images: string[] }>;
+  /** A publication: a headline line and a body, joined into one post. */
+  items: Array<{ headline: string; body: string; images: string[] }>;
 };
 
 const DEMO_WORKERS: DemoWorker[] = [
@@ -34,9 +35,8 @@ const DEMO_WORKERS: DemoWorker[] = [
       'Peintre en bâtiment, finitions soignées intérieur et extérieur.',
     items: [
       {
-        title: 'Rénovation peinture appartement',
-        description:
-          "Peinture complète d'un appartement 3 pièces : préparation des murs, enduit, deux couches et finitions. Livré en 4 jours.",
+        headline: 'Rénovation peinture appartement',
+        body: "Peinture complète d'un appartement 3 pièces : préparation des murs, enduit, deux couches et finitions. Livré en 4 jours.",
         images: [
           unsplash('1589939705384-5185137a7f0f'),
           unsplash('1562259949-e8e7689d7828'),
@@ -54,9 +54,8 @@ const DEMO_WORKERS: DemoWorker[] = [
     description: 'Plomberie sanitaire, installation et dépannage.',
     items: [
       {
-        title: 'Installation sanitaire salle de bain',
-        description:
-          "Pose complète d'une salle de bain : alimentation, évacuation, robinetterie et test d'étanchéité.",
+        headline: 'Installation sanitaire salle de bain',
+        body: "Pose complète d'une salle de bain : alimentation, évacuation, robinetterie et test d'étanchéité.",
         images: [unsplash('1607472586893-edb57bdc0e39')],
       },
     ],
@@ -71,9 +70,8 @@ const DEMO_WORKERS: DemoWorker[] = [
     description: 'Électricité bâtiment, mise aux normes et installation.',
     items: [
       {
-        title: 'Mise aux normes tableau électrique',
-        description:
-          "Remplacement d'un tableau électrique vétuste, repérage des circuits et sécurisation de l'installation.",
+        headline: 'Mise aux normes tableau électrique',
+        body: "Remplacement d'un tableau électrique vétuste, repérage des circuits et sécurisation de l'installation.",
         images: [unsplash('1621905251189-08b45d6a269e')],
       },
     ],
@@ -88,9 +86,8 @@ const DEMO_WORKERS: DemoWorker[] = [
     description: 'Pose de carrelage et faïence, sols et murs.',
     items: [
       {
-        title: 'Pose de carrelage cuisine',
-        description:
-          'Pose de carrelage grand format avec découpes autour des meubles et joints époxy. Surface de 18 m².',
+        headline: 'Pose de carrelage cuisine',
+        body: 'Pose de carrelage grand format avec découpes autour des meubles et joints époxy. Surface de 18 m².',
         images: [unsplash('1620626011761-996317b8d101')],
       },
     ],
@@ -105,9 +102,8 @@ const DEMO_WORKERS: DemoWorker[] = [
     description: 'Nettoyage de fin de chantier et entretien de bureaux.',
     items: [
       {
-        title: 'Nettoyage fin de chantier',
-        description:
-          'Nettoyage complet après travaux : dépoussiérage, vitres, sols et évacuation des gravats légers.',
+        headline: 'Nettoyage fin de chantier',
+        body: 'Nettoyage complet après travaux : dépoussiérage, vitres, sols et évacuation des gravats légers.',
         images: [unsplash('1581578731548-c64695cc6952')],
       },
     ],
@@ -122,9 +118,8 @@ const DEMO_WORKERS: DemoWorker[] = [
     description: 'Menuiserie bois, meubles et agencements sur mesure.',
     items: [
       {
-        title: 'Fabrication meuble sur mesure',
-        description:
-          "Conception et fabrication d'une bibliothèque sur mesure en bois massif, ponçage et vernis.",
+        headline: 'Fabrication meuble sur mesure',
+        body: "Conception et fabrication d'une bibliothèque sur mesure en bois massif, ponçage et vernis.",
         images: [unsplash('1504148455328-c376907d081c')],
       },
     ],
@@ -169,8 +164,9 @@ export async function seedPortfolio(prisma: PrismaClient): Promise<void> {
       await prisma.portfolioItem.create({
         data: {
           profile_id: profile.id,
-          title: item.title,
-          description: item.description,
+          // Publications have no title any more — the headline is just the
+          // first line of the post, which is how the real ones now read.
+          description: `${item.headline}\n\n${item.body}`,
           position: index,
           images: {
             create: item.images.map((url, i) => ({

@@ -619,13 +619,23 @@ model KycVerificationImage {
   @@map("kyc_verification_images")
 }
 
+/// A worker's publication: text, images, or both.
+///
+/// There is no title. A publication used to require one, plus a description
+/// and at least one photo — a portfolio entry, not a post. People publish the
+/// way they do on social: a few words, a couple of photos, or just the photos.
+/// The old titles were folded into `description` when the column was dropped,
+/// so nothing anyone had written was lost.
+///
+/// "Text or images, at least one" cannot be expressed here — the images live
+/// in another table — so that invariant is enforced in PortfolioService.
 model PortfolioItem {
   id          String   @id @default(uuid()) @db.Uuid
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
   profile_id  String   @db.Uuid
-  title       String
-  description String   @db.Text
+  /// Null for an images-only publication.
+  description String?  @db.Text
   position    Int      @default(0)
 
   profile Profile          @relation(fields: [profile_id], references: [id], onDelete: Cascade)
