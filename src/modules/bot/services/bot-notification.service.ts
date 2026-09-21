@@ -29,6 +29,22 @@ import {
   notifyProfile,
 } from '../../profile-notification/profile-notification.events';
 import { personName } from '../../profile-notification/notification-catalog';
+import {
+  NotificationDispatcher,
+  type FreeFormMessage,
+} from '../../notification-dispatch/notification-dispatcher.service';
+import type {
+  TemplateKey,
+  TemplateParams,
+} from '../../whatsapp/contracts';
+import {
+  applicationAcceptedFreeForm,
+  applicationAcceptedUnlockFreeForm,
+  applicationRejectedFreeForm,
+  cancellationFreeForm,
+  jobRecommendationFreeForm,
+  newApplicationFreeForm,
+} from '../messages/notifications.messages';
 
 /** A mission unlocks once; this only absorbs retries of the same unlock. */
 const CONTACT_UNLOCKED_DEDUPE_SECONDS = 30 * 24 * 3600;
@@ -60,7 +76,48 @@ export class BotNotificationService {
     // In-app notifications. Optional for the same positional-spec reason.
     @Optional()
     private readonly events?: EventEmitter2,
+    // The window-aware send path. Optional, and absent in the specs, so
+    // `notify()` below falls back to the template — which is what this service
+    // did before the dispatcher existed.
+    @Optional()
+    private readonly dispatcher?: NotificationDispatcher,
   ) {}
+
+  /**
+   * Send a notification the cheap way when we can, the approved way always.
+   *
+   * One helper rather than a `dispatcher ?? whatsApp` at each call site: the
+   * senders below are the highest-volume paths in the product, and the point of
+   * the free-form path is precisely that they should not each decide for
+   * themselves how a message leaves.
+   *
+   * `freeForm` omitted means "template only" — for the sends whose copy is not
+   * mirrored in `notifications.messages.ts` yet.
+   */
+  private async notify<K extends TemplateKey>(params: {
+    phone: string;
+    profileId?: string;
+    key: K;
+    params: TemplateParams<K>;
+    freeForm?: FreeFormMessage;
+  }): Promise<boolean> {
+    if (!this.dispatcher) {
+      return this.whatsApp.sendTemplateMessage(
+        params.phone,
+        params.key,
+        params.params,
+        params.profileId,
+      );
+    }
+
+    const { sent } = await this.dispatcher.send({
+      phone: params.phone,
+      ...(params.profileId ? { profileId: params.profileId } : {}),
+      template: { key: params.key, params: params.params },
+      ...(params.freeForm ? { freeForm: params.freeForm } : {}),
+    });
+    return sent;
+  }
 
   /**
    * Paces "someone applied" so one offer cannot bill the employer once per
@@ -161,27 +218,31 @@ export class BotNotificationService {
       );
       const description = app.worker.description ?? '';
       const address = jobLocationLabel(app.job_offer);
-      const tpl = WHATSAPP_TEMPLATES.newApplication;
-      await this.whatsApp.sendTemplateMessage(
-        app.job_offer.employer.phone,
-        'newApplication',
-        {
-          offerTitle: app.job_offer.title,
-          workerName: `${app.worker.first_name} ${app.worker.last_name}`,
-          reliabilityScore: app.worker.reliability_score ?? 100,
-          completedMissions: completedCount,
-          workerDescription:
-            description.length > 150
-              ? `${description.slice(0, 150)}...`
-              : description,
-          scheduledAt: scheduledAt ?? 'Non précisée',
-          address: address.length > 80 ? `${address.slice(0, 80)}...` : address,
-          // URL suffix for the CTA button (/candidatures/{{8}}). Ignored by the
-          // pre-approval template, so this is safe either side of the cutover.
-          applicationId,
-        },
-        app.job_offer.employer_id,
-      );
+      const params = {
+        offerTitle: app.job_offer.title,
+        workerName: `${app.worker.first_name} ${app.worker.last_name}`,
+        reliabilityScore: app.worker.reliability_score ?? 100,
+        completedMissions: completedCount,
+        workerDescription:
+          description.length > 150
+            ? `${description.slice(0, 150)}...`
+            : description,
+        scheduledAt: scheduledAt ?? 'Non précisée',
+        address: address.length > 80 ? `${address.slice(0, 80)}...` : address,
+        // URL suffix for the CTA button (/candidatures/{{8}}). Ignored by the
+        // pre-approval template, so this is safe either side of the cutover.
+        applicationId,
+      };
+      await this.notify({
+        phone: app.job_offer.employer.phone,
+        profileId: app.job_offer.employer_id,
+        key: 'newApplication',
+        params,
+        freeForm: newApplicationFreeForm({
+          ...params,
+          workerDescription: params.workerDescription || 'Non renseignée',
+        }),
+      });
     } catch (err) {
       // Hand the window back. Keeping it would let one failed send suppress
       // every later applicant on this offer for the rest of the cooldown, so a
@@ -234,34 +295,36 @@ export class BotNotificationService {
       if (!app.worker?.phone) return;
 
       if (attempt) {
-        const fees = await this.systemConfig.getContactUnlockFees();
-
         // No chat state is armed. This used to pre-arm the unlock flow so a
         // "Continuer" quick-reply could re-show a balance-dependent option list
         // in the chat; the template carries a URL button now and the worker
         // settles up in the app, so arming a flow only left a stale state for
         // the next thing they typed to fall into.
-        await this.whatsApp.sendTemplateMessage(
-          app.worker.phone,
-          'applicationAcceptedUnlock',
-          {
-            employerName,
-            offerTitle: app.job_offer.title,
-            // URL suffix: the worker settles their share on the web now.
-            applicationId,
-          },
-          app.worker_id,
-        );
+        const params = {
+          employerName,
+          offerTitle: app.job_offer.title,
+          // URL suffix: the worker settles their share on the web now.
+          applicationId,
+        };
+        await this.notify({
+          phone: app.worker.phone,
+          profileId: app.worker_id,
+          key: 'applicationAcceptedUnlock',
+          params,
+          freeForm: applicationAcceptedUnlockFreeForm(params),
+        });
       } else {
-        await this.whatsApp.sendTemplateMessage(
-          app.worker.phone,
-          'applicationAccepted',
-          {
-            employerName,
-            offerTitle: app.job_offer.title,
-          },
-          app.worker_id,
-        );
+        const params = {
+          employerName,
+          offerTitle: app.job_offer.title,
+        };
+        await this.notify({
+          phone: app.worker.phone,
+          profileId: app.worker_id,
+          key: 'applicationAccepted',
+          params,
+          freeForm: applicationAcceptedFreeForm(params),
+        });
       }
     } catch (err) {
       this.logger.warn(
@@ -558,12 +621,13 @@ export class BotNotificationService {
       });
       if (!app.worker?.phone) return;
 
-      const tpl = WHATSAPP_TEMPLATES.applicationRejected;
-      await this.whatsApp.sendTemplateMessage(
-        app.worker.phone,
-        'applicationRejected',
-        undefined,
-      );
+      await this.notify({
+        phone: app.worker.phone,
+        profileId: app.worker_id,
+        key: 'applicationRejected',
+        params: undefined,
+        freeForm: applicationRejectedFreeForm(),
+      });
     } catch (err) {
       this.logger.warn(
         `Failed to send rejected notification to worker: ${String(applicationId)}`,
@@ -676,19 +740,26 @@ export class BotNotificationService {
       const penaltyStatus = wasLatePenalty
         ? `Cette annulation tardive (moins de ${fees.cancellationThresholdHours}h avant) a entraîné une pénalité pour le worker.`
         : 'Aucune pénalité n’a été appliquée (annulation dans les délais).';
-      const tpl = WHATSAPP_TEMPLATES.cancellation;
-      await this.whatsApp.sendTemplateMessage(
-        app.job_offer.employer.phone,
-        'cancellation',
-        {
-          workerName: `${app.worker.first_name} ${app.worker.last_name}`,
-          offerTitle: app.job_offer.title,
-          date: date ?? 'Non précisée',
-          reason: reason ?? '',
-          penaltyStatus,
-          jobOfferId: app.job_offer.id,
-        },
-      );
+      const params = {
+        workerName: `${app.worker.first_name} ${app.worker.last_name}`,
+        offerTitle: app.job_offer.title,
+        date: date ?? 'Non précisée',
+        reason: reason ?? '',
+        penaltyStatus,
+        jobOfferId: app.job_offer.id,
+      };
+      await this.notify({
+        phone: app.job_offer.employer.phone,
+        profileId: app.job_offer.employer_id,
+        key: 'cancellation',
+        params,
+        freeForm: cancellationFreeForm({
+          ...params,
+          // The template's own variable mapping supplies this fallback; the
+          // free-form body has to do it for itself.
+          reason: params.reason.trim() || 'Aucune raison donnée',
+        }),
+      });
 
       // No bot state is armed here. This used to open a 1/2/3 action menu, back
       // when the employer received a text message that printed one; the CTA
@@ -757,23 +828,28 @@ export class BotNotificationService {
         hour: '2-digit',
         minute: '2-digit',
       });
-      const tpl = WHATSAPP_TEMPLATES.jobRecommendation;
-      return await this.whatsApp.sendTemplateMessage(
-        profile.phone,
-        'jobRecommendation',
-        {
-          firstName: profile.first_name,
-          title: offer.title,
-          amount: formatAmount(
-            offer.amount != null ? Number(offer.amount) : null,
-            offer.payment_flow,
-          ),
-          address: jobLocationLabel(offer),
-          date: dateStr ?? 'Non précisée',
-          // URL suffix for the CTA button (/offres/{{6}}).
-          jobOfferId,
-        },
-      );
+      const params = {
+        firstName: profile.first_name,
+        title: offer.title,
+        amount: formatAmount(
+          offer.amount != null ? Number(offer.amount) : null,
+          offer.payment_flow,
+        ),
+        address: jobLocationLabel(offer),
+        date: dateStr ?? 'Non précisée',
+        // URL suffix for the CTA button (/offres/{{6}}).
+        jobOfferId,
+      };
+      // The one MARKETING template among these, so the free-form path saves the
+      // most here — and free-form is not subject to the marketing opt-out that
+      // can drop this message entirely.
+      return await this.notify({
+        phone: profile.phone,
+        profileId: workerId,
+        key: 'jobRecommendation',
+        params,
+        freeForm: jobRecommendationFreeForm(params),
+      });
     } catch (err) {
       this.logger.warn(
         `Failed to send recommended job notification to worker ${workerId}`,

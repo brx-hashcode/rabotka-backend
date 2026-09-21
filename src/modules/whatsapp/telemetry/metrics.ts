@@ -39,3 +39,21 @@ export const outboundDuplicateBlockedCounter = new Counter({
   labelNames: ['provider'],
   registers: [whatsappMetricsRegistry],
 });
+
+/**
+ * How each notification left: free-form (no template fee) or template.
+ *
+ * The measurement the window-aware dispatcher exists to produce. `mode` is
+ * `free_form` | `template`, and `reason` says why the template was chosen —
+ * `window_closed`, `disabled`, `no_free_form`, `no_link` or `fallback`, the
+ * last meaning the free-form attempt failed and the template rescued it.
+ *
+ * A rising `fallback` is the alarm: it means free-form sends are being
+ * rejected, and the saving is being paid for twice.
+ */
+export const notificationDispatchCounter = new Counter({
+  name: 'whatsapp_notification_dispatch_total',
+  help: 'Notifications dispatched, by send mode',
+  labelNames: ['mode', 'reason', 'template'],
+  registers: [whatsappMetricsRegistry],
+});

@@ -471,6 +471,20 @@ model Profile {
   /// Throttled by `LOGIN_STAMP_THROTTLE_MS`, so it is accurate to the minute
   /// rather than the message.
   last_login_at                     DateTime?
+  /// When this profile last wrote to us ON WHATSAPP — the start of Meta's 24h
+  /// customer-service window, inside which free-form text is allowed and free.
+  ///
+  /// A denormalisation of "newest INBOUND Message with platform WHATSAPP",
+  /// which `WhatsAppService.saveMessage` keeps in step. It exists because the
+  /// window has to be READABLE IN BULK: a fan-out that decides per recipient
+  /// between a billed template and a free message cannot afford one query per
+  /// person, which is why no fan-out checked the window at all before.
+  ///
+  /// NULL means the profile has never messaged us, i.e. the window is closed.
+  /// That is the common case, not an edge case — most people sign up on the web
+  /// and never write to the bot. Backfilled from `messages` at migration time,
+  /// so a NULL here is a fact rather than a gap.
+  last_inbound_at                   DateTime?
 
   avatar_url        String?
   vector_indexed_at DateTime?
@@ -537,6 +551,7 @@ model Profile {
   @@index([category_id], name: "idx_profile_category")
   @@index([deleted_at], name: "idx_profile_deleted_at")
   @@index([country_code, city], name: "idx_profile_country_city")
+  @@index([last_inbound_at(sort: Desc)], name: "idx_profile_last_inbound")
   @@map("profiles")
 }
 

@@ -617,6 +617,20 @@ export class SystemConfigService implements OnModuleInit {
   }
 
   /**
+   * Whether a notification may go out as free-form text when the 24h window is
+   * open, instead of as its approved template.
+   *
+   * Defaults to TRUE, unlike most switches here, because the safe direction is
+   * the cheap one: the free-form path falls back to the very template it
+   * replaced on any failure, so the worst case is the behaviour this key turns
+   * off. See the note on the key in `system-config.constants.ts`.
+   */
+  async prefersFreeForm(): Promise<boolean> {
+    const val = await this.get('notifications.prefer_free_form', 'true');
+    return val === 'true';
+  }
+
+  /**
    * How many unread profile views a worker may pile up before WhatsApp tells
    * them. `0` turns the reminder off.
    */

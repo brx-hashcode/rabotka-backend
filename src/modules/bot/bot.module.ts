@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
+import { NotificationDispatchModule } from '../notification-dispatch/notification-dispatch.module';
 import { JobOfferModule } from '../job-offer/job-offer.module';
 import { ApplicationModule } from '../application/application.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
@@ -43,6 +44,9 @@ import { WhatsAppDocumentModule } from '../whatsapp/documents/whatsapp-document.
     InvoiceModule,
     forwardRef(() => PortfolioModule),
     forwardRef(() => VovaModule),
+    // Window-aware sending: free-form inside the 24h window, the approved
+    // template outside it or on any failure.
+    NotificationDispatchModule,
   ],
   providers: [
     BotStateService,

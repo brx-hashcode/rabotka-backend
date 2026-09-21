@@ -356,6 +356,17 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    // Kill switch for the window-aware send path — see the long note on this
+    // key in src/modules/system-config/system-config.constants.ts.
+    key: 'notifications.prefer_free_form',
+    value: 'true',
+    category: ConfigCategory.MATCHING,
+    label:
+      'Envoyer en texte libre (gratuit) quand la fenêtre WhatsApp de 24h est ' +
+      'ouverte, au lieu d’un modèle payant',
+    isSecret: false,
+  },
+  {
     key: 'notifications.profile_views_whatsapp_threshold',
     value: '5',
     category: ConfigCategory.MATCHING,
