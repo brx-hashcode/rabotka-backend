@@ -227,6 +227,9 @@ describe('authored templates', () => {
     'profileViewsDigest',
     // Lands on the identity-check consent page.
     'identityCheckConsent',
+    // Lands on the conversation LIST, not a thread: the nudge is debounced and
+    // may cover several unread messages across more than one conversation.
+    'newMessageNudge',
   ] as const;
   // Deliberately button-less: this one carries whatever an admin typed, so
   // there is no single destination a CTA could point at.
