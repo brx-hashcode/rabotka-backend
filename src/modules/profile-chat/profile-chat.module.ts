@@ -5,6 +5,7 @@ import { SystemConfigModule } from '../system-config/system-config.module';
 import { ProfileChatController } from './profile-chat.controller';
 import { ProfileChatService } from './profile-chat.service';
 import { ModerationService } from './moderation/moderation.service';
+import { ProfileChatGateway } from './profile-chat.gateway';
 
 /**
  * Profile-to-profile messaging before contact details are unlocked.
@@ -21,7 +22,7 @@ import { ModerationService } from './moderation/moderation.service';
 @Module({
   imports: [PrismaModule, AuthModule, SystemConfigModule],
   controllers: [ProfileChatController],
-  providers: [ProfileChatService, ModerationService],
+  providers: [ProfileChatService, ModerationService, ProfileChatGateway],
   exports: [ProfileChatService],
 })
 export class ProfileChatModule {}

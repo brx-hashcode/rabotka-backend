@@ -6,6 +6,7 @@ import {
 } from '@prisma/client';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ProfileChatService } from '../profile-chat.service';
+import { PROFILE_NOTIFICATION_EVENT } from '../../profile-notification/profile-notification.events';
 import { ModerationService } from '../moderation/moderation.service';
 
 const WORKER = 'w-1';
@@ -35,6 +36,8 @@ describe('ProfileChatService', () => {
   let service: ProfileChatService;
   let prisma: any;
   let config: { get: jest.Mock };
+  let gateway: { emitMessage: jest.Mock; emitRead: jest.Mock };
+  let events: { emit: jest.Mock };
 
   const storedMessage = (over: Record<string, unknown> = {}) => ({
     id: 'm-1',
@@ -50,7 +53,7 @@ describe('ProfileChatService', () => {
 
   beforeEach(() => {
     prisma = {
-      application: { findFirst: jest.fn() },
+      application: { findFirst: jest.fn(), findUnique: jest.fn().mockResolvedValue({ job_offer: { title: 'Ménage bureau' } }) },
       profileConversation: {
         findUnique: jest.fn().mockResolvedValue(conversation),
         findMany: jest.fn().mockResolvedValue([]),
@@ -67,6 +70,11 @@ describe('ProfileChatService', () => {
         groupBy: jest.fn().mockResolvedValue([]),
       },
       contactUnlockAttempt: { findFirst: jest.fn().mockResolvedValue(null) },
+      profile: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ first_name: 'Sara', last_name: 'Colombe' }),
+      },
       redactionReport: { create: jest.fn().mockResolvedValue({}) },
       $transaction: jest.fn((arg: unknown) =>
         typeof arg === 'function'
@@ -86,10 +94,15 @@ describe('ProfileChatService', () => {
       }),
     };
 
+    gateway = { emitMessage: jest.fn(), emitRead: jest.fn() };
+    events = { emit: jest.fn() };
+
     service = new ProfileChatService(
       prisma,
       config as never,
       new ModerationService(config as never),
+      gateway as never,
+      events as never,
     );
   });
 
@@ -173,6 +186,88 @@ describe('ProfileChatService', () => {
       const { data } = await service.listMessages(CONV, EMPLOYER);
 
       expect(data[0].body).toBe('mon chiffre porte-bonheur est [masqué]');
+    });
+  });
+
+  describe('reaching the recipient', () => {
+    const notificationOf = () =>
+      events.emit.mock.calls.find(
+        ([name]) => name === PROFILE_NOTIFICATION_EVENT,
+      )?.[1];
+
+    it('pushes the RECIPIENT view, never the author one', async () => {
+      // The socket bypasses the HTTP response entirely, so if this pushed the
+      // author's view the withheld characters would go straight down the wire
+      // and undo everything the controller did.
+      await service.sendMessage(CONV, WORKER, BODY_WITH_PHONE);
+
+      const [to, pushed] = gateway.emitMessage.mock.calls[0];
+      expect(to).toBe(EMPLOYER);
+      expect(pushed.body).not.toMatch(/\d/);
+      expect(pushed.redactions).toEqual([]);
+      expect(pushed.mine).toBe(false);
+    });
+
+    it('raises the in-app bell for the recipient', async () => {
+      await service.sendMessage(CONV, WORKER, 'bonjour, je suis disponible');
+
+      const payload = notificationOf();
+      expect(payload.recipientId).toBe(EMPLOYER);
+      expect(payload.actorId).toBe(WORKER);
+      expect(payload.input.type).toBe('NEW_MESSAGE');
+      expect(payload.input.conversationId).toBe(CONV);
+      expect(payload.input.senderName).toBe('Sara Colombe');
+    });
+
+    it('collapses a burst into one bell entry, by conversation and recipient', async () => {
+      // A chat produces dozens of events an hour. One feed row each would bury
+      // every other notification a person has, so the dedupe key is the whole
+      // reason this type is safe to add at all.
+      await service.sendMessage(CONV, WORKER, 'bonjour');
+      await service.sendMessage(CONV, WORKER, 'vous etes la ?');
+
+      const keys = events.emit.mock.calls
+        .filter(([name]) => name === PROFILE_NOTIFICATION_EVENT)
+        .map(([, payload]) => payload.dedupeKey);
+
+      expect(keys[0]).toBe(keys[1]);
+      expect(keys[0]).toContain(CONV);
+      expect(keys[0]).toContain(EMPLOYER);
+      expect(notificationOf().dedupeTtlSeconds).toBeGreaterThan(0);
+    });
+
+    it('puts no message text in the notification', async () => {
+      // Feed rows are rendered at write time and stored, so any text copied in
+      // would outlive a later correction to what should have been withheld.
+      await service.sendMessage(CONV, WORKER, BODY_WITH_PHONE);
+
+      const serialised = JSON.stringify(notificationOf());
+      expect(serialised).not.toContain('06 12 34 56 78');
+      expect(serialised).not.toContain('appelle');
+    });
+
+    it('neither pushes nor notifies for a held message', async () => {
+      prisma.profileMessage.create.mockResolvedValue(
+        storedMessage({
+          moderation_status: MessageModerationStatus.HELD,
+          redactions: [{ start_offset: 0, end_offset: 10, category: 'PHONE' }],
+        }),
+      );
+
+      await service.sendMessage(CONV, WORKER, '0612345678');
+
+      expect(gateway.emitMessage).not.toHaveBeenCalled();
+      expect(notificationOf()).toBeUndefined();
+    });
+
+    it('notifies the worker when the employer writes', async () => {
+      prisma.profileMessage.create.mockResolvedValue(
+        storedMessage({ sender_id: EMPLOYER }),
+      );
+      await service.sendMessage(CONV, EMPLOYER, 'bonjour');
+
+      expect(gateway.emitMessage.mock.calls[0][0]).toBe(WORKER);
+      expect(notificationOf().recipientId).toBe(WORKER);
     });
   });
 

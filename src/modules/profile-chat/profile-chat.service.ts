@@ -12,10 +12,25 @@ import {
   Prisma,
   type ProfileConversation,
 } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import {
+  notificationDedupeKey,
+  notifyProfile,
+} from '../profile-notification/profile-notification.events';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { ModerationService } from './moderation/moderation.service';
+import { ProfileChatGateway } from './profile-chat.gateway';
 import type { RedactionCategory } from './moderation/patterns';
+
+/**
+ * How long one conversation's bell entry stands in for the next message.
+ *
+ * Half an hour: long enough that a back-and-forth leaves one row, short enough
+ * that a reply the next morning still announces itself. Not configurable yet —
+ * there is no evidence to tune it against until real threads exist.
+ */
+const NOTIFICATION_DEDUPE_SECONDS = 30 * 60;
 
 const ENABLED_KEY = 'messaging.enabled';
 const MODERATE_AFTER_UNLOCK_KEY = 'messaging.moderate_after_unlock';
@@ -84,6 +99,8 @@ export class ProfileChatService {
     private readonly prisma: PrismaService,
     private readonly config: SystemConfigService,
     private readonly moderation: ModerationService,
+    private readonly gateway: ProfileChatGateway,
+    private readonly events: EventEmitter2,
   ) {}
 
   // ── Conversations ──────────────────────────────────────────────────────────
@@ -362,7 +379,77 @@ export class ProfileChatService {
       return created;
     });
 
-    return this.toMessageView(message, senderId);
+    const authorView = this.toMessageView(message, senderId);
+
+    // Pushed as the RECIPIENT'S view, built by the same code path the HTTP
+    // response uses. `deliverableFor` returns null for a held message, which is
+    // what stops a push announcing something nobody may read.
+    const recipientId =
+      conversation.worker_id === senderId
+        ? conversation.employer_id
+        : conversation.worker_id;
+    const delivered = this.deliverableFor(
+      this.toMessageView(message, recipientId),
+      recipientId,
+    );
+    if (delivered) {
+      this.gateway.emitMessage(recipientId, delivered);
+      await this.notifyRecipient(conversation, senderId, recipientId);
+    }
+
+    return authorView;
+  }
+
+  /**
+   * Raises the in-app bell for the recipient — ONCE PER CONVERSATION, not once
+   * per message.
+   *
+   * The socket push only reaches somebody who already has the app open, so
+   * without this a message lands silently for everybody else. But a chat
+   * produces dozens of events an hour, and one feed row each would bury every
+   * other notification a person has.
+   *
+   * `dedupeKey` on the conversation with a window solves both: a burst leaves
+   * one row, and a genuinely new exchange an hour later raises a fresh one. The
+   * mechanism is already there — `IdempotencyService` behind
+   * `notifyProfile` — so this is a key and a TTL, not new machinery.
+   *
+   * The notification carries the sender's name and the job title, never the
+   * message. Feed rows are rendered at write time and stored, so any text
+   * copied here would outlive a later correction to what should have been
+   * withheld.
+   */
+  private async notifyRecipient(
+    conversation: ProfileConversation,
+    senderId: string,
+    recipientId: string,
+  ): Promise<void> {
+    const [sender, application] = await Promise.all([
+      this.prisma.profile.findUnique({
+        where: { id: senderId },
+        select: { first_name: true, last_name: true },
+      }),
+      conversation.application_id
+        ? this.prisma.application.findUnique({
+            where: { id: conversation.application_id },
+            select: { job_offer: { select: { title: true } } },
+          })
+        : Promise.resolve(null),
+    ]);
+    if (!sender) return;
+
+    notifyProfile(this.events, {
+      recipientId,
+      actorId: senderId,
+      dedupeKey: notificationDedupeKey('msg', conversation.id, recipientId),
+      dedupeTtlSeconds: NOTIFICATION_DEDUPE_SECONDS,
+      input: {
+        type: 'NEW_MESSAGE',
+        conversationId: conversation.id,
+        senderName: `${sender.first_name} ${sender.last_name}`,
+        jobTitle: application?.job_offer.title ?? null,
+      },
+    });
   }
 
   /** What the OTHER party should be pushed and notified with, or null if nothing. */

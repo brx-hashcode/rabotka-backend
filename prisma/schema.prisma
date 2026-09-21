@@ -1653,6 +1653,14 @@ enum ProfileNotificationType {
   PAYMENT_FAILED
   CLAIM_COMMENTED
   CLAIM_STATUS_CHANGED
+  /// Somebody wrote in the in-app messaging.
+  ///
+  /// COLLAPSED PER CONVERSATION, not one per message. The bell is a feed of
+  /// things that happened, and a chat produces dozens of those an hour — the
+  /// trigger site passes a dedupe key on the conversation with a TTL, so a
+  /// burst of ten messages leaves one row. Without that this type would make
+  /// every other notification unreadable.
+  NEW_MESSAGE
   /// An admin's announcement, sent to a segment rather than triggered by
   /// something that happened to this person. The only type a user can opt out
   /// of — see `Profile.marketing_opt_out_at`.
