@@ -21,6 +21,8 @@ import { claimDetailCtaPath } from '../../common/constants/whatsapp-templates';
 import { notifyProfile } from '../profile-notification/profile-notification.events';
 import type { ClaimStatusValue } from '../profile-notification/notification-catalog';
 import { ClaimAttachmentService } from './claim-attachment.service';
+import { NotificationDispatcher } from '../notification-dispatch/notification-dispatcher.service';
+import { claimCommentedFreeForm } from '../bot/messages/notifications.messages';
 
 export type AdminClaimItem = {
   id: string;
@@ -162,6 +164,7 @@ export class ClaimService {
     private readonly whatsApp: WhatsAppService,
     private readonly loginLink: WhatsAppLoginLinkService,
     private readonly attachments: ClaimAttachmentService,
+    private readonly dispatcher: NotificationDispatcher,
   ) {}
 
   async createForAdmin(
@@ -584,10 +587,7 @@ export class ClaimService {
     });
 
     const mapped = mapComment(comment);
-    this.claimCommentsGateway.emitNewComment(
-      claimId,
-      mapped as unknown as Record<string, unknown>,
-    );
+    this.claimCommentsGateway.emitNewComment(claimId, mapped);
 
     // Unlike WhatsApp below, an image-only reply still counts: the bell says
     // "our team replied", which is true either way.
@@ -647,17 +647,27 @@ export class ClaimService {
       .mint(claim.profile_id, claimDetailCtaPath(claimId))
       .catch(() => null);
 
-    await this.whatsApp.sendTemplateMessage(
+    await this.dispatcher.send({
       phone,
-      'claimCommented',
-      {
+      profileId: claim.profile_id,
+      template: {
+        key: 'claimCommented',
+        params: {
+          firstName: claim.profile?.first_name ?? '',
+          claimTitle: claim.title,
+          excerpt: content,
+          loginCode,
+        },
+      },
+      // Someone in a support conversation has usually written to us within the
+      // hour, so this is the send most often reachable for free.
+      freeForm: claimCommentedFreeForm({
         firstName: claim.profile?.first_name ?? '',
         claimTitle: claim.title,
         excerpt: content,
-        loginCode,
-      },
-      claim.profile_id,
-    );
+        claimId,
+      }),
+    });
   }
 
   async listComments(claimId: string): Promise<AdminClaimCommentItem[]> {
@@ -899,10 +909,7 @@ export class ClaimService {
     });
 
     const mapped = mapComment(comment);
-    this.claimCommentsGateway.emitNewComment(
-      claimId,
-      mapped as unknown as Record<string, unknown>,
-    );
+    this.claimCommentsGateway.emitNewComment(claimId, mapped);
     return mapped;
   }
 

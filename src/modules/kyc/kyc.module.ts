@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
+import { NotificationDispatchModule } from '../notification-dispatch/notification-dispatch.module';
 import { AuthModule } from '../auth/auth.module';
 import { KycService } from './kyc.service';
 import { KycController } from './kyc.controller';
@@ -19,6 +20,7 @@ import { KycController } from './kyc.controller';
     ConfigModule,
     forwardRef(() => AuthModule),
     forwardRef(() => WhatsAppModule),
+    NotificationDispatchModule,
   ],
   controllers: [KycController],
   providers: [KycService],

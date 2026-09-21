@@ -617,6 +617,34 @@ export class SystemConfigService implements OnModuleInit {
   }
 
   /**
+   * Estimated cost of one MARKETING template, in FCFA.
+   *
+   * Only ever used to show an admin what a broadcast is about to cost. It is
+   * deliberately an estimate: Meta bills per conversation in USD at a rate that
+   * moves. A number that is roughly right lets someone judge a send before
+   * confirming it; no number at all means confirming blind.
+   */
+  async getMarketingTemplateCostFcfa(): Promise<number> {
+    const val = await this.get('fees.marketing_template_cost_fcfa', '15');
+    const n = Number.parseInt(val, 10);
+    return Number.isNaN(n) || n < 0 ? 15 : n;
+  }
+
+  /**
+   * Whether a notification may go out as free-form text when the 24h window is
+   * open, instead of as its approved template.
+   *
+   * Defaults to TRUE, unlike most switches here, because the safe direction is
+   * the cheap one: the free-form path falls back to the very template it
+   * replaced on any failure, so the worst case is the behaviour this key turns
+   * off. See the note on the key in `system-config.constants.ts`.
+   */
+  async prefersFreeForm(): Promise<boolean> {
+    const val = await this.get('notifications.prefer_free_form', 'true');
+    return val === 'true';
+  }
+
+  /**
    * How many unread profile views a worker may pile up before WhatsApp tells
    * them. `0` turns the reminder off.
    */

@@ -28,6 +28,15 @@ import {
 import { DownloadResult } from '../../common/services/storage/types/storage.types';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { WhatsAppDocumentService } from '../whatsapp/documents/whatsapp-document.service';
+import {
+  NotificationDispatcher,
+  type FreeFormMessage,
+} from '../notification-dispatch/notification-dispatcher.service';
+import type { TemplateKey, TemplateParams } from '../whatsapp/contracts';
+import {
+  accountActivatedFreeForm,
+  accountSuspendedFreeForm,
+} from '../bot/messages/notifications.messages';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import Redis from 'ioredis';
@@ -360,7 +369,43 @@ export class ProfileService {
     // dependency.
     @Optional()
     private readonly whatsAppDocuments?: WhatsAppDocumentService,
+    // The window-aware send path, appended and @Optional() for the same
+    // positional-spec reason. `notify()` falls back to the template without it.
+    @Optional()
+    private readonly notificationDispatcher?: NotificationDispatcher,
   ) {}
+
+  /**
+   * Send the cheap way inside the 24h window, the approved way always.
+   *
+   * Mirrors `BotNotificationService.notify`. The account-state messages here
+   * are low volume, but they reach people who are often mid-conversation with
+   * the assistant about the very state this announces.
+   */
+  private async notifyWhatsApp<K extends TemplateKey>(params: {
+    phone: string;
+    profileId: string;
+    key: K;
+    params: TemplateParams<K>;
+    freeForm: FreeFormMessage;
+  }): Promise<boolean> {
+    if (!this.notificationDispatcher) {
+      return this.whatsAppService.sendTemplateMessage(
+        params.phone,
+        params.key,
+        params.params,
+        params.profileId,
+      );
+    }
+
+    const { sent } = await this.notificationDispatcher.send({
+      phone: params.phone,
+      profileId: params.profileId,
+      template: { key: params.key, params: params.params },
+      freeForm: params.freeForm,
+    });
+    return sent;
+  }
 
   async findById(id: string): Promise<ProfileMeResponse> {
     const profile = await this.prisma.profile.findUnique({
@@ -590,21 +635,25 @@ export class ProfileService {
         select: { phone: true, first_name: true, profile_type: true },
       });
       if (!profile?.phone) return;
-      await this.whatsAppService
-        .sendTemplateMessage(
-          profile.phone,
-          this.accountActivatedTemplateKey(profile.profile_type),
-          {
-            firstName: profile.first_name,
-            path: ACTIVATION_LANDING_PATH,
-          },
-        )
-        .catch((err) =>
-          this.logger.warn(
-            `Failed to send account-activated WhatsApp to ${profile.phone}:`,
-            err,
-          ),
-        );
+      await this.notifyWhatsApp({
+        phone: profile.phone,
+        profileId,
+        key: this.accountActivatedTemplateKey(profile.profile_type),
+        params: {
+          firstName: profile.first_name,
+          path: ACTIVATION_LANDING_PATH,
+        },
+        freeForm: accountActivatedFreeForm({
+          firstName: profile.first_name,
+          path: ACTIVATION_LANDING_PATH,
+          isWorker: profile.profile_type === ProfileType.WORKER,
+        }),
+      }).catch((err) =>
+        this.logger.warn(
+          `Failed to send account-activated WhatsApp to ${profile.phone}:`,
+          err,
+        ),
+      );
     } catch (err) {
       this.logger.warn(
         `Failed to send account-activated WhatsApp for profile ${profileId}:`,
@@ -1173,15 +1222,20 @@ export class ProfileService {
     ) {
       try {
         if (profile.phone) {
-          await this.whatsAppService.sendTemplateMessage(
-            profile.phone,
-            this.accountActivatedTemplateKey(profile.profile_type),
-            {
+          await this.notifyWhatsApp({
+            phone: profile.phone,
+            profileId,
+            key: this.accountActivatedTemplateKey(profile.profile_type),
+            params: {
               firstName: profile.first_name,
               path: ACTIVATION_LANDING_PATH,
             },
-            profileId,
-          );
+            freeForm: accountActivatedFreeForm({
+              firstName: profile.first_name,
+              path: ACTIVATION_LANDING_PATH,
+              isWorker: profile.profile_type === ProfileType.WORKER,
+            }),
+          });
         }
       } catch {
         this.logger.warn(
@@ -1241,16 +1295,20 @@ export class ProfileService {
             .mint(profileId, SUSPENDED_CTA_PATH)
             .catch(() => null);
 
-          await this.whatsAppService.sendTemplateMessage(
-            profile.phone,
-            'accountSuspended',
-            {
+          await this.notifyWhatsApp({
+            phone: profile.phone,
+            profileId,
+            key: 'accountSuspended',
+            params: {
               firstName: profile.first_name,
               reason: trimmedReason,
               loginCode,
             },
-            profileId,
-          );
+            freeForm: accountSuspendedFreeForm({
+              firstName: profile.first_name,
+              reason: trimmedReason || 'Non précisé',
+            }),
+          });
         }
       } catch {
         this.logger.warn(

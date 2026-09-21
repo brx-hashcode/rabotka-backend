@@ -17,6 +17,8 @@ export const JOB_NOTIFICATION_QUEUE = 'job-notification-queue';
 export const WHATSAPP_LOG_RETENTION_QUEUE = 'whatsapp-log-retention-queue';
 export const IDENTITY_CHECK_QUEUE = 'identity-check-queue';
 export const PARTNER_ACTIVITY_QUEUE = 'partner-activity-queue';
+/** Admin broadcasts: one job per page of frozen recipient rows. */
+export const BROADCAST_QUEUE = 'broadcast-queue';
 
 @Module({})
 export class QueueModule {

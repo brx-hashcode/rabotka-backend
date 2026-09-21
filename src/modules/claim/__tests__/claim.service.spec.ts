@@ -12,6 +12,7 @@ import { ClaimCommentsGateway } from '../../ws-notifications/claim-comments.gate
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { WhatsAppLoginLinkService } from '../../auth/whatsapp-login-link.service';
 import { ClaimAttachmentService } from '../claim-attachment.service';
+import { NotificationDispatcher } from '../../notification-dispatch/notification-dispatcher.service';
 import { plainToInstance } from 'class-transformer';
 import { UpdateClaimDto } from '../dto/update-claim.dto';
 import { inAppNotifications } from '../../profile-notification/__tests__/in-app-notifications';
@@ -64,6 +65,13 @@ const mockWhatsApp = {
 
 const mockLoginLink = {
   mint: jest.fn().mockResolvedValue('code-123'),
+};
+
+// Claim replies go through the dispatcher now: free-form while the 24h window
+// is open, the approved template otherwise. The mock reports the template path,
+// which is what these assertions were written against.
+const mockDispatcher = {
+  send: jest.fn().mockResolvedValue({ mode: 'TEMPLATE', sent: true }),
 };
 
 const mockAttachments = {
@@ -143,6 +151,7 @@ describe('ClaimService', () => {
         { provide: WhatsAppService, useValue: mockWhatsApp },
         { provide: WhatsAppLoginLinkService, useValue: mockLoginLink },
         { provide: ClaimAttachmentService, useValue: mockAttachments },
+        { provide: NotificationDispatcher, useValue: mockDispatcher },
       ],
     }).compile();
     service = module.get<ClaimService>(ClaimService);
@@ -828,16 +837,23 @@ describe('ClaimService', () => {
         'profile-1',
         'claims/claim-1',
       );
-      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
-        '+242060000000',
-        'claimCommented',
-        {
-          firstName: 'John',
-          claimTitle: 'Test',
-          excerpt: 'On regarde',
-          loginCode: 'code-123',
-        },
-        'profile-1',
+      expect(mockDispatcher.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phone: '+242060000000',
+          profileId: 'profile-1',
+          template: {
+            key: 'claimCommented',
+            params: {
+              firstName: 'John',
+              claimTitle: 'Test',
+              excerpt: 'On regarde',
+              loginCode: 'code-123',
+            },
+          },
+          // The free rendering the dispatcher uses while the window is open.
+          // The code is still minted for the template it falls back to.
+          freeForm: expect.objectContaining({ path: 'claims/claim-1' }),
+        }),
       );
     });
 
@@ -850,11 +866,12 @@ describe('ClaimService', () => {
       await flushNotification();
 
       // The template falls back to the bare claims path for a null code.
-      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
-        '+242060000000',
-        'claimCommented',
-        expect.objectContaining({ loginCode: null }),
-        'profile-1',
+      expect(mockDispatcher.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          template: expect.objectContaining({
+            params: expect.objectContaining({ loginCode: null }),
+          }),
+        }),
       );
     });
 
@@ -868,16 +885,14 @@ describe('ClaimService', () => {
       await service.addComment('claim-1', 'user-1', { content: 'On regarde' });
       await flushNotification();
 
-      expect(mockWhatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+      expect(mockDispatcher.send).not.toHaveBeenCalled();
       expect(mockLoginLink.mint).not.toHaveBeenCalled();
     });
 
     it('does not fail the comment when the send throws', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
       mockPrisma.claimComment.create.mockResolvedValue(baseComment);
-      mockWhatsApp.sendTemplateMessage.mockRejectedValueOnce(
-        new Error('provider down'),
-      );
+      mockDispatcher.send.mockRejectedValueOnce(new Error('provider down'));
 
       const result = await service.addComment('claim-1', 'user-1', {
         content: 'On regarde',
@@ -974,11 +989,12 @@ describe('ClaimService', () => {
         });
         await flushNotification();
 
-        expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
-          '+242060000000',
-          'claimCommented',
-          expect.objectContaining({ excerpt: 'Regardez la photo' }),
-          'profile-1',
+        expect(mockDispatcher.send).toHaveBeenCalledWith(
+          expect.objectContaining({
+            template: expect.objectContaining({
+              params: expect.objectContaining({ excerpt: 'Regardez la photo' }),
+            }),
+          }),
         );
       });
 

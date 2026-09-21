@@ -728,16 +728,16 @@ export class BotOrchestratorService {
           prisma: this.prisma,
           applicationService: this.applicationService,
         }),
-
     };
     const runner = runners[flowId];
     return runner ? runner() : Promise.resolve(null);
   }
 
   /**
-   * The router can only produce `pay_penalties` now: someone typing « payer »,
-   * as older messages told them to. They get the payment card, or a plain
-   * confirmation when nothing is owed.
+   * Commands the router can produce: « payer », and the marketing opt-out.
+   *
+   * The opt-out pair is answered inline rather than through a flow — the whole
+   * point of STOP is that it takes one message and no further steps.
    */
   private async handleCommandRoute(
     route: { type: 'command'; commandId: string },
@@ -749,7 +749,46 @@ export class BotOrchestratorService {
       return this.handlePayPenaltiesCommand(botProfile, profileId);
     }
 
+    if (route.commandId === 'marketing_opt_out') {
+      return this.setMarketingOptOut(profileId, true);
+    }
+
+    if (route.commandId === 'marketing_opt_in') {
+      return this.setMarketingOptOut(profileId, false);
+    }
+
     return [welcomePlatformMessage()];
+  }
+
+  /**
+   * Record — or undo — "stop sending me announcements".
+   *
+   * Scope is stated in the reply, because an opt-out people do not trust is an
+   * opt-out they replace with a block: the messages that concern their own
+   * missions keep coming, and that is the honest thing to say rather than a
+   * bare « c'est noté ».
+   */
+  private async setMarketingOptOut(
+    profileId: string,
+    optOut: boolean,
+  ): Promise<string[]> {
+    await this.prisma.profile.update({
+      where: { id: profileId },
+      data: { marketing_opt_out_at: optOut ? new Date() : null },
+    });
+
+    return optOut
+      ? [
+          'C’est noté. Vous ne recevrez plus d’annonces ni de suggestions de ' +
+            'missions sur WhatsApp.\n\nLes messages concernant vos ' +
+            'candidatures, vos paiements et vos missions continuent — ils vous ' +
+            'concernent directement.\n\nRépondez *Reprendre* pour les ' +
+            'réactiver.',
+        ]
+      : [
+          'C’est réactivé. Vous recevrez à nouveau les annonces et les ' +
+            'suggestions de missions.',
+        ];
   }
 
   private async handlePayPenaltiesCommand(

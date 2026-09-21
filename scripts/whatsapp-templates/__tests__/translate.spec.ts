@@ -238,6 +238,27 @@ describe('authored templates', () => {
     'kycAgreementDocument',
     'missionContractDocument',
   ] as const;
+  // A URL button AND a quick reply. Only the broadcast: it is the one template
+  // here that is MARKETING by nature, and a marketing message people cannot
+  // leave gets blocked instead — which costs the quality rating that throttles
+  // every other notification.
+  const URL_PLUS_OPT_OUT_KEYS = ['broadcastAnnouncement'] as const;
+
+  it.each(URL_PLUS_OPT_OUT_KEYS)(
+    '%s carries a URL button and an opt-out quick reply',
+    (key) => {
+      const buttons = authored()[key]?.components.find(
+        (c) => c.type === 'BUTTONS',
+      );
+      expect(buttons?.buttons).toHaveLength(2);
+      expect(buttons?.buttons?.[0].type).toBe('URL');
+      expect(buttons?.buttons?.[0].url).toMatch(/\{\{1\}\}$/);
+      expect(buttons?.buttons?.[1].type).toBe('QUICK_REPLY');
+      // The word the bot router listens for — see CMD_STOP. A different label
+      // here would render an opt-out button that opts nobody out.
+      expect(buttons?.buttons?.[1].text?.toLowerCase()).toBe('stop');
+    },
+  );
 
   it.each(NO_BUTTON_KEYS)('%s carries no button at all', (key) => {
     expect(
@@ -259,7 +280,12 @@ describe('authored templates', () => {
   it('accounts for every authored key', () => {
     // Stops a new authored template from silently having neither assertion.
     expect(
-      new Set([...FLOW_BUTTON_KEYS, ...URL_BUTTON_KEYS, ...NO_BUTTON_KEYS]),
+      new Set([
+        ...FLOW_BUTTON_KEYS,
+        ...URL_BUTTON_KEYS,
+        ...NO_BUTTON_KEYS,
+        ...URL_PLUS_OPT_OUT_KEYS,
+      ]),
     ).toEqual(new Set(AUTHORED_KEYS));
   });
 

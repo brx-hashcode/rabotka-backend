@@ -644,9 +644,13 @@ export class WhatsAppService {
    * Is the profile inside WhatsApp's 24h customer-service window?
    *
    * Free-form text is only accepted while the profile has messaged us in the
-   * last 24 hours; outside it Twilio rejects with 63016. The window is derived
-   * from the newest INBOUND message, which `ConversationService` writes on every
-   * incoming WhatsApp message.
+   * last 24 hours; outside it Twilio rejects with 63016. The answer comes from
+   * `Profile.last_inbound_at`, which `saveMessage` below keeps in step with the
+   * newest INBOUND WhatsApp message.
+   *
+   * Reads a column rather than scanning `messages` because the window is now a
+   * per-recipient decision on paths that serve many recipients at once — see
+   * `isWindowOpenFor`, and the note on the column in schema.prisma.
    *
    * NO INBOUND MESSAGE AT ALL MEANS CLOSED, and that is the common case, not an
    * edge case — most profiles sign up on the web and never message the bot.
@@ -654,28 +658,37 @@ export class WhatsAppService {
   async isServiceWindowOpen(
     profileId: string,
   ): Promise<{ open: boolean; lastInboundAt: Date | null }> {
-    const last = await this.prisma.message.findFirst({
-      where: {
-        profile_id: profileId,
-        direction: MessageDirection.INBOUND,
-        // Explicit even though the column defaults to WHATSAPP: admin emails are
-        // written into this same table with platform EMAIL, and an email would
-        // otherwise be read as evidence of an open WhatsApp session.
-        platform: BotPlatform.WHATSAPP,
-      },
-      orderBy: { created_at: 'desc' },
-      select: { created_at: true },
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { last_inbound_at: true },
     });
 
-    if (!last) {
-      return { open: false, lastInboundAt: null };
-    }
+    return windowFrom(profile?.last_inbound_at ?? null);
+  }
 
-    const age = Date.now() - last.created_at.getTime();
-    return {
-      open: age < SERVICE_WINDOW_MS - SERVICE_WINDOW_MARGIN_MS,
-      lastInboundAt: last.created_at,
-    };
+  /**
+   * The same question for many profiles, in one query.
+   *
+   * The whole reason `last_inbound_at` exists: `NotificationDispatcher` asks
+   * this before a fan-out so each recipient can be sent the free message or the
+   * billed template, and doing that with one query per person is what made
+   * every fan-out skip the check entirely.
+   *
+   * Profiles missing from the result are absent or have never written, which
+   * both mean the same thing here — closed.
+   */
+  async openServiceWindows(profileIds: string[]): Promise<Set<string>> {
+    if (profileIds.length === 0) return new Set();
+
+    const since = new Date(
+      Date.now() - (SERVICE_WINDOW_MS - SERVICE_WINDOW_MARGIN_MS),
+    );
+    const rows = await this.prisma.profile.findMany({
+      where: { id: { in: profileIds }, last_inbound_at: { gt: since } },
+      select: { id: true },
+    });
+
+    return new Set(rows.map((r) => r.id));
   }
 
   /**
@@ -793,6 +806,9 @@ export class WhatsAppService {
     body: string,
     sentById?: string,
   ): Promise<void> {
+    // The row's own `created_at` is the database default; this is the stamp
+    // below, and the microseconds between them do not matter to a 24h window.
+    const now = new Date();
     await this.prisma.message.create({
       data: {
         profile_id: profileId,
@@ -802,6 +818,28 @@ export class WhatsAppService {
         ...(sentById ? { sent_by_id: sentById } : {}),
       },
     });
+
+    // The one place an INBOUND WhatsApp message is persisted, and therefore the
+    // one place the 24h window can open. Kept here rather than at the call site
+    // (`ConversationService`) so a future inbound writer cannot forget it and
+    // leave the window silently shut — which would cost templates, not
+    // correctness, and so would never show up as a bug.
+    //
+    // Best-effort: the message is already written, and losing the stamp costs
+    // one billed template. Failing the whole save over it would cost the reply.
+    if (direction === MessageDirection.INBOUND) {
+      await this.prisma.profile
+        .update({
+          where: { id: profileId },
+          data: { last_inbound_at: now },
+        })
+        .catch((err) =>
+          this.logger.warn(
+            `Could not stamp last_inbound_at for ${profileId}: ` +
+              `${err instanceof Error ? err.message : String(err)}`,
+          ),
+        );
+    }
   }
 
   async verifyWhatsAppToken(token: string): Promise<void> {
@@ -871,6 +909,25 @@ export class WhatsAppService {
       `WhatsApp verified and account activated for profile ${profileId}`,
     );
   }
+}
+
+/**
+ * The window verdict for one `last_inbound_at`.
+ *
+ * Exported so the dispatcher can decide from a profile it has already loaded,
+ * without a second read of the same column.
+ */
+export function windowFrom(lastInboundAt: Date | null): {
+  open: boolean;
+  lastInboundAt: Date | null;
+} {
+  if (!lastInboundAt) return { open: false, lastInboundAt: null };
+
+  const age = Date.now() - lastInboundAt.getTime();
+  return {
+    open: age < SERVICE_WINDOW_MS - SERVICE_WINDOW_MARGIN_MS,
+    lastInboundAt,
+  };
 }
 
 /**
