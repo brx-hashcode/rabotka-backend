@@ -49,7 +49,13 @@ export class BroadcastProcessor {
       );
       return;
     }
-    await this.dispatchPage(job.data.broadcastId, job.data.cursor);
+    await this.dispatchPage(
+      job.data.broadcastId,
+      job.data.cursor,
+      // Older jobs, queued before runs were identified, keep the previous
+      // behaviour rather than crashing on a missing field.
+      job.data.runId ?? 'legacy',
+    );
   }
 
   /**
@@ -59,7 +65,11 @@ export class BroadcastProcessor {
    * crash costs one page instead of a whole broadcast, and the cancellation
    * check below gets a chance to run between pages.
    */
-  private async dispatchPage(broadcastId: string, cursor: number) {
+  private async dispatchPage(
+    broadcastId: string,
+    cursor: number,
+    runId: string,
+  ) {
     const broadcast = await this.prisma.broadcast.findUnique({
       where: { id: broadcastId },
     });
@@ -132,6 +142,7 @@ export class BroadcastProcessor {
       if (recipient.channel === DeliveryChannel.IN_APP) continue;
 
       try {
+        const sentAttemptedAt = new Date();
         const sent =
           recipient.channel === DeliveryChannel.WHATSAPP
             ? await this.deliverWhatsApp(
@@ -144,7 +155,16 @@ export class BroadcastProcessor {
               )
             : await this.deliverEmail(broadcast, recipient.profile);
 
-        await this.settle(recipient.id, sent ? null : 'Non délivré');
+        await this.settle(
+          recipient.id,
+          sent
+            ? null
+            : await this.providerError(
+                recipient.profile_id,
+                recipient.channel,
+                sentAttemptedAt,
+              ),
+        );
       } catch (err) {
         await this.settle(
           recipient.id,
@@ -153,14 +173,13 @@ export class BroadcastProcessor {
       }
     }
 
+    const next = cursor + recipients.length;
     await this.queueService.addJob<BroadcastJobData>(
       BROADCAST_QUEUE,
-      {
-        type: 'dispatch',
-        broadcastId,
-        cursor: cursor + recipients.length,
-      },
-      { jobId: `broadcast-${broadcastId}-${cursor + recipients.length}` },
+      { type: 'dispatch', broadcastId, cursor: next, runId },
+      // Scoped to the RUN: the same cursor comes round again on a retry, and
+      // an id BullMQ has already seen is dropped without a word.
+      { jobId: `broadcast-${broadcastId}-${runId}-${next}` },
     );
   }
 
@@ -174,6 +193,7 @@ export class BroadcastProcessor {
         title: broadcast.title,
         body: broadcast.body,
         link: broadcast.link,
+        broadcastId: broadcast.id,
       });
       await this.prisma.broadcastRecipient.updateMany({
         where: {
@@ -274,6 +294,46 @@ export class BroadcastProcessor {
     return true;
   }
 
+  /**
+   * Why a send failed, in the provider's own words.
+   *
+   * `sendTemplateMessage` reports a boolean — the real error is logged and
+   * swallowed, which left every failed row saying "Non délivré" and sent the
+   * reader to the worker logs to find out that a template was never approved.
+   *
+   * The delivery log already holds the answer: `WhatsappMessageLogService`
+   * writes the error code and message against the same profile, moments
+   * earlier. Reading it back is indirect, but it is the system of record for
+   * sends and it costs one indexed query on a path that has already failed.
+   */
+  private async providerError(
+    profileId: string,
+    channel: DeliveryChannel,
+    since: Date,
+  ): Promise<string> {
+    if (channel !== DeliveryChannel.WHATSAPP) return 'Non délivré';
+
+    try {
+      const row = await this.prisma.whatsappMessage.findFirst({
+        where: {
+          profile_id: profileId,
+          created_at: { gte: new Date(since.getTime() - 5_000) },
+          error_message: { not: null },
+        },
+        orderBy: { created_at: 'desc' },
+        select: { error_code: true, error_message: true },
+      });
+      if (!row?.error_message) return 'Non délivré';
+
+      return row.error_code
+        ? `${row.error_code}: ${row.error_message}`
+        : row.error_message;
+    } catch {
+      // The reason is a nicety; the failure itself is already recorded.
+      return 'Non délivré';
+    }
+  }
+
   /** Record one recipient's outcome and move the broadcast's counters. */
   private async settle(recipientId: string, error: string | null) {
     await this.prisma.broadcastRecipient.update({
@@ -301,10 +361,31 @@ export class BroadcastProcessor {
     });
   }
 
+  /**
+   * Close the broadcast, honestly.
+   *
+   * FAILED when nothing got through — a run where every delivery was rejected
+   * is not a send, and labelling it SENT is how a broken template (or an
+   * expired token) goes unnoticed until someone asks why nobody replied. The
+   * enum had a FAILED state from the start; nothing ever set it.
+   */
   private async finish(broadcastId: string): Promise<void> {
+    const current = await this.prisma.broadcast.findUnique({
+      where: { id: broadcastId },
+      select: { sent_count: true, failed_count: true },
+    });
+
+    const nothingDelivered =
+      (current?.sent_count ?? 0) === 0 && (current?.failed_count ?? 0) > 0;
+
     const broadcast = await this.prisma.broadcast.update({
       where: { id: broadcastId },
-      data: { status: BroadcastStatus.SENT, sent_at: new Date() },
+      data: {
+        status: nothingDelivered
+          ? BroadcastStatus.FAILED
+          : BroadcastStatus.SENT,
+        sent_at: new Date(),
+      },
     });
 
     this.logger.log(

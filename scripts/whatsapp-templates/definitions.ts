@@ -446,12 +446,22 @@ export function authoredTemplates(): Partial<
       components: [
         {
           type: 'BODY',
+          // Meta rejected the first attempt with 2388293 — the
+          // parameter-to-word ratio. Two variables wrapped in one greeting and
+          // a sign-off is not enough static text to carry them, which is the
+          // very lesson `rabotka_admin_message_v4` already records. This body
+          // states who is writing and why BEFORE the variable, which is both
+          // what Meta measures and what makes the message readable when the
+          // admin's line is terse.
           text: [
-            'Bonjour {{1}},',
+            '*Information Rabotka*',
+            '',
+            'Bonjour {{1}}, voici une information importante de la part de notre équipe concernant la plateforme Rabotka :',
             '',
             '{{2}}',
             '',
-            'L’équipe Rabotka',
+            'Merci de votre confiance et à très bientôt,',
+            '_L’équipe Rabotka_',
           ].join('\n'),
           example: {
             body_text: [

@@ -49,10 +49,39 @@ describe('buildAudienceWhere', () => {
 
     // City is free text on the profile, so an equality match would split one
     // neighbourhood into as many audiences as there are spellings.
-    const [criteria] = guards(where);
-    expect(criteria.OR).toEqual([
+    const [narrowed] = guards(where) as [
+      { AND: { OR: Record<string, unknown>[] }[] },
+    ];
+    expect(narrowed.AND[1].OR).toEqual([
       { city: { equals: 'Poto-Poto', mode: 'insensitive' } },
     ]);
+  });
+
+  it('matches a trade in the relation as well as the column', () => {
+    const where = buildAudienceWhere({ category_ids: ['cat-1'] });
+
+    // Most profiles carry their trades in `profile_categories` and leave the
+    // headline `category_id` empty — checking the column alone made every one
+    // of them invisible to a trade filter.
+    const [narrowed] = guards(where) as [
+      { AND: { OR: Record<string, unknown>[] }[] },
+    ];
+    expect(narrowed.AND[1].OR).toEqual([
+      { category_id: { in: ['cat-1'] } },
+      { categories: { some: { category_id: { in: ['cat-1'] } } } },
+    ]);
+  });
+
+  it('keeps city and trade as separate conditions', () => {
+    const where = buildAudienceWhere({
+      cities: ['Brazzaville'],
+      category_ids: ['cat-1'],
+    });
+
+    // Both must hold. Assigning `OR` twice let the second filter overwrite the
+    // first, so one of the two was silently dropped.
+    const [narrowed] = guards(where) as [{ AND: unknown[] }];
+    expect(narrowed.AND).toHaveLength(3);
   });
 
   it('adds explicitly included profiles alongside the filters, not inside them', () => {
@@ -99,17 +128,16 @@ describe('buildAudienceWhere', () => {
     expect(without.email).toBeNull();
   });
 
-  it('passes verification and category filters through', () => {
-    const [criteria] = guards(
+  it('passes the verification filter through', () => {
+    const [narrowed] = guards(
       buildAudienceWhere({
         verification_statuses: [VerificationStatus.VERIFIED],
         category_ids: ['cat-1'],
       }),
-    );
+    ) as [{ AND: Record<string, unknown>[] }];
 
-    expect(criteria.verification_status).toEqual({
+    expect(narrowed.AND[0].verification_status).toEqual({
       in: [VerificationStatus.VERIFIED],
     });
-    expect(criteria.category_id).toEqual({ in: ['cat-1'] });
   });
 });

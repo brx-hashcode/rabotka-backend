@@ -10,6 +10,7 @@ jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
 jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
 
 const BROADCAST_ID = 'b-1';
+const RUN_ID = 'run-1';
 
 function broadcast(overrides: Record<string, unknown> = {}) {
   return {
@@ -87,7 +88,12 @@ describe('BroadcastProcessor', () => {
 
   const run = () =>
     processor.process({
-      data: { type: 'dispatch', broadcastId: BROADCAST_ID, cursor: 0 },
+      data: {
+        type: 'dispatch',
+        broadcastId: BROADCAST_ID,
+        cursor: 0,
+        runId: RUN_ID,
+      },
     });
 
   it('stops immediately when the broadcast was cancelled', async () => {
@@ -228,5 +234,22 @@ describe('BroadcastProcessor', () => {
       ([arg]: [{ data: { status?: BroadcastStatus } }]) => arg.data.status,
     );
     expect(statuses).toContain(BroadcastStatus.SENDING);
+  });
+
+  it('scopes the next page to this run, so a retry is not dropped', async () => {
+    deps.prisma.broadcastRecipient.findMany.mockResolvedValue([recipient()]);
+
+    await run();
+
+    const [, data, opts] = deps.queue.addJob.mock.calls[0] as [
+      string,
+      { runId: string },
+      { jobId: string },
+    ];
+    // A retry walks the same cursors again. Keyed on the cursor alone, the
+    // second run's continuation collided with the first run's completed job,
+    // BullMQ dropped it silently, and the broadcast never left SENDING.
+    expect(data.runId).toBe(RUN_ID);
+    expect(opts.jobId).toContain(RUN_ID);
   });
 });

@@ -50,8 +50,11 @@ describe('ProfileNotificationService', () => {
       create: jest.Mock;
       count: jest.Mock;
       findMany: jest.Mock;
+      findUnique: jest.Mock;
       updateMany: jest.Mock;
     };
+    broadcastRecipient: { updateMany: jest.Mock };
+    broadcast: { update: jest.Mock };
     $transaction: jest.Mock;
   };
   let idempotency: { claim: jest.Mock; release: jest.Mock };
@@ -75,7 +78,14 @@ describe('ProfileNotificationService', () => {
         create: jest.fn().mockResolvedValue(createdRow),
         count: jest.fn().mockResolvedValue(1),
         findMany: jest.fn().mockResolvedValue([]),
+        findUnique: jest.fn().mockResolvedValue(null),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      broadcastRecipient: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      broadcast: {
+        update: jest.fn().mockResolvedValue({}),
       },
       $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
     };
@@ -417,6 +427,84 @@ describe('ProfileNotificationService', () => {
         lastName: 'Olympic',
         profileType: ProfileType.EMPLOYER,
       });
+    });
+  });
+
+  describe('broadcast reads', () => {
+    const BROADCAST_ID = 'b-1';
+
+    const announcement = {
+      type: 'ANNOUNCEMENT',
+      metadata: { broadcastId: BROADCAST_ID, title: 'Maintenance' },
+    };
+
+    it('moves the delivery row to READ when the announcement is opened', async () => {
+      prisma.profileNotification.findUnique.mockResolvedValue(announcement);
+
+      await service.markRead(WORKER_ID, 'n-1');
+
+      // Only from SENT: a row opened twice must not be counted twice.
+      expect(prisma.broadcastRecipient.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            broadcast_id: BROADCAST_ID,
+            profile_id: WORKER_ID,
+            status: 'SENT',
+          }),
+          data: { status: 'READ' },
+        }),
+      );
+      expect(prisma.broadcast.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: BROADCAST_ID },
+          data: { read_count: { increment: 1 } },
+        }),
+      );
+    });
+
+    it('does not touch a broadcast for an ordinary notification', async () => {
+      prisma.profileNotification.findUnique.mockResolvedValue({
+        type: 'JOB_RECOMMENDATION',
+        metadata: { jobOfferId: 'jo-1' },
+      });
+
+      await service.markRead(WORKER_ID, 'n-1');
+
+      expect(prisma.broadcastRecipient.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('counts nothing when the row was already read', async () => {
+      prisma.profileNotification.updateMany.mockResolvedValue({ count: 0 });
+
+      await service.markRead(WORKER_ID, 'n-1');
+
+      // The read already happened; re-opening must not inflate the counter.
+      expect(prisma.profileNotification.findUnique).not.toHaveBeenCalled();
+      expect(prisma.broadcast.update).not.toHaveBeenCalled();
+    });
+
+    it('attributes every unread announcement on mark-all-read', async () => {
+      prisma.profileNotification.findMany.mockResolvedValue([
+        { metadata: { broadcastId: BROADCAST_ID } },
+        { metadata: { broadcastId: 'b-2' } },
+        // No broadcast id — a row written before the field existed.
+        { metadata: { title: 'x' } },
+      ]);
+
+      await service.markAllRead(WORKER_ID);
+
+      expect(prisma.broadcast.update).toHaveBeenCalledTimes(2);
+    });
+
+    it('still marks the notification read when the attribution fails', async () => {
+      prisma.profileNotification.findUnique.mockResolvedValue(announcement);
+      prisma.broadcastRecipient.updateMany.mockRejectedValue(
+        new Error('db down'),
+      );
+
+      // The row IS read — a reporting counter must not be able to undo that.
+      await expect(service.markRead(WORKER_ID, 'n-1')).resolves.toBeUndefined();
+      expect(prisma.profileNotification.updateMany).toHaveBeenCalled();
     });
   });
 });

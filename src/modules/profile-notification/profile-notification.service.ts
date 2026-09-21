@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   AccountStatus,
+  BroadcastRecipientStatus,
+  DeliveryChannel,
   Prisma,
   ProfileNotificationType,
   ProfileType,
@@ -86,6 +88,20 @@ function toDto(row: PublicRow): ProfileNotificationDto {
     createdAt: row.created_at,
     readAt: row.read_at,
   };
+}
+
+/**
+ * The broadcast id an ANNOUNCEMENT's metadata carries, when it has one.
+ *
+ * Defensive about the shape: `metadata` is Json, and rows written before this
+ * field existed simply do not have it.
+ */
+function broadcastIdOf(metadata: Prisma.JsonValue | null): string | null {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return null;
+  }
+  const value = (metadata as Record<string, unknown>).broadcastId;
+  return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
 /** Everything but the facts that feed the copy — those are already rendered. */
@@ -335,17 +351,106 @@ export class ProfileNotificationService {
 
   /** Scoped by recipient, so an id belonging to someone else is a no-op. */
   async markRead(recipientId: string, id: string): Promise<void> {
-    await this.prisma.profileNotification.updateMany({
+    const updated = await this.prisma.profileNotification.updateMany({
       where: { id, recipient_id: recipientId, read_at: null },
       data: { read_at: new Date() },
     });
+    if (updated.count > 0) {
+      await this.attributeBroadcastReads(recipientId, { id });
+    }
   }
 
   async markAllRead(recipientId: string): Promise<void> {
+    // Collected BEFORE the update: afterwards `read_at` is set and the rows
+    // are indistinguishable from ones read last week.
+    const announcements = await this.unreadAnnouncements(recipientId);
+
     await this.prisma.profileNotification.updateMany({
       where: { recipient_id: recipientId, read_at: null },
       data: { read_at: new Date() },
     });
+
+    await this.markBroadcastsRead(recipientId, announcements);
+  }
+
+  /**
+   * Move this person's delivery rows to READ for the broadcasts they just read.
+   *
+   * Best-effort and never throws: the notification IS read — the row says so —
+   * and a reporting counter must not be able to fail that.
+   *
+   * Only ANNOUNCEMENT rows carry a `broadcastId`, so everything else falls
+   * straight through without a query.
+   */
+  private async attributeBroadcastReads(
+    recipientId: string,
+    where: { id: string },
+  ): Promise<void> {
+    try {
+      const row = await this.prisma.profileNotification.findUnique({
+        where: { id: where.id },
+        select: { type: true, metadata: true },
+      });
+      if (row?.type !== ProfileNotificationType.ANNOUNCEMENT) return;
+
+      const broadcastId = broadcastIdOf(row.metadata);
+      if (!broadcastId) return;
+
+      await this.markBroadcastsRead(recipientId, [broadcastId]);
+    } catch (err) {
+      this.logger.warn(
+        `Could not attribute a broadcast read for ${recipientId}`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
+  /** The broadcast ids behind this person's unread announcements. */
+  private async unreadAnnouncements(recipientId: string): Promise<string[]> {
+    const rows = await this.prisma.profileNotification.findMany({
+      where: {
+        recipient_id: recipientId,
+        read_at: null,
+        type: ProfileNotificationType.ANNOUNCEMENT,
+      },
+      select: { metadata: true },
+    });
+
+    return rows
+      .map((row) => broadcastIdOf(row.metadata))
+      .filter((id): id is string => id !== null);
+  }
+
+  private async markBroadcastsRead(
+    profileId: string,
+    broadcastIds: string[],
+  ): Promise<void> {
+    for (const broadcastId of new Set(broadcastIds)) {
+      try {
+        // Only from SENT, so a read can never be counted twice however many
+        // times the row is opened.
+        const moved = await this.prisma.broadcastRecipient.updateMany({
+          where: {
+            broadcast_id: broadcastId,
+            profile_id: profileId,
+            channel: DeliveryChannel.IN_APP,
+            status: BroadcastRecipientStatus.SENT,
+          },
+          data: { status: BroadcastRecipientStatus.READ },
+        });
+        if (moved.count === 0) continue;
+
+        await this.prisma.broadcast.update({
+          where: { id: broadcastId },
+          data: { read_count: { increment: moved.count } },
+        });
+      } catch (err) {
+        this.logger.warn(
+          `Could not record a read of broadcast ${broadcastId}`,
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
   }
 
   /**

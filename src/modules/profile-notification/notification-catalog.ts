@@ -110,6 +110,14 @@ export type NotificationInput =
       title: string;
       body: string;
       link: string | null;
+      /**
+       * Which broadcast produced it.
+       *
+       * Rides in `metadata` — the recipient never sees it — and is the only
+       * way a read can be attributed back: the feed knows nothing about
+       * broadcasts, and without this the read counter could never move.
+       */
+      broadcastId: string;
     };
 
 export type NotificationType = NotificationInput['type'];

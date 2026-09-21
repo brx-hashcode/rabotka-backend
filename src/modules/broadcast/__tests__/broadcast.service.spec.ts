@@ -25,6 +25,7 @@ function makeDeps() {
     broadcastRecipient: {
       createMany: jest.fn().mockResolvedValue({ count: 0 }),
       findMany: jest.fn().mockResolvedValue([]),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       count: jest.fn().mockResolvedValue(0),
     },
   };
@@ -258,6 +259,76 @@ describe('BroadcastService', () => {
       expect(
         expandChannels([DeliveryChannel.ALL, DeliveryChannel.EMAIL]),
       ).toHaveLength(3);
+    });
+  });
+
+  describe('retryFailed', () => {
+    it('sends only to the deliveries that failed', async () => {
+      deps.prisma.broadcast.findUnique.mockResolvedValue(
+        draft({ status: BroadcastStatus.SENT }),
+      );
+      // 4 failed before the reset, 0 after it.
+      deps.prisma.broadcastRecipient.count
+        .mockResolvedValueOnce(4)
+        .mockResolvedValueOnce(0);
+
+      const result = await service.retryFailed(BROADCAST_ID);
+
+      expect(result.retried).toBe(4);
+      // Only FAILED rows are touched — anyone already reached must not be
+      // messaged twice, which is the whole reason a row exists per delivery.
+      expect(deps.prisma.broadcastRecipient.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { broadcast_id: BROADCAST_ID, status: 'FAILED' },
+          data: { status: 'PENDING', error: null, sent_at: null },
+        }),
+      );
+      expect(deps.queue.addJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses when nothing failed', async () => {
+      deps.prisma.broadcast.findUnique.mockResolvedValue(
+        draft({ status: BroadcastStatus.SENT }),
+      );
+      deps.prisma.broadcastRecipient.count.mockResolvedValue(0);
+
+      await expect(service.retryFailed(BROADCAST_ID)).rejects.toThrow(
+        /Aucun envoi en échec/,
+      );
+      expect(deps.prisma.broadcastRecipient.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('refuses while the broadcast is still sending', async () => {
+      deps.prisma.broadcast.findUnique.mockResolvedValue(
+        draft({ status: BroadcastStatus.SENDING }),
+      );
+
+      // Retrying mid-flight would race the pass that is still deciding what
+      // failed.
+      await expect(service.retryFailed(BROADCAST_ID)).rejects.toThrow(
+        /encore en cours/,
+      );
+    });
+
+    it('uses a fresh job id, since the original one still exists', async () => {
+      deps.prisma.broadcast.findUnique.mockResolvedValue(
+        draft({ status: BroadcastStatus.FAILED }),
+      );
+      deps.prisma.broadcastRecipient.count
+        .mockResolvedValueOnce(2)
+        .mockResolvedValueOnce(0);
+
+      await service.retryFailed(BROADCAST_ID);
+
+      const [, , opts] = deps.queue.addJob.mock.calls[0] as [
+        unknown,
+        unknown,
+        { jobId: string },
+      ];
+      // BullMQ keeps a completed job for an hour; reusing its id would have
+      // the retry silently dropped as a duplicate.
+      expect(opts.jobId).not.toBe(`broadcast-${BROADCAST_ID}`);
+      expect(opts.jobId).toContain(BROADCAST_ID);
     });
   });
 });

@@ -67,6 +67,18 @@ export class AdminBroadcastController {
     return this.broadcasts.preview(dto.audience);
   }
 
+  @Post('audience/facets')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({
+    summary: 'How many profiles each trade reaches',
+    description:
+      'Counted with the other filters applied and the trade filter removed, ' +
+      'so the numbers stay true as trades are ticked. Writes nothing.',
+  })
+  async facets(@Body() dto: PreviewAudienceDto) {
+    return this.broadcasts.categoryFacets(dto.audience);
+  }
+
   @Get()
   @Roles(UserRole.MODERATOR)
   @ApiOperation({ summary: 'List broadcasts' })
@@ -100,6 +112,18 @@ export class AdminBroadcastController {
       limit: dto.limit ?? 50,
       ...(dto.channel ? { channel: dto.channel } : {}),
     });
+  }
+
+  @Get(':id/stats')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({
+    summary: 'Delivery counts by channel and outcome',
+    description:
+      'Every row counted, unlike the paginated recipients list — this is what ' +
+      'the detail page charts.',
+  })
+  async stats(@Param('id', ParseUUIDPipe) id: string) {
+    return this.broadcasts.stats(id);
   }
 
   @Post()
@@ -189,6 +213,34 @@ export class AdminBroadcastController {
         estimatedCost: result.estimatedCost,
         scheduledAt: dto.scheduled_at?.toISOString() ?? null,
       },
+      ...extractRequestMeta(req),
+    });
+
+    return result;
+  }
+
+  @Post(':id/retry')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({
+    summary: 'Retry the failed deliveries',
+    description:
+      'Re-queues only the recipients whose delivery failed, each on its own ' +
+      'channel. Anyone already reached is left alone.',
+  })
+  @ApiResponse({ status: 201, description: 'Retry queued' })
+  @ApiResponse({ status: 400, description: 'Nothing failed, or still sending' })
+  async retry(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
+    const result = await this.broadcasts.retryFailed(id);
+
+    await this.logService.create({
+      action: 'BROADCAST_RETRIED',
+      entityType: 'Broadcast',
+      entityId: id,
+      userId: req.user?.userId,
+      metadata: { retried: result.retried },
       ...extractRequestMeta(req),
     });
 

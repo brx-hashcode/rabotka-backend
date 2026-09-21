@@ -11,4 +11,15 @@ export type BroadcastJobData = {
   broadcastId: string;
   /** How many recipient rows have already been handled. */
   cursor: number;
+  /**
+   * Which RUN this page belongs to — a fresh value for every send and every
+   * retry.
+   *
+   * The continuation job's id is built from it. Without it the id was
+   * `broadcast-<id>-<cursor>`, which repeats the moment a retry walks the same
+   * cursors again: BullMQ keeps a completed job for an hour, so the second
+   * run's continuation was silently dropped as a duplicate, `finish()` never
+   * ran, and the broadcast sat in SENDING for ever.
+   */
+  runId: string;
 };

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   Injectable,
@@ -5,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  BroadcastRecipientStatus,
   BroadcastStatus,
   DeliveryChannel,
   Prisma,
@@ -42,6 +44,21 @@ const EDITABLE: BroadcastStatus[] = [
   BroadcastStatus.DRAFT,
   BroadcastStatus.SCHEDULED,
 ];
+
+/** One point of the delivery curve: cumulative deliveries per channel. */
+export type BroadcastTimelinePoint = {
+  /** ISO minute the bucket starts at. */
+  at: string;
+} & Partial<Record<Exclude<DeliveryChannel, 'ALL'>, number>>;
+
+export type BroadcastStats = {
+  byChannel: {
+    channel: DeliveryChannel;
+    status: BroadcastRecipientStatus;
+    count: number;
+  }[];
+  timeline: BroadcastTimelinePoint[];
+};
 
 export type CreateBroadcastInput = {
   title: string;
@@ -117,6 +134,63 @@ export class BroadcastService {
         city: p.city,
       })),
     };
+  }
+
+  /**
+   * How many people each trade would actually reach.
+   *
+   * The trade list is the platform's full taxonomy, but most profiles carry no
+   * category at all — so an admin ticking a trade at random lands on an empty
+   * audience and reads it as a broken filter. Counting first turns the list
+   * from "every trade that exists" into "every trade someone is in".
+   *
+   * Faceted: the count for each trade is computed with the OTHER filters
+   * applied but the trade filter removed, which is what makes the numbers
+   * stay true as you tick them — otherwise selecting one trade would drop
+   * every other count to zero.
+   */
+  async categoryFacets(
+    filters: AudienceFilters,
+  ): Promise<{ categoryId: string; count: number }[]> {
+    const { category_ids: _ignored, ...rest } = filters;
+    const audience = buildAudienceWhere(rest);
+
+    // Counted from BOTH places a trade lives, then merged. The join table is
+    // where the trades people pick in the app actually go; the scalar column
+    // is the headline one and is usually empty. Counting only the column
+    // reported 0 beside trades that plainly had members.
+    const [fromRelation, fromColumn] = await Promise.all([
+      this.prisma.profileCategory.groupBy({
+        by: ['category_id'],
+        where: { profile: audience },
+        _count: { _all: true },
+      }),
+      this.prisma.profile.groupBy({
+        by: ['category_id'],
+        where: { AND: [audience, { category_id: { not: null } }] },
+        _count: { _all: true },
+      }),
+    ]);
+
+    // A profile whose headline trade is also in its list must not be counted
+    // twice, so the two sources are merged by taking the LARGER count rather
+    // than the sum — the relation is a superset in practice, and over-counting
+    // an audience is the one direction that misleads a send.
+    const merged = new Map<string, number>();
+    for (const row of fromRelation) {
+      merged.set(row.category_id, row._count._all);
+    }
+    for (const row of fromColumn) {
+      if (!row.category_id) continue;
+      merged.set(
+        row.category_id,
+        Math.max(merged.get(row.category_id) ?? 0, row._count._all),
+      );
+    }
+
+    return [...merged.entries()]
+      .map(([categoryId, count]) => ({ categoryId, count }))
+      .sort((a, b) => b.count - a.count);
   }
 
   async create(input: CreateBroadcastInput): Promise<Broadcast> {
@@ -234,6 +308,53 @@ export class BroadcastService {
   }
 
   /**
+   * Delivery broken down by channel, and how it accumulated over time.
+   *
+   * One `groupBy` for the totals and one bucketed query for the curve, rather
+   * than a page of recipients: the detail page charts every row, and the list
+   * it sits above is paginated at 50.
+   *
+   * The timeline is CUMULATIVE and computed here, not in the browser. A chart
+   * that has to fold running totals itself is a chart that disagrees with the
+   * counters the moment a page is re-fetched mid-send.
+   */
+  async stats(id: string): Promise<BroadcastStats> {
+    await this.getOrThrow(id);
+
+    const [totals, buckets] = await Promise.all([
+      this.prisma.broadcastRecipient.groupBy({
+        by: ['channel', 'status'],
+        where: { broadcast_id: id },
+        _count: { _all: true },
+      }),
+      // Raw, because `groupBy` cannot bucket a timestamp. By the minute: the
+      // fan-out paces WhatsApp at ~8 messages a second, so a second-level
+      // bucket would be mostly empty and a hourly one mostly flat.
+      this.prisma.$queryRaw<
+        { bucket: Date; channel: DeliveryChannel; count: number }[]
+      >`
+        SELECT date_trunc('minute', sent_at) AS bucket,
+               channel,
+               count(*)::int AS count
+        FROM broadcast_recipients
+        WHERE broadcast_id = ${id}::uuid
+          AND sent_at IS NOT NULL
+        GROUP BY 1, 2
+        ORDER BY 1 ASC
+      `,
+    ]);
+
+    return {
+      byChannel: totals.map((row) => ({
+        channel: row.channel,
+        status: row.status,
+        count: row._count._all,
+      })),
+      timeline: toCumulative(buckets),
+    };
+  }
+
+  /**
    * Freeze the audience, then hand the chunks to the queue.
    *
    * The snapshot is the point. Filters are evaluated ONCE, here, and written to
@@ -286,11 +407,12 @@ export class BroadcastService {
       },
     });
 
+    const runId = randomUUID();
     await this.queueService.addJob<BroadcastJobData>(
       BROADCAST_QUEUE,
-      { type: 'dispatch', broadcastId: id, cursor: 0 },
+      { type: 'dispatch', broadcastId: id, cursor: 0, runId },
       {
-        jobId: `broadcast-${id}`,
+        jobId: `broadcast-${id}-${runId}`,
         ...(opts.scheduledAt
           ? { delay: Math.max(0, opts.scheduledAt.getTime() - Date.now()) }
           : {}),
@@ -303,6 +425,70 @@ export class BroadcastService {
     );
 
     return { recipientCount, estimatedCost };
+  }
+
+  /**
+   * Send again, to the recipients that failed and only them.
+   *
+   * The failed rows go back to PENDING and the fan-out is re-queued; the
+   * processor already picks PENDING rows and sends each on the channel its own
+   * row names, so a WhatsApp failure retries on WhatsApp and an email failure
+   * on email, with no notion of "the broadcast's channel" involved.
+   *
+   * Nothing that succeeded is touched. That is the whole point of keeping a row
+   * per delivery rather than a counter: a retry after a template was finally
+   * approved must not message the people who already received it.
+   *
+   * Counters are recomputed from the rows rather than adjusted, so a retry can
+   * be run twice without the totals drifting.
+   */
+  async retryFailed(id: string): Promise<{ retried: number }> {
+    const broadcast = await this.getOrThrow(id);
+
+    if (broadcast.status === BroadcastStatus.SENDING) {
+      throw new BadRequestException(
+        'Cet envoi est encore en cours — attendez qu’il se termine',
+      );
+    }
+
+    const failed = await this.prisma.broadcastRecipient.count({
+      where: { broadcast_id: id, status: BroadcastRecipientStatus.FAILED },
+    });
+    if (failed === 0) {
+      throw new BadRequestException('Aucun envoi en échec à relancer');
+    }
+
+    await this.prisma.broadcastRecipient.updateMany({
+      where: { broadcast_id: id, status: BroadcastRecipientStatus.FAILED },
+      data: {
+        status: BroadcastRecipientStatus.PENDING,
+        error: null,
+        sent_at: null,
+      },
+    });
+
+    await this.prisma.broadcast.update({
+      where: { id },
+      data: {
+        status: BroadcastStatus.SENDING,
+        failed_count: await this.prisma.broadcastRecipient.count({
+          where: { broadcast_id: id, status: BroadcastRecipientStatus.FAILED },
+        }),
+      },
+    });
+
+    // A fresh run id: the original run's job ids live for an hour in BullMQ,
+    // and anything reused from them is silently dropped as a duplicate.
+    const runId = randomUUID();
+    await this.queueService.addJob<BroadcastJobData>(
+      BROADCAST_QUEUE,
+      { type: 'dispatch', broadcastId: id, cursor: 0, runId },
+      { jobId: `broadcast-${id}-${runId}` },
+    );
+
+    this.logger.log(`Broadcast ${id}: retrying ${failed} failed delivery(ies)`);
+
+    return { retried: failed };
   }
 
   /**
@@ -400,6 +586,45 @@ export class BroadcastService {
       throw new BadRequestException('Choisissez au moins un canal');
     }
   }
+}
+
+/**
+ * Per-minute counts folded into a running total per channel.
+ *
+ * Every point carries every channel seen so far, including the ones that
+ * delivered nothing in that minute — a line with holes in it reads as a
+ * channel that stopped, rather than one that was simply quiet.
+ */
+function toCumulative(
+  buckets: { bucket: Date; channel: DeliveryChannel; count: number }[],
+): BroadcastTimelinePoint[] {
+  const running = new Map<string, number>();
+  const byBucket = new Map<string, BroadcastTimelinePoint>();
+
+  for (const row of buckets) {
+    const at = row.bucket.toISOString();
+    running.set(row.channel, (running.get(row.channel) ?? 0) + row.count);
+
+    const point = byBucket.get(at) ?? { at };
+    byBucket.set(at, point);
+  }
+
+  // Second pass, so each point carries the running total of EVERY channel as
+  // of that minute rather than only the ones that moved in it.
+  const totals = new Map<string, number>();
+  const points: BroadcastTimelinePoint[] = [];
+
+  for (const at of [...byBucket.keys()].sort((a, b) => a.localeCompare(b))) {
+    for (const row of buckets.filter((b) => b.bucket.toISOString() === at)) {
+      totals.set(row.channel, (totals.get(row.channel) ?? 0) + row.count);
+    }
+    points.push({
+      at,
+      ...(Object.fromEntries(totals) as Record<string, number>),
+    });
+  }
+
+  return points;
 }
 
 /**

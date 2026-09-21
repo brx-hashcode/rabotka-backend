@@ -77,15 +77,37 @@ export function buildAudienceWhere(
   if (filters.country_codes?.length) {
     criteria.country_code = { in: filters.country_codes };
   }
+  // Each multi-value condition contributes its own OR group to this list.
+  // Assigning `criteria.OR` directly, as this once did, means the last writer
+  // wins: cities silently replaced trades, and a segment filtered on both
+  // ignored one of them.
+  const anyOf: Prisma.ProfileWhereInput[] = [];
+
   if (filters.cities?.length) {
     // Case-insensitive: cities are free text on the profile, so "Poto-Poto" and
     // "poto-poto" are the same neighbourhood to everyone except a SQL equality.
-    criteria.OR = filters.cities.map((city) => ({
-      city: { equals: city, mode: Prisma.QueryMode.insensitive },
-    }));
+    anyOf.push({
+      OR: filters.cities.map((city) => ({
+        city: { equals: city, mode: Prisma.QueryMode.insensitive },
+      })),
+    });
   }
   if (filters.category_ids?.length) {
-    criteria.category_id = { in: filters.category_ids };
+    // BOTH places a trade can live. `Profile.category_id` is the single
+    // headline trade; `profile_categories` is the list someone actually picks
+    // in the app, and it is where most trades are — a profile with five trades
+    // and no headline one was invisible to this filter, which is precisely the
+    // case that exposed it.
+    anyOf.push({
+      OR: [
+        { category_id: { in: filters.category_ids } },
+        {
+          categories: {
+            some: { category_id: { in: filters.category_ids } },
+          },
+        },
+      ],
+    });
   }
   if (filters.created_from || filters.created_to) {
     criteria.created_at = {
@@ -107,9 +129,12 @@ export function buildAudienceWhere(
     criteria.email = filters.has_email ? { not: null } : null;
   }
 
+  const narrowed: Prisma.ProfileWhereInput =
+    anyOf.length > 0 ? { AND: [criteria, ...anyOf] } : criteria;
+
   const included = filters.include_profile_ids?.length
-    ? { OR: [criteria, { id: { in: filters.include_profile_ids } }] }
-    : criteria;
+    ? { OR: [narrowed, { id: { in: filters.include_profile_ids } }] }
+    : narrowed;
 
   const where: Prisma.ProfileWhereInput = {
     AND: [
