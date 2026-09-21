@@ -796,6 +796,7 @@ export class BotNotificationService {
             first_name: true,
             status: true,
             profile_type: true,
+            marketing_opt_out_at: true,
           },
         }),
         this.prisma.jobOffer.findUnique({
@@ -812,6 +813,10 @@ export class BotNotificationService {
       if (!profile?.phone || !offer) return false;
       if (profile.profile_type !== 'WORKER' || profile.status !== 'ACTIVE')
         return false;
+      // The STOP reply promises that job suggestions stop too, so they do. The
+      // in-app notification the caller writes afterwards is unaffected: the
+      // opt-out is about being messaged, not about the feed they chose to open.
+      if (profile.marketing_opt_out_at) return false;
 
       // No flow arming: the approved template's button opens `/offres/:id`, so
       // the worker applies on the web. This previously both armed the apply flow

@@ -31,8 +31,13 @@ import { getMailerTransportConfig } from './modules/mail/mailer-transport.config
 import { WalletService } from './modules/wallet/wallet.service';
 import { SystemConfigService } from './modules/system-config/system-config.service';
 import { LayoutService } from './modules/mail/layout.service';
+import { MailService } from './modules/mail/mail.service';
 import { InvoiceService } from './modules/invoice/invoice.service';
 import { PenaltyNotificationProcessor } from './modules/penalty/penalty-notification.processor';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { BroadcastProcessor } from './modules/broadcast/broadcast.processor';
+import { NotificationDispatcher } from './modules/notification-dispatch/notification-dispatcher.service';
+import { ProfileNotificationService } from './modules/profile-notification/profile-notification.service';
 
 /**
  * Worker module for the queue worker process.
@@ -219,6 +224,62 @@ export class WorkerModule {
       ],
     };
 
+    /**
+     * Broadcasts, assembled by hand rather than by importing BroadcastModule.
+     *
+     * That module pulls AuthModule for its controller's guard, which drags in
+     * PaymentsModule and the rest of the API graph — none of which the worker
+     * registers, so importing it crashed this process at boot with an
+     * unresolved EventEmitter. The fan-out needs six collaborators and no
+     * controller, so it is built the same way ReminderProcessor is.
+     */
+    const broadcastProvider = {
+      provide: BroadcastProcessor,
+      useFactory: (
+        prisma: PrismaService,
+        queue: QueueService,
+        whatsApp: WhatsAppService,
+        loginLink: WhatsAppLoginLinkService,
+        systemConfig: SystemConfigService,
+        idempotency: IdempotencyService,
+        mail: MailService,
+      ) => {
+        const dispatcher = new NotificationDispatcher(
+          whatsApp,
+          loginLink,
+          systemConfig,
+        );
+        // The gateway holds no server outside the HTTP app, so its emit is
+        // already a no-op there (see `emitNew`). A stub says that outright
+        // instead of relying on a null check three files away.
+        const gateway = { emitNew: () => undefined } as never;
+        const inApp = new ProfileNotificationService(
+          prisma,
+          idempotency,
+          systemConfig,
+          gateway,
+          new EventEmitter2(),
+        );
+        return new BroadcastProcessor(
+          prisma,
+          queue,
+          dispatcher,
+          inApp,
+          mail,
+          new LayoutService(systemConfig),
+        );
+      },
+      inject: [
+        PrismaService,
+        QueueService,
+        WhatsAppService,
+        WhatsAppLoginLinkService,
+        SystemConfigService,
+        IdempotencyService,
+        MailService,
+      ],
+    };
+
     return {
       module: WorkerModule,
       imports: coreImports,
@@ -226,6 +287,7 @@ export class WorkerModule {
         ...whatsAppProviders,
         ...reminderProviders,
         penaltyProvider,
+        broadcastProvider,
         PaymentProcessor,
         WhatsAppLoginLinkService,
         {

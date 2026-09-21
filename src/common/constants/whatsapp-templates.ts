@@ -181,6 +181,17 @@ function sid(envVar: string, approvedDefault: string): string {
 export const CLOUD_DEFAULT_LANGUAGE = 'fr';
 
 /**
+ * Longest admin-typed message a broadcast template may carry.
+ *
+ * The same 700 as `ADMIN_MESSAGE_VAR_MAX` and for the same reason — Meta's
+ * rendered body caps at 1024 characters shared across the template — but
+ * declared here rather than imported, because this file is `common/` and that
+ * one is `modules/`. The admin form enforces it so the writer is told before
+ * they send, not after.
+ */
+export const BROADCAST_MESSAGE_VAR_MAX = 700;
+
+/**
  * Where the two "bad news" templates send people.
  *
  * Exported because the CALLER mints the login code — these notifications are
@@ -1467,6 +1478,49 @@ export const WHATSAPP_TEMPLATES = {
         loginCode?: string | null;
       },
     ]
+  >,
+  /**
+   * An admin's announcement to a SEGMENT — the broadcast feature's template.
+   *
+   * MARKETING, and there is no point submitting it as anything else: the body
+   * is essentially one free variable, which is exactly what made `adminMessage`
+   * come back MARKETING three times (see the note there). It genuinely is a
+   * broadcast, so the category is honest.
+   *
+   * What that costs, accepted deliberately: billed per recipient, and subject
+   * to Meta's marketing opt-out — so a profile that opted out at Meta may never
+   * receive one, on top of the opt-out Rabotka keeps in
+   * `Profile.marketing_opt_out_at`.
+   *
+   * Only ever sent when the 24h window is CLOSED. Inside it the broadcast
+   * processor sends the same words free-form through `NotificationDispatcher`,
+   * at no template cost — which is the split the admin is shown as an estimate
+   * before confirming.
+   */
+  broadcastAnnouncement: {
+    cloudOnly: true,
+    urlSuffixVar: '3',
+    urlSuffixMode: 'shortlink',
+    category: 'MARKETING',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_BROADCAST_ANNOUNCEMENT',
+        'rabotka_broadcast_announcement_v1',
+      ),
+    },
+    variables: (p: { firstName: string; message: string; path: string }) => ({
+      '1': p.firstName,
+      // Admin-typed prose: flattened and capped like every other free-text
+      // binding here, or one newline fails the whole send with 132018.
+      '2': freeTextVar(
+        p.message,
+        'Information Rabotka',
+        BROADCAST_MESSAGE_VAR_MAX,
+      ),
+      '3': p.path,
+    }),
+  } satisfies WhatsAppTemplate<
+    [params: { firstName: string; message: string; path: string }]
   >,
 } as const;
 

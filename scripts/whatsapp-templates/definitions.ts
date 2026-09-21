@@ -43,6 +43,10 @@ export const AUTHORED_KEYS: ReadonlySet<WhatsAppTemplateName> = new Set([
   // for that at all, so these have no Content fixture to capture.
   'kycAgreementDocument',
   'missionContractDocument',
+  // The broadcast template. Authored straight for Meta: it is new, the account
+  // is on Cloud, and getting one template approved twice to satisfy a binding
+  // nobody sends on is pure cost.
+  'broadcastAnnouncement',
 ]);
 
 /**
@@ -420,6 +424,74 @@ export function authoredTemplates(): Partial<
      * The profile-views reminder. A count and a link, nothing more — the feed it
      * opens is anonymised, and so is this.
      */
+    /**
+     * The broadcast template: one admin message to a segment.
+     *
+     * MARKETING, asked for as MARKETING. The body is essentially one free
+     * variable, which is what Meta reclassified `adminMessage` for three times
+     * — and here the classification is simply true. Do not spend a submission
+     * trying to word it into UTILITY.
+     *
+     * It is only ever sent OUTSIDE the 24h window: inside it, the broadcast
+     * processor sends the same words free-form, at no template cost.
+     *
+     * The « Stop » quick reply is not decoration. A marketing message people
+     * cannot leave gets blocked and reported instead, and blocks are what move
+     * the quality rating that throttles every other notification we send.
+     */
+    broadcastAnnouncement: {
+      name: 'rabotka_broadcast_announcement_v1',
+      language: 'fr',
+      category: 'MARKETING',
+      components: [
+        {
+          type: 'BODY',
+          // Meta rejected the first attempt with 2388293 — the
+          // parameter-to-word ratio. Two variables wrapped in one greeting and
+          // a sign-off is not enough static text to carry them, which is the
+          // very lesson `rabotka_admin_message_v4` already records. This body
+          // states who is writing and why BEFORE the variable, which is both
+          // what Meta measures and what makes the message readable when the
+          // admin's line is terse.
+          text: [
+            '*Information Rabotka*',
+            '',
+            'Bonjour {{1}}, voici une information importante de la part de notre équipe concernant la plateforme Rabotka :',
+            '',
+            '{{2}}',
+            '',
+            'Merci de votre confiance et à très bientôt,',
+            '_L’équipe Rabotka_',
+          ].join('\n'),
+          example: {
+            body_text: [
+              [
+                'Jean',
+                'Rabotka sera en maintenance dimanche de 8h à 10h. Les paiements reprendront automatiquement ensuite.',
+              ],
+            ],
+          },
+        },
+        {
+          type: 'BUTTONS',
+          buttons: [
+            {
+              type: 'URL',
+              text: 'Ouvrir Rabotka',
+              // {{1}} of the BUTTON namespace; the processor swaps it for a
+              // one-tap login code minted against the broadcast's link.
+              url: 'https://rabotka.work/s/{{1}}',
+              example: ['https://rabotka.work/s/home'],
+            },
+            {
+              type: 'QUICK_REPLY',
+              text: 'Stop',
+            },
+          ],
+        },
+      ],
+    },
+
     profileViewsDigest: {
       name: 'rabotka_profile_views_digest_v1',
       language: 'fr',

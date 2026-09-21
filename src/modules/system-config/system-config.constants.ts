@@ -378,6 +378,18 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    // What one MARKETING template costs, in FCFA, used only to show an admin an
+    // ESTIMATE before they confirm a broadcast. Meta bills in USD per
+    // conversation and the rate moves, so this is a dial the team keeps roughly
+    // right rather than a figure the system derives — the truth afterwards is
+    // `whatsapp_messages.billable`, which the estimate can be compared against.
+    key: 'fees.marketing_template_cost_fcfa',
+    value: '15',
+    category: ConfigCategory.FEES,
+    label: 'Coût estimé d’un modèle MARKETING WhatsApp (FCFA)',
+    isSecret: false,
+  },
+  {
     // The kill switch for the window-aware send path. On, a notification to
     // someone who wrote to us in the last 24h goes out as free-form text with a
     // button — same words, same destination, no template fee. Off, every

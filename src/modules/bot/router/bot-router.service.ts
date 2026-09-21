@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { BotState, BotProfile } from '../types/bot-state.types';
-import { CMD_PAY } from '../bot.constants';
+import { CMD_PAY, CMD_RESUME, CMD_STOP } from '../bot.constants';
 import { stripChatFormattingChars } from '../utils/chat-input';
 
 export type RouteResult =
@@ -35,6 +35,16 @@ export class BotRouterService {
     // with the button into the app — with or without an open flow.
     if (CMD_PAY.includes(normalized)) {
       return { type: 'command', commandId: 'pay_penalties' };
+    }
+
+    // Before the flow branch, deliberately: someone who writes STOP means it,
+    // and making them finish a half-open payment flow first would be the
+    // product arguing with a person who asked to be left alone.
+    if (CMD_STOP.includes(normalized)) {
+      return { type: 'command', commandId: 'marketing_opt_out' };
+    }
+    if (CMD_RESUME.includes(normalized)) {
+      return { type: 'command', commandId: 'marketing_opt_in' };
     }
 
     if (state?.flowId) {
