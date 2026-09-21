@@ -14,13 +14,25 @@ export interface SanitizeResult {
   blocked: string[];
 }
 
-const PHONE_PATTERNS: ReadonlyArray<readonly [string, RegExp]> = [
+/**
+ * Exported for the messaging moderation, which matches the same shapes on text
+ * users write rather than on text the model wrote.
+ *
+ * Shared as SOURCE, not as behaviour: that module needs `g` to walk every match
+ * and report offsets, this one only asks `test`. Copying the expressions into a
+ * second file would have them drift apart at the first evasion somebody reports,
+ * and drift between two contact filters is exactly the bug nobody notices.
+ *
+ * A global regex carries `lastIndex`, so the other side rebuilds its own from
+ * `.source` instead of importing these objects to mutate.
+ */
+export const PHONE_PATTERNS: ReadonlyArray<readonly [string, RegExp]> = [
   ['phone_intl', /\+\s?\d{1,3}[\s.-]?(?:\d[\s.-]?){7,}/],
   ['phone_local', /\b0\d[\s.-]?(?:\d[\s.-]?){6,}\d\b/],
   ['phone_bare', /\b\d{8,}\b/],
 ];
 
-const EMAIL_PATTERN = /[\w.+-]+@[\w-]+\.[\w.]{2,}/;
+export const EMAIL_PATTERN = /[\w.+-]+@[\w-]+\.[\w.]{2,}/;
 
 const PROVIDER_TERMS = [
   'chatgpt',
