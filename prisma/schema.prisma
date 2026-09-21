@@ -550,6 +550,10 @@ model Profile {
   notifications_received          ProfileNotification[]         @relation("ProfileNotificationRecipient")
   broadcast_deliveries            BroadcastRecipient[]
   notifications_triggered         ProfileNotification[]         @relation("ProfileNotificationActor")
+  conversations_as_worker         ProfileConversation[]         @relation("ConversationWorker")
+  conversations_as_employer       ProfileConversation[]         @relation("ConversationEmployer")
+  messages_sent                   ProfileMessage[]
+  redaction_reports_filed         RedactionReport[]
   deleted_at                      DateTime?                     @db.Timestamptz
 
   @@index([email], name: "idx_profile_email")
@@ -592,11 +596,12 @@ model User {
   events                 Event[]           @relation("EventAssignedUsers")
   deleted_at             DateTime?         @db.Timestamptz
 
-  chat_participants  ChatParticipant[]
-  chat_messages      ChatMessage[]
-  chat_conversations ChatConversation[] @relation("ChatConversationCreatedBy")
-  oauth_apps_created OAuthApp[]         @relation("OAuthAppCreatedBy")
-  broadcasts_created Broadcast[]
+  chat_participants          ChatParticipant[]
+  chat_messages              ChatMessage[]
+  chat_conversations         ChatConversation[] @relation("ChatConversationCreatedBy")
+  oauth_apps_created         OAuthApp[]         @relation("OAuthAppCreatedBy")
+  broadcasts_created         Broadcast[]
+  redaction_reports_reviewed RedactionReport[]  @relation("RedactionReportReviewer")
 
   @@index([email], name: "idx_user_email")
   @@index([role], name: "idx_user_role")
@@ -912,6 +917,7 @@ model Application {
   assignment             Assignment?
   contact_unlock_attempt ContactUnlockAttempt?
   contract               Contract?
+  conversation           ProfileConversation?
   deleted_at             DateTime?             @db.Timestamptz
 
   /// NOT unique any more. Uniqueness is enforced by a PARTIAL index created in
@@ -2395,4 +2401,184 @@ model BroadcastRecipient {
   @@index([broadcast_id, status], name: "idx_broadcast_recipient_status")
   @@index([profile_id], name: "idx_broadcast_recipient_profile")
   @@map("broadcast_recipients")
+}
+
+/// Whether a message reached its recipient whole, with holes, or not at all.
+///
+/// CLEAN and REDACTED are both DELIVERED — the difference is only what the
+/// recipient sees. HELD is not delivered, and exists for the one case where
+/// redaction is impossible: the semantic pass answers a yes/no question and
+/// returns no positions, so a message only it catches cannot be holed
+/// accurately and is withheld whole rather than mangled.
+enum MessageModerationStatus {
+  CLEAN
+  REDACTED
+  HELD
+}
+
+/// What kind of contact detail a withheld fragment is.
+///
+/// Recorded per fragment rather than per message so that "which family
+/// produces the false positives" is a query rather than a reading exercise.
+/// OBFUSCATED_DIGITS is deliberately its own member: its false-positive rate is
+/// structurally the highest of the five, and separating it is what allows it to
+/// be switched off alone without blinding the rest.
+enum RedactionCategory {
+  PHONE
+  EMAIL
+  MESSAGING_HANDLE
+  URL
+  OBFUSCATED_DIGITS
+}
+
+/// A conversation between a worker and an employer, BEFORE either has paid to
+/// unlock the other's contact details.
+///
+/// The two parties are COLUMNS, not a join table, and that is a deliberate
+/// departure from ChatParticipant next door. A conversation here is always
+/// exactly two people in asymmetric roles — the unlock fee differs by role, 100
+/// vs 500 FCFA — so a join table would permit states the domain forbids: three
+/// participants, two workers, a party removed. ContactUnlockAttempt models the
+/// same pair the same way.
+///
+/// CARRIES NO UNLOCK STATE. Whether contacts are unlocked is read from
+/// ContactUnlockAttempt.status, which is the one place that decides it. A
+/// second copy of a paid-for state is a dispute waiting to be filed.
+model ProfileConversation {
+  id         String   @id @default(uuid()) @db.Uuid
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  worker_id   String @db.Uuid
+  employer_id String @db.Uuid
+
+  /// The application both parties consented through: the worker applied, the
+  /// employer published. Nullable because the RECOMMENDATION path creates no
+  /// application row at all (`recommendation-contact.service.ts`) — that path
+  /// is out of scope for v1, and a nullable column is what lets it be added
+  /// later with a service rather than a migration on a full table.
+  application_id String? @unique @db.Uuid
+
+  /// Denormalised, or ordering the conversation list means aggregating over
+  /// profile_messages on every open of the tab.
+  last_message_at DateTime?
+
+  /// Two columns rather than a read-state table, for the same reason the
+  /// participants are columns: there are always exactly two readers.
+  worker_last_read_at   DateTime?
+  employer_last_read_at DateTime?
+
+  /// Set when the application dies — rejected, cancelled, or the unlock expired
+  /// into wallet credit. Read-only from then on, never deleted: it is evidence
+  /// for whatever claim follows.
+  closed_at DateTime?
+
+  worker      Profile          @relation("ConversationWorker", fields: [worker_id], references: [id], onDelete: Cascade)
+  employer    Profile          @relation("ConversationEmployer", fields: [employer_id], references: [id], onDelete: Cascade)
+  application Application?     @relation(fields: [application_id], references: [id], onDelete: SetNull)
+  messages    ProfileMessage[]
+
+  @@index([worker_id, last_message_at(sort: Desc)], name: "idx_profile_conversation_worker")
+  @@index([employer_id, last_message_at(sort: Desc)], name: "idx_profile_conversation_employer")
+  @@map("profile_conversations")
+}
+
+/// One message in a profile-to-profile conversation.
+///
+/// `body` IS THE TEXT AS TYPED, never the redacted version. Three reasons, in
+/// order: the sender is shown exactly which of their own characters were
+/// withheld and that needs the original plus offsets; a false positive cannot
+/// be reviewed against a copy that already hides the evidence; and a pattern
+/// found to be too wide can only be corrected retroactively if what it matched
+/// still exists.
+///
+/// The price is real and stated rather than left implicit: contact details sent
+/// in breach of the rules sit here in clear text, and this repo has no
+/// application-level encryption at rest. What contains it is access — the
+/// author, an admin above a role threshold whose read is logged, and the
+/// moderation job. The recipient's API response is built from the redactions
+/// and never contains the withheld characters.
+model ProfileMessage {
+  id              String   @id @default(uuid()) @db.Uuid
+  created_at      DateTime @default(now())
+  conversation_id String   @db.Uuid
+  sender_id       String   @db.Uuid
+
+  body String @db.Text
+
+  moderation_status MessageModerationStatus @default(CLEAN)
+
+  /// The semantic pass said "yes" while the deterministic one found nothing.
+  /// Separate from moderation_status because it carries no positions: it is why
+  /// a message is HELD, not a description of where.
+  semantic_flagged Boolean @default(false)
+
+  read_at    DateTime?
+  deleted_at DateTime? @db.Timestamptz
+
+  conversation ProfileConversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  sender       Profile             @relation(fields: [sender_id], references: [id], onDelete: Cascade)
+  redactions   MessageRedaction[]
+  reports      RedactionReport[]
+
+  @@index([conversation_id, created_at], name: "idx_profile_message_conversation")
+  @@index([sender_id, created_at], name: "idx_profile_message_sender")
+  @@map("profile_messages")
+}
+
+/// One withheld fragment, as OFFSETS INTO ProfileMessage.body.
+///
+/// Half-open bounds, [start, end), and UTF-16 indices — the same units
+/// JavaScript's String uses, because that is what produced them and what will
+/// slice with them. Anything else guarantees an off-by-one on the first emoji.
+///
+/// `matched_by` names the rule that fired, not just the family. It is what
+/// turns "this pattern produces 40% of our false positives" into a query
+/// instead of an afternoon of reading other people's messages.
+model MessageRedaction {
+  id         String   @id @default(uuid()) @db.Uuid
+  created_at DateTime @default(now())
+  message_id String   @db.Uuid
+
+  start_offset Int
+  end_offset   Int
+  category     RedactionCategory
+  matched_by   String
+
+  message ProfileMessage @relation(fields: [message_id], references: [id], onDelete: Cascade)
+
+  @@index([message_id], name: "idx_message_redaction_message")
+  @@index([category], name: "idx_message_redaction_category")
+  @@map("message_redactions")
+}
+
+/// "This was not a phone number" — a sender contesting a redaction.
+///
+/// NOT a Claim, although claims are already this product's reporting channel. A
+/// claim opens a kanban card and commits support's response time; the value
+/// here is not handling one case but ACCUMULATING A CORPUS of false positives
+/// to tune the patterns against. A claim thread cannot be aggregated; this
+/// joined to `matched_by` is one query. If a report turns out to be a real
+/// dispute, support opens a claim by hand — that is already their job.
+model RedactionReport {
+  id          String   @id @default(uuid()) @db.Uuid
+  created_at  DateTime @default(now())
+  message_id  String   @db.Uuid
+  reporter_id String   @db.Uuid
+
+  note String? @db.Text
+
+  reviewed_at DateTime?
+  reviewed_by String?   @db.Uuid
+  /// True once a human agrees the detection was wrong. Null while unreviewed,
+  /// so "pending" and "rejected" are not the same value.
+  upheld      Boolean?
+
+  message  ProfileMessage @relation(fields: [message_id], references: [id], onDelete: Cascade)
+  reporter Profile        @relation(fields: [reporter_id], references: [id], onDelete: Cascade)
+  reviewer User?          @relation("RedactionReportReviewer", fields: [reviewed_by], references: [id], onDelete: SetNull)
+
+  @@index([reviewed_at], name: "idx_redaction_report_pending")
+  @@index([message_id], name: "idx_redaction_report_message")
+  @@map("redaction_reports")
 }
