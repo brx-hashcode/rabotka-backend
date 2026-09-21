@@ -97,9 +97,25 @@ const SPELLED_RUN = new RegExp(
  * emails by design — an email matches first and the two spans merge, so the
  * overlap costs nothing.
  */
-const URL_PATTERN = /\bhttps?:\/\/\S+|\bwww\.\S+/gi;
-const MESSENGER_LINK = /\b(?:t\.me|wa\.me|m\.me|join\.skype\.com)\/\S+/gi;
-const HANDLE_PATTERN = /@[a-z0-9._]{3,}/gi;
+/**
+ * A link cannot END on punctuation.
+ *
+ * `\S+` is greedy and swallows whatever follows — "ecris sur wa.me/242061234567,
+ * on s'arrange" matched the comma too, so the recipient read
+ * "sur [contact masqué] on s'arrange" with the sentence's punctuation gone.
+ * The hole should be the link's shape, not a character more.
+ */
+const LINK_TAIL = String.raw`\S*[^\s.,;:!?)\]"']`;
+
+const URL_PATTERN = new RegExp(
+  String.raw`\bhttps?:\/\/${LINK_TAIL}|\bwww\.${LINK_TAIL}`,
+  'gi',
+);
+const MESSENGER_LINK = new RegExp(
+  String.raw`\b(?:t\.me|wa\.me|m\.me|join\.skype\.com)\/${LINK_TAIL}`,
+  'gi',
+);
+const HANDLE_PATTERN = /@[a-z0-9._]{2,}[a-z0-9]/gi;
 
 /**
  * The patterns that always run.

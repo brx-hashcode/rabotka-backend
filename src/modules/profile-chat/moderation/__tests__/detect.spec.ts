@@ -48,6 +48,18 @@ describe('detectContacts', () => {
       ]);
     });
 
+    it.each([
+      ["ecris sur wa.me/242061234567, on s'arrange", 'wa.me/242061234567'],
+      ['va sur https://exemple.cg/page. merci', 'https://exemple.cg/page'],
+      ['mon site www.exemple.cg!', 'www.exemple.cg'],
+      ['mon insta @jean.dupont.', '@jean.dupont'],
+    ])('stops the link before the sentence punctuation in %p', (text, link) => {
+      // Greedy \S+ used to eat the comma, and the recipient then read
+      // "sur [contact masqué] on s'arrange" with the punctuation gone. The hole
+      // should be the link's shape and not a character more.
+      expect(slice(text)).toEqual([link]);
+    });
+
     it('catches digits written as words', () => {
       const text = 'mon numero zero six un deux trois quatre';
       const spans = detectContacts(text);
