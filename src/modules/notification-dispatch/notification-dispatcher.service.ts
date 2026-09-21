@@ -3,10 +3,7 @@ import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { notificationDispatchCounter } from '../whatsapp/telemetry/metrics';
-import type {
-  TemplateKey,
-  TemplateParams,
-} from '../whatsapp/contracts';
+import type { TemplateKey, TemplateParams } from '../whatsapp/contracts';
 
 /** How the message actually left, for the caller and for the metric. */
 export type DispatchMode = 'FREE_FORM' | 'TEMPLATE';
@@ -106,7 +103,13 @@ export class NotificationDispatcher {
     const { phone, profileId, template, freeForm, body } = input;
 
     if (!freeForm || !profileId) {
-      return this.sendTemplate(template, phone, profileId, body, 'no_free_form');
+      return this.sendTemplate(
+        template,
+        phone,
+        profileId,
+        body,
+        'no_free_form',
+      );
     }
 
     if (!(await this.freeFormEnabled())) {

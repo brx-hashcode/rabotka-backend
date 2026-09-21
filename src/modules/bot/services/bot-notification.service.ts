@@ -18,7 +18,6 @@ import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { WhatsAppFeedbackService } from '../../whatsapp/feedback/whatsapp-feedback.service';
 import { BotInboxService } from './bot-inbox.service';
 import { formatAmount } from '../messages/offers.messages';
-import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { WalletService } from '../../wallet/wallet.service';
@@ -33,15 +32,13 @@ import {
   NotificationDispatcher,
   type FreeFormMessage,
 } from '../../notification-dispatch/notification-dispatcher.service';
-import type {
-  TemplateKey,
-  TemplateParams,
-} from '../../whatsapp/contracts';
+import type { TemplateKey, TemplateParams } from '../../whatsapp/contracts';
 import {
   applicationAcceptedFreeForm,
   applicationAcceptedUnlockFreeForm,
   applicationRejectedFreeForm,
   cancellationFreeForm,
+  unlockExpiredConversionFreeForm,
   jobRecommendationFreeForm,
   newApplicationFreeForm,
 } from '../messages/notifications.messages';
@@ -581,13 +578,13 @@ export class BotNotificationService {
       });
       if (!profile?.phone) return;
 
-      const tpl = WHATSAPP_TEMPLATES.unlockExpiredConversion;
-      await this.whatsApp.sendTemplateMessage(
-        profile.phone,
-        'unlockExpiredConversion',
-        { amount },
+      await this.notify({
+        phone: profile.phone,
         profileId,
-      );
+        key: 'unlockExpiredConversion',
+        params: { amount },
+        freeForm: unlockExpiredConversionFreeForm({ amount }),
+      });
     } catch (err) {
       this.logger.warn(
         `Failed to send credit conversion notification to ${profileId}`,

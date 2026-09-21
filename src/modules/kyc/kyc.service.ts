@@ -1,6 +1,8 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { NotificationDispatcher } from '../notification-dispatch/notification-dispatcher.service';
+import { kycApprovedFreeForm } from '../bot/messages/notifications.messages';
 import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
 
 @Injectable()
@@ -10,6 +12,7 @@ export class KycService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly whatsApp: WhatsAppService,
+    private readonly dispatcher: NotificationDispatcher,
   ) {}
 
   /**
@@ -41,12 +44,12 @@ export class KycService {
       .filter(Boolean)
       .join(' ');
 
-    const sent = await this.whatsApp.sendTemplateMessage(
-      profile.phone,
-      'kyc',
-      name,
-      profile.id,
-    );
+    const { sent } = await this.dispatcher.send({
+      phone: profile.phone,
+      profileId: profile.id,
+      template: { key: 'kyc', params: name },
+      freeForm: kycApprovedFreeForm(name),
+    });
 
     if (!sent) {
       throw new Error("Echec de l'envoi du message WhatsApp");
