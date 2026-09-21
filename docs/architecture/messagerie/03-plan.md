@@ -229,7 +229,11 @@ Le CTA « Débloquer les coordonnées » (décision produit 3.2) est dans l'en-t
 
 L'affichage des rédactions porte la décision 3.1 : côté expéditeur, les fragments retenus sont marqués **en place** dans son propre message, pas résumés par un bandeau en dessous. Il doit voir *lequel* de ses numéros n'est pas passé.
 
-**Critère de sortie :** deux téléphones, deux comptes, un message qui arrive sans rechargement.
+**L'avertissement de §8.4 fait partie de ce lot, pas d'une passe de finition.** Trois emplacements : permanent en en-tête du fil, sous un fragment retenu chez l'expéditeur, une fois par fil chez le destinataire. Rendu par le client, jamais stocké en base — le raisonnement est dans §8.4 de l'architecture.
+
+La raison de le livrer *avec* le masquage et pas après : un masquage sans avertissement n'apprend pas la règle, il apprend à la contourner. Et le jour où une tentative répétée entraînera une sanction, « la personne savait-elle ? » sera la seule question qui compte.
+
+**Critère de sortie :** deux téléphones, deux comptes, un message qui arrive sans rechargement — et l'avertissement visible avant la première tentative, sans avoir eu à faire défiler.
 
 **Risque :** ⚠️ **HYPOTHÈSE** — les tests jsdom de `rabotka-client` ne tournent pas en local (liaison canvas manquante). Les helpers purs (formatage, non-lus) se testent en environnement node ; l'écran se valide à la main.
 

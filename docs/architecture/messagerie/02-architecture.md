@@ -418,6 +418,40 @@ Un message `HELD` n'apparaît pas du tout chez le destinataire, et apparaît che
 
 Un rappel : **aucun de ces rendus ne se calcule côté client** (§4.4). Le client affiche ce que le serveur lui donne.
 
+### 8.4 L'avertissement — la règle est dite avant d'être appliquée
+
+**Décision produit : la discussion porte en permanence un avertissement disant de ne jamais envoyer volontairement ses coordonnées, et renvoyant vers « Débloquer les coordonnées ».**
+
+Ce n'est pas de l'habillage, et c'est le point à ne pas traiter comme tel.
+
+1. **Sans lui, le masquage est incompréhensible.** Quelqu'un dont le numéro disparaît sans avoir été prévenu conclut que l'application est cassée, pas qu'une règle s'applique. Le premier réflexe est alors de réessayer autrement — c'est-à-dire d'apprendre à contourner.
+2. **Il rend l'application de la règle défendable.** Le jour où une tentative répétée se traduit par un signalement ou une sanction, la seule question qui compte est « la personne savait-elle ? ». Un avertissement affiché en permanence y répond ; une détection silencieuse, non. La plateforme est le gagne-pain de ces gens, et `GuardService` a déjà arbitré ce genre de situation dans le même sens (`guard.service.ts:45-64` : « un faux positif coûte infiniment plus cher qu'un faux négatif »).
+3. **Il convertit.** C'est le seul endroit où l'on explique que les coordonnées s'obtiennent, et par où. Un avertissement qui dit seulement « interdit » perd la moitié de sa valeur ; celui-ci dit « interdit, et voici comment faire ».
+
+**Trois emplacements, trois rôles distincts.**
+
+| Où | Quand | Rôle |
+|---|---|---|
+| En-tête du fil, permanent et discret | toujours | la règle est connue avant la première tentative |
+| Sous un fragment retenu, chez l'expéditeur | à la rédaction | le moment où la règle est comprise, parce qu'elle vient de s'appliquer à lui |
+| Sous le premier trou, chez le destinataire | une fois par fil | il sait que son interlocuteur a essayé, et que ce n'est pas un bug |
+
+Formulations proposées, à valider :
+
+- En-tête : « Vos coordonnées restent protégées. N'envoyez jamais votre numéro ou votre email ici : ils sont automatiquement masqués. Pour les échanger, utilisez **Débloquer les coordonnées**. »
+- À l'expéditeur : « Ce fragment n'a pas été transmis. Les coordonnées ne s'échangent pas dans la discussion — **Débloquer les coordonnées** pour les obtenir. »
+- Au destinataire : « Les coordonnées sont masquées tant qu'elles n'ont pas été débloquées. »
+
+Les trois pointent vers le même bouton, qui est déjà le CTA principal du fil (décision 3.2).
+
+**L'avertissement n'est pas un message stocké.** Il est rendu par le client, pas écrit dans `profile_messages`, pour trois raisons :
+
+- une ligne par conversation pour un texte qui ne varie jamais est du stockage pur ;
+- `ProfileMessage.sender_id` devrait devenir nullable, ce qui affaiblit une clé étrangère aujourd'hui toujours valide, pour un seul cas ;
+- la formulation sera réécrite, et des copies stockées figeraient l'ancienne. C'est l'inverse exact du cas `ANNOUNCEMENT`, où le gel est voulu parce que la copie appartient à son auteur (`schema.prisma` — commentaire du type de notification).
+
+**Question ouverte que cette décision soulève** : faut-il escalader après N tentatives délibérées ? Le modèle de données le permet déjà — les rédactions sont comptées par expéditeur et par catégorie — et `GuardService` a un précédent avec `ABUSE_REPORT_THRESHOLD = 3` et son principe « le premier message reçoit un avertissement, le seuil distingue un dérapage d'un comportement » (`guard.service.ts:263-271`). Hors périmètre v1 ; reportée en §9.
+
 ---
 
 ## 9. Questions ouvertes
@@ -431,7 +465,8 @@ Ce qui doit être tranché avant la Phase 3.
 5. **Rétention** des corps de messages. Aucune règle n'existe ; le précédent est 180 jours.
 6. **§3.3 — arrêt de la modération après déblocage.** Décision proposée, facile à inverser, à valider explicitement.
 7. **§7.3 — SUPPORT peut-il lire un fil ?** Proposé oui, journalisé. À valider par le produit, pas par moi.
-8. **Les champs libres existants** (Phase 1 §2.17) ne sont filtrés nulle part. Une bio suffit à contourner toute cette architecture. Ce n'est pas dans ce chantier, mais **ça doit être un chantier**, et court : la passe A s'applique telle quelle à `Profile.description`, `JobOffer.description` et `PortfolioItem.description` — ce dernier étant servi sur une page publique non authentifiée (`portfolio.service.ts:443-450`).
+8. **Escalade après N tentatives délibérées ?** §8.4 rend la règle explicite, donc une tentative répétée devient un choix et non une ignorance. Le précédent du dépôt est `ABUSE_REPORT_THRESHOLD = 3` avec un avertissement d'abord (`guard.service.ts:263-271`). Hors v1, mais à trancher avant que quiconque demande « pourquoi ce compte n'a-t-il rien eu ? ».
+9. **Les champs libres existants** (Phase 1 §2.17) ne sont filtrés nulle part. Une bio suffit à contourner toute cette architecture. Ce n'est pas dans ce chantier, mais **ça doit être un chantier**, et court : la passe A s'applique telle quelle à `Profile.description`, `JobOffer.description` et `PortfolioItem.description` — ce dernier étant servi sur une page publique non authentifiée (`portfolio.service.ts:443-450`).
 
 ---
 
