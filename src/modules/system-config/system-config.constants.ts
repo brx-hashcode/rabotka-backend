@@ -497,6 +497,58 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
 
+  // ── MESSAGERIE ────────────────────────────────────────────────────────────
+  // GENERAL rather than CONTACT: that category holds RABOTKA's own contact
+  // details (contact.email, contact.orange_money_number), which is a different
+  // subject entirely. GENERAL already hosts the Vova settings above, and the
+  // admin renders it with one card per family.
+  {
+    key: 'messaging.enabled',
+    value: 'true',
+    category: ConfigCategory.GENERAL,
+    label: 'Messagerie entre profils activée',
+    isSecret: false,
+  },
+  {
+    // The local prefixes are not in this repo and I have no authoritative
+    // source for them, so the default is EMPTY rather than a guess. An empty
+    // list simply adds no pattern; the generic phone shapes still apply.
+    key: 'messaging.operator_prefixes',
+    value: '',
+    category: ConfigCategory.GENERAL,
+    label: 'Préfixes opérateurs à masquer (séparés par des virgules)',
+    isSecret: false,
+  },
+  {
+    // Above this share of the message withheld, delivering it tells the
+    // recipient nothing except that somebody tried something — so it is held
+    // whole instead of delivered as confetti.
+    key: 'messaging.held_ratio_threshold',
+    value: '0.5',
+    category: ConfigCategory.GENERAL,
+    label: 'Part masquée au-delà de laquelle le message est retenu (0–1)',
+    isSecret: false,
+  },
+  {
+    key: 'messaging.rate_limit_per_minute',
+    value: '20',
+    category: ConfigCategory.GENERAL,
+    label: 'Messages par minute et par profil',
+    isSecret: false,
+  },
+  {
+    // Once both parties have paid, they already hold each other's numbers —
+    // delivered over WhatsApp by the unlock itself. Carrying on masking would
+    // be theatre, and theatre that breaks legitimate messages ("rappelle-moi
+    // sur l'autre numéro"). Kept as a switch because it is a product call that
+    // is cheap to reverse and expensive to discover late.
+    key: 'messaging.moderate_after_unlock',
+    value: 'false',
+    category: ConfigCategory.GENERAL,
+    label: 'Continuer à masquer après déblocage des coordonnées',
+    isSecret: false,
+  },
+
   // ── CONTACT ───────────────────────────────────────────────────────────────
   {
     key: 'contact.email',
