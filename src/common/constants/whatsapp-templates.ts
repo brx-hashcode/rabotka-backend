@@ -220,6 +220,16 @@ export const PENALTIES_PAYMENT_CTA_PATH = 'penalites/paiement';
  */
 export const OPEN_APP_CTA_PATH = 'home';
 /**
+ * Where the unread-message nudge lands — the conversation LIST, never a
+ * specific thread.
+ *
+ * The nudge is debounced and covers every unread message in a conversation, so
+ * by the time it is sent there may be several, and in more than one thread.
+ * Deep-linking to the one that happened to trigger the timer would land the
+ * person on an arbitrary conversation.
+ */
+export const DISCUSSIONS_CTA_PATH = 'discussions';
+/**
  * Where a claim notification lands when no login code could be minted.
  *
  * The list rather than the claim itself: the fallback travels in the URL as a
@@ -449,6 +459,33 @@ export const WHATSAPP_TEMPLATES = {
     variables: (firstName: string) => ({
       '1': firstName,
       '2': OPEN_APP_CTA_PATH,
+    }),
+  } satisfies WhatsAppTemplate<[firstName: string]>,
+
+  /**
+   * "Vous avez reçu un nouveau message non lu" — the in-app messaging nudge.
+   *
+   * The FALLBACK half of the nudge, not the nudge itself: `NotificationDispatcher`
+   * sends free-form inside the 24h service window, where this costs nothing, and
+   * only reaches for this template once the window has closed. That is where the
+   * money is, so the send site keeps it behind a config switch.
+   *
+   * Carries NO message content and NO counterparty name, deliberately. The whole
+   * point of the feature is that what two profiles write to each other stays
+   * where it can be moderated; copying any of it into WhatsApp would walk it
+   * straight back out.
+   */
+  newMessageNudge: {
+    cloudOnly: true,
+    urlSuffixVar: '2',
+    urlSuffixMode: 'shortlink',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName('TPL_CLOUD_NEW_MESSAGE', 'rabotka_new_message_v1'),
+    },
+    variables: (firstName: string) => ({
+      '1': firstName,
+      '2': DISCUSSIONS_CTA_PATH,
     }),
   } satisfies WhatsAppTemplate<[firstName: string]>,
 

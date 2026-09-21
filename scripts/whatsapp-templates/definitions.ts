@@ -47,6 +47,9 @@ export const AUTHORED_KEYS: ReadonlySet<WhatsAppTemplateName> = new Set([
   // is on Cloud, and getting one template approved twice to satisfy a binding
   // nobody sends on is pure cost.
   'broadcastAnnouncement',
+  // The in-app messaging nudge. Same reasoning as the broadcast one: new,
+  // Cloud-only, nothing to translate from.
+  'newMessageNudge',
 ]);
 
 /**
@@ -352,6 +355,59 @@ export function authoredTemplates(): Partial<
               // processor swaps it for a one-tap login code.
               url: 'https://rabotka.work/s/{{1}}',
               example: ['https://rabotka.work/s/home'],
+            },
+          ],
+        },
+      ],
+    },
+
+    /**
+     * Somebody wrote to you in the in-app messaging.
+     *
+     * The FALLBACK half of the nudge: inside the 24h window the dispatcher
+     * sends free-form and this costs nothing, so this body is only ever what a
+     * closed window sees.
+     *
+     * UTILITY is asked for, and the body earns it by LEADING WITH THE STATE —
+     * "vous avez reçu un nouveau message non lu" is a fact about the account,
+     * not an invitation to come back. That distinction is not academic: v1 of
+     * `rabotka_open_app_v2` was filed MARKETING precisely because it said
+     * nothing about the account's state, and a MARKETING filing here would let
+     * `Profile.marketing_opt_out_at` silence it.
+     *
+     * NO message content and NO sender name. Both were considered; both walk
+     * the thing the feature exists to contain back out of the app. The name in
+     * particular would identify a counterparty whose contact details have not
+     * been paid for.
+     */
+    newMessageNudge: {
+      name: 'rabotka_new_message_v1',
+      language: 'fr',
+      category: 'UTILITY',
+      components: [
+        {
+          type: 'BODY',
+          text: [
+            'Bonjour {{1}},',
+            '',
+            'Vous avez reçu un nouveau message non lu.',
+            '',
+            'Consultez votre espace pour en prendre connaissance.',
+            '',
+            'L’équipe Rabotka',
+          ].join('\n'),
+          example: { body_text: [['Jean']] },
+        },
+        {
+          type: 'BUTTONS',
+          buttons: [
+            {
+              type: 'URL',
+              // Names the destination, like « Voir mon compte » above, for the
+              // same reason recorded there.
+              text: 'Voir mes messages',
+              url: 'https://rabotka.work/s/{{1}}',
+              example: ['https://rabotka.work/s/discussions'],
             },
           ],
         },
