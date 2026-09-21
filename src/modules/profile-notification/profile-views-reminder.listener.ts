@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { AccountStatus, ProfileType } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -6,6 +6,8 @@ import { IdempotencyService } from '../../common/services/idempotency/idempotenc
 import { NOTIFICATIONS_CTA_PATH } from '../../common/constants/whatsapp-templates';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
+import { NotificationDispatcher } from '../notification-dispatch/notification-dispatcher.service';
+import { profileViewsDigestFreeForm } from '../bot/messages/notifications.messages';
 import {
   PROFILE_VIEWS_THRESHOLD_EVENT,
   profileViewsReminderKey,
@@ -29,6 +31,10 @@ export class ProfileViewsReminderListener {
     private readonly idempotency: IdempotencyService,
     private readonly whatsApp: WhatsAppService,
     private readonly loginLink: WhatsAppLoginLinkService,
+    // Appended and @Optional(): the spec constructs this listener positionally,
+    // and without it the send falls back to the template.
+    @Optional()
+    private readonly dispatcher?: NotificationDispatcher,
   ) {}
 
   @OnEvent(PROFILE_VIEWS_THRESHOLD_EVENT)
@@ -79,11 +85,31 @@ export class ProfileViewsReminderListener {
       .mint(workerId, NOTIFICATIONS_CTA_PATH)
       .catch(() => null);
 
-    return this.whatsApp.sendTemplateMessage(
+    if (!this.dispatcher) {
+      return this.whatsApp.sendTemplateMessage(
+        phone,
+        'profileViewsDigest',
+        { firstName: profile.first_name, count: unreadCount, loginCode },
+        workerId,
+      );
+    }
+
+    const { sent } = await this.dispatcher.send({
       phone,
-      'profileViewsDigest',
-      { firstName: profile.first_name, count: unreadCount, loginCode },
-      workerId,
-    );
+      profileId: workerId,
+      template: {
+        key: 'profileViewsDigest',
+        params: {
+          firstName: profile.first_name,
+          count: unreadCount,
+          loginCode,
+        },
+      },
+      freeForm: profileViewsDigestFreeForm({
+        firstName: profile.first_name,
+        count: unreadCount,
+      }),
+    });
+    return sent;
   }
 }

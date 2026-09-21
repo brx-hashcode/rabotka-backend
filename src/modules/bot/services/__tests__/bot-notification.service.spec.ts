@@ -493,6 +493,10 @@ describe('BotNotificationService', () => {
         // registry entry, and the processor swaps it for a login code on the
         // way out. Covered in the twilio mapper spec.
         undefined,
+        // The recipient, so the send lands in their conversation view. It
+        // arrived with the dispatcher: every notification now names its
+        // profile, because the free-form path needs one to read the window.
+        'w-1',
       );
     });
 
@@ -513,6 +517,7 @@ describe('BotNotificationService', () => {
         '+24200000002',
         'cancellation',
         expect.objectContaining({ reason: 'Malade' }),
+        'e-1',
       );
     });
 
@@ -800,6 +805,7 @@ describe('BotNotificationService', () => {
         '+242001',
         expect.any(String),
         expect.objectContaining({ title: 'Plombier' }),
+        'worker-1',
       );
     });
 

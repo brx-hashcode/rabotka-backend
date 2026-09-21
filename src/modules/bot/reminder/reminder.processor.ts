@@ -1,4 +1,10 @@
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Inject,
+  Optional,
+  forwardRef,
+} from '@nestjs/common';
 import { jobLocationLabel } from '../../../common/utils/job-location.util';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
@@ -6,9 +12,21 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { QueueService } from '../../../common/services/queue/queue.service';
 import { WHATSAPP_REMINDERS_QUEUE } from '../../../common/services/queue/queue.module';
-import { formatDate } from '../messages/notifications.messages';
+import {
+  autoStartedFreeForm,
+  formatDate,
+  offerExpiredApplicantFreeForm,
+  offerExpiredEmployerFreeForm,
+  reminder24hFreeForm,
+  reminderStartFreeForm,
+  statusCheckFreeForm,
+} from '../messages/notifications.messages';
+import {
+  NotificationDispatcher,
+  type FreeFormMessage,
+} from '../../notification-dispatch/notification-dispatcher.service';
+import type { TemplateKey, TemplateParams } from '../../whatsapp/contracts';
 import { APP_TIMEZONE } from '../utils/parse-date-time';
-import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 import {
   ApplicationCancelledBy,
   ApplicationStatus,
@@ -77,7 +95,44 @@ export class ReminderProcessor {
     private readonly contactUnlockService: ContactUnlockService,
     @Inject(forwardRef(() => BotNotificationService))
     private readonly botNotification: BotNotificationService,
+    // Appended and @Optional(): the spec constructs this processor
+    // positionally, and `notify()` falls back to the template without it —
+    // which is what every send here did before the dispatcher existed.
+    @Optional()
+    private readonly dispatcher?: NotificationDispatcher,
   ) {}
+
+  /**
+   * Send the cheap way inside the 24h window, the approved way always.
+   *
+   * Mirrors `BotNotificationService.notify`. Reminders are the other half of
+   * the notification volume, and the worker on a mission tomorrow is precisely
+   * the person likely to have written to the bot today.
+   */
+  private async notify<K extends TemplateKey>(params: {
+    phone: string;
+    profileId?: string;
+    key: K;
+    params: TemplateParams<K>;
+    freeForm?: FreeFormMessage;
+  }): Promise<boolean> {
+    if (!this.dispatcher) {
+      return this.whatsApp.sendTemplateMessage(
+        params.phone,
+        params.key,
+        params.params,
+        params.profileId,
+      );
+    }
+
+    const { sent } = await this.dispatcher.send({
+      phone: params.phone,
+      ...(params.profileId ? { profileId: params.profileId } : {}),
+      template: { key: params.key, params: params.params },
+      ...(params.freeForm ? { freeForm: params.freeForm } : {}),
+    });
+    return sent;
+  }
 
   async process(job: { id?: string; data: ReminderJobData }): Promise<void> {
     const { type } = job.data;
@@ -411,17 +466,14 @@ export class ReminderProcessor {
     const phone = offer.employer?.phone;
 
     if (phone) {
-      const autoStartTpl = WHATSAPP_TEMPLATES.autoStarted;
-      const sent = await this.whatsApp
-        .sendTemplateMessage(
-          phone,
-          'autoStarted',
-          {
-            offerTitle: offer.title,
-            jobOfferId: offer.id,
-          },
-          offer.employer_id,
-        )
+      const params = { offerTitle: offer.title, jobOfferId: offer.id };
+      const sent = await this.notify({
+        phone,
+        profileId: offer.employer_id,
+        key: 'autoStarted',
+        params,
+        freeForm: autoStartedFreeForm(params),
+      })
         .then(() => true)
         .catch((err) => {
           this.logger.warn(
@@ -460,23 +512,19 @@ export class ReminderProcessor {
     const workerPhone = app.worker?.phone;
     if (!workerPhone) return;
 
-    const statusTpl = WHATSAPP_TEMPLATES.statusCheck;
-    await this.whatsApp
-      .sendTemplateMessage(
-        workerPhone,
-        'statusCheck',
-        {
-          jobTitle: offer.title,
-          jobOfferId: offer.id,
-        },
-        app.worker_id,
-      )
-      .catch((err) =>
-        this.logger.warn(
-          `Failed to send status check prompt to worker ${app.worker_id}`,
-          err,
-        ),
-      );
+    const statusParams = { jobTitle: offer.title, jobOfferId: offer.id };
+    await this.notify({
+      phone: workerPhone,
+      profileId: app.worker_id,
+      key: 'statusCheck',
+      params: statusParams,
+      freeForm: statusCheckFreeForm(statusParams),
+    }).catch((err) =>
+      this.logger.warn(
+        `Failed to send status check prompt to worker ${app.worker_id}`,
+        err,
+      ),
+    );
 
     // No bot state is armed alongside this template. It carries a CTA button
     // and no menu, so a state expecting "1 = done / 2 = later" would only make
@@ -615,20 +663,18 @@ export class ReminderProcessor {
   ): Promise<void> {
     const phone = worker.phone;
     if (!phone) return;
-    const tpl = WHATSAPP_TEMPLATES.offerExpiredApplicant;
-    await this.whatsApp
-      .sendTemplateMessage(
-        phone,
-        'offerExpiredApplicant',
-        { offerTitle },
-        worker.id,
-      )
-      .catch((err) => {
-        this.logger.warn(
-          `Failed to notify worker ${worker.id} of expired offer`,
-          err,
-        );
-      });
+    await this.notify({
+      phone,
+      profileId: worker.id,
+      key: 'offerExpiredApplicant',
+      params: { offerTitle },
+      freeForm: offerExpiredApplicantFreeForm({ offerTitle }),
+    }).catch((err) => {
+      this.logger.warn(
+        `Failed to notify worker ${worker.id} of expired offer`,
+        err,
+      );
+    });
   }
 
   /**
@@ -663,19 +709,19 @@ export class ReminderProcessor {
     // No bot state is armed alongside this template. Republishing is a CTA away
     // in the app, and an armed queue would let a stray "1" republish an offer
     // the employer had finished with.
-    await this.whatsApp
-      .sendTemplateMessage(
-        phone,
-        'offerExpiredEmployer',
-        { offerTitle: offer.title, jobOfferId: offer.id },
-        offer.employer_id,
-      )
-      .catch((err) =>
-        this.logger.warn(
-          `Failed to notify employer ${offer.employer_id} of expired offer`,
-          err,
-        ),
-      );
+    const expiredParams = { offerTitle: offer.title, jobOfferId: offer.id };
+    await this.notify({
+      phone,
+      profileId: offer.employer_id,
+      key: 'offerExpiredEmployer',
+      params: expiredParams,
+      freeForm: offerExpiredEmployerFreeForm(expiredParams),
+    }).catch((err) =>
+      this.logger.warn(
+        `Failed to notify employer ${offer.employer_id} of expired offer`,
+        err,
+      ),
+    );
   }
 
   private async sendJobStatusCheckReminder(
@@ -714,17 +760,14 @@ export class ReminderProcessor {
     if (!phone) return;
 
     const workerId = application.worker_id;
-    const tpl = WHATSAPP_TEMPLATES.statusCheck;
-    const sent = await this.whatsApp
-      .sendTemplateMessage(
-        phone,
-        'statusCheck',
-        {
-          jobTitle: offer.title,
-          jobOfferId,
-        },
-        workerId,
-      )
+    const repingParams = { jobTitle: offer.title, jobOfferId };
+    const sent = await this.notify({
+      phone,
+      profileId: workerId,
+      key: 'statusCheck',
+      params: repingParams,
+      freeForm: statusCheckFreeForm(repingParams),
+    })
       .then(() => true)
       .catch((err) => {
         this.logger.warn(
@@ -761,25 +804,26 @@ export class ReminderProcessor {
     if (!app?.worker?.phone || app.status !== 'ACCEPTED') return;
 
     const fees = await this.systemConfigService.getFees();
-    const tpl = WHATSAPP_TEMPLATES.reminder24h;
-    await this.whatsApp.sendTemplateMessage(
-      app.worker.phone,
-      'reminder24h',
-      {
-        offerTitle: app.job_offer.title,
-        date: formatDate(app.job_offer.scheduled_at),
-        address: jobLocationLabel(app.job_offer),
-        amount: Number(app.job_offer.amount).toLocaleString('fr-FR'),
-        employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
-        employerPhone: app.job_offer.employer.phone,
-        cancellationThresholdHours: String(fees.cancellationThresholdHours),
-        penaltyFcfa: fees.lateCancellationPenaltyFcfa.toLocaleString('fr-FR'),
-        // URL suffix: the reminder deep-links to this exact mission rather
-        // than dropping the worker on a list to find it.
-        applicationId,
-      },
-      app.worker_id,
-    );
+    const params = {
+      offerTitle: app.job_offer.title,
+      date: formatDate(app.job_offer.scheduled_at),
+      address: jobLocationLabel(app.job_offer),
+      amount: Number(app.job_offer.amount).toLocaleString('fr-FR'),
+      employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
+      employerPhone: app.job_offer.employer.phone,
+      cancellationThresholdHours: String(fees.cancellationThresholdHours),
+      penaltyFcfa: fees.lateCancellationPenaltyFcfa.toLocaleString('fr-FR'),
+      // URL suffix: the reminder deep-links to this exact mission rather
+      // than dropping the worker on a list to find it.
+      applicationId,
+    };
+    await this.notify({
+      phone: app.worker.phone,
+      profileId: app.worker_id,
+      key: 'reminder24h',
+      params,
+      freeForm: reminder24hFreeForm(params),
+    });
 
     // No bot state is armed here. This used to open the cancel flow so the
     // worker's "1 = cancel / 2 = keep" quick reply had somewhere to land, but
@@ -845,20 +889,21 @@ export class ReminderProcessor {
         minute: '2-digit',
         timeZone: APP_TIMEZONE,
       });
-      const tpl = WHATSAPP_TEMPLATES.reminderStart;
-      await this.whatsApp.sendTemplateMessage(
-        app.worker.phone,
-        'reminderStart',
-        {
-          offerTitle: app.job_offer.title,
-          time,
-          address: jobLocationLabel(app.job_offer),
-          employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
-          employerPhone: app.job_offer.employer.phone,
-          applicationId,
-        },
-        app.worker_id,
-      );
+      const params = {
+        offerTitle: app.job_offer.title,
+        time,
+        address: jobLocationLabel(app.job_offer),
+        employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
+        employerPhone: app.job_offer.employer.phone,
+        applicationId,
+      };
+      await this.notify({
+        phone: app.worker.phone,
+        profileId: app.worker_id,
+        key: 'reminderStart',
+        params,
+        freeForm: reminderStartFreeForm(params),
+      });
       this.logger.log(
         `Reminder start sent for application ${applicationId} (alreadyStarted=${alreadyStarted})`,
       );

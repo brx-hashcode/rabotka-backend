@@ -15,6 +15,7 @@ import {
   UploadedFile,
   BadRequestException,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { Response } from 'express';
@@ -50,6 +51,8 @@ import { kycApprovedEmail, kycRejectedEmail } from '../mail/templates';
 import { MessageDirection, BotPlatform } from '@prisma/client';
 import { KYC_REJECTED_CTA_PATH } from '../../common/constants/whatsapp-templates';
 import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
+import { NotificationDispatcher } from '../notification-dispatch/notification-dispatcher.service';
+import { kycRejectedFreeForm } from '../bot/messages/notifications.messages';
 import { AdminListProfilesDto } from './dto/admin-list-profiles.dto';
 import {
   AdminVerifyProfileDto,
@@ -81,7 +84,48 @@ export class AdminProfileController {
     // Appended rather than slotted in: specs construct this controller
     // positionally, so a mid-list parameter shifts every mock after it.
     private readonly adminContactRecords: AdminContactRecordService,
+    // Window-aware sending. Appended and @Optional() for the same positional
+    // reason; without it the KYC rejection goes out as its template, which is
+    // what this controller did before the dispatcher existed.
+    @Optional()
+    private readonly dispatcher?: NotificationDispatcher,
   ) {}
+
+  /**
+   * The KYC rejection, sent the cheap way when the window allows it.
+   *
+   * Worth the free path despite being low volume: someone whose documents were
+   * refused usually writes back within the hour to ask why, so this lands in a
+   * chat that is open — and the reply that follows is free too.
+   */
+  private async notifyRejection(
+    result: { phone: string; firstName: string },
+    profileId: string,
+    reason: string,
+    loginCode: string | null,
+  ): Promise<void> {
+    const params = { firstName: result.firstName, reason, loginCode };
+
+    if (!this.dispatcher) {
+      await this.whatsApp.sendTemplateMessage(
+        result.phone,
+        'kycRejected',
+        params,
+        profileId,
+      );
+      return;
+    }
+
+    await this.dispatcher.send({
+      phone: result.phone,
+      profileId,
+      template: { key: 'kycRejected', params },
+      freeForm: kycRejectedFreeForm({
+        firstName: result.firstName,
+        reason: reason?.trim() || 'Non précisé',
+      }),
+    });
+  }
 
   @Get()
   @Roles(UserRole.MODERATOR)
@@ -902,23 +946,13 @@ export class AdminProfileController {
         .mint(id, KYC_REJECTED_CTA_PATH)
         .catch(() => null);
 
-      this.whatsApp
-        .sendTemplateMessage(
-          result.phone,
-          'kycRejected',
-          {
-            firstName: result.firstName,
-            reason: dto.reason,
-            loginCode,
-          },
-          id,
-        )
-        .catch((err) =>
+      this.notifyRejection(result, id, dto.reason, loginCode).catch(
+        (err: unknown) =>
           console.warn(
             `Failed to send KYC rejected WhatsApp message for ${id}:`,
             err,
           ),
-        );
+      );
     }
 
     return result;

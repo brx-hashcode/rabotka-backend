@@ -58,6 +58,7 @@ describe('WhatsAppService', () => {
       },
       profile: {
         findUnique: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
         update: jest.fn().mockResolvedValue({}),
       },
     };
@@ -331,12 +332,14 @@ describe('WhatsAppService', () => {
 
   describe('isServiceWindowOpen', () => {
     const inboundAt = (msAgo: number) => ({
-      created_at: new Date(Date.now() - msAgo),
+      last_inbound_at: new Date(Date.now() - msAgo),
     });
     const HOUR = 60 * 60 * 1000;
 
     it('is closed when the profile has never messaged us', async () => {
-      (prisma.message.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        last_inbound_at: null,
+      });
 
       // The dominant real case: profiles sign up on the web and never message
       // the bot, so free-form would be rejected on the very first admin message.
@@ -346,8 +349,16 @@ describe('WhatsAppService', () => {
       });
     });
 
+    it('is closed when the profile does not exist', async () => {
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(null);
+
+      const result = await service.isServiceWindowOpen(PROFILE_ID);
+
+      expect(result.open).toBe(false);
+    });
+
     it('is open just inside the window', async () => {
-      (prisma.message.findFirst as jest.Mock).mockResolvedValue(
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(
         inboundAt(23 * HOUR),
       );
 
@@ -360,7 +371,7 @@ describe('WhatsAppService', () => {
     it('is closed inside the safety margin, before the 24h mark', async () => {
       // 23h58m — technically still inside WhatsApp's window, but close enough
       // that clock skew and dispatch latency could push the send past it.
-      (prisma.message.findFirst as jest.Mock).mockResolvedValue(
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(
         inboundAt(23 * HOUR + 58 * 60 * 1000),
       );
 
@@ -370,7 +381,7 @@ describe('WhatsAppService', () => {
     });
 
     it('is closed well past the window', async () => {
-      (prisma.message.findFirst as jest.Mock).mockResolvedValue(
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(
         inboundAt(25 * HOUR),
       );
 
@@ -378,34 +389,84 @@ describe('WhatsAppService', () => {
 
       expect(result.open).toBe(false);
     });
+  });
 
-    it('only counts INBOUND WhatsApp messages', async () => {
-      await service.isServiceWindowOpen(PROFILE_ID);
+  describe('openServiceWindows', () => {
+    it('asks for one batch rather than one query per profile', async () => {
+      (prisma.profile.findMany as jest.Mock).mockResolvedValue([
+        { id: 'a' },
+        { id: 'c' },
+      ]);
 
-      // An admin email is written into this same table; reading one as evidence
-      // of an open WhatsApp session would be exactly wrong.
-      expect(prisma.message.findFirst).toHaveBeenCalledWith(
+      const open = await service.openServiceWindows(['a', 'b', 'c']);
+
+      // The reason the column exists: a fan-out deciding free-vs-billed per
+      // recipient cannot pay a round trip each.
+      expect(prisma.profile.findMany).toHaveBeenCalledTimes(1);
+      expect(open.has('a')).toBe(true);
+      expect(open.has('b')).toBe(false);
+      expect(open.has('c')).toBe(true);
+    });
+
+    it('does not query at all for an empty batch', async () => {
+      await expect(service.openServiceWindows([])).resolves.toEqual(new Set());
+
+      expect(prisma.profile.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('saveMessage', () => {
+    it('stamps last_inbound_at for an INBOUND message', async () => {
+      await service.saveMessage(PROFILE_ID, MessageDirection.INBOUND, 'salut');
+
+      // This stamp IS the 24h window. Losing it does not break a reply, it
+      // silently makes every later notification pay for a template.
+      expect(prisma.profile.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: {
-            profile_id: PROFILE_ID,
-            direction: MessageDirection.INBOUND,
-            platform: BotPlatform.WHATSAPP,
-          },
-          orderBy: { created_at: 'desc' },
-          select: { created_at: true },
+          where: { id: PROFILE_ID },
+          data: { last_inbound_at: expect.any(Date) },
         }),
       );
+      expect(prisma.message.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            direction: MessageDirection.INBOUND,
+            platform: BotPlatform.WHATSAPP,
+          }),
+        }),
+      );
+    });
+
+    it('does not stamp for an OUTBOUND message', async () => {
+      await service.saveMessage(PROFILE_ID, MessageDirection.OUTBOUND, 'ok');
+
+      // Our own message proves nothing about whether they will write back.
+      expect(prisma.profile.update).not.toHaveBeenCalled();
+    });
+
+    it('keeps the message when the stamp fails', async () => {
+      (prisma.profile.update as jest.Mock).mockRejectedValue(
+        new Error('deadlock'),
+      );
+
+      await expect(
+        service.saveMessage(PROFILE_ID, MessageDirection.INBOUND, 'salut'),
+      ).resolves.toBeUndefined();
+
+      expect(prisma.message.create).toHaveBeenCalled();
     });
   });
 
   describe('sendAdminMessage', () => {
     const HOUR = 60 * 60 * 1000;
     const openWindow = () =>
-      (prisma.message.findFirst as jest.Mock).mockResolvedValue({
-        created_at: new Date(Date.now() - HOUR),
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        last_inbound_at: new Date(Date.now() - HOUR),
       });
     const closedWindow = () =>
-      (prisma.message.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        last_inbound_at: null,
+      });
 
     const base = {
       phone: PHONE,

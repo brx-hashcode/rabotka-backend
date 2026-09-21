@@ -378,6 +378,26 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    // The kill switch for the window-aware send path. On, a notification to
+    // someone who wrote to us in the last 24h goes out as free-form text with a
+    // button — same words, same destination, no template fee. Off, every
+    // notification goes back to its approved template, which is how this
+    // codebase behaved before `NotificationDispatcher` existed.
+    //
+    // It exists because the saving rests on two things this repo cannot verify
+    // for itself: that Meta bills utility templates inside the window, and that
+    // an interactive message's button opens the in-app browser the way a
+    // template's CTA does. If either turns out false, flipping this key undoes
+    // the change everywhere without a deploy.
+    key: 'notifications.prefer_free_form',
+    value: 'true',
+    category: ConfigCategory.MATCHING,
+    label:
+      'Envoyer en texte libre (gratuit) quand la fenêtre WhatsApp de 24h est ' +
+      'ouverte, au lieu d’un modèle payant',
+    isSecret: false,
+  },
+  {
     key: 'notifications.profile_views_whatsapp_threshold',
     value: '5',
     category: ConfigCategory.MATCHING,
