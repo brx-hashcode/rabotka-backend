@@ -106,6 +106,62 @@ export class ProfileNotificationService {
     private readonly events: EventEmitter2,
   ) {}
 
+  /**
+   * The same notification for many recipients, in one insert.
+   *
+   * For broadcasts: the copy is identical for everyone, so rendering it once
+   * and writing the rows together turns a thousand round trips into one. The
+   * socket still fires per recipient — that is a Redis publish, not a query,
+   * and a bell that only updates on refresh is the bug this whole feed exists
+   * to avoid.
+   *
+   * Returns how many rows were written. The live emit is best-effort: a
+   * disconnected recipient reads it from the feed on their next open.
+   */
+  async createMany(
+    recipientIds: string[],
+    input: NotificationInput,
+  ): Promise<number> {
+    if (recipientIds.length === 0) return 0;
+
+    const { title, body, link } = renderNotification(input);
+    const metadata = metadataOf(input);
+
+    const writtenAfter = new Date(Date.now() - 1_000);
+    const result = await this.prisma.profileNotification.createMany({
+      data: recipientIds.map((recipientId) => ({
+        recipient_id: recipientId,
+        type: input.type,
+        title,
+        body,
+        link,
+        metadata,
+      })),
+    });
+
+    // Read the rows back rather than inventing DTOs: `createMany` returns a
+    // count, and a socket payload carrying a made-up id is worse than none —
+    // the client keys the feed on it.
+    //
+    // Costs one query per batch, and only matters in the API process: the
+    // gateway holds no server in the queue worker (see `emitNew`), where a
+    // broadcast actually runs. There the feed and the client's poll deliver it.
+    const rows = await this.prisma.profileNotification.findMany({
+      where: {
+        recipient_id: { in: recipientIds },
+        type: input.type,
+        created_at: { gte: writtenAfter },
+      },
+      select: { ...PUBLIC_SELECT, recipient_id: true },
+    });
+
+    for (const { recipient_id, ...row } of rows) {
+      this.gateway.emitNew(recipient_id, toDto(row));
+    }
+
+    return result.count;
+  }
+
   async create({
     recipientId,
     input,

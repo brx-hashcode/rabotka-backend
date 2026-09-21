@@ -1,0 +1,320 @@
+import { Injectable, Logger } from '@nestjs/common';
+import {
+  BroadcastRecipientStatus,
+  BroadcastStatus,
+  DeliveryChannel,
+  type Broadcast,
+} from '@prisma/client';
+import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { QueueService } from '../../common/services/queue/queue.service';
+import { BROADCAST_QUEUE } from '../../common/services/queue/queue.module';
+import { MailService } from '../mail/mail.service';
+import { LayoutService } from '../mail/layout.service';
+import { NotificationDispatcher } from '../notification-dispatch/notification-dispatcher.service';
+import { ProfileNotificationService } from '../profile-notification/profile-notification.service';
+import { flattenForTemplateVariable } from '../../common/utils/whatsapp-template-text.util';
+import { broadcastEmail } from '../mail/templates/broadcast';
+import { CHUNK_SIZE } from './broadcast.service';
+import type { BroadcastJobData } from './broadcast.types';
+
+/**
+ * How long a WhatsApp leg waits between messages, in milliseconds.
+ *
+ * Meta rate-limits per number, and a broadcast is the only path here that sends
+ * hundreds of messages back to back — every other sender is one message about
+ * one event. Slow and delivered beats fast and throttled.
+ */
+const WHATSAPP_PACE_MS = 120;
+
+/** Longest error text kept on a recipient row. */
+const ERROR_MAX = 300;
+
+@Injectable()
+export class BroadcastProcessor {
+  private readonly logger = new Logger(BroadcastProcessor.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly queueService: QueueService,
+    private readonly dispatcher: NotificationDispatcher,
+    private readonly inApp: ProfileNotificationService,
+    private readonly mail: MailService,
+    private readonly layout: LayoutService,
+  ) {}
+
+  async process(job: { id?: string; data: BroadcastJobData }): Promise<void> {
+    if (job.data.type !== 'dispatch') {
+      this.logger.warn(
+        `Unknown broadcast job type: ${String((job.data as { type: string }).type)}`,
+      );
+      return;
+    }
+    await this.dispatchPage(job.data.broadcastId, job.data.cursor);
+  }
+
+  /**
+   * Send one page of recipients, then queue the next.
+   *
+   * Re-queuing rather than looping keeps each job short, so a redeploy or a
+   * crash costs one page instead of a whole broadcast, and the cancellation
+   * check below gets a chance to run between pages.
+   */
+  private async dispatchPage(broadcastId: string, cursor: number) {
+    const broadcast = await this.prisma.broadcast.findUnique({
+      where: { id: broadcastId },
+    });
+    if (!broadcast) {
+      this.logger.warn(`Broadcast ${broadcastId} vanished mid-send`);
+      return;
+    }
+
+    // Checked every page: an admin who cancels expects the send to stop, and
+    // the only honest place to stop is between pages.
+    if (broadcast.status === BroadcastStatus.CANCELLED) {
+      this.logger.log(`Broadcast ${broadcastId} cancelled — stopping`);
+      return;
+    }
+
+    if (broadcast.status === BroadcastStatus.SCHEDULED) {
+      await this.prisma.broadcast.update({
+        where: { id: broadcastId },
+        data: { status: BroadcastStatus.SENDING },
+      });
+    }
+
+    const recipients = await this.prisma.broadcastRecipient.findMany({
+      where: {
+        broadcast_id: broadcastId,
+        status: BroadcastRecipientStatus.PENDING,
+      },
+      include: {
+        profile: {
+          select: {
+            id: true,
+            phone: true,
+            email: true,
+            first_name: true,
+            whatsapp_connected: true,
+          },
+        },
+      },
+      orderBy: { created_at: 'asc' },
+      take: CHUNK_SIZE,
+    });
+
+    if (recipients.length === 0) {
+      await this.finish(broadcastId);
+      return;
+    }
+
+    // In-app first, and in one insert: it is free, it never fails for a missing
+    // phone or address, and it is the record the other channels point back to.
+    const inAppIds = recipients
+      .filter((r) => r.channel === DeliveryChannel.IN_APP)
+      .map((r) => r.profile_id);
+    if (inAppIds.length) {
+      await this.deliverInApp(broadcast, inAppIds);
+    }
+
+    // One batched window read for the whole page — the reason
+    // `Profile.last_inbound_at` exists. Doing this per recipient would put a
+    // query in front of every message.
+    const whatsappRecipients = recipients.filter(
+      (r) => r.channel === DeliveryChannel.WHATSAPP,
+    );
+    const openWindows = whatsappRecipients.length
+      ? await this.dispatcher.openWindows(
+          whatsappRecipients.map((r) => r.profile_id),
+        )
+      : new Set<string>();
+
+    for (const recipient of recipients) {
+      if (recipient.channel === DeliveryChannel.IN_APP) continue;
+
+      try {
+        const sent =
+          recipient.channel === DeliveryChannel.WHATSAPP
+            ? await this.deliverWhatsApp(
+                broadcast,
+                // `profile_id` rather than `profile.id`: the FK on the row is
+                // what the window map above is keyed on, and the two must not
+                // be able to drift apart in a test or a partial select.
+                { ...recipient.profile, id: recipient.profile_id },
+                openWindows.has(recipient.profile_id),
+              )
+            : await this.deliverEmail(broadcast, recipient.profile);
+
+        await this.settle(recipient.id, sent ? null : 'Non délivré');
+      } catch (err) {
+        await this.settle(
+          recipient.id,
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
+
+    await this.queueService.addJob<BroadcastJobData>(
+      BROADCAST_QUEUE,
+      {
+        type: 'dispatch',
+        broadcastId,
+        cursor: cursor + recipients.length,
+      },
+      { jobId: `broadcast-${broadcastId}-${cursor + recipients.length}` },
+    );
+  }
+
+  private async deliverInApp(
+    broadcast: Broadcast,
+    recipientIds: string[],
+  ): Promise<void> {
+    try {
+      await this.inApp.createMany(recipientIds, {
+        type: 'ANNOUNCEMENT',
+        title: broadcast.title,
+        body: broadcast.body,
+        link: broadcast.link,
+      });
+      await this.prisma.broadcastRecipient.updateMany({
+        where: {
+          broadcast_id: broadcast.id,
+          profile_id: { in: recipientIds },
+          channel: DeliveryChannel.IN_APP,
+        },
+        data: {
+          status: BroadcastRecipientStatus.SENT,
+          sent_at: new Date(),
+        },
+      });
+      await this.prisma.broadcast.update({
+        where: { id: broadcast.id },
+        data: { sent_count: { increment: recipientIds.length } },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `In-app leg failed for broadcast ${broadcast.id}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+      await this.prisma.broadcastRecipient.updateMany({
+        where: {
+          broadcast_id: broadcast.id,
+          profile_id: { in: recipientIds },
+          channel: DeliveryChannel.IN_APP,
+        },
+        data: {
+          status: BroadcastRecipientStatus.FAILED,
+          error: 'Insertion du fil in-app échouée',
+        },
+      });
+      await this.prisma.broadcast.update({
+        where: { id: broadcast.id },
+        data: { failed_count: { increment: recipientIds.length } },
+      });
+    }
+  }
+
+  /**
+   * The WhatsApp leg, through the dispatcher.
+   *
+   * Free-form when the window is open, the approved MARKETING template
+   * otherwise — the split the admin was shown as a cost before confirming. The
+   * window verdict is passed in so the dispatcher does not read it again.
+   */
+  private async deliverWhatsApp(
+    broadcast: Broadcast,
+    profile: { id: string; phone: string; first_name: string },
+    windowOpen: boolean,
+  ): Promise<boolean> {
+    if (!profile.phone) return false;
+
+    await pace(WHATSAPP_PACE_MS);
+
+    const { sent } = await this.dispatcher.send({
+      phone: profile.phone,
+      profileId: profile.id,
+      template: {
+        key: 'broadcastAnnouncement',
+        params: {
+          firstName: profile.first_name,
+          // Meta rejects a newline inside a variable (132018), and an admin's
+          // message is written in a textarea.
+          message: flattenForTemplateVariable(broadcast.body),
+          path: broadcast.link ?? 'home',
+        },
+      },
+      freeForm: {
+        body: `*${broadcast.title}*\n\n${broadcast.body}`,
+        buttonText: 'Ouvrir Rabotka',
+        path: broadcast.link ?? 'home',
+      },
+      windowOpen,
+    });
+
+    return sent;
+  }
+
+  private async deliverEmail(
+    broadcast: Broadcast,
+    profile: { email: string | null; first_name: string },
+  ): Promise<boolean> {
+    if (!profile.email) return false;
+
+    await this.mail.sendMail({
+      to: profile.email,
+      subject: broadcast.title,
+      html: await this.layout.wrap(
+        broadcastEmail({
+          firstName: profile.first_name,
+          title: broadcast.title,
+          body: broadcast.body,
+          link: broadcast.link,
+        }),
+      ),
+    });
+    return true;
+  }
+
+  /** Record one recipient's outcome and move the broadcast's counters. */
+  private async settle(recipientId: string, error: string | null) {
+    await this.prisma.broadcastRecipient.update({
+      where: { id: recipientId },
+      data: {
+        status: error
+          ? BroadcastRecipientStatus.FAILED
+          : BroadcastRecipientStatus.SENT,
+        error: error ? error.slice(0, ERROR_MAX) : null,
+        sent_at: error ? null : new Date(),
+      },
+    });
+
+    const recipient = await this.prisma.broadcastRecipient.findUnique({
+      where: { id: recipientId },
+      select: { broadcast_id: true },
+    });
+    if (!recipient) return;
+
+    await this.prisma.broadcast.update({
+      where: { id: recipient.broadcast_id },
+      data: error
+        ? { failed_count: { increment: 1 } }
+        : { sent_count: { increment: 1 } },
+    });
+  }
+
+  private async finish(broadcastId: string): Promise<void> {
+    const broadcast = await this.prisma.broadcast.update({
+      where: { id: broadcastId },
+      data: { status: BroadcastStatus.SENT, sent_at: new Date() },
+    });
+
+    this.logger.log(
+      `Broadcast ${broadcastId} finished: ${broadcast.sent_count} sent, ` +
+        `${broadcast.failed_count} failed of ${broadcast.recipient_count}`,
+    );
+  }
+}
+
+/** Wait, so the WhatsApp leg stays under Meta's per-number rate limit. */
+function pace(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

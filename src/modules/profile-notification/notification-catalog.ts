@@ -95,6 +95,21 @@ export type NotificationInput =
       claimId: string;
       claimTitle: string;
       status: ClaimStatusValue;
+    }
+  | {
+      /**
+       * An admin's announcement. The only type whose copy is WRITTEN BY THE
+       * SENDER rather than by this catalog — everything else here turns facts
+       * into a sentence, but a broadcast already has its sentence.
+       *
+       * `link` is an app path without the leading slash, as the admin form
+       * collects it; it is normalised below so the client sees the same shape
+       * as every other notification.
+       */
+      type: 'ANNOUNCEMENT';
+      title: string;
+      body: string;
+      link: string | null;
     };
 
 export type NotificationType = NotificationInput['type'];
@@ -291,6 +306,13 @@ export function renderNotification(
         title: 'Réclamation mise à jour',
         body: `Votre réclamation${quoted(input.claimTitle)} ${CLAIM_STATUS_SENTENCE[input.status]}.`,
         link: `/claims/${input.claimId}`,
+      };
+
+    case 'ANNOUNCEMENT':
+      return {
+        title: input.title,
+        body: input.body,
+        link: input.link ? `/${input.link.replace(/^\/+/, '')}` : null,
       };
   }
 }

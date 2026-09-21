@@ -53,6 +53,26 @@ export const CMD_MENU = [
   // the expanded text.
   '/',
 ];
+/**
+ * "Stop sending me announcements."
+ *
+ * The opt-out every marketing message is required to honour, and the one this
+ * codebase had no way to express until broadcasts existed — a user who wanted
+ * out could only block the number, which costs the WhatsApp quality rating far
+ * more than an unsubscribe does.
+ *
+ * Narrow by design: it silences announcements and job suggestions, never
+ * anything about something the person did. Someone who stops the marketing
+ * still hears that their candidature was accepted.
+ *
+ * English spellings included — "stop" is what the WhatsApp footer trains people
+ * to send, whatever language the message was in.
+ */
+export const CMD_STOP = ['stop', 'stopper', 'arreter', 'arrêter', 'unsubscribe'];
+
+/** The other direction, so an opt-out is not a one-way door. */
+export const CMD_RESUME = ['reprendre', 'resume', 'start', 'continuer'];
+
 export const CMD_PAY = [
   'payer',
   'régler',

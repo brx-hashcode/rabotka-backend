@@ -23,3 +23,4 @@ export { eventCreatedEmail } from './event-created';
 export { eventUpdatedEmail } from './event-updated';
 export { advertisementCreatedEmail } from './advertisement-created';
 export { advertisementCompletedEmail } from './advertisement-completed';
+export * from './broadcast';

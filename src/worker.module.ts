@@ -33,6 +33,7 @@ import { SystemConfigService } from './modules/system-config/system-config.servi
 import { LayoutService } from './modules/mail/layout.service';
 import { InvoiceService } from './modules/invoice/invoice.service';
 import { PenaltyNotificationProcessor } from './modules/penalty/penalty-notification.processor';
+import { BroadcastModule } from './modules/broadcast/broadcast.module';
 
 /**
  * Worker module for the queue worker process.
@@ -72,6 +73,9 @@ export class WorkerModule {
       }),
       PrismaModule,
       MailModule,
+      // Broadcasts fan out here, not in the API: the controller only freezes
+      // the audience and queues the first page.
+      BroadcastModule,
     ];
 
     const systemConfigProvider = {

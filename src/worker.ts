@@ -36,6 +36,7 @@ import {
   WHATSAPP_REMINDERS_QUEUE,
   PAYMENT_QUEUE,
   PENALTY_NOTIFICATIONS_QUEUE,
+  BROADCAST_QUEUE,
 } from './common/services/queue/queue.module';
 import type { EmailJobData } from './common/services/queue/queue.service';
 import { ReminderProcessor } from './modules/bot/reminder/reminder.processor';
@@ -46,6 +47,8 @@ import { WhatsAppOutboundProcessor } from './modules/whatsapp/whatsapp-outbound.
 // WhatsAppInboundProcessor runs in the API process (needs ConversationService);
 // it self-registers via OnApplicationBootstrap.
 import { PenaltyNotificationProcessor } from './modules/penalty/penalty-notification.processor';
+import { BroadcastProcessor } from './modules/broadcast/broadcast.processor';
+import type { BroadcastJobData } from './modules/broadcast/broadcast.types';
 import type { PenaltyNotificationJobData } from './modules/penalty/penalty-notification.processor';
 
 loadEnv({ path: '.env.local' });
@@ -313,6 +316,24 @@ async function bootstrap(): Promise<void> {
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn(
       `PenaltyNotificationProcessor not found (${msg}); penalty notifications will not be processed`,
+    );
+  }
+
+  try {
+    const broadcastProcessor = app.get(BroadcastProcessor);
+    queueService.createWorker<BroadcastJobData>(
+      BROADCAST_QUEUE,
+      (job) => broadcastProcessor.process(job),
+      // One at a time on purpose. The WhatsApp leg is already paced inside the
+      // processor, and two concurrent broadcasts would race that pacing against
+      // Meta's per-number rate limit.
+      { concurrency: 1 },
+    );
+    logger.log('Broadcast worker registered');
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(
+      `BroadcastProcessor not found (${msg}); broadcasts will not be sent`,
     );
   }
 

@@ -485,6 +485,14 @@ model Profile {
   /// and never write to the bot. Backfilled from `messages` at migration time,
   /// so a NULL here is a fact rather than a gap.
   last_inbound_at                   DateTime?
+  /// When this profile asked to stop receiving non-transactional messages, by
+  /// replying STOP on WhatsApp or from the back office. Null means opted in.
+  ///
+  /// Scope is deliberately narrow: announcements and job suggestions. Anything
+  /// that concerns something they did — an application, a payment, a penalty,
+  /// an OTP — keeps arriving, because silencing those would break the product
+  /// rather than respect a preference.
+  marketing_opt_out_at              DateTime?
 
   avatar_url        String?
   vector_indexed_at DateTime?
@@ -540,8 +548,9 @@ model Profile {
   oauth_authorizations            OAuthAuthorization[]
   identity_checks                 IdentityCheck[]
   notifications_received          ProfileNotification[]         @relation("ProfileNotificationRecipient")
+  broadcast_deliveries            BroadcastRecipient[]
   notifications_triggered         ProfileNotification[]         @relation("ProfileNotificationActor")
-  deleted_at                     DateTime?                     @db.Timestamptz
+  deleted_at                      DateTime?                     @db.Timestamptz
 
   @@index([email], name: "idx_profile_email")
   @@index([phone], name: "idx_profile_phone")
@@ -587,6 +596,7 @@ model User {
   chat_messages      ChatMessage[]
   chat_conversations ChatConversation[] @relation("ChatConversationCreatedBy")
   oauth_apps_created OAuthApp[]         @relation("OAuthAppCreatedBy")
+  broadcasts_created Broadcast[]
 
   @@index([email], name: "idx_user_email")
   @@index([role], name: "idx_user_role")
@@ -1637,6 +1647,10 @@ enum ProfileNotificationType {
   PAYMENT_FAILED
   CLAIM_COMMENTED
   CLAIM_STATUS_CHANGED
+  /// An admin's announcement, sent to a segment rather than triggered by
+  /// something that happened to this person. The only type a user can opt out
+  /// of — see `Profile.marketing_opt_out_at`.
+  ANNOUNCEMENT
 }
 
 /// The in-app feed behind the bell in rabotka-client.
@@ -2216,12 +2230,12 @@ model IdentityCheck {
   /// From the `Idempotency-Key` header. A retry returns the original check.
   idempotency_key String?
 
-  status     IdentityCheckStatus @default(PENDING_CONSENT)
-  expires_at DateTime            @db.Timestamptz
+  status          IdentityCheckStatus @default(PENDING_CONSENT)
+  expires_at      DateTime            @db.Timestamptz
   /// When the WhatsApp consent request went out. Null when none was sent:
   /// no account, a sandbox app, or the per-number cap reached.
-  consent_sent_at DateTime? @db.Timestamptz
-  decided_at      DateTime? @db.Timestamptz
+  consent_sent_at DateTime?           @db.Timestamptz
+  decided_at      DateTime?           @db.Timestamptz
   /// Internal only — the partner sees NOT_COMPLETED either way.
   declined        Boolean?
 
@@ -2277,4 +2291,108 @@ model PartnerApiRequest {
   @@index([app_id, created_at(sort: Desc)], name: "idx_partner_api_request_app_time")
   @@index([created_at], name: "idx_partner_api_request_created")
   @@map("partner_api_requests")
+}
+
+/// Where a broadcast is in its life. Terminal states are SENT, CANCELLED and
+/// FAILED; SENDING means the fan-out is in flight and the audience is already
+/// frozen into `broadcast_recipients`.
+enum BroadcastStatus {
+  DRAFT
+  SCHEDULED
+  SENDING
+  SENT
+  CANCELLED
+  FAILED
+}
+
+/// Per-recipient, per-channel outcome of a broadcast.
+enum BroadcastRecipientStatus {
+  PENDING
+  SENT
+  FAILED
+  /// In-app only: the recipient opened it. The other channels have no such
+  /// signal we can attribute back to a broadcast.
+  READ
+}
+
+/// One message an admin sends to a SEGMENT rather than to a person.
+///
+/// Announcements — maintenance, a fee change, a recruitment push in one
+/// neighbourhood — which until now were sent by hand, one profile at a time,
+/// through `POST /admin/profiles/:id/messages`.
+///
+/// The audience is stored as FILTERS, not as a list: a draft written on Monday
+/// and sent on Thursday should reach the people who match on Thursday. The list
+/// is materialised into `recipients` at send time, which is also what makes the
+/// send idempotent and reportable.
+model Broadcast {
+  id         String   @id @default(uuid()) @db.Uuid
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  title String
+  /// The message itself, as the admin typed it. Rendered per channel: the
+  /// in-app row takes it whole, WhatsApp flattens it into the template variable
+  /// (Meta rejects newlines there), email wraps it in the layout.
+  body  String  @db.Text
+  /// Optional in-app path the CTA opens, without the host (`home`, `claims`).
+  link  String?
+
+  channels DeliveryChannel[]
+  /// The audience filters, shaped by `AudienceFiltersDto`. Json rather than
+  /// columns because the filter set will grow, and a broadcast is read far more
+  /// often by its counters than by its criteria.
+  audience Json
+
+  status       BroadcastStatus @default(DRAFT)
+  /// When the fan-out should start. Null means "as soon as it is sent".
+  scheduled_at DateTime?
+  sent_at      DateTime?
+
+  /// Frozen at send time from the audience snapshot, so a later filter change
+  /// cannot rewrite history.
+  recipient_count Int @default(0)
+  sent_count      Int @default(0)
+  failed_count    Int @default(0)
+  read_count      Int @default(0)
+
+  /// What the WhatsApp leg was expected to cost, in FCFA, at the moment the
+  /// admin confirmed: only the recipients whose 24h window was CLOSED are
+  /// billable. Kept so the estimate can be compared against
+  /// `whatsapp_messages.billable` afterwards.
+  estimated_cost Int @default(0)
+
+  created_by_id String? @db.Uuid
+  created_by    User?   @relation(fields: [created_by_id], references: [id], onDelete: SetNull)
+
+  recipients BroadcastRecipient[]
+
+  @@index([status, created_at(sort: Desc)], name: "idx_broadcast_status_created")
+  @@index([scheduled_at], name: "idx_broadcast_scheduled")
+  @@map("broadcasts")
+}
+
+/// One (broadcast, profile, channel) delivery.
+///
+/// The row is written BEFORE the send, so a retried chunk can tell what it
+/// already did — the unique constraint is the idempotency, not a Redis key that
+/// expires.
+model BroadcastRecipient {
+  id           String                   @id @default(uuid()) @db.Uuid
+  created_at   DateTime                 @default(now())
+  broadcast_id String                   @db.Uuid
+  profile_id   String                   @db.Uuid
+  channel      DeliveryChannel
+  status       BroadcastRecipientStatus @default(PENDING)
+  /// Why it failed, truncated. Null on success.
+  error        String?
+  sent_at      DateTime?
+
+  broadcast Broadcast @relation(fields: [broadcast_id], references: [id], onDelete: Cascade)
+  profile   Profile   @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+
+  @@unique([broadcast_id, profile_id, channel], name: "idx_broadcast_recipient_unique")
+  @@index([broadcast_id, status], name: "idx_broadcast_recipient_status")
+  @@index([profile_id], name: "idx_broadcast_recipient_profile")
+  @@map("broadcast_recipients")
 }
