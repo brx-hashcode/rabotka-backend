@@ -537,6 +537,20 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    key: 'messaging.nudge_delay_seconds',
+    value: '300',
+    category: ConfigCategory.GENERAL,
+    label: 'Délai avant relance WhatsApp d’un message non lu (secondes)',
+    isSecret: false,
+  },
+  {
+    key: 'messaging.nudge_template_enabled',
+    value: 'false',
+    category: ConfigCategory.GENERAL,
+    label: 'Relancer hors fenêtre 24h (modèle WhatsApp payant)',
+    isSecret: false,
+  },
+  {
     // Once both parties have paid, they already hold each other's numbers —
     // delivered over WhatsApp by the unlock itself. Carrying on masking would
     // be theatre, and theatre that breaks legitimate messages ("rappelle-moi

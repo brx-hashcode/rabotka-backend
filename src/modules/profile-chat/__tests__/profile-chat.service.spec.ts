@@ -38,6 +38,7 @@ describe('ProfileChatService', () => {
   let config: { get: jest.Mock };
   let gateway: { emitMessage: jest.Mock; emitRead: jest.Mock };
   let events: { emit: jest.Mock };
+  let queue: { addJob: jest.Mock };
 
   const storedMessage = (over: Record<string, unknown> = {}) => ({
     id: 'm-1',
@@ -96,6 +97,7 @@ describe('ProfileChatService', () => {
 
     gateway = { emitMessage: jest.fn(), emitRead: jest.fn() };
     events = { emit: jest.fn() };
+    queue = { addJob: jest.fn().mockResolvedValue('job-1') };
 
     service = new ProfileChatService(
       prisma,
@@ -103,6 +105,7 @@ describe('ProfileChatService', () => {
       new ModerationService(config as never),
       gateway as never,
       events as never,
+      queue as never,
     );
   });
 
@@ -246,6 +249,25 @@ describe('ProfileChatService', () => {
       expect(serialised).not.toContain('appelle');
     });
 
+    it('queues a delayed nudge for the recipient', async () => {
+      await service.sendMessage(CONV, WORKER, 'bonjour');
+
+      const [, data, options] = queue.addJob.mock.calls[0];
+      expect(data).toEqual({ conversationId: CONV, recipientId: EMPLOYER });
+      expect(options.delay).toBeGreaterThan(0);
+      expect(options.jobId).toContain(CONV);
+      expect(options.jobId).toContain(EMPLOYER);
+    });
+
+    it('does not fail the send when the queue is down', async () => {
+      // The message is already stored and already pushed. Losing the nudge is
+      // a smaller harm than a 500 on a message that actually went through.
+      queue.addJob.mockRejectedValue(new Error('redis down'));
+      await expect(
+        service.sendMessage(CONV, WORKER, 'bonjour'),
+      ).resolves.toBeTruthy();
+    });
+
     it('neither pushes nor notifies for a held message', async () => {
       prisma.profileMessage.create.mockResolvedValue(
         storedMessage({
@@ -258,6 +280,7 @@ describe('ProfileChatService', () => {
 
       expect(gateway.emitMessage).not.toHaveBeenCalled();
       expect(notificationOf()).toBeUndefined();
+      expect(queue.addJob).not.toHaveBeenCalled();
     });
 
     it('notifies the worker when the employer writes', async () => {

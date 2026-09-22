@@ -35,6 +35,7 @@ import { MailService } from './modules/mail/mail.service';
 import { InvoiceService } from './modules/invoice/invoice.service';
 import { PenaltyNotificationProcessor } from './modules/penalty/penalty-notification.processor';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ProfileChatProcessor } from './modules/profile-chat/profile-chat.processor';
 import { BroadcastProcessor } from './modules/broadcast/broadcast.processor';
 import { NotificationDispatcher } from './modules/notification-dispatch/notification-dispatcher.service';
 import { ProfileNotificationService } from './modules/profile-notification/profile-notification.service';
@@ -280,6 +281,39 @@ export class WorkerModule {
       ],
     };
 
+    /**
+     * The unread-message nudge.
+     *
+     * Hand-wired for the same reason as the broadcast one above: importing
+     * ProfileChatModule would drag AuthModule in behind it and crash this
+     * process at boot. Five collaborators, no controller, no gateway — the
+     * nudge never touches the socket.
+     */
+    const messagingNudgeProvider = {
+      provide: ProfileChatProcessor,
+      useFactory: (
+        queue: QueueService,
+        prisma: PrismaService,
+        systemConfig: SystemConfigService,
+        whatsApp: WhatsAppService,
+        loginLink: WhatsAppLoginLinkService,
+      ) =>
+        new ProfileChatProcessor(
+          queue,
+          prisma,
+          systemConfig,
+          new NotificationDispatcher(whatsApp, loginLink, systemConfig),
+          whatsApp,
+        ),
+      inject: [
+        QueueService,
+        PrismaService,
+        SystemConfigService,
+        WhatsAppService,
+        WhatsAppLoginLinkService,
+      ],
+    };
+
     return {
       module: WorkerModule,
       imports: coreImports,
@@ -288,6 +322,7 @@ export class WorkerModule {
         ...reminderProviders,
         penaltyProvider,
         broadcastProvider,
+        messagingNudgeProvider,
         PaymentProcessor,
         WhatsAppLoginLinkService,
         {

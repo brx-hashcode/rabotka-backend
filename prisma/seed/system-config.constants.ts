@@ -488,6 +488,20 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    key: 'messaging.nudge_delay_seconds',
+    value: '300',
+    category: ConfigCategory.GENERAL,
+    label: 'Délai avant relance WhatsApp d’un message non lu (secondes)',
+    isSecret: false,
+  },
+  {
+    key: 'messaging.nudge_template_enabled',
+    value: 'false',
+    category: ConfigCategory.GENERAL,
+    label: 'Relancer hors fenêtre 24h (modèle WhatsApp payant)',
+    isSecret: false,
+  },
+  {
     key: 'messaging.moderate_after_unlock',
     value: 'false',
     category: ConfigCategory.GENERAL,

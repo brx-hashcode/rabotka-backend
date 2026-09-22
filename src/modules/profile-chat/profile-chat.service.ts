@@ -19,6 +19,9 @@ import {
   notifyProfile,
 } from '../profile-notification/profile-notification.events';
 import { SystemConfigService } from '../system-config/system-config.service';
+import { MESSAGING_NUDGE_QUEUE } from '../../common/services/queue/queue.module';
+import { QueueService } from '../../common/services/queue/queue.service';
+import { nudgeJobId, type MessagingNudgeJob } from './profile-chat.nudge';
 import { ModerationService } from './moderation/moderation.service';
 import { ProfileChatGateway } from './profile-chat.gateway';
 import type { RedactionCategory } from './moderation/patterns';
@@ -31,6 +34,10 @@ import type { RedactionCategory } from './moderation/patterns';
  * there is no evidence to tune it against until real threads exist.
  */
 const NOTIFICATION_DEDUPE_SECONDS = 30 * 60;
+
+/** Fallback when `messaging.nudge_delay_seconds` is unset or nonsense. */
+const DEFAULT_NUDGE_DELAY_SECONDS = 300;
+const NUDGE_DELAY_KEY = 'messaging.nudge_delay_seconds';
 
 const ENABLED_KEY = 'messaging.enabled';
 const MODERATE_AFTER_UNLOCK_KEY = 'messaging.moderate_after_unlock';
@@ -101,6 +108,7 @@ export class ProfileChatService {
     private readonly moderation: ModerationService,
     private readonly gateway: ProfileChatGateway,
     private readonly events: EventEmitter2,
+    private readonly queue: QueueService,
   ) {}
 
   // ── Conversations ──────────────────────────────────────────────────────────
@@ -395,9 +403,59 @@ export class ProfileChatService {
     if (delivered) {
       this.gateway.emitMessage(recipientId, delivered);
       await this.notifyRecipient(conversation, senderId, recipientId);
+      await this.scheduleNudge(conversationId, recipientId);
     }
 
     return authorView;
+  }
+
+  /**
+   * Queues a delayed "you have an unread message" for the recipient.
+   *
+   * Three layers now reach the same person, and each covers what the one above
+   * it cannot: the socket reaches an open tab, the bell reaches somebody who
+   * opens the app later, and this reaches somebody who does not open it at all
+   * — which on a WhatsApp-first platform is most people, most of the time.
+   *
+   * Delayed rather than immediate, because the job re-checks at fire time
+   * whether anything is still unread. Somebody who reads within the window is
+   * never nudged, and a back-and-forth produces one job rather than a dozen
+   * (see `nudgeJobId`).
+   *
+   * Failures are swallowed on purpose: a queue that is down must not fail the
+   * send. The message is already stored and already pushed; losing the nudge is
+   * a smaller harm than a 500 on a message that actually went through.
+   */
+  private async scheduleNudge(
+    conversationId: string,
+    recipientId: string,
+  ): Promise<void> {
+    try {
+      const delaySeconds = await this.nudgeDelaySeconds();
+      await this.queue.addJob<MessagingNudgeJob>(
+        MESSAGING_NUDGE_QUEUE,
+        { conversationId, recipientId },
+        {
+          delay: delaySeconds * 1000,
+          jobId: nudgeJobId(conversationId, recipientId, delaySeconds),
+        },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Could not schedule the nudge for ${recipientId}: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  private async nudgeDelaySeconds(): Promise<number> {
+    const raw = await this.config.get(
+      NUDGE_DELAY_KEY,
+      String(DEFAULT_NUDGE_DELAY_SECONDS),
+    );
+    const value = Number.parseInt(raw, 10);
+    return Number.isFinite(value) && value > 0
+      ? value
+      : DEFAULT_NUDGE_DELAY_SECONDS;
   }
 
   /**
