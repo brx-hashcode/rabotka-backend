@@ -74,7 +74,10 @@ describe('ProfileChatService', () => {
         updateMany: jest.fn().mockResolvedValue({ count: 2 }),
         groupBy: jest.fn().mockResolvedValue([]),
       },
-      contactUnlockAttempt: { findFirst: jest.fn().mockResolvedValue(null) },
+      contactUnlockAttempt: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       profile: {
         findUnique: jest
           .fn()
@@ -473,7 +476,7 @@ describe('ProfileChatService', () => {
         .mockImplementation(({ where }: { where: { id: string } }) =>
           Promise.resolve(where.id === WORKER ? worker : employer),
         );
-      prisma.profileConversation.findFirst = jest.fn().mockResolvedValue(null);
+      prisma.profileConversation.findUnique.mockResolvedValue(null);
       prisma.profileConversation.count.mockResolvedValue(0);
       prisma.profileConversation.create.mockResolvedValue({
         ...conversation,
@@ -487,6 +490,7 @@ describe('ProfileChatService', () => {
       expect(prisma.profileConversation.create.mock.calls[0][0].data).toEqual({
         worker_id: WORKER,
         employer_id: EMPLOYER,
+        application_id: null,
       });
     });
 
@@ -495,11 +499,12 @@ describe('ProfileChatService', () => {
       expect(prisma.profileConversation.create.mock.calls[0][0].data).toEqual({
         worker_id: WORKER,
         employer_id: EMPLOYER,
+        application_id: null,
       });
     });
 
     it('returns the existing one rather than a second', async () => {
-      prisma.profileConversation.findFirst.mockResolvedValue(conversation);
+      prisma.profileConversation.findUnique.mockResolvedValue(conversation);
       await service.openWithProfile(WORKER, EMPLOYER);
       expect(prisma.profileConversation.create).not.toHaveBeenCalled();
     });
@@ -512,7 +517,7 @@ describe('ProfileChatService', () => {
           clientVersion: 'test',
         }),
       );
-      prisma.profileConversation.findFirst
+      prisma.profileConversation.findUnique
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(conversation);
 
@@ -570,7 +575,7 @@ describe('ProfileChatService', () => {
 
       it('does not count re-opening a thread that already exists', async () => {
         // Returning to a conversation is not reaching out to anybody new.
-        prisma.profileConversation.findFirst.mockResolvedValue(conversation);
+        prisma.profileConversation.findUnique.mockResolvedValue(conversation);
         await service.openWithProfile(WORKER, EMPLOYER);
         expect(prisma.profileConversation.count).not.toHaveBeenCalled();
       });
@@ -585,6 +590,108 @@ describe('ProfileChatService', () => {
         await expect(
           service.openWithProfile(WORKER, EMPLOYER),
         ).resolves.toBeTruthy();
+      });
+    });
+  });
+
+  describe('one thread per person', () => {
+    // The first version keyed threads on the application, and the same person
+    // showed up once per application plus once for a direct message.
+    const application = {
+      id: 'a-2',
+      worker_id: WORKER,
+      status: ApplicationStatus.PENDING,
+      job_offer: { employer_id: EMPLOYER },
+    };
+
+    beforeEach(() => {
+      prisma.application.findFirst.mockResolvedValue(application);
+    });
+
+    it('looks the thread up by the PAIR, not by the application', async () => {
+      prisma.profileConversation.findUnique.mockResolvedValue(null);
+      prisma.profileConversation.create.mockResolvedValue(conversation);
+      await service.openForApplication('a-2', EMPLOYER);
+
+      expect(prisma.profileConversation.findUnique.mock.calls[0][0].where).toEqual({
+        worker_id_employer_id: { worker_id: WORKER, employer_id: EMPLOYER },
+      });
+    });
+
+    it('reuses a direct thread when the same worker later applies', async () => {
+      // An employer wrote to a recommended worker, who then applied: that is
+      // one conversation, now about that application.
+      prisma.profileConversation.findUnique.mockResolvedValue({
+        ...conversation,
+        application_id: null,
+      });
+      prisma.profileConversation.update.mockResolvedValue(conversation);
+
+      await service.openForApplication('a-2', EMPLOYER);
+
+      expect(prisma.profileConversation.create).not.toHaveBeenCalled();
+      expect(prisma.profileConversation.update.mock.calls[0][0].data).toEqual({
+        application_id: 'a-2',
+      });
+    });
+
+    it('reuses an application thread when opened from the profile', async () => {
+      prisma.profile.findFirst = jest.fn().mockImplementation(
+        ({ where }: { where: { id: string } }) =>
+          Promise.resolve({
+            id: where.id,
+            profile_type:
+              where.id === WORKER ? ProfileType.WORKER : ProfileType.EMPLOYER,
+            status: AccountStatus.ACTIVE,
+          }),
+      );
+      prisma.profileConversation.findUnique.mockResolvedValue(conversation);
+
+      await expect(service.openWithProfile(WORKER, EMPLOYER)).resolves.toEqual(
+        conversation,
+      );
+      expect(prisma.profileConversation.create).not.toHaveBeenCalled();
+    });
+
+    it('keeps the thread open when one of the applications dies', async () => {
+      // The pair may be talking about another one. A dead application only
+      // stops being offered as the new context.
+      prisma.application.findFirst.mockResolvedValue({
+        ...application,
+        status: ApplicationStatus.REJECTED,
+      });
+      prisma.profileConversation.findUnique.mockResolvedValue(conversation);
+
+      await expect(
+        service.openForApplication('a-2', EMPLOYER),
+      ).resolves.toEqual(conversation);
+      expect(prisma.profileConversation.update).not.toHaveBeenCalled();
+    });
+
+    it('lists only threads somebody has written in', async () => {
+      // Opening creates the thread; backing out without writing must not leave
+      // an empty row in the list.
+      await service.listConversations(EMPLOYER);
+      expect(
+        prisma.profileConversation.findMany.mock.calls[0][0].where.last_message_at,
+      ).toEqual({ not: null });
+    });
+
+    it('stops moderating once the PAIR has unlocked on any application', async () => {
+      prisma.contactUnlockAttempt.findFirst.mockResolvedValue({ id: 'u-1' });
+      prisma.profileMessage.create.mockResolvedValue(
+        storedMessage({
+          moderation_status: MessageModerationStatus.CLEAN,
+          redactions: [],
+        }),
+      );
+
+      await service.sendMessage(CONV, WORKER, BODY_WITH_PHONE);
+
+      expect(prisma.contactUnlockAttempt.findFirst.mock.calls[0][0].where).toMatchObject({
+        worker_id: WORKER,
+        employer_id: EMPLOYER,
+        status: ContactUnlockStatus.UNLOCKED,
       });
     });
   });

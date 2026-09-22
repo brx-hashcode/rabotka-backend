@@ -110,6 +110,9 @@ export interface Paginated<T> {
  * evidence for whatever claim follows. WAITING_PAYMENT is very much alive —
  * that is precisely the moment the two need to talk.
  */
+const pairKey = (workerId: string, employerId: string) =>
+  `${workerId}:${employerId}`;
+
 const LIVE_APPLICATION_STATUSES: ReadonlySet<ApplicationStatus> = new Set([
   ApplicationStatus.PENDING,
   ApplicationStatus.VIEWED,
@@ -137,14 +140,15 @@ export class ProfileChatService {
   /**
    * Opens the conversation for an application, or returns the existing one.
    *
-   * LAZY, and that is a cost decision rather than a style one: an offer with 60
-   * applicants of whom 3 ever write would otherwise put 60 empty threads in
-   * everyone's list. The row appears on the first message.
+   * ONE THREAD PER PAIR. The application is the thread's context — shown in the
+   * header — not its key. The first version keyed on it, and the same person
+   * appeared once per application plus once more for a direct message. So this
+   * finds the pair's thread, points it at THIS application as the latest
+   * context, and creates the thread only if the pair has none.
    *
-   * Idempotent without a lock. Two simultaneous first messages both try to
-   * insert; the unique index on `application_id` rejects one, and that one
-   * re-reads instead of failing. Catching P2002 is the whole concurrency story
-   * here — see the note in the catch.
+   * Created on open, not on first message: the thread screen needs an id to
+   * navigate to. What keeps an untouched thread out of the list is the list
+   * itself, which only shows conversations that have a message.
    */
   async openForApplication(
     applicationId: string,
@@ -166,40 +170,30 @@ export class ProfileChatService {
     if (actorId !== workerId && actorId !== employerId) {
       throw new ForbiddenException('Cette candidature ne vous concerne pas');
     }
+
+    const existing = await this.findPair(workerId, employerId);
+    if (existing) {
+      // A dead application does not close the thread: the pair may be talking
+      // about another one. It only stops being offered as the new context.
+      if (
+        existing.application_id !== applicationId &&
+        LIVE_APPLICATION_STATUSES.has(application.status)
+      ) {
+        return this.prisma.profileConversation.update({
+          where: { id: existing.id },
+          data: { application_id: applicationId },
+        });
+      }
+      return existing;
+    }
+
     if (!LIVE_APPLICATION_STATUSES.has(application.status)) {
       throw new BadRequestException(
-        'Cette candidature est terminée, la discussion est close',
+        'Cette candidature est terminée, la discussion ne peut pas commencer',
       );
     }
 
-    const existing = await this.prisma.profileConversation.findUnique({
-      where: { application_id: applicationId },
-    });
-    if (existing) return existing;
-
-    try {
-      return await this.prisma.profileConversation.create({
-        data: {
-          worker_id: workerId,
-          employer_id: employerId,
-          application_id: applicationId,
-        },
-      });
-    } catch (error) {
-      // P2002 means the other party's first message won the race by
-      // microseconds. That is a success from here: re-read and carry on. Any
-      // other error is a real failure and must not be swallowed.
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2002'
-      ) {
-        const raced = await this.prisma.profileConversation.findUnique({
-          where: { application_id: applicationId },
-        });
-        if (raced) return raced;
-      }
-      throw error;
-    }
+    return this.createPair(workerId, employerId, applicationId);
   }
 
   /**
@@ -260,13 +254,10 @@ export class ProfileChatService {
     const workerId = isEmployer ? counterpartId : actorId;
     const employerId = isEmployer ? actorId : counterpartId;
 
-    const existing = await this.prisma.profileConversation.findFirst({
-      where: {
-        worker_id: workerId,
-        employer_id: employerId,
-        application_id: null,
-      },
-    });
+    // The pair's ONE thread, whether it began from an application or not —
+    // writing to a recommended worker who already applied to you opens the
+    // conversation you already have, not a second one.
+    const existing = await this.findPair(workerId, employerId);
     if (existing) return existing;
 
     // Checked only when a NEW thread would be created. Re-opening one that
@@ -275,24 +266,45 @@ export class ProfileChatService {
     // are already in.
     await this.assertUnderDailyCap(actorId);
 
+    return this.createPair(workerId, employerId, null);
+  }
+
+  private findPair(
+    workerId: string,
+    employerId: string,
+  ): Promise<ProfileConversation | null> {
+    return this.prisma.profileConversation.findUnique({
+      where: {
+        worker_id_employer_id: { worker_id: workerId, employer_id: employerId },
+      },
+    });
+  }
+
+  /**
+   * Idempotent without a lock. Two simultaneous opens both try to insert; the
+   * unique index on the pair rejects one, and that one re-reads instead of
+   * failing. P2002 is caught and NOTHING ELSE is — a disk-full error must still
+   * surface.
+   */
+  private async createPair(
+    workerId: string,
+    employerId: string,
+    applicationId: string | null,
+  ): Promise<ProfileConversation> {
     try {
       return await this.prisma.profileConversation.create({
-        data: { worker_id: workerId, employer_id: employerId },
+        data: {
+          worker_id: workerId,
+          employer_id: employerId,
+          application_id: applicationId,
+        },
       });
     } catch (error) {
-      // The partial unique index caught a double tap. Same recovery as the
-      // application path: re-read rather than fail.
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
-        const raced = await this.prisma.profileConversation.findFirst({
-          where: {
-            worker_id: workerId,
-            employer_id: employerId,
-            application_id: null,
-          },
-        });
+        const raced = await this.findPair(workerId, employerId);
         if (raced) return raced;
       }
       throw error;
@@ -348,6 +360,11 @@ export class ProfileChatService {
     // filter in memory would break the pagination below.
     const fields = this.prisma.profileConversation.fields;
     const where: Prisma.ProfileConversationWhereInput = {
+      // Only threads somebody has written in. A thread is created when it is
+      // OPENED — the screen needs an id — so without this, tapping the chat
+      // button and backing out left an empty row in the list, headed by the
+      // job title because there was no message to preview.
+      last_message_at: { not: null },
       OR: [
         {
           worker_id: profileId,
@@ -394,7 +411,6 @@ export class ProfileChatService {
             select: {
               id: true,
               job_offer: { select: { title: true } },
-              contact_unlock_attempt: { select: { status: true } },
             },
           },
           messages: {
@@ -417,7 +433,7 @@ export class ProfileChatService {
 
     // One grouped count and one pipeline rather than a query per row: a list of
     // 20 conversations would otherwise be 41 round trips.
-    const [unread, online] = await Promise.all([
+    const [unread, online, unlocked] = await Promise.all([
       this.unreadCounts(
         profileId,
         rows.map((r) => r.id),
@@ -425,6 +441,7 @@ export class ProfileChatService {
       this.presence.onlineAmong(
         rows.map((r) => (r.worker_id === profileId ? r.employer_id : r.worker_id)),
       ),
+      this.unlockedPairs(rows),
     ]);
 
     return {
@@ -463,9 +480,7 @@ export class ProfileChatService {
             last.moderation_status === MessageModerationStatus.HELD,
           unreadCount: unread.get(row.id) ?? 0,
           closed: row.closed_at !== null,
-          contactsUnlocked:
-            row.application?.contact_unlock_attempt?.status ===
-            ContactUnlockStatus.UNLOCKED,
+          contactsUnlocked: unlocked.has(pairKey(row.worker_id, row.employer_id)),
         };
       }),
       total,
@@ -893,17 +908,50 @@ export class ProfileChatService {
    * delivered by the unlock itself over WhatsApp. Masking on would be theatre,
    * and theatre that breaks "rappelle-moi sur l'autre numéro".
    */
+  /**
+   * Moderation stops once the pair has unlocked — on ANY of their applications.
+   *
+   * At the pair level now that a thread is one per pair: if either side has
+   * paid the other's contact details through any application, they already
+   * hold each other's numbers, and masking a number in this thread would be
+   * theatre. `ContactUnlockAttempt` carries both ids as columns, so this is one
+   * indexed lookup rather than a walk through applications.
+   *
+   * The recommendation path is not counted: there the employer alone pays and
+   * the worker receives nothing, so the worker has no number to be reminded of
+   * and the thread stays moderated.
+   */
   private async shouldModerate(
     conversation: ProfileConversation,
   ): Promise<boolean> {
     if (await this.moderateAfterUnlock()) return true;
-    if (!conversation.application_id) return true;
-
-    const attempt = await this.prisma.contactUnlockAttempt.findFirst({
-      where: { application_id: conversation.application_id },
-      select: { status: true },
+    const unlocked = await this.prisma.contactUnlockAttempt.findFirst({
+      where: {
+        worker_id: conversation.worker_id,
+        employer_id: conversation.employer_id,
+        status: ContactUnlockStatus.UNLOCKED,
+      },
+      select: { id: true },
     });
-    return attempt?.status !== ContactUnlockStatus.UNLOCKED;
+    return unlocked === null;
+  }
+
+  /** Which of these pairs have unlocked, in one query for a whole page. */
+  private async unlockedPairs(
+    rows: readonly { worker_id: string; employer_id: string }[],
+  ): Promise<Set<string>> {
+    if (rows.length === 0) return new Set();
+    const found = await this.prisma.contactUnlockAttempt.findMany({
+      where: {
+        status: ContactUnlockStatus.UNLOCKED,
+        OR: rows.map((r) => ({
+          worker_id: r.worker_id,
+          employer_id: r.employer_id,
+        })),
+      },
+      select: { worker_id: true, employer_id: true },
+    });
+    return new Set(found.map((f) => pairKey(f.worker_id, f.employer_id)));
   }
 
   private toMessageView(

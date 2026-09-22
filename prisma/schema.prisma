@@ -917,7 +917,9 @@ model Application {
   assignment             Assignment?
   contact_unlock_attempt ContactUnlockAttempt?
   contract               Contract?
-  conversation           ProfileConversation?
+  /// Threads that last showed this application as their context. Plural since
+  /// conversations became one per pair: the key is the pair, not this row.
+  conversations          ProfileConversation[]
   deleted_at             DateTime?             @db.Timestamptz
 
   /// NOT unique any more. Uniqueness is enforced by a PARTIAL index created in
@@ -2460,12 +2462,15 @@ model ProfileConversation {
   worker_id   String @db.Uuid
   employer_id String @db.Uuid
 
-  /// The application both parties consented through: the worker applied, the
-  /// employer published. Nullable because the RECOMMENDATION path creates no
-  /// application row at all (`recommendation-contact.service.ts`) — that path
-  /// is out of scope for v1, and a nullable column is what lets it be added
-  /// later with a service rather than a migration on a full table.
-  application_id String? @unique @db.Uuid
+  /// The CONTEXT of the thread, not its key: the most recent application
+  /// between the pair, shown in the header. A pair has ONE conversation however
+  /// many applications they share — one chat per contact, like WhatsApp — so
+  /// this is updated to the latest one each time the thread is opened from an
+  /// application.
+  ///
+  /// Null when the thread began from a recommended profile, where no
+  /// application exists at all.
+  application_id String? @db.Uuid
 
   /// Denormalised, or ordering the conversation list means aggregating over
   /// profile_messages on every open of the tab.
@@ -2496,13 +2501,11 @@ model ProfileConversation {
   application Application?     @relation(fields: [application_id], references: [id], onDelete: SetNull)
   messages    ProfileMessage[]
 
-  /// A pair may also have ONE conversation with no application behind it — an
-  /// employer writing to a recommended worker who has not applied to anything.
-  /// Enforced by `profile_conversations_direct_pair`, a PARTIAL unique index
-  /// (WHERE application_id IS NULL) created in raw SQL, because Prisma cannot
-  /// express one. A future `migrate dev` will offer to drop it: say no, and
-  /// carry it forward by hand — same standing instruction as
-  /// `applications_live_unique` on Application.
+  /// One conversation per pair. The first version keyed on the application,
+  /// and the same person showed up once per application plus once more for a
+  /// direct message.
+  @@unique([worker_id, employer_id], map: "profile_conversations_pair_key")
+  @@index([application_id], map: "idx_profile_conversation_application")
   @@index([worker_id, last_message_at(sort: Desc)], name: "idx_profile_conversation_worker")
   @@index([employer_id, last_message_at(sort: Desc)], name: "idx_profile_conversation_employer")
   @@map("profile_conversations")
