@@ -709,6 +709,18 @@ export class ProfileChatService {
           : { employer_last_read_at: now },
     });
 
+    // Tells the AUTHOR their ticks just turned blue. Defined on the gateway from
+    // the start and never called until now, so read receipts only showed up on
+    // the sender's next refetch. Only when something was actually marked:
+    // re-opening an already-read thread is not news to anybody.
+    if (count > 0) {
+      const authorId =
+        conversation.worker_id === profileId
+          ? conversation.employer_id
+          : conversation.worker_id;
+      this.gateway.emitRead(authorId, conversation.id);
+    }
+
     return count;
   }
 

@@ -633,6 +633,17 @@ describe('ProfileChatService', () => {
       );
     });
 
+    it('tells the author their messages were read', async () => {
+      await service.markRead(CONV, EMPLOYER);
+      expect(gateway.emitRead).toHaveBeenCalledWith(WORKER, CONV);
+    });
+
+    it('says nothing when there was nothing new to read', async () => {
+      prisma.profileMessage.updateMany.mockResolvedValue({ count: 0 });
+      await service.markRead(CONV, EMPLOYER);
+      expect(gateway.emitRead).not.toHaveBeenCalled();
+    });
+
     it('stamps the right side of the conversation', async () => {
       await service.markRead(CONV, WORKER);
       expect(
