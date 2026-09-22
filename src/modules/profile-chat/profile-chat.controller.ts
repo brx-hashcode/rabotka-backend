@@ -83,6 +83,28 @@ export class ProfileChatController {
     return { conversation: { id: conversation.id } };
   }
 
+  /**
+   * Opens a conversation with a profile directly, with no application.
+   *
+   * Throttled harder than sending: this is the one endpoint that can reach
+   * somebody who never asked to be reached, and the per-day cap in the service
+   * is the ceiling while this is the rate.
+   */
+  @Post('profiles/:profileId')
+  @UseGuards(ProfileAuthGuard, ActiveProfileGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Ouvrir une discussion avec un profil' })
+  async openWith(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('profileId', ParseUUIDPipe) profileId: string,
+  ) {
+    const conversation = await this.chat.openWithProfile(
+      profileId,
+      req.user.profileId,
+    );
+    return { conversation: { id: conversation.id } };
+  }
+
   @Get(':id/messages')
   @UseGuards(ProfileAuthGuard)
   @ApiOperation({ summary: 'Messages d’une discussion' })

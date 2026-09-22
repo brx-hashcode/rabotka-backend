@@ -2486,6 +2486,13 @@ model ProfileConversation {
   application Application?     @relation(fields: [application_id], references: [id], onDelete: SetNull)
   messages    ProfileMessage[]
 
+  /// A pair may also have ONE conversation with no application behind it — an
+  /// employer writing to a recommended worker who has not applied to anything.
+  /// Enforced by `profile_conversations_direct_pair`, a PARTIAL unique index
+  /// (WHERE application_id IS NULL) created in raw SQL, because Prisma cannot
+  /// express one. A future `migrate dev` will offer to drop it: say no, and
+  /// carry it forward by hand — same standing instruction as
+  /// `applications_live_unique` on Application.
   @@index([worker_id, last_message_at(sort: Desc)], name: "idx_profile_conversation_worker")
   @@index([employer_id, last_message_at(sort: Desc)], name: "idx_profile_conversation_employer")
   @@map("profile_conversations")

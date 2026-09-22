@@ -1,8 +1,10 @@
 import {
+  AccountStatus,
   ApplicationStatus,
   ContactUnlockStatus,
   MessageModerationStatus,
   Prisma,
+  ProfileType,
 } from '@prisma/client';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ProfileChatService } from '../profile-chat.service';
@@ -446,6 +448,140 @@ describe('ProfileChatService', () => {
       await expect(
         service.openForApplication(APP, WORKER),
       ).resolves.toBeTruthy();
+    });
+  });
+
+  describe('opening a conversation with no application', () => {
+    const employer = {
+      id: EMPLOYER,
+      profile_type: ProfileType.EMPLOYER,
+      status: AccountStatus.ACTIVE,
+    };
+    const worker = {
+      id: WORKER,
+      profile_type: ProfileType.WORKER,
+      status: AccountStatus.ACTIVE,
+    };
+
+    beforeEach(() => {
+      prisma.profile.findFirst = jest
+        .fn()
+        .mockImplementation(({ where }: { where: { id: string } }) =>
+          Promise.resolve(where.id === WORKER ? worker : employer),
+        );
+      prisma.profileConversation.findFirst = jest.fn().mockResolvedValue(null);
+      prisma.profileConversation.count.mockResolvedValue(0);
+      prisma.profileConversation.create.mockResolvedValue({
+        ...conversation,
+        application_id: null,
+      });
+    });
+
+    it('creates one between an employer and a recommended worker', async () => {
+      await service.openWithProfile(WORKER, EMPLOYER);
+
+      expect(prisma.profileConversation.create.mock.calls[0][0].data).toEqual({
+        worker_id: WORKER,
+        employer_id: EMPLOYER,
+      });
+    });
+
+    it('puts each party on the right side, whoever starts it', async () => {
+      await service.openWithProfile(EMPLOYER, WORKER);
+      expect(prisma.profileConversation.create.mock.calls[0][0].data).toEqual({
+        worker_id: WORKER,
+        employer_id: EMPLOYER,
+      });
+    });
+
+    it('returns the existing one rather than a second', async () => {
+      prisma.profileConversation.findFirst.mockResolvedValue(conversation);
+      await service.openWithProfile(WORKER, EMPLOYER);
+      expect(prisma.profileConversation.create).not.toHaveBeenCalled();
+    });
+
+    it('survives a double tap', async () => {
+      // The partial unique index caught it; re-read rather than 500.
+      prisma.profileConversation.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('unique', {
+          code: 'P2002',
+          clientVersion: 'test',
+        }),
+      );
+      prisma.profileConversation.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(conversation);
+
+      await expect(
+        service.openWithProfile(WORKER, EMPLOYER),
+      ).resolves.toEqual(conversation);
+    });
+
+    it('refuses two profiles of the same type', async () => {
+      prisma.profile.findFirst = jest.fn().mockResolvedValue(employer);
+      await expect(service.openWithProfile('e-2', EMPLOYER)).rejects.toThrow(
+        /employeur et un travailleur/i,
+      );
+    });
+
+    it('refuses writing to yourself', async () => {
+      await expect(service.openWithProfile(WORKER, WORKER)).rejects.toThrow(
+        /vous-même/i,
+      );
+    });
+
+    it('answers NotFound for a suspended profile, same as for a missing one', async () => {
+      // Otherwise this endpoint tells anybody who asks whether a given account
+      // is suspended.
+      prisma.profile.findFirst = jest
+        .fn()
+        .mockImplementation(({ where }: { where: { id: string } }) =>
+          Promise.resolve(
+            where.id === WORKER
+              ? { ...worker, status: AccountStatus.SUSPENDED }
+              : employer,
+          ),
+        );
+      await expect(service.openWithProfile(WORKER, EMPLOYER)).rejects.toThrow(
+        /introuvable/i,
+      );
+    });
+
+    describe('the daily cap', () => {
+      it('refuses once the cap is reached', async () => {
+        // The only thing between "talk before you pay" and a mailing list.
+        prisma.profileConversation.count.mockResolvedValue(20);
+        await expect(service.openWithProfile(WORKER, EMPLOYER)).rejects.toThrow(
+          /trop de discussions/i,
+        );
+      });
+
+      it('counts only threads with no application behind them', async () => {
+        // The application path carries the worker's own consent, so it needs
+        // no ceiling — counting it would punish somebody for being popular.
+        await service.openWithProfile(WORKER, EMPLOYER);
+        expect(prisma.profileConversation.count.mock.calls[0][0].where)
+          .toMatchObject({ application_id: null });
+      });
+
+      it('does not count re-opening a thread that already exists', async () => {
+        // Returning to a conversation is not reaching out to anybody new.
+        prisma.profileConversation.findFirst.mockResolvedValue(conversation);
+        await service.openWithProfile(WORKER, EMPLOYER);
+        expect(prisma.profileConversation.count).not.toHaveBeenCalled();
+      });
+
+      it('treats a cap of 0 as no cap', async () => {
+        config.get.mockImplementation((key: string, fallback: string) =>
+          Promise.resolve(
+            key === 'messaging.max_new_conversations_per_day' ? '0' : fallback,
+          ),
+        );
+        prisma.profileConversation.count.mockResolvedValue(9999);
+        await expect(
+          service.openWithProfile(WORKER, EMPLOYER),
+        ).resolves.toBeTruthy();
+      });
     });
   });
 

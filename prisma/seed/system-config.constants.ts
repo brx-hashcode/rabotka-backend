@@ -488,6 +488,13 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    key: 'messaging.max_new_conversations_per_day',
+    value: '20',
+    category: ConfigCategory.GENERAL,
+    label: 'Discussions sans candidature ouvertes par jour et par profil',
+    isSecret: false,
+  },
+  {
     key: 'messaging.nudge_delay_seconds',
     value: '300',
     category: ConfigCategory.GENERAL,

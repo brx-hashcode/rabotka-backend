@@ -6,10 +6,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AccountStatus,
   ApplicationStatus,
   ContactUnlockStatus,
   MessageModerationStatus,
   Prisma,
+  ProfileType,
   type ProfileConversation,
 } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -38,6 +40,10 @@ const NOTIFICATION_DEDUPE_SECONDS = 30 * 60;
 /** Fallback when `messaging.nudge_delay_seconds` is unset or nonsense. */
 const DEFAULT_NUDGE_DELAY_SECONDS = 300;
 const NUDGE_DELAY_KEY = 'messaging.nudge_delay_seconds';
+
+/** Unsolicited threads one profile may start per rolling day. */
+const DEFAULT_MAX_NEW_CONVERSATIONS = 20;
+const MAX_NEW_CONVERSATIONS_KEY = 'messaging.max_new_conversations_per_day';
 
 const ENABLED_KEY = 'messaging.enabled';
 const MODERATE_AFTER_UNLOCK_KEY = 'messaging.moderate_after_unlock';
@@ -179,6 +185,141 @@ export class ProfileChatService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Opens a conversation with a profile DIRECTLY, with no application behind
+   * it — an employer writing to a recommended worker who has not applied to
+   * anything.
+   *
+   * This is the case `application_id` was made nullable for, and it is the
+   * mission's own scenario: the whole point of moderated messaging is to let
+   * two people talk BEFORE either pays to unlock contact details. An employer
+   * looking at a recommended profile is exactly that moment.
+   *
+   * It does not leak the 1000 FCFA recommendation fee. Nothing said here can
+   * carry a phone number — that is what the moderation is for — so the fee
+   * still buys the only thing it ever bought: the actual contact details.
+   *
+   * WHAT IT DOES COST is consent. On the application path the worker chose to
+   * engage by applying; here nobody chose anything, and an employer could open
+   * a thread with every profile they are shown. Hence the daily cap below,
+   * which is the price of allowing this at all.
+   */
+  async openWithProfile(
+    counterpartId: string,
+    actorId: string,
+  ): Promise<ProfileConversation> {
+    if (counterpartId === actorId) {
+      throw new BadRequestException('Vous ne pouvez pas vous écrire à vous-même');
+    }
+    if (!(await this.isEnabled())) {
+      throw new BadRequestException(
+        'La messagerie est momentanément indisponible',
+      );
+    }
+
+    const [actor, counterpart] = await Promise.all([
+      this.prisma.profile.findFirst({
+        where: { id: actorId, deleted_at: null },
+        select: { id: true, profile_type: true },
+      }),
+      this.prisma.profile.findFirst({
+        where: { id: counterpartId, deleted_at: null },
+        select: { id: true, profile_type: true, status: true },
+      }),
+    ]);
+    if (!actor) throw new NotFoundException('Profil introuvable');
+    if (!counterpart || counterpart.status !== AccountStatus.ACTIVE) {
+      // Same answer for "does not exist" and "not active": otherwise this
+      // endpoint tells anybody who asks whether a given profile is suspended.
+      throw new NotFoundException('Profil introuvable');
+    }
+    if (actor.profile_type === counterpart.profile_type) {
+      throw new BadRequestException(
+        'Une discussion relie un employeur et un travailleur',
+      );
+    }
+
+    const isEmployer = actor.profile_type === ProfileType.EMPLOYER;
+    const workerId = isEmployer ? counterpartId : actorId;
+    const employerId = isEmployer ? actorId : counterpartId;
+
+    const existing = await this.prisma.profileConversation.findFirst({
+      where: {
+        worker_id: workerId,
+        employer_id: employerId,
+        application_id: null,
+      },
+    });
+    if (existing) return existing;
+
+    // Checked only when a NEW thread would be created. Re-opening one that
+    // already exists is not reaching out to anybody new, and counting it would
+    // make the cap tighten every time somebody returns to a conversation they
+    // are already in.
+    await this.assertUnderDailyCap(actorId);
+
+    try {
+      return await this.prisma.profileConversation.create({
+        data: { worker_id: workerId, employer_id: employerId },
+      });
+    } catch (error) {
+      // The partial unique index caught a double tap. Same recovery as the
+      // application path: re-read rather than fail.
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const raced = await this.prisma.profileConversation.findFirst({
+          where: {
+            worker_id: workerId,
+            employer_id: employerId,
+            application_id: null,
+          },
+        });
+        if (raced) return raced;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * How many unsolicited threads one profile may start in a day.
+   *
+   * The only thing standing between "talk before you pay" and a mailing list.
+   * Counts conversations with no application behind them, because the
+   * application path carries the worker's own consent and needs no ceiling.
+   */
+  private async assertUnderDailyCap(actorId: string): Promise<void> {
+    const cap = await this.maxNewConversationsPerDay();
+    if (cap <= 0) return;
+
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const started = await this.prisma.profileConversation.count({
+      where: {
+        application_id: null,
+        created_at: { gte: since },
+        OR: [{ worker_id: actorId }, { employer_id: actorId }],
+      },
+    });
+
+    if (started >= cap) {
+      throw new BadRequestException(
+        'Vous avez ouvert trop de discussions aujourd’hui, réessayez demain',
+      );
+    }
+  }
+
+  private async maxNewConversationsPerDay(): Promise<number> {
+    const raw = await this.config.get(
+      MAX_NEW_CONVERSATIONS_KEY,
+      String(DEFAULT_MAX_NEW_CONVERSATIONS),
+    );
+    const value = Number.parseInt(raw, 10);
+    return Number.isFinite(value) && value >= 0
+      ? value
+      : DEFAULT_MAX_NEW_CONVERSATIONS;
   }
 
   async listConversations(
