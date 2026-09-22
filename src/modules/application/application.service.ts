@@ -1001,7 +1001,7 @@ export class ApplicationService {
             },
           },
         },
-        worker: true,
+        worker: { select: APPLICANT_PUBLIC_SELECT },
       },
     });
 
@@ -2281,7 +2281,10 @@ export class ApplicationService {
   ): Promise<ApplicationWithOffer> {
     const application = await this.prisma.application.findUnique({
       where: { id: applicationId },
-      include: { job_offer: true, worker: true },
+      include: {
+        job_offer: true,
+        worker: { select: APPLICANT_PUBLIC_SELECT },
+      },
     });
     if (!application) {
       throw new NotFoundException('Candidature non trouvée');
