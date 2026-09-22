@@ -1,4 +1,8 @@
 import {
+  CHATTABLE_APPLICATION_SELECT,
+  chattableApplicationIds,
+} from './chattable-applications';
+import {
   Controller,
   Delete,
   ForbiddenException,
@@ -164,10 +168,11 @@ export class MobileSavedJobController {
     const applied = ids.length
       ? await this.prisma.application.findMany({
           where: { worker_id: profileId, job_offer_id: { in: ids } },
-          select: { job_offer_id: true },
+          select: CHATTABLE_APPLICATION_SELECT,
         })
       : [];
     const appliedSet = new Set(applied.map((a) => a.job_offer_id));
+    const chattable = chattableApplicationIds(applied);
 
     // findById returns the service's snake_case shape; the worker app expects
     // isRemote/employmentType/countryName in camelCase, which a bare spread
@@ -177,6 +182,7 @@ export class MobileSavedJobController {
       matchScore: 0,
       saved: true,
       applied: appliedSet.has(o.id),
+      applicationId: chattable.get(o.id) ?? null,
     }));
     return { items, total };
   }

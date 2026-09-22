@@ -129,8 +129,19 @@ describe('MobileFeedController', () => {
           matchScore: 0,
           saved: false,
           applied: false,
+          // Null, not absent: the card decides whether to offer the chat
+          // button on this field, so "no live application" has to be a value
+          // it can read rather than a key it has to test for.
+          applicationId: null,
         },
-        { id: 'job-2', title: 'B', matchScore: 0, saved: true, applied: false },
+        {
+          id: 'job-2',
+          title: 'B',
+          matchScore: 0,
+          saved: true,
+          applied: false,
+          applicationId: null,
+        },
       ]);
     });
 
@@ -157,6 +168,7 @@ describe('MobileFeedController', () => {
         {
           id: 'job-9',
           title: 'Z',
+          applicationId: null,
           matchScore: 0.91,
           saved: false,
           applied: false,
