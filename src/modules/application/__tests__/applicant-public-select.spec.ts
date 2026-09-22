@@ -29,23 +29,39 @@ describe('APPLICANT_PUBLIC_SELECT', () => {
     );
   });
 
-  it('is what the three employer-facing queries use', () => {
-    // Reading the source is blunt, but it is the only thing that catches
-    // somebody putting `worker: true` back into one of them, and that is
-    // exactly how the leak happened.
+  /**
+   * Every query whose result reaches an EMPLOYER. Reading the source is blunt,
+   * but it is the only thing that catches somebody putting `worker: true` back
+   * into one of them, and that is exactly how the leak happened — twice: the
+   * three listing queries first, then `reject` and `cancelAcceptedByEmployer`,
+   * which hand their updated row straight back in the response.
+   */
+  const EMPLOYER_FACING = [
+    'private applicationListInclude',
+    'async findByJobOffer(',
+    'async findById(',
+    'async reject(',
+    'async cancelAcceptedByEmployer(',
+  ];
+
+  it('is what every employer-facing query uses', () => {
     const source = fs.readFileSync(
       path.join(__dirname, '..', 'application.service.ts'),
       'utf8',
     );
     const uses = source.match(/worker: \{ select: APPLICANT_PUBLIC_SELECT \}/g);
-    expect(uses?.length).toBe(3);
+    expect(uses?.length).toBe(EMPLOYER_FACING.length);
 
-    for (const fn of ['applicationListInclude', 'findByJobOffer', 'findById']) {
-      const start = source.indexOf(fn === 'applicationListInclude'
-        ? 'private applicationListInclude'
-        : `async ${fn}(`);
-      const body = source.slice(start, start + 1500);
-      expect(body).not.toMatch(/\n\s*worker: true,/);
+    for (const fn of EMPLOYER_FACING) {
+      const start = source.indexOf(fn);
+      expect(start).toBeGreaterThan(-1);
+      // Bounded by the NEXT method declaration: a fixed window spilled into
+      // the method below, which legitimately loads the whole worker to send a
+      // WhatsApp message.
+      const rest = source.slice(start + fn.length);
+      const next = rest.search(/\n {2}(private |public )?(async )?[a-zA-Z_]+\(/);
+      const body = rest.slice(0, next === -1 ? undefined : next);
+      expect(body).not.toMatch(/worker: true/);
     }
   });
 });
