@@ -59,6 +59,7 @@ describe('ProfileChatService', () => {
     prisma = {
       application: { findFirst: jest.fn(), findUnique: jest.fn().mockResolvedValue({ job_offer: { title: 'Ménage bureau' } }) },
       profileConversation: {
+        fields: { worker_hidden_at: 'w', employer_hidden_at: 'e' },
         findUnique: jest.fn().mockResolvedValue(conversation),
         findMany: jest.fn().mockResolvedValue([]),
         count: jest.fn().mockResolvedValue(0),
@@ -649,6 +650,58 @@ describe('ProfileChatService', () => {
       expect(
         prisma.profileConversation.update.mock.calls[0][0].data,
       ).toHaveProperty('worker_last_read_at');
+    });
+  });
+
+  describe('deleting a conversation, for one side', () => {
+    it('hides it for the side that asked, and only that side', async () => {
+      await service.hideConversation(CONV, EMPLOYER);
+      const data = prisma.profileConversation.update.mock.calls.at(-1)[0].data;
+      expect(data).toHaveProperty('employer_hidden_at');
+      expect(data).not.toHaveProperty('worker_hidden_at');
+    });
+
+    it('never deletes a message', async () => {
+      // The rows are evidence — for a claim, and for reviewing a redaction —
+      // and the other party keeps their whole history.
+      prisma.profileMessage.deleteMany = jest.fn();
+      prisma.profileConversation.delete = jest.fn();
+      await service.hideConversation(CONV, EMPLOYER);
+      expect(prisma.profileMessage.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.profileConversation.delete).not.toHaveBeenCalled();
+    });
+
+    it('clears the unread badge along with it', async () => {
+      await service.hideConversation(CONV, EMPLOYER);
+      expect(prisma.profileMessage.updateMany).toHaveBeenCalled();
+    });
+
+    it('refuses a third party', async () => {
+      await expect(service.hideConversation(CONV, STRANGER)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('shows that side only what came after', async () => {
+      const hiddenAt = new Date('2026-09-22T10:00:00Z');
+      prisma.profileConversation.findUnique.mockResolvedValue({
+        ...conversation,
+        employer_hidden_at: hiddenAt,
+      });
+      await service.listMessages(CONV, EMPLOYER);
+      expect(prisma.profileMessage.findMany.mock.calls[0][0].where.created_at)
+        .toEqual({ gt: hiddenAt });
+    });
+
+    it('leaves the other side’s thread whole', async () => {
+      prisma.profileConversation.findUnique.mockResolvedValue({
+        ...conversation,
+        employer_hidden_at: new Date(),
+      });
+      await service.listMessages(CONV, WORKER);
+      expect(
+        prisma.profileMessage.findMany.mock.calls[0][0].where.created_at,
+      ).toBeUndefined();
     });
   });
 

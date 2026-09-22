@@ -2476,6 +2476,16 @@ model ProfileConversation {
   worker_last_read_at   DateTime?
   employer_last_read_at DateTime?
 
+  /// "Supprimer la discussion", per side — WhatsApp's meaning: it clears the
+  /// thread FOR ME and nobody else.
+  ///
+  /// Never a delete. The rows are evidence — for a claim, and for reviewing a
+  /// redaction — and the other party keeps their whole history. Everything
+  /// before this instant disappears from this side's list and thread; a new
+  /// message after it brings the conversation back, starting from there.
+  worker_hidden_at   DateTime?
+  employer_hidden_at DateTime?
+
   /// Set when the application dies — rejected, cancelled, or the unlock expired
   /// into wallet credit. Read-only from then on, never deleted: it is evidence
   /// for whatever claim follows.

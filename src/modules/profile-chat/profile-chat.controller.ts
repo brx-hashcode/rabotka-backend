@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -149,6 +150,23 @@ export class ProfileChatController {
       dto.body,
     );
     return { message };
+  }
+
+  /**
+   * "Supprimer la discussion". For this side only — see `hideConversation`.
+   *
+   * DELETE for the verb the client means, although nothing is deleted: the
+   * rows stay as evidence and the other party keeps their history.
+   */
+  @Delete(':id')
+  @UseGuards(ProfileAuthGuard)
+  @ApiOperation({ summary: 'Supprimer la discussion (pour moi)' })
+  async hide(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    await this.chat.hideConversation(id, req.user.profileId);
+    return { ok: true };
   }
 
   @Post(':id/read')

@@ -332,8 +332,28 @@ export class ProfileChatService {
     page = 1,
     limit = 20,
   ): Promise<Paginated<ConversationView>> {
+    // A side that hid the conversation sees it again only once something new
+    // arrives after that instant. Column-to-column, through Prisma's field
+    // references: the comparison has to be per row, and fetching everything to
+    // filter in memory would break the pagination below.
+    const fields = this.prisma.profileConversation.fields;
     const where: Prisma.ProfileConversationWhereInput = {
-      OR: [{ worker_id: profileId }, { employer_id: profileId }],
+      OR: [
+        {
+          worker_id: profileId,
+          OR: [
+            { worker_hidden_at: null },
+            { last_message_at: { gt: fields.worker_hidden_at } },
+          ],
+        },
+        {
+          employer_id: profileId,
+          OR: [
+            { employer_hidden_at: null },
+            { last_message_at: { gt: fields.employer_hidden_at } },
+          ],
+        },
+      ],
     };
 
     const [total, rows] = await this.prisma.$transaction([
@@ -446,7 +466,11 @@ export class ProfileChatService {
     page = 1,
     limit = 50,
   ): Promise<Paginated<MessageView>> {
-    await this.requireParticipant(conversationId, profileId);
+    const conversation = await this.requireParticipant(
+      conversationId,
+      profileId,
+    );
+    const hiddenAt = this.hiddenAtFor(conversation, profileId);
 
     // A HELD message was never delivered, so it does not exist for the
     // recipient — but the author must still see it, marked as not delivered,
@@ -454,6 +478,9 @@ export class ProfileChatService {
     const visible: Prisma.ProfileMessageWhereInput = {
       conversation_id: conversationId,
       deleted_at: null,
+      // Cleared for this side only. The rows stay, and the other side still
+      // reads every one of them.
+      ...(hiddenAt ? { created_at: { gt: hiddenAt } } : {}),
       OR: [
         { sender_id: profileId },
         { moderation_status: { not: MessageModerationStatus.HELD } },
@@ -681,6 +708,46 @@ export class ProfileChatService {
   deliverableFor(message: MessageView, recipientId: string): MessageView | null {
     if (message.status === MessageModerationStatus.HELD) return null;
     return { ...message, mine: false, redactions: [], senderId: message.senderId };
+  }
+
+  /**
+   * "Supprimer la discussion" — clears the thread FOR THIS SIDE ONLY.
+   *
+   * Never deletes a row. The messages are evidence, for a claim and for
+   * reviewing a redaction, and the other party keeps their whole history. This
+   * side stops seeing everything up to now; the conversation comes back, from
+   * that point on, the moment a new message arrives.
+   *
+   * Marks everything read at the same time, so a cleared thread does not leave
+   * an unread badge behind for messages the person can no longer see.
+   */
+  async hideConversation(
+    conversationId: string,
+    profileId: string,
+  ): Promise<void> {
+    const conversation = await this.requireParticipant(
+      conversationId,
+      profileId,
+    );
+    await this.markRead(conversationId, profileId);
+
+    const now = new Date();
+    await this.prisma.profileConversation.update({
+      where: { id: conversation.id },
+      data:
+        conversation.worker_id === profileId
+          ? { worker_hidden_at: now }
+          : { employer_hidden_at: now },
+    });
+  }
+
+  private hiddenAtFor(
+    conversation: ProfileConversation,
+    profileId: string,
+  ): Date | null {
+    return conversation.worker_id === profileId
+      ? conversation.worker_hidden_at
+      : conversation.employer_hidden_at;
   }
 
   async markRead(conversationId: string, profileId: string): Promise<number> {
