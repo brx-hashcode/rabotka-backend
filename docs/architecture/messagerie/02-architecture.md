@@ -154,12 +154,17 @@ Création paresseuse, et c'est un choix de coût : la ligne n'est écrite qu'au 
 
 ### 3.3 Après déblocage
 
-Quand `ContactUnlockAttempt.status === UNLOCKED` (`contact-unlock.service.ts:279-286`) :
+**TRANCHÉ PAR LE PRODUIT, CONTRE MA PROPOSITION INITIALE : la modération ne s'arrête jamais.**
 
-- **La modération s'arrête.** Les deux parties ont déjà les coordonnées de l'autre, remises par WhatsApp. Continuer à masquer un numéro dans le fil serait du théâtre, et un théâtre qui casse des messages légitimes (« rappelle-moi au numéro que je t'ai donné, pas sur l'autre »).
-- La conversation reste ouverte et lisible. Elle devient une trace utile en cas de réclamation.
+J'avais proposé de l'arrêter une fois `ContactUnlockAttempt.status === UNLOCKED`, en arguant que les deux parties ont déjà les coordonnées de l'autre et que continuer à masquer serait du théâtre. C'était la question ouverte n° 6, laissée à valider.
 
-C'est une décision qui mérite d'être contestée si le produit voit les choses autrement, parce qu'elle est facile à inverser (un booléen dans la config) mais lourde à découvrir tard.
+Elle s'est tranchée toute seule à l'usage : sur un fil dont la paire avait payé treize déblocages, un numéro est passé en clair, et la première réaction a été « celui-là est passé ». Une règle qui a une exception se lit comme une faille, même quand l'exception est défendable.
+
+Donc : **les coordonnées ne circulent jamais dans une discussion, quel que soit l'historique de paiement.** L'exception a été supprimée plutôt que désactivée — la clé `messaging.moderate_after_unlock`, la requête de déblocage à chaque envoi, le champ `contactsUnlocked` de la vue et le paramètre de `ModerationService.review` n'existent plus. Une requête de moins par message, et une règle qui s'énonce sans note de bas de page.
+
+Ce que ça coûte, et qui reste vrai : « rappelle-moi sur l'autre numéro » devient illisible entre deux personnes qui ont déjà leurs numéros. C'est le prix d'une règle sans exception, assumé.
+
+La conversation reste ouverte et lisible après déblocage. Elle devient une trace utile en cas de réclamation.
 
 ### 3.4 Fermeture
 
@@ -463,10 +468,9 @@ Ce qui doit être tranché avant la Phase 3.
 3. **Préfixes opérateurs congolais** — à fournir par le produit, ils vont en configuration.
 4. **CGU** — l'envoi du contenu de messages privés à des fournisseurs tiers y est-il couvert ?
 5. **Rétention** des corps de messages. Aucune règle n'existe ; le précédent est 180 jours.
-6. **§3.3 — arrêt de la modération après déblocage.** Décision proposée, facile à inverser, à valider explicitement.
-7. **§7.3 — SUPPORT peut-il lire un fil ?** Proposé oui, journalisé. À valider par le produit, pas par moi.
-8. **Escalade après N tentatives délibérées ?** §8.4 rend la règle explicite, donc une tentative répétée devient un choix et non une ignorance. Le précédent du dépôt est `ABUSE_REPORT_THRESHOLD = 3` avec un avertissement d'abord (`guard.service.ts:263-271`). Hors v1, mais à trancher avant que quiconque demande « pourquoi ce compte n'a-t-il rien eu ? ».
-9. **Les champs libres existants** (Phase 1 §2.17) ne sont filtrés nulle part. Une bio suffit à contourner toute cette architecture. Ce n'est pas dans ce chantier, mais **ça doit être un chantier**, et court : la passe A s'applique telle quelle à `Profile.description`, `JobOffer.description` et `PortfolioItem.description` — ce dernier étant servi sur une page publique non authentifiée (`portfolio.service.ts:443-450`).
+6. **§7.3 — SUPPORT peut-il lire un fil ?** Proposé oui, journalisé. À valider par le produit, pas par moi.
+7. **Escalade après N tentatives délibérées ?** §8.4 rend la règle explicite, donc une tentative répétée devient un choix et non une ignorance. Le précédent du dépôt est `ABUSE_REPORT_THRESHOLD = 3` avec un avertissement d'abord (`guard.service.ts:263-271`). Hors v1, mais à trancher avant que quiconque demande « pourquoi ce compte n'a-t-il rien eu ? ».
+8. **Les champs libres existants** (Phase 1 §2.17) ne sont filtrés nulle part. Une bio suffit à contourner toute cette architecture. Ce n'est pas dans ce chantier, mais **ça doit être un chantier**, et court : la passe A s'applique telle quelle à `Profile.description`, `JobOffer.description` et `PortfolioItem.description` — ce dernier étant servi sur une page publique non authentifiée (`portfolio.service.ts:443-450`).
 
 ---
 
