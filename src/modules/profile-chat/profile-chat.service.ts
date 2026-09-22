@@ -81,6 +81,16 @@ export interface ConversationView {
   applicationId: string | null;
   lastMessageAt: Date | null;
   lastMessagePreview: string | null;
+  /**
+   * Whether the last message is this profile's own. The list prefixes it with
+   * ticks, WhatsApp-style — which is also what makes it obvious that a number
+   * shown in clear there is the viewer's OWN text, not a leak.
+   */
+  lastMessageMine: boolean;
+  /** Own last message only: the other side has opened the thread since. */
+  lastMessageRead: boolean;
+  /** Own last message only: held back whole, so it never arrived. */
+  lastMessageHeld: boolean;
   unreadCount: number;
   closed: boolean;
   contactsUnlocked: boolean;
@@ -395,6 +405,7 @@ export class ProfileChatService {
               body: true,
               sender_id: true,
               moderation_status: true,
+              read_at: true,
               redactions: {
                 select: { start_offset: true, end_offset: true, category: true },
               },
@@ -445,6 +456,11 @@ export class ProfileChatService {
                 profileId,
               )
             : null,
+          lastMessageMine: last?.sender_id === profileId,
+          lastMessageRead: last?.sender_id === profileId && last.read_at !== null,
+          lastMessageHeld:
+            last?.sender_id === profileId &&
+            last.moderation_status === MessageModerationStatus.HELD,
           unreadCount: unread.get(row.id) ?? 0,
           closed: row.closed_at !== null,
           contactsUnlocked:
