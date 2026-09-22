@@ -70,8 +70,19 @@ export const CMD_MENU = [
  */
 export const CMD_STOP = ['stop', 'stopper', 'arreter', 'arrêter', 'unsubscribe'];
 
-/** The other direction, so an opt-out is not a one-way door. */
-export const CMD_RESUME = ['reprendre', 'resume', 'start', 'continuer'];
+/**
+ * The other direction, so an opt-out is not a one-way door.
+ *
+ * Deliberately does NOT contain « start ». The router checks this list before
+ * anything else, so listing it there hijacked the product's documented front
+ * door: `/start` expands to `start`, matched here, and every user who typed it
+ * was answered « C’est réactivé » instead of getting the card that opens the
+ * app — whether or not they had ever opted out of anything.
+ *
+ * Nothing points people at « start » to come back, either: the opt-out reply
+ * itself says « Répondez *Reprendre* », which is the word that belongs here.
+ */
+export const CMD_RESUME = ['reprendre', 'resume', 'continuer'];
 
 export const CMD_PAY = [
   'payer',
