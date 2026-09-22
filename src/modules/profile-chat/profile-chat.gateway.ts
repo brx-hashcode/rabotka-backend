@@ -1,14 +1,19 @@
 import {
   OnGatewayConnection,
+  OnGatewayDisconnect,
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { Logger } from '@nestjs/common';
+import { Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 import type { JwtPayload } from '../auth/guards/jwt-auth.guard';
 import type { MessageView } from './profile-chat.service';
+import { PresenceService } from './presence.service';
+
+/** Well under the 90s TTL, so one missed tick never drops somebody offline. */
+const PRESENCE_REFRESH_MS = 45_000;
 
 /**
  * Pushes a new message to the recipient's open tabs.
@@ -41,15 +46,29 @@ import type { MessageView } from './profile-chat.service';
     credentials: true,
   },
 })
-export class ProfileChatGateway implements OnGatewayConnection {
+export class ProfileChatGateway
+  implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
+{
   private readonly logger = new Logger(ProfileChatGateway.name);
 
   @WebSocketServer()
   server?: Server;
 
+  /**
+   * Sockets THIS instance holds, so it knows whose TTL to push out.
+   *
+   * Not the source of truth for who is online — Redis is. This is only the
+   * list of keys this process is responsible for keeping alive; another
+   * instance keeps its own, and neither can see the other's, which is exactly
+   * why the answer lives in Redis rather than here.
+   */
+  private readonly local = new Map<string, string>();
+  private refreshTimer?: NodeJS.Timeout;
+
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly presence: PresenceService,
   ) {}
 
   handleConnection(client: Socket): void {
@@ -62,6 +81,36 @@ export class ProfileChatGateway implements OnGatewayConnection {
     }
 
     void client.join(`profile:${profileId}`);
+    this.local.set(client.id, profileId);
+    void this.presence.connected(profileId, client.id);
+    this.startRefresh();
+  }
+
+  handleDisconnect(client: Socket): void {
+    const profileId = this.local.get(client.id);
+    if (!profileId) return;
+    this.local.delete(client.id);
+    void this.presence.disconnected(profileId, client.id);
+  }
+
+  onModuleDestroy(): void {
+    if (this.refreshTimer) clearInterval(this.refreshTimer);
+  }
+
+  /**
+   * Started lazily and never stopped.
+   *
+   * A timer created at boot would run in the queue worker and in every spec
+   * that instantiates this class, holding the process open. Starting it on the
+   * first real connection means it only exists where sockets do.
+   */
+  private startRefresh(): void {
+    if (this.refreshTimer) return;
+    this.refreshTimer = setInterval(() => {
+      void this.presence.refresh([...new Set(this.local.values())]);
+    }, PRESENCE_REFRESH_MS);
+    // Never the reason node stays alive.
+    this.refreshTimer.unref?.();
   }
 
   /**

@@ -26,6 +26,7 @@ import { QueueService } from '../../common/services/queue/queue.service';
 import { nudgeJobId, type MessagingNudgeJob } from './profile-chat.nudge';
 import { ModerationService } from './moderation/moderation.service';
 import { ProfileChatGateway } from './profile-chat.gateway';
+import { PresenceService } from './presence.service';
 import type { RedactionCategory } from './moderation/patterns';
 
 /**
@@ -73,6 +74,9 @@ export interface ConversationView {
   id: string;
   counterpartId: string;
   counterpartName: string;
+  counterpartAvatarUrl: string | null;
+  /** Connected right now, on any instance. False when Redis cannot say. */
+  counterpartOnline: boolean;
   jobTitle: string | null;
   applicationId: string | null;
   lastMessageAt: Date | null;
@@ -115,6 +119,7 @@ export class ProfileChatService {
     private readonly gateway: ProfileChatGateway,
     private readonly events: EventEmitter2,
     private readonly queue: QueueService,
+    private readonly presence: PresenceService,
   ) {}
 
   // ── Conversations ──────────────────────────────────────────────────────────
@@ -339,8 +344,22 @@ export class ProfileChatService {
         skip: (page - 1) * limit,
         take: limit,
         include: {
-          worker: { select: { id: true, first_name: true, last_name: true } },
-          employer: { select: { id: true, first_name: true, last_name: true } },
+          worker: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              avatar_url: true,
+            },
+          },
+          employer: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              avatar_url: true,
+            },
+          },
           application: {
             select: {
               id: true,
@@ -365,12 +384,17 @@ export class ProfileChatService {
       }),
     ]);
 
-    // One grouped count rather than a query per row: a list of 20 conversations
-    // would otherwise be 21 round trips.
-    const unread = await this.unreadCounts(
-      profileId,
-      rows.map((r) => r.id),
-    );
+    // One grouped count and one pipeline rather than a query per row: a list of
+    // 20 conversations would otherwise be 41 round trips.
+    const [unread, online] = await Promise.all([
+      this.unreadCounts(
+        profileId,
+        rows.map((r) => r.id),
+      ),
+      this.presence.onlineAmong(
+        rows.map((r) => (r.worker_id === profileId ? r.employer_id : r.worker_id)),
+      ),
+    ]);
 
     return {
       data: rows.map((row) => {
@@ -382,6 +406,8 @@ export class ProfileChatService {
           id: row.id,
           counterpartId: counterpart.id,
           counterpartName: `${counterpart.first_name} ${counterpart.last_name}`,
+          counterpartAvatarUrl: counterpart.avatar_url ?? null,
+          counterpartOnline: online.has(counterpart.id),
           jobTitle: row.application?.job_offer.title ?? null,
           applicationId: row.application_id,
           lastMessageAt: row.last_message_at,

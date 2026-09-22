@@ -41,6 +41,7 @@ describe('ProfileChatService', () => {
   let gateway: { emitMessage: jest.Mock; emitRead: jest.Mock };
   let events: { emit: jest.Mock };
   let queue: { addJob: jest.Mock };
+  let presence: { onlineAmong: jest.Mock };
 
   const storedMessage = (over: Record<string, unknown> = {}) => ({
     id: 'm-1',
@@ -100,6 +101,7 @@ describe('ProfileChatService', () => {
     gateway = { emitMessage: jest.fn(), emitRead: jest.fn() };
     events = { emit: jest.fn() };
     queue = { addJob: jest.fn().mockResolvedValue('job-1') };
+    presence = { onlineAmong: jest.fn().mockResolvedValue(new Set()) };
 
     service = new ProfileChatService(
       prisma,
@@ -108,6 +110,7 @@ describe('ProfileChatService', () => {
       gateway as never,
       events as never,
       queue as never,
+      presence as never,
     );
   });
 
