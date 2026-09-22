@@ -271,6 +271,34 @@ export type WorkerMissionCard = {
   };
 };
 
+/**
+ * What an EMPLOYER may see of an applicant through the application endpoints.
+ *
+ * These three queries used `worker: true` — the whole Profile row, 44 fields —
+ * and the response passed it through untouched. So `GET
+ * /profile/job-offers/:id/applications`, `GET /profile/received-applications`
+ * and the application detail all handed the employer every applicant's PHONE,
+ * EMAIL and ADDRESS, whatever the application's status: a PENDING candidate
+ * nobody had paid to unlock included. The app never displayed them — contact
+ * details are delivered over WhatsApp, after payment, by design — but they
+ * were one network tab away, which bypassed the 500 FCFA unlock outright.
+ *
+ * An allow-list, not a deny-list: a column added to Profile tomorrow stays out
+ * of these responses until somebody decides it belongs here. Only what the
+ * employer screens actually render.
+ *
+ * Internal callers that DO need the number — WhatsApp notifications, the
+ * contract PDF, the post-payment reveal — load the worker themselves and are
+ * untouched.
+ */
+export const APPLICANT_PUBLIC_SELECT = {
+  id: true,
+  first_name: true,
+  last_name: true,
+  avatar_url: true,
+  reliability_score: true,
+} as const satisfies Prisma.ProfileSelect;
+
 @Injectable()
 export class ApplicationService {
   constructor(
@@ -521,7 +549,7 @@ export class ApplicationService {
           },
         },
       },
-      worker: true,
+      worker: { select: APPLICANT_PUBLIC_SELECT },
     };
   }
 
@@ -672,7 +700,7 @@ export class ApplicationService {
             },
           },
         },
-        worker: true,
+        worker: { select: APPLICANT_PUBLIC_SELECT },
         contract: { select: { id: true } },
         assignment: { select: { id: true } },
       },
@@ -722,7 +750,7 @@ export class ApplicationService {
             },
           },
         },
-        worker: true,
+        worker: { select: APPLICANT_PUBLIC_SELECT },
       },
     });
     if (!application) return null;
@@ -2994,16 +3022,15 @@ export class ApplicationService {
         phone: string;
       };
     };
+    // Exactly APPLICANT_PUBLIC_SELECT. This type used to promise phone and
+    // email, and the query delivered the whole row to match — see the
+    // constant for what that exposed.
     worker: {
       id: string;
       first_name: string;
       last_name: string;
-      phone: string;
-      email: string | null;
-      description: string;
       reliability_score: number | null;
-      verification_status: string;
-      avatar_url?: string | null;
+      avatar_url: string | null;
     };
     contract?: { id: string } | null;
   }): ApplicationWithOffer {
