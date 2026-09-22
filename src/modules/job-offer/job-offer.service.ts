@@ -322,12 +322,21 @@ export type JobOfferListItem = {
   created_at: Date;
 };
 
+/**
+ * An offer as a WORKER may see it.
+ *
+ * The employer's phone used to be here. `findById` backs the worker's job feed,
+ * job detail and saved jobs, and `toWorkerJobShape` spreads the whole object
+ * into the response — so every worker received the phone of the employer
+ * behind every offer they scrolled past, without applying, let alone paying.
+ * Removed from the type as well as the query, so putting it back fails to
+ * compile instead of shipping.
+ */
 export type JobOfferDetail = JobOfferListItem & {
   employer?: {
     id: string;
     first_name: string;
     last_name: string;
-    phone: string;
     reliability_score: number | null;
     avatar_url: string | null;
     rating_avg: number | null;
@@ -884,7 +893,6 @@ export class JobOfferService {
             id: true,
             first_name: true,
             last_name: true,
-            phone: true,
             reliability_score: true,
             avatar_url: true,
             rating_avg: true,
@@ -907,7 +915,6 @@ export class JobOfferService {
             id: offer.employer.id,
             first_name: offer.employer.first_name,
             last_name: offer.employer.last_name,
-            phone: offer.employer.phone,
             reliability_score: offer.employer.reliability_score,
             avatar_url: offer.employer.avatar_url,
             rating_avg: offer.employer.rating_avg,
@@ -928,7 +935,6 @@ export class JobOfferService {
             id: true,
             first_name: true,
             last_name: true,
-            phone: true,
             reliability_score: true,
             avatar_url: true,
             rating_avg: true,
@@ -951,7 +957,6 @@ export class JobOfferService {
             id: offer.employer.id,
             first_name: offer.employer.first_name,
             last_name: offer.employer.last_name,
-            phone: offer.employer.phone,
             reliability_score: offer.employer.reliability_score,
             avatar_url: offer.employer.avatar_url,
             rating_avg: offer.employer.rating_avg,
