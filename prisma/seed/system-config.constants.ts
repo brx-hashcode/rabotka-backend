@@ -509,13 +509,6 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
-    key: 'messaging.moderate_after_unlock',
-    value: 'false',
-    category: ConfigCategory.GENERAL,
-    label: 'Continuer à masquer après déblocage des coordonnées',
-    isSecret: false,
-  },
-  {
     // Suspended, KYC en cours, KYC refusé. Ces profils ne coûtaient rien tant
     // que le bot leur répondait par une carte figée ; ce sont aussi ceux qui
     // ont le plus de raisons d'insister et le moins de chances de rapporter.

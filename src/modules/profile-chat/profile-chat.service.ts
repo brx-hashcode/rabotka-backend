@@ -8,7 +8,6 @@ import {
 import {
   AccountStatus,
   ApplicationStatus,
-  ContactUnlockStatus,
   MessageModerationStatus,
   Prisma,
   ProfileType,
@@ -47,7 +46,6 @@ const DEFAULT_MAX_NEW_CONVERSATIONS = 20;
 const MAX_NEW_CONVERSATIONS_KEY = 'messaging.max_new_conversations_per_day';
 
 const ENABLED_KEY = 'messaging.enabled';
-const MODERATE_AFTER_UNLOCK_KEY = 'messaging.moderate_after_unlock';
 
 /** A withheld fragment, as the SENDER sees it. Never sent to anybody else. */
 export interface RedactionView {
@@ -93,7 +91,6 @@ export interface ConversationView {
   lastMessageHeld: boolean;
   unreadCount: number;
   closed: boolean;
-  contactsUnlocked: boolean;
 }
 
 export interface Paginated<T> {
@@ -110,9 +107,6 @@ export interface Paginated<T> {
  * evidence for whatever claim follows. WAITING_PAYMENT is very much alive —
  * that is precisely the moment the two need to talk.
  */
-const pairKey = (workerId: string, employerId: string) =>
-  `${workerId}:${employerId}`;
-
 const LIVE_APPLICATION_STATUSES: ReadonlySet<ApplicationStatus> = new Set([
   ApplicationStatus.PENDING,
   ApplicationStatus.VIEWED,
@@ -460,7 +454,7 @@ export class ProfileChatService {
     rows: ConversationRow[],
     profileId: string,
   ): Promise<ConversationView[]> {
-    const [unread, online, unlocked] = await Promise.all([
+    const [unread, online] = await Promise.all([
       this.unreadCounts(
         profileId,
         rows.map((r) => r.id),
@@ -470,7 +464,6 @@ export class ProfileChatService {
           r.worker_id === profileId ? r.employer_id : r.worker_id,
         ),
       ),
-      this.unlockedPairs(rows),
     ]);
 
     return rows.map((row) => {
@@ -508,7 +501,6 @@ export class ProfileChatService {
           last.moderation_status === MessageModerationStatus.HELD,
         unreadCount: unread.get(row.id) ?? 0,
         closed: row.closed_at !== null,
-        contactsUnlocked: unlocked.has(pairKey(row.worker_id, row.employer_id)),
       };
     });
   }
@@ -616,10 +608,12 @@ export class ProfileChatService {
       throw new BadRequestException('Cette discussion est close');
     }
 
-    const verdict = await this.moderation.review(
-      body,
-      await this.shouldModerate(conversation),
-    );
+    // ALWAYS moderated. There used to be an exception — a pair that had paid
+    // for each other's details could speak freely, on the reasoning that they
+    // already held the numbers and masking was theatre. The product decided
+    // otherwise, and the simpler rule is also the one that can be stated
+    // without a footnote: contact details never travel through a conversation.
+    const verdict = await this.moderation.review(body);
 
     const message = await this.prisma.$transaction(async (tx) => {
       const created = await tx.profileMessage.create({
@@ -962,52 +956,6 @@ export class ProfileChatService {
    * delivered by the unlock itself over WhatsApp. Masking on would be theatre,
    * and theatre that breaks "rappelle-moi sur l'autre numéro".
    */
-  /**
-   * Moderation stops once the pair has unlocked — on ANY of their applications.
-   *
-   * At the pair level now that a thread is one per pair: if either side has
-   * paid the other's contact details through any application, they already
-   * hold each other's numbers, and masking a number in this thread would be
-   * theatre. `ContactUnlockAttempt` carries both ids as columns, so this is one
-   * indexed lookup rather than a walk through applications.
-   *
-   * The recommendation path is not counted: there the employer alone pays and
-   * the worker receives nothing, so the worker has no number to be reminded of
-   * and the thread stays moderated.
-   */
-  private async shouldModerate(
-    conversation: ProfileConversation,
-  ): Promise<boolean> {
-    if (await this.moderateAfterUnlock()) return true;
-    const unlocked = await this.prisma.contactUnlockAttempt.findFirst({
-      where: {
-        worker_id: conversation.worker_id,
-        employer_id: conversation.employer_id,
-        status: ContactUnlockStatus.UNLOCKED,
-      },
-      select: { id: true },
-    });
-    return unlocked === null;
-  }
-
-  /** Which of these pairs have unlocked, in one query for a whole page. */
-  private async unlockedPairs(
-    rows: readonly { worker_id: string; employer_id: string }[],
-  ): Promise<Set<string>> {
-    if (rows.length === 0) return new Set();
-    const found = await this.prisma.contactUnlockAttempt.findMany({
-      where: {
-        status: ContactUnlockStatus.UNLOCKED,
-        OR: rows.map((r) => ({
-          worker_id: r.worker_id,
-          employer_id: r.employer_id,
-        })),
-      },
-      select: { worker_id: true, employer_id: true },
-    });
-    return new Set(found.map((f) => pairKey(f.worker_id, f.employer_id)));
-  }
-
   private toMessageView(
     row: {
       id: string;
@@ -1086,9 +1034,4 @@ export class ProfileChatService {
     return (await this.config.get(ENABLED_KEY, 'true')) !== 'false';
   }
 
-  private async moderateAfterUnlock(): Promise<boolean> {
-    return (
-      (await this.config.get(MODERATE_AFTER_UNLOCK_KEY, 'false')) === 'true'
-    );
-  }
 }

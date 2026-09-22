@@ -704,50 +704,13 @@ describe('ProfileChatService', () => {
       ).toEqual({ not: null });
     });
 
-    it('stops moderating once the PAIR has unlocked on any application', async () => {
-      prisma.contactUnlockAttempt.findFirst.mockResolvedValue({ id: 'u-1' });
-      prisma.profileMessage.create.mockResolvedValue(
-        storedMessage({
-          moderation_status: MessageModerationStatus.CLEAN,
-          redactions: [],
-        }),
-      );
-
-      await service.sendMessage(CONV, WORKER, BODY_WITH_PHONE);
-
-      expect(prisma.contactUnlockAttempt.findFirst.mock.calls[0][0].where).toMatchObject({
-        worker_id: WORKER,
-        employer_id: EMPLOYER,
-        status: ContactUnlockStatus.UNLOCKED,
-      });
-    });
   });
 
-  describe('after the contacts are unlocked', () => {
-    it('stops moderating, because both already have the number', async () => {
-      prisma.contactUnlockAttempt.findFirst.mockResolvedValue({
-        status: ContactUnlockStatus.UNLOCKED,
-      });
-      prisma.profileMessage.create.mockResolvedValue(
-        storedMessage({
-          moderation_status: MessageModerationStatus.CLEAN,
-          redactions: [],
-        }),
-      );
-
-      const message = await service.sendMessage(CONV, WORKER, BODY_WITH_PHONE);
-
-      expect(message.status).toBe(MessageModerationStatus.CLEAN);
-      expect(prisma.profileMessage.create.mock.calls[0][0].data.redactions.create)
-        .toEqual([]);
-    });
-
-    it('keeps moderating when the config says to', async () => {
-      config.get.mockImplementation((key: string) =>
-        Promise.resolve(
-          key === 'messaging.moderate_after_unlock' ? 'true' : 'true',
-        ),
-      );
+  describe('moderation has no exception', () => {
+    it('still masks a number between a pair that has already unlocked', async () => {
+      // This used to pass through: a pair who had paid for each other's
+      // details could speak freely. The product ruled otherwise — contact
+      // details never travel through a conversation, whatever was paid.
       prisma.contactUnlockAttempt.findFirst.mockResolvedValue({
         status: ContactUnlockStatus.UNLOCKED,
       });
@@ -757,6 +720,12 @@ describe('ProfileChatService', () => {
       expect(
         prisma.profileMessage.create.mock.calls[0][0].data.redactions.create,
       ).toHaveLength(1);
+    });
+
+    it('never asks whether the pair has unlocked', async () => {
+      // One query per message saved, and no way for the rule to drift.
+      await service.sendMessage(CONV, WORKER, BODY_WITH_PHONE);
+      expect(prisma.contactUnlockAttempt.findFirst).not.toHaveBeenCalled();
     });
   });
 

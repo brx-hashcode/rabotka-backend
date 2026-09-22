@@ -557,18 +557,6 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Relancer hors fenêtre 24h (modèle WhatsApp payant)',
     isSecret: false,
   },
-  {
-    // Once both parties have paid, they already hold each other's numbers —
-    // delivered over WhatsApp by the unlock itself. Carrying on masking would
-    // be theatre, and theatre that breaks legitimate messages ("rappelle-moi
-    // sur l'autre numéro"). Kept as a switch because it is a product call that
-    // is cheap to reverse and expensive to discover late.
-    key: 'messaging.moderate_after_unlock',
-    value: 'false',
-    category: ConfigCategory.GENERAL,
-    label: 'Continuer à masquer après déblocage des coordonnées',
-    isSecret: false,
-  },
 
   // ── CONTACT ───────────────────────────────────────────────────────────────
   {

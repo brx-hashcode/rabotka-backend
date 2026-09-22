@@ -36,21 +36,12 @@ export class ModerationService {
   constructor(private readonly config: SystemConfigService) {}
 
   /**
-   * @param body the text as typed
-   * @param moderate `false` once the pair has unlocked — see
-   *   `messaging.moderate_after_unlock`. The message then passes untouched,
-   *   because both sides already hold each other's numbers.
+   * Every message, with no exception. An earlier version could be switched off
+   * for a pair that had already paid to unlock each other; the product ruled
+   * that contact details never travel through a conversation, whatever has
+   * been paid before.
    */
-  async review(body: string, moderate = true): Promise<ModerationVerdict> {
-    if (!moderate) {
-      return {
-        status: MessageModerationStatus.CLEAN,
-        spans: [],
-        deliveredBody: body,
-        ratio: 0,
-      };
-    }
-
+  async review(body: string): Promise<ModerationVerdict> {
     const [prefixes, heldRatio] = await Promise.all([
       this.operatorPrefixes(),
       this.heldRatioThreshold(),

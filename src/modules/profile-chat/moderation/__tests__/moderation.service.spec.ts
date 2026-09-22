@@ -73,14 +73,13 @@ describe('ModerationService', () => {
     expect(verdict.spans[0].matchedBy).toBe('operator_prefix');
   });
 
-  it('does nothing at all when moderation is off for this pair', async () => {
-    // Both parties have paid; they already hold each other's numbers, delivered
-    // by the unlock itself. Masking on would break "rappelle-moi sur l'autre".
+  it('masks a number in every message, with no exception', async () => {
+    // The `moderate` flag is gone: there is no caller, and no state, that can
+    // turn this off for a conversation.
     const service = new ModerationService(configWith());
-    const verdict = await service.review('rappelle moi au 06 12 34 56 78', false);
+    const verdict = await service.review('rappelle moi au 06 12 34 56 78');
 
-    expect(verdict.status).toBe(MessageModerationStatus.CLEAN);
-    expect(verdict.deliveredBody).toBe('rappelle moi au 06 12 34 56 78');
-    expect(verdict.spans).toEqual([]);
+    expect(verdict.status).toBe(MessageModerationStatus.REDACTED);
+    expect(verdict.deliveredBody).not.toMatch(/\d/);
   });
 });
