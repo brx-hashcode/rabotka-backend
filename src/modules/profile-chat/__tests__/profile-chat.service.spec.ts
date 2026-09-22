@@ -125,6 +125,33 @@ describe('ProfileChatService', () => {
    * digits, redacting them in the client is decoration and a network tab
    * defeats the whole product.
    */
+  describe('one conversation, for the thread header', () => {
+    it('describes a thread nobody has written in yet', async () => {
+      // The list leaves such a thread out, and the header used to look its
+      // counterpart up there — so a fresh thread showed "Discussion".
+      prisma.profileConversation.findUniqueOrThrow = jest.fn().mockResolvedValue({
+        ...conversation,
+        last_message_at: null,
+        worker: { id: WORKER, first_name: 'Sara', last_name: 'Colombe', avatar_url: null },
+        employer: { id: EMPLOYER, first_name: 'Job', last_name: 'ITOUA', avatar_url: null },
+        application: { id: APP, job_offer: { title: 'Ménage bureau' } },
+        messages: [],
+      });
+
+      const view = await service.getConversation(CONV, EMPLOYER);
+
+      expect(view.counterpartName).toBe('Sara Colombe');
+      expect(view.jobTitle).toBe('Ménage bureau');
+      expect(view.lastMessagePreview).toBeNull();
+    });
+
+    it('refuses a third party', async () => {
+      await expect(service.getConversation(CONV, STRANGER)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
   describe('the two views of one message', () => {
     it('gives the author their own text back, with the offsets', async () => {
       const message = await service.sendMessage(

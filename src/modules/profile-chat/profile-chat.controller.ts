@@ -106,6 +106,22 @@ export class ProfileChatController {
     return { conversation: { id: conversation.id } };
   }
 
+  /**
+   * One conversation's header data — counterpart, job, presence — including
+   * for a thread nobody has written in yet, which the list leaves out.
+   */
+  @Get(':id')
+  @UseGuards(ProfileAuthGuard)
+  @ApiOperation({ summary: 'Une discussion' })
+  async one(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return {
+      conversation: await this.chat.getConversation(id, req.user.profileId),
+    };
+  }
+
   @Get(':id/messages')
   @UseGuards(ProfileAuthGuard)
   @ApiOperation({ summary: 'Messages d’une discussion' })

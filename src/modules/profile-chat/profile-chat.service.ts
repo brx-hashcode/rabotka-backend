@@ -121,6 +121,54 @@ const LIVE_APPLICATION_STATUSES: ReadonlySet<ApplicationStatus> = new Set([
   ApplicationStatus.STARTED,
 ]);
 
+/**
+ * Everything a conversation row needs to become a ConversationView, shared by
+ * the list and by a single thread so the two cannot describe the same
+ * conversation differently.
+ */
+const CONVERSATION_VIEW_INCLUDE = {
+  worker: {
+    select: {
+      id: true,
+      first_name: true,
+      last_name: true,
+      avatar_url: true,
+    },
+  },
+  employer: {
+    select: {
+      id: true,
+      first_name: true,
+      last_name: true,
+      avatar_url: true,
+    },
+  },
+  application: {
+    select: {
+      id: true,
+      job_offer: { select: { title: true } },
+    },
+  },
+  messages: {
+    where: { deleted_at: null },
+    orderBy: { created_at: 'desc' },
+    take: 1,
+    select: {
+      body: true,
+      sender_id: true,
+      moderation_status: true,
+      read_at: true,
+      redactions: {
+        select: { start_offset: true, end_offset: true, category: true },
+      },
+    },
+  },
+} satisfies Prisma.ProfileConversationInclude;
+
+type ConversationRow = Prisma.ProfileConversationGetPayload<{
+  include: typeof CONVERSATION_VIEW_INCLUDE;
+}>;
+
 @Injectable()
 export class ProfileChatService {
   private readonly logger = new Logger(ProfileChatService.name);
@@ -220,7 +268,9 @@ export class ProfileChatService {
     actorId: string,
   ): Promise<ProfileConversation> {
     if (counterpartId === actorId) {
-      throw new BadRequestException('Vous ne pouvez pas vous écrire à vous-même');
+      throw new BadRequestException(
+        'Vous ne pouvez pas vous écrire à vous-même',
+      );
     }
     if (!(await this.isEnabled())) {
       throw new BadRequestException(
@@ -390,103 +440,99 @@ export class ProfileChatService {
         orderBy: [{ last_message_at: 'desc' }, { created_at: 'desc' }],
         skip: (page - 1) * limit,
         take: limit,
-        include: {
-          worker: {
-            select: {
-              id: true,
-              first_name: true,
-              last_name: true,
-              avatar_url: true,
-            },
-          },
-          employer: {
-            select: {
-              id: true,
-              first_name: true,
-              last_name: true,
-              avatar_url: true,
-            },
-          },
-          application: {
-            select: {
-              id: true,
-              job_offer: { select: { title: true } },
-            },
-          },
-          messages: {
-            where: { deleted_at: null },
-            orderBy: { created_at: 'desc' },
-            take: 1,
-            select: {
-              body: true,
-              sender_id: true,
-              moderation_status: true,
-              read_at: true,
-              redactions: {
-                select: { start_offset: true, end_offset: true, category: true },
-              },
-            },
-          },
-        },
+        include: CONVERSATION_VIEW_INCLUDE,
       }),
     ]);
 
-    // One grouped count and one pipeline rather than a query per row: a list of
-    // 20 conversations would otherwise be 41 round trips.
+    return {
+      data: await this.toViews(rows, profileId),
+      total,
+      page,
+      limit,
+    };
+  }
+
+  /**
+   * Rows to views, with unread counts, presence and unlock state fetched ONCE
+   * for the whole batch: a list of 20 would otherwise be 61 round trips.
+   */
+  private async toViews(
+    rows: ConversationRow[],
+    profileId: string,
+  ): Promise<ConversationView[]> {
     const [unread, online, unlocked] = await Promise.all([
       this.unreadCounts(
         profileId,
         rows.map((r) => r.id),
       ),
       this.presence.onlineAmong(
-        rows.map((r) => (r.worker_id === profileId ? r.employer_id : r.worker_id)),
+        rows.map((r) =>
+          r.worker_id === profileId ? r.employer_id : r.worker_id,
+        ),
       ),
       this.unlockedPairs(rows),
     ]);
 
-    return {
-      data: rows.map((row) => {
-        const isWorker = row.worker_id === profileId;
-        const counterpart = isWorker ? row.employer : row.worker;
-        const last = row.messages[0];
+    return rows.map((row) => {
+      const isWorker = row.worker_id === profileId;
+      const counterpart = isWorker ? row.employer : row.worker;
+      const last = row.messages[0];
 
-        return {
-          id: row.id,
-          counterpartId: counterpart.id,
-          counterpartName: `${counterpart.first_name} ${counterpart.last_name}`,
-          counterpartAvatarUrl: counterpart.avatar_url ?? null,
-          counterpartOnline: online.has(counterpart.id),
-          jobTitle: row.application?.job_offer.title ?? null,
-          applicationId: row.application_id,
-          lastMessageAt: row.last_message_at,
-          // The preview obeys the same rule as the thread: if the last message
-          // was not this profile's, they get the redacted form. A preview is a
-          // message too, and a leak in a list is still a leak.
-          lastMessagePreview: last
-            ? this.bodyFor(
-                {
-                  body: last.body,
-                  sender_id: last.sender_id,
-                  moderation_status: last.moderation_status,
-                  redactions: last.redactions,
-                },
-                profileId,
-              )
-            : null,
-          lastMessageMine: last?.sender_id === profileId,
-          lastMessageRead: last?.sender_id === profileId && last.read_at !== null,
-          lastMessageHeld:
-            last?.sender_id === profileId &&
-            last.moderation_status === MessageModerationStatus.HELD,
-          unreadCount: unread.get(row.id) ?? 0,
-          closed: row.closed_at !== null,
-          contactsUnlocked: unlocked.has(pairKey(row.worker_id, row.employer_id)),
-        };
-      }),
-      total,
-      page,
-      limit,
-    };
+      return {
+        id: row.id,
+        counterpartId: counterpart.id,
+        counterpartName: `${counterpart.first_name} ${counterpart.last_name}`,
+        counterpartAvatarUrl: counterpart.avatar_url ?? null,
+        counterpartOnline: online.has(counterpart.id),
+        jobTitle: row.application?.job_offer.title ?? null,
+        applicationId: row.application_id,
+        lastMessageAt: row.last_message_at,
+        // The preview obeys the same rule as the thread: if the last message
+        // was not this profile's, they get the redacted form. A preview is a
+        // message too, and a leak in a list is still a leak.
+        lastMessagePreview: last
+          ? this.bodyFor(
+              {
+                body: last.body,
+                sender_id: last.sender_id,
+                moderation_status: last.moderation_status,
+                redactions: last.redactions,
+              },
+              profileId,
+            )
+          : null,
+        lastMessageMine: last?.sender_id === profileId,
+        lastMessageRead: last?.sender_id === profileId && last.read_at !== null,
+        lastMessageHeld:
+          last?.sender_id === profileId &&
+          last.moderation_status === MessageModerationStatus.HELD,
+        unreadCount: unread.get(row.id) ?? 0,
+        closed: row.closed_at !== null,
+        contactsUnlocked: unlocked.has(pairKey(row.worker_id, row.employer_id)),
+      };
+    });
+  }
+
+  /**
+   * One conversation, whether or not anybody has written in it yet.
+   *
+   * The thread's header used to find its counterpart in the LIST — and the list
+   * only holds threads with a message, so a thread opened from a card and not
+   * yet written in showed "Discussion" and a "D". This works on a refresh and
+   * from a link (the WhatsApp nudge opens a thread directly), which state
+   * carried through the router would not.
+   */
+  async getConversation(
+    conversationId: string,
+    profileId: string,
+  ): Promise<ConversationView> {
+    await this.requireParticipant(conversationId, profileId);
+    const row = await this.prisma.profileConversation.findUniqueOrThrow({
+      where: { id: conversationId },
+      include: CONVERSATION_VIEW_INCLUDE,
+    });
+    const [view] = await this.toViews([row], profileId);
+    return view;
   }
 
   // ── Messages ───────────────────────────────────────────────────────────────
@@ -736,9 +782,17 @@ export class ProfileChatService {
   }
 
   /** What the OTHER party should be pushed and notified with, or null if nothing. */
-  deliverableFor(message: MessageView, recipientId: string): MessageView | null {
+  deliverableFor(
+    message: MessageView,
+    recipientId: string,
+  ): MessageView | null {
     if (message.status === MessageModerationStatus.HELD) return null;
-    return { ...message, mine: false, redactions: [], senderId: message.senderId };
+    return {
+      ...message,
+      mine: false,
+      redactions: [],
+      senderId: message.senderId,
+    };
   }
 
   /**
