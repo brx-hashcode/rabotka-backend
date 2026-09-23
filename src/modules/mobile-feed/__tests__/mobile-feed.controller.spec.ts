@@ -129,8 +129,21 @@ describe('MobileFeedController', () => {
           matchScore: 0,
           saved: false,
           applied: false,
+          // Null, not absent: the card decides whether to offer the chat
+          // button on this field, so "no live application" has to be a value
+          // it can read rather than a key it has to test for.
+          applicationId: null,
+          applicationState: 'NONE',
         },
-        { id: 'job-2', title: 'B', matchScore: 0, saved: true, applied: false },
+        {
+          id: 'job-2',
+          title: 'B',
+          matchScore: 0,
+          saved: true,
+          applied: false,
+          applicationId: null,
+          applicationState: 'NONE',
+        },
       ]);
     });
 
@@ -157,6 +170,8 @@ describe('MobileFeedController', () => {
         {
           id: 'job-9',
           title: 'Z',
+          applicationId: null,
+          applicationState: 'NONE',
           matchScore: 0.91,
           saved: false,
           applied: false,
@@ -428,8 +443,16 @@ describe('MobileFeedController', () => {
       mockType(ProfileType.WORKER);
       prisma.jobOffer.findMany.mockResolvedValue([searchRow()]);
       prisma.jobOffer.count.mockResolvedValue(1);
+      // The full shape the feed now selects: the applied flag comes from
+      // reapplyDecision, which reads status, cancelled_by and deleted_at.
       prisma.application.findMany.mockResolvedValue([
-        { job_offer_id: 'job-1' },
+        {
+          id: 'app-1',
+          job_offer_id: 'job-1',
+          status: 'PENDING',
+          cancelled_by: null,
+          deleted_at: null,
+        },
       ]);
 
       const result = await controller.jobSearch(reqFor('w1') as never, {});

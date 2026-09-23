@@ -45,12 +45,21 @@ function global(pattern: RegExp, extraFlags = ''): RegExp {
 }
 
 /**
- * Digits spelled out, the cheapest way around a digit matcher.
+ * Number words, the cheapest way around a digit matcher.
+ *
+ * The first version knew only zero to nine, and was bypassed in its first real
+ * test: "zero six huit cent cinq" went through CLEAN. Nobody here dictates a
+ * phone number digit by digit — they say it in PAIRS, the French way: « zéro
+ * six, quatre-vingt-dix-neuf, dix-sept, soixante-huit ». Dix, vingt, soixante
+ * and cent were simply not in the list.
+ *
+ * Folded text, so accents and hyphens are already gone: « quatre-vingt-dix »
+ * arrives as three tokens, « zéro » as "zero".
  *
  * `une` is in because "zero six une deux" is how it gets typed, however wrong
  * that is grammatically.
  */
-const SPELLED_DIGITS = [
+const NUMBER_WORDS = [
   'zero',
   'un',
   'une',
@@ -62,28 +71,68 @@ const SPELLED_DIGITS = [
   'sept',
   'huit',
   'neuf',
+  'dix',
+  'onze',
+  'douze',
+  'treize',
+  'quatorze',
+  'quinze',
+  'seize',
+  'vingt',
+  'vingts',
+  'trente',
+  'quarante',
+  'cinquante',
+  'soixante',
+  'cent',
+  'cents',
+  'mille',
 ];
 
+const FIGURE_GROUP = String.raw`\d{1,3}`;
+const NUMBER_TOKEN = `(?:${NUMBER_WORDS.join('|')}|${FIGURE_GROUP})`;
+
 /**
- * Six or more consecutive number-ish tokens, where a token is a spelled digit
- * or a short group of figures.
+ * Between two number tokens: whitespace, optionally with « et » in it.
  *
- * SIX, not three, and that threshold is the whole design. Everyday messages on
- * a job platform are full of small numbers — "6 ans d'experience", "2 enfants",
- * "15000 FCFA", "4 heures par jour" — and a filter that trips on those breaks
- * real conversations between people trying to work. Six consecutive is long
- * enough that no ordinary sentence reaches it and short enough to catch a
- * nine-digit number read aloud.
+ * « soixante et onze » is one number. But « et » is ALSO in nearly every
+ * sentence, so it is allowed only as glue between two numbers and never counts
+ * as a token itself — otherwise it could start a run, end one, or pad a short
+ * one past the threshold.
+ */
+const NUMBER_GAP = String.raw`\s+(?:et\s+)?`;
+
+/**
+ * Six or more consecutive number tokens.
+ *
+ * SIX, and that threshold is what protects prices written out in full:
+ * « quatre vingt dix neuf mille francs » is five tokens and must stay legible
+ * in a negotiation about a job. Everyday small numbers — "6 ans d'experience",
+ * "2 enfants", "15000 FCFA" — never come close.
  *
  * Known and accepted: a bare run of six small figures ("100 200 300 400 500
- * 600") matches. It is rare enough in prose, and this category is separable
- * from the others precisely so it can be switched off on its own if the reports
- * say otherwise.
+ * 600") matches. Rare in prose, and this category can be switched off alone.
  */
-const FIGURE_GROUP = String.raw`\d{1,3}`;
-const NUMBER_TOKEN = `(?:${SPELLED_DIGITS.join('|')}|${FIGURE_GROUP})`;
 const SPELLED_RUN = new RegExp(
-  String.raw`\b${NUMBER_TOKEN}(?:\s+${NUMBER_TOKEN}){5,}\b`,
+  String.raw`\b${NUMBER_TOKEN}(?:${NUMBER_GAP}${NUMBER_TOKEN}){5,}\b`,
+  'g',
+);
+
+/**
+ * « zéro » followed by three or more number tokens.
+ *
+ * The sharper rule, and the one that caught the real bypass. Every Congolese
+ * mobile number starts with 0 — 04, 05, 06 — and a price, a date or a
+ * quantity NEVER starts with « zéro ». So a run that opens on it is a phone
+ * number at four tokens, without lowering the six-token threshold that keeps
+ * written-out prices readable.
+ *
+ * Still a per-message rule: a number split across two messages — "zero six
+ * huit" then "cent cinq quarante" — gets past both. That is what the semantic
+ * pass is for, and it is not built yet.
+ */
+const ZERO_LED_RUN = new RegExp(
+  String.raw`\bzero(?:${NUMBER_GAP}${NUMBER_TOKEN}){3,}\b`,
   'g',
 );
 
@@ -159,6 +208,12 @@ export const BASE_PATTERNS: readonly PatternSpec[] = [
     category: 'MESSAGING_HANDLE',
     scope: 'raw',
     pattern: HANDLE_PATTERN,
+  },
+  {
+    id: 'spelled_zero_lead',
+    category: 'OBFUSCATED_DIGITS',
+    scope: 'folded',
+    pattern: ZERO_LED_RUN,
   },
   {
     id: 'spelled_digits',

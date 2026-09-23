@@ -19,6 +19,17 @@ export const IDENTITY_CHECK_QUEUE = 'identity-check-queue';
 export const PARTNER_ACTIVITY_QUEUE = 'partner-activity-queue';
 /** Admin broadcasts: one job per page of frozen recipient rows. */
 export const BROADCAST_QUEUE = 'broadcast-queue';
+/**
+ * "You have an unread message" — one DELAYED job per conversation and
+ * recipient, not one per message.
+ *
+ * The delay is the whole mechanism: a back-and-forth produces one nudge rather
+ * than a dozen, and the job re-checks at fire time whether anything is still
+ * unread. There is no cancel API on QueueService, and re-checking is the
+ * sturdier answer anyway — it survives the race where somebody reads while the
+ * job is already running.
+ */
+export const MESSAGING_NUDGE_QUEUE = 'messaging-nudge-queue';
 
 @Module({})
 export class QueueModule {

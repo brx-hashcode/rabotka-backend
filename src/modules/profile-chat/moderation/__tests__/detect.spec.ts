@@ -70,6 +70,32 @@ describe('detectContacts', () => {
       );
     });
 
+    describe('numbers dictated the French way', () => {
+      // The first version knew only zero to nine and was bypassed in its first
+      // real test. Nobody dictates a number digit by digit here; they say it
+      // in pairs.
+      it.each([
+        // The exact message that got through CLEAN in testing.
+        ['zero six huit cent cinq'],
+        ['zéro six, quatre-vingt-dix-neuf, dix-sept, soixante-huit, six'],
+        ['zero cinq soixante et onze vingt deux'],
+        ['appelle moi au zéro six neuf cent quatre-vingt-onze, soixante-seize'],
+        ['mon numero: zero 6 99 17 68 6'],
+      ])('catches %p', (text) => {
+        const spans = detectContacts(text);
+        expect(spans.length).toBeGreaterThan(0);
+        expect(spans.some((s) => s.category === 'OBFUSCATED_DIGITS' || s.category === 'PHONE')).toBe(true);
+      });
+
+      it('masks the whole dictated number, not a piece of it', () => {
+        const text = 'mon numero zero six quatre vingt dix neuf dix sept stp';
+        const [span] = detectContacts(text);
+        expect(text.slice(span.start, span.end)).toBe(
+          'zero six quatre vingt dix neuf dix sept',
+        );
+      });
+    });
+
     it('catches digits written as words WITH accents and punctuation', () => {
       // The reason the offset table exists: the match is found on folded text
       // and has to come back onto these exact characters.
@@ -102,6 +128,20 @@ describe('detectContacts', () => {
       'ok pour demain matin',
       '',
     ])('leaves %p untouched', (text) => {
+      expect(detectContacts(text)).toEqual([]);
+    });
+
+    it.each([
+      // Prices, dates and quantities written out in full. None of them starts
+      // with « zéro », and none reaches six tokens — the two properties the
+      // spelled-number rules are built on.
+      ['c’est quatre-vingt-dix-neuf mille francs par mois'],
+      ['je demande deux cent cinquante mille'],
+      ['on commence le vingt deux septembre deux mille vingt six'],
+      ['trois cent soixante-cinq jours par an'],
+      ['il y a vingt et un postes et trente candidats'],
+      ['six et sept heures, puis dix et onze'],
+    ])('leaves the written-out figure %p alone', (text) => {
       expect(detectContacts(text)).toEqual([]);
     });
 

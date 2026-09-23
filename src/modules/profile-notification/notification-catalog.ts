@@ -91,6 +91,20 @@ export type NotificationInput =
     }
   | { type: 'CLAIM_COMMENTED'; claimId: string; claimTitle: string }
   | {
+      /**
+       * Somebody wrote in the in-app messaging.
+       *
+       * Carries NO message text, not even the redacted form. The bell is
+       * rendered at write time and stored, so a body copied in here would
+       * outlive any later correction to what should have been withheld — and
+       * the feed is one place further for a phone number to leak out of.
+       */
+      type: 'NEW_MESSAGE';
+      conversationId: string;
+      senderName: string;
+      jobTitle: string | null;
+    }
+  | {
       type: 'CLAIM_STATUS_CHANGED';
       claimId: string;
       claimTitle: string;
@@ -300,6 +314,13 @@ export function renderNotification(
         title: 'Paiement échoué',
         body: `Votre paiement de ${fcfa(input.amount)} pour ${PAYMENT_LABEL[input.kind]} n’a pas abouti. Vous pouvez réessayer.`,
         link: paymentLink(input.kind, true),
+      };
+
+    case 'NEW_MESSAGE':
+      return {
+        title: 'Nouveau message',
+        body: `${input.senderName} vous a écrit${quoted(input.jobTitle)}.`,
+        link: `/discussions/${input.conversationId}`,
       };
 
     case 'CLAIM_COMMENTED':

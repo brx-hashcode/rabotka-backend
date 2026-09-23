@@ -1,4 +1,10 @@
 import {
+  CHATTABLE_APPLICATION_ORDER,
+  CHATTABLE_APPLICATION_SELECT,
+  applicationSummaries,
+  isApplied,
+} from './chattable-applications';
+import {
   Controller,
   Delete,
   ForbiddenException,
@@ -422,12 +428,15 @@ export class MobileFeedController {
       ids.length
         ? this.prisma.application.findMany({
             where: { worker_id: profileId, job_offer_id: { in: ids } },
-            select: { job_offer_id: true },
+            select: CHATTABLE_APPLICATION_SELECT,
+            orderBy: CHATTABLE_APPLICATION_ORDER,
           })
         : Promise.resolve([]),
     ]);
     const savedSet = new Set(saved.map((s) => s.job_offer_id));
-    const appliedSet = new Set(applied.map((a) => a.job_offer_id));
+    // One summary per offer, from the SAME rule the apply endpoint uses —
+    // see chattable-applications.ts for what the old boolean got wrong.
+    const summaries = applicationSummaries(applied);
 
     // Built through toWorkerJobShape rather than field by field: the explicit
     // list here used to omit is_remote, employment_type, city and country_name
@@ -441,7 +450,9 @@ export class MobileFeedController {
       categoryName: category?.name ?? null,
       matchScore: 0,
       saved: savedSet.has(r.id),
-      applied: appliedSet.has(r.id),
+      applied: isApplied(summaries.get(r.id)),
+      applicationState: summaries.get(r.id)?.state ?? 'NONE',
+      applicationId: summaries.get(r.id)?.applicationId ?? null,
     }));
 
     // `offset: skip` — otherwise every page restarts at position 0 and
@@ -567,19 +578,24 @@ export class MobileFeedController {
       ids.length
         ? this.prisma.application.findMany({
             where: { worker_id: profileId, job_offer_id: { in: ids } },
-            select: { job_offer_id: true },
+            select: CHATTABLE_APPLICATION_SELECT,
+            orderBy: CHATTABLE_APPLICATION_ORDER,
           })
         : Promise.resolve([]),
     ]);
     const savedSet = new Set(saved.map((s) => s.job_offer_id));
-    const appliedSet = new Set(applied.map((a) => a.job_offer_id));
+    // One summary per offer, from the SAME rule the apply endpoint uses —
+    // see chattable-applications.ts for what the old boolean got wrong.
+    const summaries = applicationSummaries(applied);
     const scoreById = new Map(hits.map((h) => [h.id, h.score]));
 
     const hydrated = offers.map((o) => ({
       ...toWorkerJobShape(o),
       matchScore: scoreById.get(o.id) ?? 0,
       saved: savedSet.has(o.id),
-      applied: appliedSet.has(o.id),
+      applied: isApplied(summaries.get(o.id)),
+      applicationState: summaries.get(o.id)?.state ?? 'NONE',
+      applicationId: summaries.get(o.id)?.applicationId ?? null,
     }));
 
     if (impression) {

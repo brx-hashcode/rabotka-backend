@@ -542,6 +542,44 @@ describe('LlmService', () => {
       deadline.dispose();
     });
 
+    it('blames the turn, not the provider, when both timers tie', async () => {
+      // The race the CI runner kept losing. With the reserve released, the
+      // per-call budget EQUALS the remaining turn, so both timers are armed for
+      // the same instant; if the per-call one lands first, `remainingMs()` is
+      // still 1 and a healthy provider was recorded as having failed.
+      //
+      // Forced rather than raced: the deadline reports 1ms left and has not
+      // aborted, which is exactly the state that misclassified.
+      const deadline = Deadline.start(5_000, 'turn');
+      jest.spyOn(deadline, 'remainingMs').mockReturnValue(1);
+      jest.spyOn(deadline, 'causedAbort').mockReturnValue(false);
+
+      const timingOut = () => ({
+        build: jest.fn(() => ({
+          invoke: jest.fn(
+            () =>
+              new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('timeout')), 5),
+              ),
+          ),
+        })),
+      });
+
+      await expect(
+        build(
+          timingOut() as never,
+          makeBreaker(),
+          makeConfig({ VOVA_LLM_TIMEOUT_MS: 5000, VOVA_LLM_MIN_CALL_MS: 0 }),
+        ).invokeWith(TIER_CHAINS.standard[0], 'hi', {
+          tier: 'standard',
+          deadline,
+          reserveMs: 0,
+        }),
+      ).rejects.toBeInstanceOf(LlmDeadlineExceededError);
+
+      deadline.dispose();
+    });
+
     // The cascade guard, and the single riskiest behaviour in this change.
     it('does NOT blame a provider for the turn running out of time', async () => {
       const deadline = Deadline.start(120, 'turn');
