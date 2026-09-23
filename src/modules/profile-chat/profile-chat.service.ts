@@ -64,6 +64,12 @@ export interface MessageView {
   status: MessageModerationStatus;
   /** Populated for the author only, so they can see WHICH characters stayed behind. */
   redactions: RedactionView[];
+  /**
+   * This reader has already reported this message. The author's alone, like
+   * `redactions` — and it is what keeps "déjà signalé" true after they leave
+   * the thread and come back, which component state could not.
+   */
+  reported: boolean;
   createdAt: Date;
   readAt: Date | null;
 }
@@ -568,6 +574,14 @@ export class ProfileChatService {
             select: { start_offset: true, end_offset: true, category: true },
             orderBy: { start_offset: 'asc' },
           },
+          // THIS READER'S own reports, never anybody else's: whether the other
+          // party contested a redaction is not this reader's business, and one
+          // row is all the view needs.
+          reports: {
+            where: { reporter_id: profileId },
+            select: { id: true },
+            take: 1,
+          },
         },
       }),
     ]);
@@ -896,8 +910,14 @@ export class ProfileChatService {
       throw new BadRequestException('Ce message n’a rien de masqué');
     }
 
-    await this.prisma.redactionReport.create({
-      data: { message_id: messageId, reporter_id: reporterId, note },
+    // Idempotent, against the unique index on (message, reporter). A second
+    // tap is the same person saying the same thing about the same message, and
+    // it must not add a row to a queue a human works through by hand — nor
+    // fail, because from where the author stands nothing went wrong. The first
+    // report stands, note included: it was written closest to the message.
+    await this.prisma.redactionReport.createMany({
+      data: [{ message_id: messageId, reporter_id: reporterId, note }],
+      skipDuplicates: true,
     });
   }
 
@@ -970,6 +990,12 @@ export class ProfileChatService {
         end_offset: number;
         category: RedactionCategory;
       }[];
+      /**
+       * Absent on the send path, where the message was created a line ago and
+       * cannot have been reported yet. Absent reads as "not reported", which is
+       * the truth there.
+       */
+      reports?: { id: string }[];
     },
     viewerId: string,
   ): MessageView {
@@ -991,6 +1017,7 @@ export class ProfileChatService {
             category: r.category,
           }))
         : [],
+      reported: mine && (row.reports?.length ?? 0) > 0,
       createdAt: row.created_at,
       readAt: row.read_at,
     };

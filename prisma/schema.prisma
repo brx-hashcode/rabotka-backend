@@ -2606,7 +2606,9 @@ model RedactionReport {
   reporter Profile        @relation(fields: [reporter_id], references: [id], onDelete: Cascade)
   reviewer User?          @relation("RedactionReportReviewer", fields: [reviewed_by], references: [id], onDelete: SetNull)
 
+  /// A report is a signal, not a conversation: the first one from an author
+  /// stands, and a second tap is a no-op rather than another row in the queue.
+  @@unique([message_id, reporter_id], map: "redaction_reports_message_reporter_key")
   @@index([reviewed_at], name: "idx_redaction_report_pending")
-  @@index([message_id], name: "idx_redaction_report_message")
   @@map("redaction_reports")
 }

@@ -83,7 +83,9 @@ describe('ProfileChatService', () => {
           .fn()
           .mockResolvedValue({ first_name: 'Sara', last_name: 'Colombe' }),
       },
-      redactionReport: { create: jest.fn().mockResolvedValue({}) },
+      redactionReport: {
+        createMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       $transaction: jest.fn((arg: unknown) =>
         typeof arg === 'function'
           ? (arg as (tx: unknown) => unknown)(prisma)
@@ -838,7 +840,28 @@ describe('ProfileChatService', () => {
         moderation_status: MessageModerationStatus.REDACTED,
       });
       await service.reportRedaction('m-1', WORKER, 'c’est un prix');
-      expect(prisma.redactionReport.create).toHaveBeenCalled();
+      expect(prisma.redactionReport.createMany).toHaveBeenCalledWith({
+        data: [
+          { message_id: 'm-1', reporter_id: WORKER, note: 'c’est un prix' },
+        ],
+        // The unique index on (message, reporter) is what stops a second tap
+        // from queueing the same report twice; this is the half of that rule
+        // that keeps it from being an error instead.
+        skipDuplicates: true,
+      });
+    });
+
+    it('is a no-op the second time, not an error', async () => {
+      prisma.profileMessage.findFirst.mockResolvedValue({
+        id: 'm-1',
+        sender_id: WORKER,
+        moderation_status: MessageModerationStatus.REDACTED,
+      });
+      prisma.redactionReport.createMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.reportRedaction('m-1', WORKER),
+      ).resolves.toBeUndefined();
     });
   });
 
