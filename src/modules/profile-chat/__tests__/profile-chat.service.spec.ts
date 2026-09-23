@@ -38,7 +38,11 @@ describe('ProfileChatService', () => {
   let service: ProfileChatService;
   let prisma: any;
   let config: { get: jest.Mock };
-  let gateway: { emitMessage: jest.Mock; emitRead: jest.Mock };
+  let gateway: {
+    emitMessage: jest.Mock;
+    emitRead: jest.Mock;
+    emitDeleted: jest.Mock;
+  };
   let events: { emit: jest.Mock };
   let queue: { addJob: jest.Mock };
   let presence: { onlineAmong: jest.Mock };
@@ -57,7 +61,12 @@ describe('ProfileChatService', () => {
 
   beforeEach(() => {
     prisma = {
-      application: { findFirst: jest.fn(), findUnique: jest.fn().mockResolvedValue({ job_offer: { title: 'Ménage bureau' } }) },
+      application: {
+        findFirst: jest.fn(),
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ job_offer: { title: 'Ménage bureau' } }),
+      },
       profileConversation: {
         fields: { worker_hidden_at: 'w', employer_hidden_at: 'e' },
         findUnique: jest.fn().mockResolvedValue(conversation),
@@ -104,7 +113,11 @@ describe('ProfileChatService', () => {
       }),
     };
 
-    gateway = { emitMessage: jest.fn(), emitRead: jest.fn() };
+    gateway = {
+      emitMessage: jest.fn(),
+      emitRead: jest.fn(),
+      emitDeleted: jest.fn(),
+    };
     events = { emit: jest.fn() };
     queue = { addJob: jest.fn().mockResolvedValue('job-1') };
     presence = { onlineAmong: jest.fn().mockResolvedValue(new Set()) };
@@ -131,14 +144,26 @@ describe('ProfileChatService', () => {
     it('describes a thread nobody has written in yet', async () => {
       // The list leaves such a thread out, and the header used to look its
       // counterpart up there — so a fresh thread showed "Discussion".
-      prisma.profileConversation.findUniqueOrThrow = jest.fn().mockResolvedValue({
-        ...conversation,
-        last_message_at: null,
-        worker: { id: WORKER, first_name: 'Sara', last_name: 'Colombe', avatar_url: null },
-        employer: { id: EMPLOYER, first_name: 'Job', last_name: 'ITOUA', avatar_url: null },
-        application: { id: APP, job_offer: { title: 'Ménage bureau' } },
-        messages: [],
-      });
+      prisma.profileConversation.findUniqueOrThrow = jest
+        .fn()
+        .mockResolvedValue({
+          ...conversation,
+          last_message_at: null,
+          worker: {
+            id: WORKER,
+            first_name: 'Sara',
+            last_name: 'Colombe',
+            avatar_url: null,
+          },
+          employer: {
+            id: EMPLOYER,
+            first_name: 'Job',
+            last_name: 'ITOUA',
+            avatar_url: null,
+          },
+          application: { id: APP, job_offer: { title: 'Ménage bureau' } },
+          messages: [],
+        });
 
       const view = await service.getConversation(CONV, EMPLOYER);
 
@@ -156,11 +181,7 @@ describe('ProfileChatService', () => {
 
   describe('the two views of one message', () => {
     it('gives the author their own text back, with the offsets', async () => {
-      const message = await service.sendMessage(
-        CONV,
-        WORKER,
-        BODY_WITH_PHONE,
-      );
+      const message = await service.sendMessage(CONV, WORKER, BODY_WITH_PHONE);
 
       expect(message.body).toBe(BODY_WITH_PHONE);
       expect(message.mine).toBe(true);
@@ -402,9 +423,9 @@ describe('ProfileChatService', () => {
         ...conversation,
         closed_at: new Date(),
       });
-      await expect(
-        service.sendMessage(CONV, WORKER, 'salut'),
-      ).rejects.toThrow(/close/i);
+      await expect(service.sendMessage(CONV, WORKER, 'salut')).rejects.toThrow(
+        /close/i,
+      );
     });
   });
 
@@ -461,9 +482,9 @@ describe('ProfileChatService', () => {
     });
 
     it('refuses somebody the application has nothing to do with', async () => {
-      await expect(
-        service.openForApplication(APP, STRANGER),
-      ).rejects.toThrow(ForbiddenException);
+      await expect(service.openForApplication(APP, STRANGER)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('refuses a dead application', async () => {
@@ -550,9 +571,9 @@ describe('ProfileChatService', () => {
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(conversation);
 
-      await expect(
-        service.openWithProfile(WORKER, EMPLOYER),
-      ).resolves.toEqual(conversation);
+      await expect(service.openWithProfile(WORKER, EMPLOYER)).resolves.toEqual(
+        conversation,
+      );
     });
 
     it('refuses two profiles of the same type', async () => {
@@ -598,8 +619,9 @@ describe('ProfileChatService', () => {
         // The application path carries the worker's own consent, so it needs
         // no ceiling — counting it would punish somebody for being popular.
         await service.openWithProfile(WORKER, EMPLOYER);
-        expect(prisma.profileConversation.count.mock.calls[0][0].where)
-          .toMatchObject({ application_id: null });
+        expect(
+          prisma.profileConversation.count.mock.calls[0][0].where,
+        ).toMatchObject({ application_id: null });
       });
 
       it('does not count re-opening a thread that already exists', async () => {
@@ -642,7 +664,9 @@ describe('ProfileChatService', () => {
       prisma.profileConversation.create.mockResolvedValue(conversation);
       await service.openForApplication('a-2', EMPLOYER);
 
-      expect(prisma.profileConversation.findUnique.mock.calls[0][0].where).toEqual({
+      expect(
+        prisma.profileConversation.findUnique.mock.calls[0][0].where,
+      ).toEqual({
         worker_id_employer_id: { worker_id: WORKER, employer_id: EMPLOYER },
       });
     });
@@ -665,15 +689,16 @@ describe('ProfileChatService', () => {
     });
 
     it('reuses an application thread when opened from the profile', async () => {
-      prisma.profile.findFirst = jest.fn().mockImplementation(
-        ({ where }: { where: { id: string } }) =>
+      prisma.profile.findFirst = jest
+        .fn()
+        .mockImplementation(({ where }: { where: { id: string } }) =>
           Promise.resolve({
             id: where.id,
             profile_type:
               where.id === WORKER ? ProfileType.WORKER : ProfileType.EMPLOYER,
             status: AccountStatus.ACTIVE,
           }),
-      );
+        );
       prisma.profileConversation.findUnique.mockResolvedValue(conversation);
 
       await expect(service.openWithProfile(WORKER, EMPLOYER)).resolves.toEqual(
@@ -702,10 +727,10 @@ describe('ProfileChatService', () => {
       // an empty row in the list.
       await service.listConversations(EMPLOYER);
       expect(
-        prisma.profileConversation.findMany.mock.calls[0][0].where.last_message_at,
+        prisma.profileConversation.findMany.mock.calls[0][0].where
+          .last_message_at,
       ).toEqual({ not: null });
     });
-
   });
 
   describe('moderation has no exception', () => {
@@ -734,9 +759,9 @@ describe('ProfileChatService', () => {
   describe('reading', () => {
     it('does not count the reader’s own messages as unread', async () => {
       await service.markRead(CONV, EMPLOYER);
-      expect(prisma.profileMessage.updateMany.mock.calls[0][0].where).toMatchObject(
-        { sender_id: { not: EMPLOYER } },
-      );
+      expect(
+        prisma.profileMessage.updateMany.mock.calls[0][0].where,
+      ).toMatchObject({ sender_id: { not: EMPLOYER } });
     });
 
     it('tells the author their messages were read', async () => {
@@ -794,8 +819,9 @@ describe('ProfileChatService', () => {
         employer_hidden_at: hiddenAt,
       });
       await service.listMessages(CONV, EMPLOYER);
-      expect(prisma.profileMessage.findMany.mock.calls[0][0].where.created_at)
-        .toEqual({ gt: hiddenAt });
+      expect(
+        prisma.profileMessage.findMany.mock.calls[0][0].where.created_at,
+      ).toEqual({ gt: hiddenAt });
     });
 
     it('leaves the other side’s thread whole', async () => {
@@ -817,9 +843,9 @@ describe('ProfileChatService', () => {
         sender_id: WORKER,
         moderation_status: MessageModerationStatus.REDACTED,
       });
-      await expect(
-        service.reportRedaction('m-1', EMPLOYER),
-      ).rejects.toThrow(ForbiddenException);
+      await expect(service.reportRedaction('m-1', EMPLOYER)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('refuses a report on a message with nothing masked', async () => {
@@ -882,6 +908,132 @@ describe('ProfileChatService', () => {
         Promise.resolve(key === 'messaging.enabled' ? 'false' : 'false'),
       );
       await expect(service.listMessages(CONV, WORKER)).resolves.toBeTruthy();
+    });
+  });
+  /**
+   * Taking a message back.
+   *
+   * The rule that matters here is not the happy path — it is that the row
+   * survives. A platform whose whole job is catching shared phone numbers
+   * cannot offer a button that erases the evidence of one.
+   */
+  describe('deleteMessage', () => {
+    const stored = (over: Record<string, unknown> = {}) => ({
+      id: 'm-1',
+      sender_id: WORKER,
+      conversation_id: CONV,
+      deleted_at: null,
+      ...over,
+    });
+
+    beforeEach(() => {
+      prisma.profileMessage.findUnique = jest.fn().mockResolvedValue(stored());
+      prisma.profileMessage.update = jest.fn().mockResolvedValue({});
+    });
+
+    it('stamps deleted_at and tells BOTH parties', async () => {
+      await service.deleteMessage('m-1', WORKER);
+
+      expect(prisma.profileMessage.update).toHaveBeenCalledWith({
+        where: { id: 'm-1' },
+        data: { deleted_at: expect.any(Date) },
+      });
+      // The author too: they may have the thread open in a second tab.
+      expect(gateway.emitDeleted).toHaveBeenCalledWith(WORKER, CONV, 'm-1');
+      expect(gateway.emitDeleted).toHaveBeenCalledWith(EMPLOYER, CONV, 'm-1');
+    });
+
+    it('NEVER erases the body or the redaction offsets', async () => {
+      await service.deleteMessage('m-1', WORKER);
+
+      const [[call]] = prisma.profileMessage.update.mock.calls;
+      expect(call.data).toEqual({ deleted_at: expect.any(Date) });
+      expect(call.data).not.toHaveProperty('body');
+      // Nothing may sweep the offsets away either — they are moderation's
+      // record of what was caught.
+      expect(prisma.messageRedaction).toBeUndefined();
+    });
+
+    it('refuses the recipient', async () => {
+      await expect(service.deleteMessage('m-1', EMPLOYER)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(prisma.profileMessage.update).not.toHaveBeenCalled();
+    });
+
+    it("hides a message in somebody else's conversation behind a 404", async () => {
+      // NotFound rather than Forbidden, like requireParticipant: "it exists but
+      // is not yours" is itself information about who is talking to whom.
+      await expect(service.deleteMessage('m-1', STRANGER)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('404s an unknown message', async () => {
+      prisma.profileMessage.findUnique.mockResolvedValue(null);
+      await expect(service.deleteMessage('nope', WORKER)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('is idempotent — a second tap is not an error', async () => {
+      prisma.profileMessage.findUnique.mockResolvedValue(
+        stored({ deleted_at: new Date() }),
+      );
+
+      await expect(
+        service.deleteMessage('m-1', WORKER),
+      ).resolves.toBeUndefined();
+      expect(prisma.profileMessage.update).not.toHaveBeenCalled();
+      expect(gateway.emitDeleted).not.toHaveBeenCalled();
+    });
+
+    it('refuses once the conversation is closed', async () => {
+      prisma.profileConversation.findUnique.mockResolvedValue({
+        ...conversation,
+        closed_at: new Date(),
+      });
+
+      await expect(service.deleteMessage('m-1', WORKER)).rejects.toThrow(
+        /close/i,
+      );
+    });
+  });
+
+  describe('the tombstone a deleted message leaves', () => {
+    it('shows both sides an empty message, not a hole in the thread', async () => {
+      // Deliberately a REDACTED message with offsets: if the tombstone leaked
+      // either the body or the spans, this is where it would show.
+      prisma.profileMessage.findMany.mockResolvedValue([
+        storedMessage({ deleted_at: new Date('2026-09-23T10:00:00Z') }),
+      ]);
+      prisma.profileMessage.count.mockResolvedValue(1);
+
+      for (const viewer of [WORKER, EMPLOYER]) {
+        const { data } = await service.listMessages(CONV, viewer);
+
+        expect(data[0].deletedAt).toBeInstanceOf(Date);
+        expect(data[0].body).toBe('');
+        expect(data[0].redactions).toEqual([]);
+        expect(data[0].reported).toBe(false);
+      }
+    });
+
+    it('still lists it, rather than dropping it out of the thread', async () => {
+      // The `where` must NOT filter deleted_at — a message that simply vanished
+      // mid-conversation reads as a bug, and lets a thread be rewritten.
+      prisma.profileMessage.findMany.mockResolvedValue([]);
+      await service.listMessages(CONV, WORKER);
+
+      const [[query]] = prisma.profileMessage.findMany.mock.calls;
+      expect(query.where).not.toHaveProperty('deleted_at');
+    });
+
+    it('does not let a deleted message keep a thread unread', async () => {
+      await service.markRead(CONV, EMPLOYER);
+
+      const [[query]] = prisma.profileMessage.updateMany.mock.calls;
+      expect(query.where.deleted_at).toBeNull();
     });
   });
 });
