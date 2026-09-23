@@ -44,6 +44,45 @@ export function brazzavilleClock(now: Date = new Date()): {
   };
 }
 
+/**
+ * Correct a salutation the model got wrong about the time of day.
+ *
+ * `brazzavilleClock` is right and has always been right — checked against four
+ * real replies from one transcript: 06h08, 09h19 and 09h29 local all produced
+ * « Bonsoir ». The clock said « Bonjour » for every one of them. Fariol
+ * eventually corrected it himself: « Tu confond le temps c'est bonjour ah ah ».
+ *
+ * The prompt already carries the hour AND the word it calls for, and this file
+ * already records one earlier attempt to fix this by prompting — a second
+ * example was added so a single one could not be copied blindly. It produced
+ * « Bonsoir » at 14h35 anyway. Three rounds of instruction is enough: the rule
+ * is mechanical, so it belongs in code.
+ *
+ * ONLY WHEN THE PERSON DID NOT GREET FIRST. The standing rule is to return a
+ * salutation with the SAME WORD they used — somebody who writes « bonsoir » at
+ * noon gets « Bonsoir » back, deliberately, because nobody is corrected on
+ * their own greeting. This only touches a salutation the model chose alone.
+ *
+ * Only the OPENING word, and only when it is the wrong one of the pair. It is
+ * not a rewriter: anything else the model wrote is its own.
+ */
+export function correctSalutation(
+  reply: string,
+  userText: string,
+  now: Date = new Date(),
+): string {
+  const { greeting } = brazzavilleClock(now);
+  const wrong = greeting === 'Bonjour' ? 'Bonsoir' : 'Bonjour';
+
+  // They greeted first: their word wins, whatever the hour.
+  if (/\b(bonjour|bonsoir|bonne nuit)\b/iu.test(userText)) return reply;
+
+  const opening = new RegExp(`^(\\s*)${wrong}\\b`, 'u');
+  if (!opening.test(reply)) return reply;
+
+  return reply.replace(opening, `$1${greeting}`);
+}
+
 export interface PromptContext {
   firstName: string | null;
   profileType: ProfileType;

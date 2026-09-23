@@ -19,7 +19,7 @@ import { VovaAnonymousStore } from './agent/anonymous.store';
 import { VovaMemoryService } from './agent/memory.service';
 import { withTimeout } from './llm/llm.service';
 import { Deadline } from './llm/deadline';
-import { isWalled } from './agent/prompts';
+import { correctSalutation, isWalled } from './agent/prompts';
 import { VOVA_CONFIG_KEYS } from './vova.constants';
 import { acknowledgementReply, refusal } from './agent/refusals';
 import { welcomePlatformMessage } from '../bot/messages/welcome.messages';
@@ -440,11 +440,17 @@ export class VovaService {
           this.logger.debug(`memory refresh failed for ${profile.id}`, err),
         );
 
+      // The model picks the wrong half of Bonjour/Bonsoir often enough that one
+      // user corrected it himself — « Tu confond le temps c'est bonjour ah ah »,
+      // at 06h08. The clock was right; the reply was not. Fixed here rather than
+      // asked for again in the prompt, which has already been tried twice.
+      const answer = correctSalutation(reply.text, text);
+
       // The card goes out now only if the person asked to go somewhere.
       // Otherwise the reply stands on its own and the destination is
       // remembered, so a following « oui » opens it.
       if (isNavigationRequest(text)) {
-        return [reply.text, this.card(reply.destination)];
+        return [answer, this.card(reply.destination)];
       }
 
       // Only remember a destination when the reply actually proposed to open
@@ -454,7 +460,7 @@ export class VovaService {
       if (offersNavigation(reply.text)) {
         await this.offers.remember(profile.id, reply.destination);
       }
-      return [reply.text];
+      return [answer];
     } catch (err) {
       this.report(
         err,
