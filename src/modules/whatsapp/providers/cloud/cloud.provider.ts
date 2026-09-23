@@ -36,6 +36,19 @@ import {
 const CTA_BUTTON_TEXT_MAX = 20;
 
 /**
+ * Did this send fail because the media id we used is no longer there?
+ *
+ * Meta keeps uploaded media for about 30 days and reports a gone id through the
+ * same family of codes as an unfetchable link, which is what `MEDIA_ERROR`
+ * covers. Narrow on purpose: this only ever runs on a send that DID carry an
+ * id, so a media error on that send points at the id before anything else, and
+ * anything broader would re-upload on failures an upload cannot fix.
+ */
+function isStaleMediaError(err: unknown): boolean {
+  return err instanceof WhatsappError && err.code === 'MEDIA_ERROR';
+}
+
+/**
  * Meta WhatsApp Cloud API implementation of the port.
  *
  * Everything provider-specific — the wire shapes, the digits-only recipient
@@ -44,6 +57,27 @@ const CTA_BUTTON_TEXT_MAX = 20;
  */
 export class CloudProvider implements WhatsappProvider {
   readonly name = 'cloud' as const;
+
+  /**
+   * Source URL → the media id Meta gave us for it.
+   *
+   * IN PROCESS, not Redis, and that is the whole design. Uploading is idempotent
+   * and cheap, the set of images is one brand cover, and a cold process pays a
+   * single upload on its first card. Sharing this between the api and the worker
+   * would buy one avoided upload per restart at the cost of a Redis dependency
+   * inside a provider that is constructed by hand, outside Nest's DI — see
+   * `whatsapp-provider.factory.ts`.
+   *
+   * Entries are dropped when Meta says the id is gone (they last about 30 days),
+   * so this heals itself without a TTL to keep in step with Meta's.
+   */
+  private readonly mediaIds = new Map<string, string>();
+
+  /**
+   * In-flight uploads, so a burst of cards does not upload the same image N
+   * times. The first caller uploads, the rest await the same promise.
+   */
+  private readonly mediaUploads = new Map<string, Promise<string>>();
 
   readonly capabilities: ProviderCapabilities = {
     typingIndicator: true,
@@ -226,37 +260,96 @@ export class CloudProvider implements WhatsappProvider {
       });
     }
 
-    const header = payload.imageUrl
-      ? {
-          header: { type: 'image' as const, image: { link: payload.imageUrl } },
-        }
-      : payload.header
-        ? { header: { type: 'text' as const, text: payload.header } }
-        : {};
+    const send = async (
+      image: { link: string } | { id: string } | null,
+    ): Promise<SendResult> => {
+      const header = image
+        ? { header: { type: 'image' as const, image } }
+        : payload.header
+          ? { header: { type: 'text' as const, text: payload.header } }
+          : {};
 
-    const response = await this.client.send({
-      messaging_product: MESSAGING_PRODUCT,
-      recipient_type: 'individual',
-      to: toProviderAddress(to),
-      type: 'interactive',
-      interactive: {
-        type: 'cta_url',
-        ...header,
-        body: { text: payload.body },
-        ...(payload.footer ? { footer: { text: payload.footer } } : {}),
-        action: {
-          name: 'cta_url',
-          parameters: {
-            display_text: payload.buttonText,
-            url: payload.url,
+      const response = await this.client.send({
+        messaging_product: MESSAGING_PRODUCT,
+        recipient_type: 'individual',
+        to: toProviderAddress(to),
+        type: 'interactive',
+        interactive: {
+          type: 'cta_url',
+          ...header,
+          body: { text: payload.body },
+          ...(payload.footer ? { footer: { text: payload.footer } } : {}),
+          action: {
+            name: 'cta_url',
+            parameters: {
+              display_text: payload.buttonText,
+              url: payload.url,
+            },
           },
         },
-      },
-      ...(opts?.internalMessageId
-        ? { biz_opaque_callback_data: opts.internalMessageId }
-        : {}),
+        ...(opts?.internalMessageId
+          ? { biz_opaque_callback_data: opts.internalMessageId }
+          : {}),
+      });
+      return this.toResult(response, 'interactive_cta');
+    };
+
+    if (!payload.imageUrl) return send(null);
+
+    const source = payload.imageUrl;
+    const mediaId = await this.mediaIdFor(source);
+
+    // The upload itself failed — the bucket is unreachable from here, or Graph
+    // refused the file. Fall back to the link so the card is no worse off than
+    // it was before ids existed: Meta may still manage the fetch, and if it
+    // does not, the caller's own template fallback catches it.
+    if (!mediaId) return send({ link: source });
+
+    try {
+      return await send({ id: mediaId });
+    } catch (err) {
+      // An id that Meta no longer recognises — uploaded media lasts about 30
+      // days. Drop it and go once more with a fresh one, which is what makes
+      // the cache self-healing rather than something with a TTL to maintain.
+      if (!isStaleMediaError(err)) throw err;
+
+      this.mediaIds.delete(source);
+      const fresh = await this.mediaIdFor(source);
+      return send(fresh ? { id: fresh } : { link: source });
+    }
+  }
+
+  /**
+   * The media id for an image, uploading it the first time it is asked for.
+   *
+   * Returns null rather than throwing: a card whose image could not be uploaded
+   * should still go out. Failing the send over the picture would turn a
+   * cosmetic problem into a missed message.
+   */
+  private async mediaIdFor(sourceUrl: string): Promise<string | null> {
+    const cached = this.mediaIds.get(sourceUrl);
+    if (cached) return cached;
+
+    const inFlight = this.mediaUploads.get(sourceUrl);
+    if (inFlight) return inFlight.catch(() => null);
+
+    const upload = this.client
+      .uploadMedia(sourceUrl)
+      .then((id) => {
+        this.mediaIds.set(sourceUrl, id);
+        return id;
+      })
+      .finally(() => this.mediaUploads.delete(sourceUrl));
+
+    this.mediaUploads.set(sourceUrl, upload);
+
+    return upload.catch((err: unknown) => {
+      this.logger.warn(
+        `Could not upload ${sourceUrl} to WhatsApp, falling back to a link: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+      return null;
     });
-    return this.toResult(response, 'interactive_cta');
   }
 
   async sendInteractiveList(

@@ -109,11 +109,21 @@ export interface CloudInteractivePayload {
          * Unlike the other three, its header may carry an image, so a brand
          * card survives the move off templates. Verified against Graph before
          * this was written: an image header on `cta_url` is accepted.
+         *
+         * PREFER `{ id }` OVER `{ link }`. A link makes Meta fetch the image
+         * from the public internet at send time, and that fetch is the only
+         * thing in the whole outbound path that depends on a third party being
+         * reachable from Meta's network — it failed in production with 131053
+         * while the same URL answered 200 to everyone else, including Meta's
+         * own `facebookexternalhit` agent. An uploaded media id is served from
+         * Meta's own storage, which is exactly why an approved TEMPLATE with a
+         * header image never has this problem: its image was uploaded once at
+         * approval and is never fetched again.
          */
         type: 'cta_url';
         header?:
           | { type: 'text'; text: string }
-          | { type: 'image'; image: { link: string } };
+          | { type: 'image'; image: { link: string } | { id: string } };
         body: { text: string };
         footer?: { text: string };
         action: {
@@ -226,6 +236,19 @@ export function isCloudErrorBody(value: unknown): value is CloudErrorBody {
   const error = (value as { error?: unknown }).error;
   if (typeof error !== 'object' || error === null) return false;
   return typeof (error as { code?: unknown }).code === 'number';
+}
+
+/** What `POST /{phone-number-id}/media` answers with. */
+export interface CloudMediaUploadResponse {
+  id: string;
+}
+
+export function isCloudMediaUploadResponse(
+  value: unknown,
+): value is CloudMediaUploadResponse {
+  if (typeof value !== 'object' || value === null) return false;
+  const id = (value as { id?: unknown }).id;
+  return typeof id === 'string' && id.length > 0;
 }
 
 export function isCloudSendResponse(
