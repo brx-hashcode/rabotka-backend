@@ -1,9 +1,7 @@
 import {
   coverImageUrl,
   ctaReply,
-  templateReply,
 } from '../../../common/constants/whatsapp-carousel';
-import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 
 /** Where the welcome card sends people: the role-aware app home. */
 const WELCOME_PATH = 'home';
@@ -11,7 +9,13 @@ const WELCOME_PATH = 'home';
 /** Where the unregistered card sends people: there is no account to open yet. */
 const ONBOARDING_PATH = 'onboarding';
 
-const APP_URL = 'https://rabotka.work/login?redirect=/home';
+/**
+ * Where a text fallback points, since it has no button to carry the one-tap
+ * link. The path goes in as a `?redirect=` target rather than onto the path:
+ * the app's entry point is the login screen, which then forwards.
+ */
+const appUrlFor = (path: string): string =>
+  `https://rabotka.work/login?redirect=/${path.replace(/^\/+/u, '')}`;
 
 /**
  * Both cards are sent FREE-FORM rather than as their approved templates.
@@ -48,51 +52,50 @@ const APP_URL = 'https://rabotka.work/login?redirect=/home';
  *   assistant passes the place the person actually asked about, so the card
  *   opens there instead of making them navigate again.
  */
+/**
+ * THE HEADER IMAGE, AND WHY IT IS A LINK.
+ *
+ * Verified against Graph on a live send, because two rounds of guessing had
+ * already cost a production regression:
+ *
+ *   header.image = { link }  ->  200, delivered
+ *   header.image = { id }    ->  400, 131008 "header image must contain link"
+ *
+ * A `cta_url` header REQUIRES a link. It does not take an uploaded media id,
+ * however reasonable that looks next to templates, whose header media really is
+ * uploaded once at approval. Sending an id here fails every time.
+ *
+ * That is worth knowing because a link is the fragile option and the instinct
+ * to replace it is a good one. The bucket is `*.r2.dev`, Cloudflare's
+ * development endpoint, which is rate-limited and not meant for production
+ * traffic — when Meta cannot fetch it the send comes back 131053. That is a
+ * transient failure of the HOST, not of the shape of the message, and the fix
+ * for it is a real domain in front of the bucket, not a different payload.
+ *
+ * Until then `CloudProvider` retries the card without its image on any refusal,
+ * so a bucket hiccup costs the picture rather than falling through to the
+ * approved MARKETING template, which is billed.
+ */
 export function welcomePlatformMessage(
   destination: string = WELCOME_PATH,
 ): string {
-  const { variables } = WHATSAPP_TEMPLATES.welcomePlatform;
+  const body = [
+    '*Rabotka*',
+    'La première marketplace d’emploi sur WhatsApp en Afrique.',
+    'Offres, candidatures et missions : tout se passe dans l’application.',
+  ].join('\n');
 
   return ctaReply({
-    body: [
-      '*Rabotka*',
-      'La première marketplace d’emploi sur WhatsApp en Afrique.',
-      'Offres, candidatures et missions : tout se passe dans l’application.',
-    ].join('\n'),
+    body,
     buttonText: 'Ouvrir l’application',
     // A path, not a URL: the outbound worker mints the one-tap `/s/<code>`
-    // link, exactly as it does for the template's button.
+    // link on the way out.
     path: destination,
     imageUrl: coverImageUrl(),
-    fallbackTemplate: 'welcomePlatform',
-    fallbackVariables: variables(destination),
+    // TEXT, NOT A TEMPLATE — see the note above this function. There is no
+    // billed way out of this card any more.
+    fallbackText: `${body}\n\n${appUrlFor(destination)}`,
   });
-}
-
-/**
- * The template path, kept whole for a rollback.
- *
- * Point `welcomePlatformMessage` at this to put the approved card back: same
- * words, same button, billed again. Its own free-form branch below is the
- * older, buttonless fallback for a blank `TPL_WELCOME_PLATFORM`.
- */
-export function welcomePlatformTemplateMessage(): string {
-  const { contentSid, variables } = WHATSAPP_TEMPLATES.welcomePlatform;
-
-  if (contentSid) {
-    return templateReply('welcomePlatform', variables(WELCOME_PATH));
-  }
-
-  // Kept word-for-word in step with the card's title, so a rollback to the
-  // free-form branch doesn't quietly change what the bot says.
-  return [
-    `[IMG:${coverImageUrl()}]*Rabotka*`,
-    'La première marketplace d’emploi sur WhatsApp en Afrique.',
-    '',
-    'Offres, candidatures et missions : tout se passe dans l’application.',
-    '',
-    APP_URL,
-  ].join('\n');
 }
 
 /**
@@ -117,23 +120,13 @@ export function welcomeUnregisteredMessage(): string {
     buttonText: 'Créer mon compte',
     path: ONBOARDING_PATH,
     imageUrl: coverImageUrl(),
-    fallbackTemplate: 'welcomeUnregisteredCard',
+    fallbackText: [
+      '*Bienvenue sur Rabotka*',
+      'L’endroit où compétences et opportunités se rencontrent.',
+      'Ce numéro n’est pas encore enregistré.',
+      '',
+      appUrlFor(ONBOARDING_PATH),
+    ].join('\n'),
   });
 }
 
-/**
- * The template path for the unregistered card, kept for a rollback.
- *
- * Point `welcomeUnregisteredMessage` here to send the approved card again.
- * Rolling back further — to the text-only template that predated the card —
- * means pointing `TPL_WELCOME_UNREGISTERED_V2` at
- * `HX1610d675f58d8fa92d277383584cc5fb`.
- *
- * No free-form branch, unlike its sibling: `sid()` returns its approved default
- * whenever the env override is blank, so `contentSid` is never empty and a
- * guard here would be dead code that reads like a live choice.
- */
-export function welcomeUnregisteredTemplateMessage(): string {
-  const card = WHATSAPP_TEMPLATES.welcomeUnregisteredCard;
-  return templateReply('welcomeUnregisteredCard', card.variables());
-}

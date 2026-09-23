@@ -78,7 +78,7 @@ describe('ConversationService', () => {
       expect(result.replies).toHaveLength(1);
       // Registry, not a literal — see bot-orchestrator.service.spec.ts.
       expect(result.replies[0]).toContain(
-        '"fallbackTemplate":"welcomeUnregisteredCard"',
+        '"fallbackText"',
       );
       expect(botOrchestrator.handle).not.toHaveBeenCalled();
     });
@@ -114,7 +114,7 @@ describe('ConversationService', () => {
       // so `/compte` reached the matcher still carrying it.
       expect(vova.handleAnonymous).not.toHaveBeenCalled();
       expect(result.replies[0]).toContain(
-        '"fallbackTemplate":"welcomeUnregisteredCard"',
+        '"fallbackText"',
       );
     });
 
@@ -148,7 +148,7 @@ describe('ConversationService', () => {
 
         expect(vova.handleAnonymous).not.toHaveBeenCalled();
         expect(result.replies[0]).toContain(
-          '"fallbackTemplate":"welcomeUnregisteredCard"',
+          '"fallbackText"',
         );
       }
     });
@@ -162,7 +162,7 @@ describe('ConversationService', () => {
       const result = await service.handleIncomingMessage(PHONE, 'Bonjour');
 
       expect(result.replies[0]).toContain(
-        '"fallbackTemplate":"welcomeUnregisteredCard"',
+        '"fallbackText"',
       );
     });
 
@@ -199,7 +199,7 @@ describe('ConversationService', () => {
       expect(result.replies).toHaveLength(2);
       expect(result.replies[0]).toContain('Créez votre compte');
       expect(result.replies[1]).toContain(
-        '"fallbackTemplate":"welcomeUnregisteredCard"',
+        '"fallbackText"',
       );
     });
 

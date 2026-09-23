@@ -123,7 +123,7 @@ export interface CloudInteractivePayload {
         type: 'cta_url';
         header?:
           | { type: 'text'; text: string }
-          | { type: 'image'; image: { link: string } | { id: string } };
+          | { type: 'image'; image: { link: string } };
         body: { text: string };
         footer?: { text: string };
         action: {
@@ -236,19 +236,6 @@ export function isCloudErrorBody(value: unknown): value is CloudErrorBody {
   const error = (value as { error?: unknown }).error;
   if (typeof error !== 'object' || error === null) return false;
   return typeof (error as { code?: unknown }).code === 'number';
-}
-
-/** What `POST /{phone-number-id}/media` answers with. */
-export interface CloudMediaUploadResponse {
-  id: string;
-}
-
-export function isCloudMediaUploadResponse(
-  value: unknown,
-): value is CloudMediaUploadResponse {
-  if (typeof value !== 'object' || value === null) return false;
-  const id = (value as { id?: unknown }).id;
-  return typeof id === 'string' && id.length > 0;
 }
 
 export function isCloudSendResponse(

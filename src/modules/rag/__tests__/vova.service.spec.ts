@@ -261,7 +261,7 @@ describe('the app card', () => {
     // for a job that drains after the window has shut.
     expect(replies?.[1]).toContain('[CTA:]');
     expect(replies?.[1]).not.toContain('[TPL:');
-    expect(replies?.[1]).toContain('"fallbackTemplate":"welcomePlatform"');
+    expect(replies?.[1]).toContain('"fallbackText"');
   });
 
   it('is sent on a bare « oui » after an offer, with no model call', async () => {
@@ -269,7 +269,9 @@ describe('the app card', () => {
     const offers = makeOffers('portefeuille');
     const replies = await build(agent, live, offers).handle(PROFILE, 'oui');
 
-    expect(replies?.[1]).toContain('"1":"portefeuille"');
+    // The destination now rides on the card's own `path` rather than on a
+    // fallback template's variables — which is the more direct assertion.
+    expect(replies?.[1]).toContain('"path":"portefeuille"');
     expect(agent.handle).not.toHaveBeenCalled();
   });
 
