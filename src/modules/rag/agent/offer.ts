@@ -124,6 +124,66 @@ export function isPureGreeting(text: string): boolean {
   return PURE_GREETINGS.includes(folded);
 }
 
+/**
+ * A message that CLOSES the exchange rather than opening one.
+ *
+ * "merci", "non merci", "je vois", "ok", "non laisse" — the person is done.
+ * They are not asking anything, and they are not greeting.
+ *
+ * Its own list, for the same reason {@link PURE_GREETINGS} is its own: the
+ * router's lists answer "could a cheaper model take this?", a cost question.
+ * This one answers "should anything be sent back beyond an acknowledgement?",
+ * which is a correctness question — and getting it wrong is what produced a
+ * real transcript where every « non merci » was answered with a full
+ * reintroduction and a card, until the person wrote « arrête avec vos messages
+ * bête la ».
+ *
+ * NOTE « non merci » AND « merci » both belong here. A refusal is still a
+ * close: answering it with "how can I help you today?" is not listening.
+ */
+const ACKNOWLEDGEMENTS = [
+  'merci',
+  'merci bien',
+  'merci beaucoup',
+  'mercii',
+  'non merci',
+  'ok merci',
+  'merci ok',
+  'je vois',
+  'd accord',
+  'daccord',
+  'ok',
+  'okay',
+  'oki',
+  'non laisse',
+  'laisse',
+  'laisse tomber',
+  'c est bon',
+  'cest bon',
+  'ca va',
+  'rien',
+  'non rien',
+  'thanks',
+  'thank you',
+  'thx',
+  'no thanks',
+  'nothing',
+  'matondi',
+];
+
+/**
+ * True only when the WHOLE message is an acknowledgement.
+ *
+ * Exact match after folding, like {@link isPureGreeting} and for the same
+ * reason: « merci, et comment je postule ? » is a question with a thank-you in
+ * front of it, and answering it with "de rien" drops the question on the floor.
+ */
+export function isAcknowledgement(text: string): boolean {
+  const folded = foldText(text);
+  if (!folded || folded.length > 20) return false;
+  return ACKNOWLEDGEMENTS.includes(folded);
+}
+
 export function isNavigationRequest(text: string): boolean {
   const folded = foldText(text);
   if (!folded) return false;

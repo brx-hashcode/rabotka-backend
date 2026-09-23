@@ -10,6 +10,7 @@ import {
 import {
   isAffirmation,
   isNavigationRequest,
+  isAcknowledgement,
   isPureGreeting,
   offersNavigation,
 } from './agent/offer';
@@ -20,7 +21,7 @@ import { withTimeout } from './llm/llm.service';
 import { Deadline } from './llm/deadline';
 import { isWalled } from './agent/prompts';
 import { VOVA_CONFIG_KEYS } from './vova.constants';
-import { refusal } from './agent/refusals';
+import { acknowledgementReply, refusal } from './agent/refusals';
 import { welcomePlatformMessage } from '../bot/messages/welcome.messages';
 
 /**
@@ -156,6 +157,13 @@ export class VovaService {
       if (isPureGreeting(text)) {
         this.logger.log(`vova.greeting anonymous phone=${phone}`);
         return { text: refusal('salutation'), offerAccount: false };
+      }
+
+      // A close, not a question — see the profile path below. Costs nothing to
+      // answer, so it must not spend one of a stranger's ten questions either.
+      if (isAcknowledgement(text)) {
+        this.logger.log(`vova.acknowledgement anonymous phone=${phone}`);
+        return { text: acknowledgementReply(null), offerAccount: false };
       }
 
       const limit = Number(limitRaw);
@@ -296,6 +304,22 @@ export class VovaService {
       if (isPureGreeting(text)) {
         this.logger.log(`vova.greeting profile=${profile.id}`);
         return shadow ? null : [refusal('salutation')];
+      }
+
+      // « merci », « non merci », « je vois », « non laisse » — the person is
+      // CLOSING the exchange. Answered here, with no model call, because the
+      // model kept opening a new one: a real transcript has every one of these
+      // answered with "Bonjour Chloé ! Je suis VoVa AI…", a full
+      // reintroduction, until she wrote « arrête avec vos messages bête la ».
+      //
+      // The prompt already says to answer a thank-you short and stop, and to
+      // introduce itself only on the first message of a conversation. It is
+      // right and the model does not reliably obey it — and this is exactly
+      // the shape of question that should never have depended on obedience.
+      // `isPureGreeting` above is the same trade, made for the same reason.
+      if (isAcknowledgement(text)) {
+        this.logger.log(`vova.acknowledgement profile=${profile.id}`);
+        return shadow ? null : [acknowledgementReply(profile.first_name)];
       }
 
       // Meter a profile behind a wall before the model runs.

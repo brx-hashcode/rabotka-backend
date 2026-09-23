@@ -12,6 +12,7 @@ import { ApplicationService } from '../../application/application.service';
 import { BotStateService } from './bot-state.service';
 import { BotRouterService } from '../router/bot-router.service';
 import { BotNotificationService } from './bot-notification.service';
+import { isAcknowledgement } from '../../rag/agent/offer';
 import { BotInboxService } from './bot-inbox.service';
 import { BotDraftService } from './bot-draft.service';
 import {
@@ -228,7 +229,9 @@ export class BotOrchestratorService {
       // already offered on every reply — this offers the same door as a button
       // instead of a word to type, at the same frequency.
       if (vovaReply) {
-        return [...vovaReply, this.openAppCard(profile.first_name)];
+        return this.wantsAppCard(text)
+          ? [...vovaReply, this.openAppCard(profile.first_name)]
+          : vovaReply;
       }
       return [this.openAppCard(profile.first_name)];
     }
@@ -298,7 +301,9 @@ export class BotOrchestratorService {
       // This card only has to open the app, and it does so in one tap instead
       // of asking for a typed command.
       if (vovaReply) {
-        return [...vovaReply, this.openAppCard(profile.first_name)];
+        return this.wantsAppCard(text)
+          ? [...vovaReply, this.openAppCard(profile.first_name)]
+          : vovaReply;
       }
       return [this.openAppCard(profile.first_name)];
     }
@@ -362,6 +367,23 @@ export class BotOrchestratorService {
    * so the outbound processor mints the one-time code against the bare
    * destination on the way out.
    */
+  /**
+   * Should the app card ride along with this reply?
+   *
+   * NOT ON A CLOSE. « merci », « non merci », « non laisse », « je vois » — the
+   * person has finished, and appending a button to that is the behaviour a real
+   * transcript ends with: « Regarde vous avez déjà refusé donc svp arrête avec
+   * vos messages bête la ». Every one of her replies, including the refusals,
+   * carried the card.
+   *
+   * The card is a door, and a door is worth offering to somebody going
+   * somewhere. Offering it to somebody leaving is just noise, and noise from a
+   * business account is what gets a number blocked.
+   */
+  private wantsAppCard(text: string): boolean {
+    return !isAcknowledgement(text);
+  }
+
   private openAppCard(firstName: string): string {
     return openAppBotMessage(firstName);
   }
