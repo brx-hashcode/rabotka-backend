@@ -209,3 +209,17 @@ export function refusal(id: RefusalId): string {
 export function isRefusalId(value: string): value is RefusalId {
   return value in REFUSALS;
 }
+
+/**
+ * What VoVa says when somebody closes the exchange.
+ *
+ * SHORT, AND IT ASKS NOTHING. The prompt already carries this rule — "quelqu'un
+ * qui dit merci a fini" — and the model kept adding a question anyway, which is
+ * what turns "merci" into another round trip. A fixed phrase cannot drift.
+ *
+ * No « n'hésitez pas à me solliciter » either: it is a relance wearing a polite
+ * hat, and the person just said they were done.
+ */
+export function acknowledgementReply(firstName: string | null): string {
+  return firstName ? `Avec plaisir, *${firstName}* 🙂` : 'Avec plaisir 🙂';
+}

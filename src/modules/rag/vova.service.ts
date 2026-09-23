@@ -10,6 +10,7 @@ import {
 import {
   isAffirmation,
   isNavigationRequest,
+  isAcknowledgement,
   isPureGreeting,
   offersNavigation,
 } from './agent/offer';
@@ -18,9 +19,9 @@ import { VovaAnonymousStore } from './agent/anonymous.store';
 import { VovaMemoryService } from './agent/memory.service';
 import { withTimeout } from './llm/llm.service';
 import { Deadline } from './llm/deadline';
-import { isWalled } from './agent/prompts';
+import { correctSalutation, isWalled } from './agent/prompts';
 import { VOVA_CONFIG_KEYS } from './vova.constants';
-import { refusal } from './agent/refusals';
+import { acknowledgementReply, refusal } from './agent/refusals';
 import { welcomePlatformMessage } from '../bot/messages/welcome.messages';
 
 /**
@@ -156,6 +157,13 @@ export class VovaService {
       if (isPureGreeting(text)) {
         this.logger.log(`vova.greeting anonymous phone=${phone}`);
         return { text: refusal('salutation'), offerAccount: false };
+      }
+
+      // A close, not a question — see the profile path below. Costs nothing to
+      // answer, so it must not spend one of a stranger's ten questions either.
+      if (isAcknowledgement(text)) {
+        this.logger.log(`vova.acknowledgement anonymous phone=${phone}`);
+        return { text: acknowledgementReply(null), offerAccount: false };
       }
 
       const limit = Number(limitRaw);
@@ -298,6 +306,22 @@ export class VovaService {
         return shadow ? null : [refusal('salutation')];
       }
 
+      // « merci », « non merci », « je vois », « non laisse » — the person is
+      // CLOSING the exchange. Answered here, with no model call, because the
+      // model kept opening a new one: a real transcript has every one of these
+      // answered with "Bonjour Chloé ! Je suis VoVa AI…", a full
+      // reintroduction, until she wrote « arrête avec vos messages bête la ».
+      //
+      // The prompt already says to answer a thank-you short and stop, and to
+      // introduce itself only on the first message of a conversation. It is
+      // right and the model does not reliably obey it — and this is exactly
+      // the shape of question that should never have depended on obedience.
+      // `isPureGreeting` above is the same trade, made for the same reason.
+      if (isAcknowledgement(text)) {
+        this.logger.log(`vova.acknowledgement profile=${profile.id}`);
+        return shadow ? null : [acknowledgementReply(profile.first_name)];
+      }
+
       // Meter a profile behind a wall before the model runs.
       //
       // Placed here, after the affirmation shortcut and before the call: that
@@ -416,11 +440,17 @@ export class VovaService {
           this.logger.debug(`memory refresh failed for ${profile.id}`, err),
         );
 
+      // The model picks the wrong half of Bonjour/Bonsoir often enough that one
+      // user corrected it himself — « Tu confond le temps c'est bonjour ah ah »,
+      // at 06h08. The clock was right; the reply was not. Fixed here rather than
+      // asked for again in the prompt, which has already been tried twice.
+      const answer = correctSalutation(reply.text, text);
+
       // The card goes out now only if the person asked to go somewhere.
       // Otherwise the reply stands on its own and the destination is
       // remembered, so a following « oui » opens it.
       if (isNavigationRequest(text)) {
-        return [reply.text, this.card(reply.destination)];
+        return [answer, this.card(reply.destination)];
       }
 
       // Only remember a destination when the reply actually proposed to open
@@ -430,7 +460,7 @@ export class VovaService {
       if (offersNavigation(reply.text)) {
         await this.offers.remember(profile.id, reply.destination);
       }
-      return [reply.text];
+      return [answer];
     } catch (err) {
       this.report(
         err,

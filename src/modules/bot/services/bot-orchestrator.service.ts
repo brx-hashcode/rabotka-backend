@@ -12,6 +12,7 @@ import { ApplicationService } from '../../application/application.service';
 import { BotStateService } from './bot-state.service';
 import { BotRouterService } from '../router/bot-router.service';
 import { BotNotificationService } from './bot-notification.service';
+import { isAcknowledgement } from '../../rag/agent/offer';
 import { BotInboxService } from './bot-inbox.service';
 import { BotDraftService } from './bot-draft.service';
 import {
@@ -24,6 +25,7 @@ import { templateReply } from '../../../common/constants/whatsapp-carousel';
 import {
   supportCardBotMessage,
   hasPenaltiesBotMessage,
+  openAppBotMessage,
 } from '../messages/menu.messages';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowContext, FlowResult } from '../types/flow.types';
@@ -227,7 +229,9 @@ export class BotOrchestratorService {
       // already offered on every reply — this offers the same door as a button
       // instead of a word to type, at the same frequency.
       if (vovaReply) {
-        return [...vovaReply, this.openAppCard(profile.first_name)];
+        return this.wantsAppCard(text)
+          ? [...vovaReply, this.openAppCard(profile.first_name)]
+          : vovaReply;
       }
       return [this.openAppCard(profile.first_name)];
     }
@@ -297,7 +301,9 @@ export class BotOrchestratorService {
       // This card only has to open the app, and it does so in one tap instead
       // of asking for a typed command.
       if (vovaReply) {
-        return [...vovaReply, this.openAppCard(profile.first_name)];
+        return this.wantsAppCard(text)
+          ? [...vovaReply, this.openAppCard(profile.first_name)]
+          : vovaReply;
       }
       return [this.openAppCard(profile.first_name)];
     }
@@ -348,10 +354,10 @@ export class BotOrchestratorService {
    * get it back by asking the bot. That is a deliberate trade, not an
    * oversight; lift it by taking those fields out of `NEVER_EXPOSE`.
    *
-   * So this one says nothing about the wall. It exists for a single reason: a
-   * bare link does not open WhatsApp's in-app browser, only a template's CTA
-   * button does. Without that, this would be free-form text — the bot answers
-   * inside the 24h service window, where templates are not required.
+   * So this one says nothing about the wall. It existed for a single reason: a
+   * bare link does not open WhatsApp's in-app browser, only a button does. That
+   * no longer requires a template — `openAppBotMessage` builds the card
+   * free-form and keeps `openApp` only for a window that shut in between.
    *
    * The three explanatory templates stay: they are what an admin sends when
    * suspending an account or refusing a dossier, which is outside any window
@@ -361,11 +367,25 @@ export class BotOrchestratorService {
    * so the outbound processor mints the one-time code against the bare
    * destination on the way out.
    */
+  /**
+   * Should the app card ride along with this reply?
+   *
+   * NOT ON A CLOSE. « merci », « non merci », « non laisse », « je vois » — the
+   * person has finished, and appending a button to that is the behaviour a real
+   * transcript ends with: « Regarde vous avez déjà refusé donc svp arrête avec
+   * vos messages bête la ». Every one of her replies, including the refusals,
+   * carried the card.
+   *
+   * The card is a door, and a door is worth offering to somebody going
+   * somewhere. Offering it to somebody leaving is just noise, and noise from a
+   * business account is what gets a number blocked.
+   */
+  private wantsAppCard(text: string): boolean {
+    return !isAcknowledgement(text);
+  }
+
   private openAppCard(firstName: string): string {
-    return templateReply(
-      'openApp',
-      WHATSAPP_TEMPLATES.openApp.variables(firstName),
-    );
+    return openAppBotMessage(firstName);
   }
 
   /**

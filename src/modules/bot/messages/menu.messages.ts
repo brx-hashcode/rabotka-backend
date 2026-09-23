@@ -1,5 +1,6 @@
 import { ctaReply } from '../../../common/constants/whatsapp-carousel';
 import {
+  OPEN_APP_CTA_PATH,
   PENALTIES_PAYMENT_CTA_PATH,
   WHATSAPP_TEMPLATES,
 } from '../../../common/constants/whatsapp-templates';
@@ -78,6 +79,50 @@ export function whatsappSupportLink(
  */
 export function accountSuspendedBotMessage(contact: ContactInfo): string {
   return supportCardBotMessage(contact);
+}
+
+/**
+ * The card the bot closes a reply with: one line and a button.
+ *
+ * BUILT BY THE BOT, not sent as its approved template. It used to be
+ * `templateReply('openApp', …)`, on the reasoning written right where it was
+ * called — "a bare link does not open WhatsApp's in-app browser, only a
+ * template's CTA button does". True of a bare link, and not true of the message
+ * since `ctaReply` existed: a free-form `cta_url` carries the same button, and
+ * this is a REPLY, so it is inside the 24h window where free-form is allowed
+ * and costs nothing.
+ *
+ * SHORT, AND IT DOES NOT COPY THE TEMPLATE. The first version of this repeated
+ * the approved wording — "Suite à votre message, voici l'accès à votre espace
+ * … L'équipe Rabotka" — on the reasoning that the card and its fallback should
+ * not say different things. That was the wrong instinct. A template is
+ * business-initiated: it arrives cold, hours later, and has to reintroduce
+ * itself and sign off. This card is the last line of a conversation already in
+ * progress, and a signature in the middle of a chat reads like a letter
+ * somebody pasted in.
+ *
+ * So the two say the same THING in the register each belongs to, and the
+ * template keeps its letter form for the case it is actually for — a window
+ * that shut between the reply being built and the job draining.
+ *
+ * `openApp` is UTILITY rather than MARKETING, so that fallback is the cheap
+ * kind rather than the expensive one — but free beats cheap on every reply.
+ */
+export function openAppBotMessage(firstName: string): string {
+  return ctaReply({
+    body: [
+      '*Votre espace Rabotka*',
+      'Compte, missions et messages : tout est dans l’application.',
+    ].join('\n'),
+    buttonText: 'Voir mon compte',
+    // A path: the outbound worker mints the one-tap `/s/<code>` link, exactly
+    // as it does for the template's button.
+    path: OPEN_APP_CTA_PATH,
+    // The letter-form template, for a window that shut in between. It still
+    // takes the name — it is the one that has to reintroduce itself.
+    fallbackTemplate: 'openApp',
+    fallbackVariables: WHATSAPP_TEMPLATES.openApp.variables(firstName),
+  });
 }
 
 /**
