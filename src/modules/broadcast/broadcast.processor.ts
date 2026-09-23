@@ -283,9 +283,9 @@ export class BroadcastProcessor {
       to: profile.email,
       subject: broadcast.title,
       html: await this.layout.wrap(
+        // The title rides on `subject` only — the body no longer repeats it.
         broadcastEmail({
           firstName: profile.first_name,
-          title: broadcast.title,
           body: broadcast.body,
           link: broadcast.link,
         }),
