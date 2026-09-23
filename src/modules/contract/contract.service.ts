@@ -11,6 +11,7 @@ import { DocumentService } from '../document/document.service';
 import { DocumentCategory, EmploymentType, PaymentFlow } from '@prisma/client';
 import {
   computeContractPublicReference,
+  contractDescriptionSummary,
   resolveMissionPeriodForContractPdf,
   paymentFlowPayModeFr,
   paymentFlowFrequencyFr,
@@ -226,7 +227,10 @@ export class ContractService {
       WORKER_PHONE: s(worker.phone),
       WORKER_EMAIL: s(worker.email),
       JOB_TITLE: s(job.title),
-      JOB_DESCRIPTION: s(job.description),
+      // Cut to what the mission table can hold — a long description used to
+      // push the row past the page and take the layout with it. The full text
+      // stays on the job offer, which both parties can open.
+      JOB_DESCRIPTION: contractDescriptionSummary(job.description),
       JOB_LOCATION: s(jobLocationLabel(job)),
       PAY_MODE: paymentFlowPayModeFr(job.payment_flow),
       PAY_FREQUENCY: paymentFlowFrequencyFr(job.payment_flow),
