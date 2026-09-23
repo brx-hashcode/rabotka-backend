@@ -148,3 +148,99 @@ export function paymentFlowFrequencyFr(
       return '-';
   }
 }
+
+/**
+ * The DESCRIPTION column of the contract's mission table, in characters.
+ *
+ * It renders monospaced and roughly this wide. Measured off the generated PDF —
+ * "surpresseur et à la salle de" is one full line in it.
+ */
+export const CONTRACT_DESCRIPTION_COLUMN_CHARS = 30;
+
+/** How many of those lines the row was laid out to hold. */
+export const CONTRACT_DESCRIPTION_MAX_LINES = 3;
+
+/**
+ * The job description, cut to what the contract's mission table can hold.
+ *
+ * Employers write these in a textarea and they run long: the one that prompted
+ * this was five paragraphs of plumbing symptoms, with bullets and blank lines
+ * between them. Dropped whole into a table cell it pushed the row past the page
+ * and took the rest of the layout with it — the contract stopped looking like a
+ * contract.
+ *
+ * WRAPPED, NOT COUNTED. A character budget only approximates a line count,
+ * because wrapping on word boundaries wastes a few characters per line and the
+ * waste depends on the words. This lays the text out the way the column will
+ * and stops after the third line, so "three lines" is a guarantee rather than
+ * an estimate.
+ *
+ * List markers are dropped as the lines are flattened. Run together into one
+ * paragraph a leading "-" lands mid-sentence, where it reads as a stray dash
+ * rather than as a bullet.
+ *
+ * DELIBERATELY LOSSY, and worth saying out loud: the full description lives on
+ * the job offer and in the application, both of which the parties can open. The
+ * contract names the mission; it is not the place that reproduces the brief.
+ */
+export function contractDescriptionSummary(
+  description: string | null | undefined,
+  maxLines: number = CONTRACT_DESCRIPTION_MAX_LINES,
+  columnChars: number = CONTRACT_DESCRIPTION_COLUMN_CHARS,
+): string {
+  const words = (description ?? '')
+    .split(/\r?\n/u)
+    .map((line) => line.trim().replace(/^[-–—*•]+\s*/u, ''))
+    .filter(Boolean)
+    .join(' ')
+    .split(/\s+/u)
+    .filter(Boolean);
+
+  if (words.length === 0) return '-';
+
+  // A word longer than the column has no boundary to break on — a URL, usually.
+  // Cutting it into line-sized pieces up front means the packer below never
+  // meets a word it cannot place, and keeps that case out of the loop.
+  const atoms: string[] = [];
+  for (const word of words) {
+    if (word.length <= columnChars) {
+      atoms.push(word);
+      continue;
+    }
+    for (let i = 0; i < word.length; i += columnChars) {
+      atoms.push(word.slice(i, i + columnChars));
+    }
+  }
+
+  const lines: string[] = [];
+  let line = '';
+  let placed = 0;
+
+  for (const atom of atoms) {
+    const candidate = line ? `${line} ${atom}` : atom;
+
+    if (candidate.length <= columnChars) {
+      line = candidate;
+      placed += 1;
+      continue;
+    }
+
+    lines.push(line);
+    if (lines.length === maxLines) {
+      // This atom never made it in, which is what `placed` records.
+      line = '';
+      break;
+    }
+    line = atom;
+    placed += 1;
+  }
+
+  if (line) lines.push(line);
+
+  const text = lines.join(' ');
+  if (placed === atoms.length) return text;
+
+  // Trailing punctuation before an ellipsis reads as a typo. The ellipsis may
+  // push the last line one character over, which the column absorbs.
+  return `${text.replace(/[\s,;:.–—-]+$/u, '')}…`;
+}
