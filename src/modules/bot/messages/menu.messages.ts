@@ -1,5 +1,6 @@
 import { ctaReply } from '../../../common/constants/whatsapp-carousel';
 import {
+  OPEN_APP_CTA_PATH,
   PENALTIES_PAYMENT_CTA_PATH,
   WHATSAPP_TEMPLATES,
 } from '../../../common/constants/whatsapp-templates';
@@ -78,6 +79,42 @@ export function whatsappSupportLink(
  */
 export function accountSuspendedBotMessage(contact: ContactInfo): string {
   return supportCardBotMessage(contact);
+}
+
+/**
+ * "Voici l'accès à votre espace" — the card the bot closes a reply with.
+ *
+ * BUILT BY THE BOT, not sent as its approved template. It used to be
+ * `templateReply('openApp', …)`, on the reasoning — written down right where it
+ * was called — that "a bare link does not open WhatsApp's in-app browser, only
+ * a template's CTA button does". True of a bare link, and no longer true of the
+ * message: a free-form `cta_url` carries the same button, and this is a REPLY,
+ * so it is inside the 24h window where free-form is allowed and costs nothing.
+ *
+ * The words track the approved template deliberately. Somebody whose window
+ * closed between the reply being built and the job draining gets `openApp`
+ * instead, and the two should not say different things.
+ *
+ * `openApp` is UTILITY rather than MARKETING, so the fallback is the cheap kind
+ * — but the card above it is free, and free beats cheap on every reply the bot
+ * gives.
+ */
+export function openAppBotMessage(firstName: string): string {
+  return ctaReply({
+    body: [
+      `Bonjour ${firstName},`,
+      '',
+      'Suite à votre message, voici l’accès à votre espace Rabotka. Vous pouvez y consulter l’état de votre compte et vos informations.',
+      '',
+      'L’équipe Rabotka',
+    ].join('\n'),
+    buttonText: 'Voir mon compte',
+    // A path: the outbound worker mints the one-tap `/s/<code>` link, exactly
+    // as it does for the template's button.
+    path: OPEN_APP_CTA_PATH,
+    fallbackTemplate: 'openApp',
+    fallbackVariables: WHATSAPP_TEMPLATES.openApp.variables(firstName),
+  });
 }
 
 /**

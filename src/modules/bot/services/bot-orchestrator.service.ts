@@ -24,6 +24,7 @@ import { templateReply } from '../../../common/constants/whatsapp-carousel';
 import {
   supportCardBotMessage,
   hasPenaltiesBotMessage,
+  openAppBotMessage,
 } from '../messages/menu.messages';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowContext, FlowResult } from '../types/flow.types';
@@ -348,10 +349,10 @@ export class BotOrchestratorService {
    * get it back by asking the bot. That is a deliberate trade, not an
    * oversight; lift it by taking those fields out of `NEVER_EXPOSE`.
    *
-   * So this one says nothing about the wall. It exists for a single reason: a
-   * bare link does not open WhatsApp's in-app browser, only a template's CTA
-   * button does. Without that, this would be free-form text — the bot answers
-   * inside the 24h service window, where templates are not required.
+   * So this one says nothing about the wall. It existed for a single reason: a
+   * bare link does not open WhatsApp's in-app browser, only a button does. That
+   * no longer requires a template — `openAppBotMessage` builds the card
+   * free-form and keeps `openApp` only for a window that shut in between.
    *
    * The three explanatory templates stay: they are what an admin sends when
    * suspending an account or refusing a dossier, which is outside any window
@@ -362,10 +363,7 @@ export class BotOrchestratorService {
    * destination on the way out.
    */
   private openAppCard(firstName: string): string {
-    return templateReply(
-      'openApp',
-      WHATSAPP_TEMPLATES.openApp.variables(firstName),
-    );
+    return openAppBotMessage(firstName);
   }
 
   /**

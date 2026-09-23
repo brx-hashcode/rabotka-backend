@@ -40,12 +40,17 @@ describe('the welcome cards', () => {
     expect(payload.path).toEqual(expect.any(String));
   });
 
-  it('still names a billed template as the last resort', () => {
-    // Keeping it is right — a card that cannot be sent at all should still
-    // reach the person. It is only the FIRST choice that must stay free.
-    expect(card(welcomePlatformMessage()).fallbackTemplate).toBe(
-      'welcomePlatform',
-    );
+  it.each([
+    ['platform', welcomePlatformMessage()],
+    ['unregistered', welcomeUnregisteredMessage()],
+  ])('leaves the %s card no billed way out', (_label, reply) => {
+    // The point of the change: both cards used to fall back to an approved
+    // MARKETING template, so any refusal became a paid message. The fallback
+    // is now plain text, which is free — and still carries the link, so the
+    // person can reach the app even without a button.
+    const payload = card(reply);
+    expect(payload).not.toHaveProperty('fallbackTemplate');
+    expect(String(payload.fallbackText)).toContain('https://rabotka.work');
   });
 
   it('says what Rabotka is, since there is no longer a picture to', () => {

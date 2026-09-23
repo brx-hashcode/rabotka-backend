@@ -286,7 +286,7 @@ describe('BotOrchestratorService', () => {
       // switch to this one.
       expect(result[0]).toContain('[CTA:]');
       expect(result[0]).toContain(
-        '"fallbackTemplate":"welcomeUnregisteredCard"',
+        '"fallbackText"',
       );
       // And it points at onboarding, not at the app: there is no account yet.
       expect(result[0]).toContain('"path":"onboarding"');
@@ -585,7 +585,7 @@ describe('BotOrchestratorService', () => {
         const result = await service.handle(PROFILE_ID, PHONE, input);
 
         expect(deps.vova.handle).not.toHaveBeenCalled();
-        expect(result[0]).toContain('[TPL:openApp]');
+        expect(result[0]).toContain('"fallbackTemplate":"openApp"');
       },
     );
 
@@ -617,7 +617,7 @@ describe('BotOrchestratorService', () => {
 
       const result = await service.handle(PROFILE_ID, PHONE, 'une question');
 
-      expect(result[0]).toContain('[TPL:openApp]');
+      expect(result[0]).toContain('"fallbackTemplate":"openApp"');
     });
 
     // The assistant must not offer to apply or publish to someone who cannot,
@@ -683,7 +683,7 @@ describe('BotOrchestratorService', () => {
         const result = await service.handle(PROFILE_ID, PHONE, input);
 
         expect(deps.vova.handle).not.toHaveBeenCalled();
-        expect(result[0]).toContain('[TPL:openApp]');
+        expect(result[0]).toContain('"fallbackTemplate":"openApp"');
         expect(activationWrites()).toHaveLength(0);
       },
     );
@@ -734,7 +734,7 @@ describe('BotOrchestratorService', () => {
       );
 
       expect(deps.vova.handle).toHaveBeenCalledTimes(1);
-      expect(result[0]).toContain('[TPL:openApp]');
+      expect(result[0]).toContain('"fallbackTemplate":"openApp"');
       expect(activationWrites()).toHaveLength(0);
     });
 
@@ -814,7 +814,7 @@ describe('BotOrchestratorService', () => {
       const result = await service.handle(PROFILE_ID, PHONE, 'menu');
 
       expect(deps.vova.handle).not.toHaveBeenCalled();
-      expect(result[0]).toContain('[TPL:openApp]');
+      expect(result[0]).toContain('"fallbackTemplate":"openApp"');
       expect(activationWrites()).toHaveLength(0);
     });
 
@@ -905,7 +905,7 @@ describe('BotOrchestratorService', () => {
           verification_status: 'PENDING',
         });
         const result = await service.handle(PROFILE_ID, PHONE, 'menu');
-        expect(result[0]).toContain('[TPL:openApp]');
+        expect(result[0]).toContain('"fallbackTemplate":"openApp"');
         expect(activationWrites()).toHaveLength(0);
       });
 
