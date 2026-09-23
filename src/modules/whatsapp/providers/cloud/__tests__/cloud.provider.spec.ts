@@ -419,3 +419,185 @@ describe('redactHeaders', () => {
     });
   });
 });
+
+/**
+ * The header image of a free-form CTA.
+ *
+ * This is the one place in the outbound path that used to ask Meta to fetch a
+ * URL at send time, and in production that fetch failed (131053) against a
+ * bucket that answered 200 to everything else — including Meta's own crawler.
+ * Uploading the image and sending an id puts it on Meta's storage, which is why
+ * an approved template's header image never fails the same way.
+ */
+describe('CloudProvider CTA header image', () => {
+  const realFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = realFetch;
+    jest.clearAllMocks();
+  });
+
+  const IMAGE = 'https://cdn.example/whatsapp/cover-rabotka.jpg';
+
+  const CTA = {
+    body: 'Rabotka',
+    buttonText: 'Ouvrir',
+    url: 'https://rabotka.work/s/abc',
+    imageUrl: IMAGE,
+  };
+
+  type Step =
+    | { kind: 'image'; type?: string }
+    | { kind: 'json'; status: number; body: unknown };
+
+  /** Serves the image bytes for a source fetch and JSON for every Graph call. */
+  function stubUpload(steps: Step[]): { calls: FetchArgs[] } {
+    const calls: FetchArgs[] = [];
+    let i = 0;
+    global.fetch = jest.fn((url: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: asString(url), init: init ?? {} });
+      const next = steps[Math.min(i++, steps.length - 1)];
+      if (next.kind === 'image') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          statusText: 'HTTP 200',
+          blob: () =>
+            Promise.resolve(
+              new Blob([new Uint8Array([1, 2, 3])], {
+                type: next.type ?? 'image/jpeg',
+              }),
+            ),
+        } as unknown as Response);
+      }
+      return Promise.resolve({
+        ok: next.status >= 200 && next.status < 300,
+        status: next.status,
+        statusText: `HTTP ${next.status}`,
+        json: () => Promise.resolve(next.body),
+      } as Response);
+    }) as typeof fetch;
+    return { calls };
+  }
+
+  const UPLOADED = { kind: 'json' as const, status: 200, body: { id: 'mid.42' } };
+  const SENT = { kind: 'json' as const, ...ACCEPTED };
+  const MEDIA_GONE = {
+    kind: 'json' as const,
+    status: 400,
+    body: { error: { message: 'media not found', code: 131053 } },
+  };
+
+  const header = (call: FetchArgs) =>
+    (body(call).interactive as { header?: unknown }).header;
+
+  it('uploads the image and sends it by id, never by link', async () => {
+    const { calls } = stubUpload([
+      { kind: 'image' },
+      UPLOADED,
+      SENT,
+    ]);
+
+    await new CloudProvider(CONFIG).sendInteractiveCta('+242069917686', CTA);
+
+    expect(calls[0].url).toBe(IMAGE);
+    expect(calls[1].url).toContain('/111222333/media');
+    // No Content-Type by hand: fetch must set it so the multipart boundary
+    // comes with it.
+    expect(
+      (calls[1].init.headers as Record<string, string>)['Content-Type'],
+    ).toBeUndefined();
+    expect(header(calls[2])).toEqual({
+      type: 'image',
+      image: { id: 'mid.42' },
+    });
+  });
+
+  it('uploads once and reuses the id for later cards', async () => {
+    const { calls } = stubUpload([
+      { kind: 'image' },
+      UPLOADED,
+      SENT,
+    ]);
+    const provider = new CloudProvider(CONFIG);
+
+    await provider.sendInteractiveCta('+242069917686', CTA);
+    await provider.sendInteractiveCta('+242069917687', CTA);
+
+    const uploads = calls.filter((c) => c.url.includes('/media'));
+    expect(uploads).toHaveLength(1);
+  });
+
+  it('uploads once for cards sent at the same moment', async () => {
+    const { calls } = stubUpload([
+      { kind: 'image' },
+      UPLOADED,
+      SENT,
+    ]);
+    const provider = new CloudProvider(CONFIG);
+
+    await Promise.all([
+      provider.sendInteractiveCta('+242069917686', CTA),
+      provider.sendInteractiveCta('+242069917687', CTA),
+      provider.sendInteractiveCta('+242069917688', CTA),
+    ]);
+
+    expect(calls.filter((c) => c.url.includes('/media'))).toHaveLength(1);
+  });
+
+  it('still sends the card when the upload fails, falling back to a link', async () => {
+    // A card without its picture beats no card at all — and the caller's own
+    // template fallback is still behind this.
+    const { calls } = stubUpload([
+      { kind: 'image' },
+      { kind: 'json', status: 400, body: { error: { message: 'no', code: 100 } } },
+      SENT,
+    ]);
+
+    const result = await new CloudProvider(CONFIG).sendInteractiveCta(
+      '+242069917686',
+      CTA,
+    );
+
+    expect(result.providerMessageId).toBe('wamid.HBgMMjQy');
+    expect(header(calls[2])).toEqual({ type: 'image', image: { link: IMAGE } });
+  });
+
+  it('re-uploads and retries once when Meta has forgotten the id', async () => {
+    // Uploaded media lasts about 30 days. This is what makes the cache heal
+    // itself instead of needing a TTL kept in step with Meta's.
+    const { calls } = stubUpload([
+      { kind: 'image' },
+      UPLOADED,
+      MEDIA_GONE,
+      { kind: 'image' },
+      { kind: 'json', status: 200, body: { id: 'mid.99' } },
+      SENT,
+    ]);
+
+    const result = await new CloudProvider(CONFIG).sendInteractiveCta(
+      '+242069917686',
+      CTA,
+    );
+
+    expect(result.providerMessageId).toBe('wamid.HBgMMjQy');
+    expect(calls.filter((c) => c.url.includes('/media'))).toHaveLength(2);
+    expect(header(calls[5])).toEqual({
+      type: 'image',
+      image: { id: 'mid.99' },
+    });
+  });
+
+  it('does not upload anything for a card with no image', async () => {
+    const { calls } = stubUpload([SENT]);
+
+    await new CloudProvider(CONFIG).sendInteractiveCta('+242069917686', {
+      body: 'x',
+      buttonText: 'y',
+      url: 'https://rabotka.work',
+      header: 'Titre',
+    });
+
+    expect(calls.filter((c) => c.url.includes('/media'))).toHaveLength(0);
+    expect(header(calls[0])).toEqual({ type: 'text', text: 'Titre' });
+  });
+});

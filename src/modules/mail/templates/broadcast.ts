@@ -11,7 +11,6 @@ import { escapeHtml } from './layout';
  */
 export function broadcastEmail(p: {
   firstName: string;
-  title: string;
   body: string;
   link: string | null;
 }): string {
@@ -25,10 +24,12 @@ export function broadcastEmail(p: {
     ? `<p><a href="${appUrl}/${escapeHtml(p.link.replace(/^\/+/, ''))}">Ouvrir Rabotka</a></p>`
     : '';
 
+  // NO TITLE IN THE BODY. The broadcast's title is already the SUBJECT LINE,
+  // and repeating it as a heading made every announcement open by saying the
+  // same sentence twice — once in the client's header, once again under the
+  // greeting. An email is not a web page; its heading is the subject.
   return `
     <p>Bonjour ${escapeHtml(p.firstName)},</p>
-
-    <h2>${escapeHtml(p.title)}</h2>
 
     ${paragraphs}
 
