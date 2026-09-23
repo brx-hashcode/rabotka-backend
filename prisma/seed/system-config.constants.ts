@@ -455,6 +455,59 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Réponses IA par jour et par numéro non inscrit',
     isSecret: false,
   },
+
+  // ── MESSAGERIE ────────────────────────────────────────────────────────────
+  // Kept in step with src/modules/system-config/system-config.constants.ts —
+  // `system-config.constants.spec.ts` fails CI when the two lists drift.
+  {
+    key: 'messaging.enabled',
+    value: 'true',
+    category: ConfigCategory.GENERAL,
+    label: 'Messagerie entre profils activée',
+    isSecret: false,
+  },
+  {
+    key: 'messaging.operator_prefixes',
+    value: '',
+    category: ConfigCategory.GENERAL,
+    label: 'Préfixes opérateurs à masquer (séparés par des virgules)',
+    isSecret: false,
+  },
+  {
+    key: 'messaging.held_ratio_threshold',
+    value: '0.5',
+    category: ConfigCategory.GENERAL,
+    label: 'Part masquée au-delà de laquelle le message est retenu (0–1)',
+    isSecret: false,
+  },
+  {
+    key: 'messaging.rate_limit_per_minute',
+    value: '20',
+    category: ConfigCategory.GENERAL,
+    label: 'Messages par minute et par profil',
+    isSecret: false,
+  },
+  {
+    key: 'messaging.max_new_conversations_per_day',
+    value: '20',
+    category: ConfigCategory.GENERAL,
+    label: 'Discussions sans candidature ouvertes par jour et par profil',
+    isSecret: false,
+  },
+  {
+    key: 'messaging.nudge_delay_seconds',
+    value: '300',
+    category: ConfigCategory.GENERAL,
+    label: 'Délai avant relance WhatsApp d’un message non lu (secondes)',
+    isSecret: false,
+  },
+  {
+    key: 'messaging.nudge_template_enabled',
+    value: 'false',
+    category: ConfigCategory.GENERAL,
+    label: 'Relancer hors fenêtre 24h (modèle WhatsApp payant)',
+    isSecret: false,
+  },
   {
     // Suspended, KYC en cours, KYC refusé. Ces profils ne coûtaient rien tant
     // que le bot leur répondait par une carte figée ; ce sont aussi ceux qui

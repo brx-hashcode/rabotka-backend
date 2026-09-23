@@ -85,6 +85,28 @@ export interface LlmInvokeOptions {
  * LangChain still owns everything above this line — the models, tool binding,
  * and the LangGraph agent that calls us.
  */
+/**
+ * How close to the end still counts as "the turn ran out of time".
+ *
+ * Zero is too strict, and the race it misses is the one the comment in
+ * `deadlineCaused` describes: when the reserve is released the per-call budget
+ * EQUALS the remaining turn, so both timers are armed for the same instant.
+ * If the per-call timer lands a fraction of a millisecond first, `expired()`
+ * was still false — `remainingMs()` returned 1 — and a healthy provider took
+ * the blame for the turn running out.
+ *
+ * It surfaced as a flaky test (`gives up at the turn deadline rather than at
+ * the per-call cap` failing with `LlmChainExhaustedError` on a loaded CI
+ * runner), but the flake was reporting a real misclassification: in production
+ * the same tie records a failure against a vendor that did nothing wrong, and
+ * `shouldTripBreaker('transport')` is true.
+ *
+ * Two milliseconds, because no model call completes in that window — anything
+ * that "finished" there finished because a timer fired, not because a provider
+ * answered.
+ */
+const DEADLINE_TIE_MS = 2;
+
 @Injectable()
 export class LlmService {
   private readonly logger = new Logger(LlmService.name);
@@ -679,7 +701,10 @@ export class LlmService {
     // It errs toward not blaming the provider. That asymmetry is deliberate:
     // failing to open a breaker costs one slow call, while opening one on a
     // healthy vendor removes it from the chain for a full cooldown.
-    return options.deadline.causedAbort() || options.deadline.expired();
+    return (
+      options.deadline.causedAbort() ||
+      options.deadline.remainingMs() <= DEADLINE_TIE_MS
+    );
   }
 }
 

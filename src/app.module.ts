@@ -57,6 +57,7 @@ import { RetrievalModule } from './modules/rag/retrieval/retrieval.module';
 import { VovaAgentModule } from './modules/rag/agent/agent.module';
 import { ClaimModule } from './modules/claim/claim.module';
 import { ProfileNotificationModule } from './modules/profile-notification/profile-notification.module';
+import { ProfileChatModule } from './modules/profile-chat/profile-chat.module';
 import { ProfileViewsReminderModule } from './modules/profile-notification/profile-views-reminder.module';
 import { BroadcastModule } from './modules/broadcast/broadcast.module';
 import { DocumentModule } from './modules/document/document.module';
@@ -185,6 +186,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     WalletModule,
     ClaimModule,
     ProfileNotificationModule,
+    ProfileChatModule,
     ProfileViewsReminderModule,
     BroadcastModule,
     DocumentModule,
