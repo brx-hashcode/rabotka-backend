@@ -7,6 +7,9 @@ import {
   addUtcCalendarDays,
   resolveMissionPeriodForContractPdf,
   MONTHLY_CONTRACT_END_OFFSET_DAYS,
+  contractDescriptionSummary,
+  CONTRACT_DESCRIPTION_COLUMN_CHARS,
+  CONTRACT_DESCRIPTION_MAX_LINES,
 } from '../contract-template.helpers';
 import { EmploymentType } from '@prisma/client';
 
@@ -130,5 +133,95 @@ describe('contract-template.helpers', () => {
       });
       expect(p.durationLabel).toBe('5 jours');
     });
+  });
+});
+
+describe('contractDescriptionSummary', () => {
+  /** The real one that broke the layout: bullets, blank lines, five paragraphs. */
+  const PLUMBING = `Nous constatons plusieurs symptômes liés à notre surpresseur et à la salle de bain :
+- Fuite d'eau apparente : Il y'a un peu d'eau sur le carrelage à l'entrée de la salle de bain.
+
+ - Bruits anormaux dans la tuyauterie : Dès que le surpresseur démarre ou l'ouverture d'un quelconque robinet de la maison, on entend un fort bruit de gonflement suivi d'un sifflement directement au niveau du robinet de lavabo de la salle de bain.
+
+Précision: Le surpresseur est installé à l'extérieur loin de la salle de bain.
+
+N.B: Je souhaiterais un diagnostic et possible une réparation, en cas de non entente, votre déplacement sera payé.`;
+
+  /** Lays the summary out the way the column will. */
+  const wrapped = (text: string): string[] => {
+    const lines: string[] = [];
+    let line = '';
+    for (const word of text.split(' ')) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (candidate.length <= CONTRACT_DESCRIPTION_COLUMN_CHARS) {
+        line = candidate;
+      } else {
+        lines.push(line);
+        line = word;
+      }
+    }
+    if (line) lines.push(line);
+    return lines;
+  };
+
+  it('never exceeds three lines in the column', () => {
+    // The point of the whole helper: a longer row pushed the table past the
+    // page and took the contract's layout with it.
+    expect(wrapped(contractDescriptionSummary(PLUMBING)).length).toBeLessThanOrEqual(
+      CONTRACT_DESCRIPTION_MAX_LINES,
+    );
+  });
+
+  it('flattens the author’s own line breaks', () => {
+    // Carrying bullets and blank lines into a narrow cell is most of what
+    // wrecked the row — what gets measured should be the text, not the layout.
+    const out = contractDescriptionSummary(PLUMBING);
+    expect(out).not.toContain('\n');
+    expect(out).not.toMatch(/ {2}/);
+  });
+
+  it('opens with the employer’s own first words', () => {
+    expect(contractDescriptionSummary(PLUMBING)).toMatch(
+      /^Nous constatons plusieurs symptômes/,
+    );
+  });
+
+  it('marks that there is more, without a stray punctuation mark', () => {
+    const out = contractDescriptionSummary(PLUMBING);
+    expect(out.endsWith('…')).toBe(true);
+    expect(out).not.toMatch(/[\s,;:.-]…$/u);
+  });
+
+  it('cuts on a word boundary, never mid-word', () => {
+    const out = contractDescriptionSummary(PLUMBING);
+    const lastWord = out.slice(0, -1).trim().split(' ').pop() ?? '';
+    expect(PLUMBING.replace(/\s+/gu, ' ')).toContain(lastWord);
+  });
+
+  it('leaves a short description exactly as written', () => {
+    const short = 'Réparer le robinet de la cuisine.';
+    expect(contractDescriptionSummary(short)).toBe(short);
+    expect(contractDescriptionSummary(short)).not.toContain('…');
+  });
+
+  it('gives the template a dash rather than an empty cell', () => {
+    // The rest of the contract's variables use '-' for absent values; an empty
+    // cell reads as a rendering fault.
+    expect(contractDescriptionSummary(null)).toBe('-');
+    expect(contractDescriptionSummary('   \n  ')).toBe('-');
+  });
+
+  it('still cuts a single word too long for one line', () => {
+    // A URL, usually. Without the hard cut there is no boundary to break on.
+    const wall = 'a'.repeat(400);
+    const out = contractDescriptionSummary(wall);
+    expect(wrapped(out).length).toBeLessThanOrEqual(CONTRACT_DESCRIPTION_MAX_LINES);
+    expect(out.endsWith('…')).toBe(true);
+  });
+
+  it('drops the list markers it inherits', () => {
+    // Run into one paragraph, a leading "-" reads as a stray dash.
+    const out = contractDescriptionSummary('Titre :\n- premier point\n- second');
+    expect(out).not.toContain('- ');
   });
 });
