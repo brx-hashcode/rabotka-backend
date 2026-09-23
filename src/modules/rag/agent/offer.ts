@@ -172,16 +172,75 @@ const ACKNOWLEDGEMENTS = [
 ];
 
 /**
+ * The pieces a close is built from.
+ *
+ * People stack them, and across two lines: « D'accord \n Merci », « Ok \n
+ * Merci ». Enumerating every pair in {@link ACKNOWLEDGEMENTS} would be a
+ * combinatorial list that still misses the next one somebody types, so the
+ * whole message is consumed atom by atom instead.
+ *
+ * Longest first — « d accord » must be tried before « d », and « laisse
+ * tomber » before « laisse ».
+ */
+const CLOSING_ATOMS = [
+  'laisse tomber',
+  'thank you',
+  'merci beaucoup',
+  'd accord',
+  'c est bon',
+  'je vois',
+  'no thanks',
+  'daccord',
+  'cest bon',
+  'beaucoup',
+  'matondi',
+  'nothing',
+  'thanks',
+  'laisse',
+  'mercii',
+  'merci',
+  'bien',
+  'rien',
+  'okay',
+  'non',
+  'thx',
+  'oki',
+  'ok',
+].sort((a, b) => b.length - a.length);
+
+/**
  * True only when the WHOLE message is an acknowledgement.
  *
- * Exact match after folding, like {@link isPureGreeting} and for the same
- * reason: « merci, et comment je postule ? » is a question with a thank-you in
- * front of it, and answering it with "de rien" drops the question on the floor.
+ * Nothing is matched loosely: « merci, et comment je postule ? » is a question
+ * with a thank-you in front of it, and answering that with "de rien" drops the
+ * question on the floor. That is the trap {@link isPureGreeting} documents, and
+ * the same answer — the message must be a close ENTIRELY.
+ *
+ * Two ways to qualify. Either the folded text is one of the phrases above, or
+ * it decomposes into TWO OR MORE closing atoms and nothing else.
+ *
+ * The two-atom floor is what keeps a bare « non » out. Alone it is an answer —
+ * to "voulez-vous que je regarde ?" it means no, and it deserves a real reply.
+ * Stacked, as in « non merci », it is a close. Same word, different message.
  */
 export function isAcknowledgement(text: string): boolean {
   const folded = foldText(text);
-  if (!folded || folded.length > 20) return false;
-  return ACKNOWLEDGEMENTS.includes(folded);
+  if (!folded || folded.length > 30) return false;
+  if (ACKNOWLEDGEMENTS.includes(folded)) return true;
+
+  let rest = folded;
+  let atoms = 0;
+
+  while (rest.length > 0) {
+    const atom = CLOSING_ATOMS.find(
+      (candidate) => rest === candidate || rest.startsWith(`${candidate} `),
+    );
+    if (!atom) return false;
+    rest = rest.slice(atom.length).trimStart();
+    atoms += 1;
+  }
+
+  return atoms >= 2;
 }
 
 export function isNavigationRequest(text: string): boolean {

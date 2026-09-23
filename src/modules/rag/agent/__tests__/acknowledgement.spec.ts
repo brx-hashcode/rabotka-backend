@@ -31,6 +31,35 @@ describe('isAcknowledgement', () => {
     expect(isAcknowledgement(text)).toBe(false);
   });
 
+  it.each([
+    ['D’accord \nMerci', 'Ravine, 9 Sep 17:59'],
+    ['Ok \nMerci', 'Ravine, 23 Sep 10:37'],
+    ['Merci beaucoup', ''],
+    ["ok d'accord merci", ''],
+  ])('reads %s as one close, stacked across lines', (text) => {
+    // People stack these, and across two lines. Enumerating every pair would
+    // be a list that still misses the next one somebody types, so the message
+    // is consumed atom by atom instead.
+    expect(isAcknowledgement(text)).toBe(true);
+  });
+
+  it.each(['Non', 'Bien'])('leaves a bare %s to the assistant', (text) => {
+    // Alone it is an ANSWER — to "voulez-vous que je regarde ?" a bare « non »
+    // means no, and it deserves a real reply. Stacked, as in « non merci », it
+    // closes. Same word, different message, which is why two atoms are needed.
+    //
+    // « rien » is the exception and stays a close on its own: asked what they
+    // are looking for, "nothing" IS the end of the exchange.
+    expect(isAcknowledgement(text)).toBe(false);
+  });
+
+  it.each(['rien ne marche', 'ok mais mon paiement ne passe pas'])(
+    'does not swallow %s',
+    (text) => {
+      expect(isAcknowledgement(text)).toBe(false);
+    },
+  );
+
   it('does not overlap with a greeting', () => {
     // Two different decisions; « bonjour » opens and « merci » closes. Sharing
     // one list would make a change to either silently change the other.
