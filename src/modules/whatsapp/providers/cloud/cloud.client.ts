@@ -5,7 +5,6 @@ import type { CloudProviderConfig } from '../../whatsapp.config';
 import { transportError, toWhatsappError } from './cloud.errors';
 import {
   isCloudErrorBody,
-  isCloudMediaUploadResponse,
   isCloudSendResponse,
   type CloudErrorBody,
   type CloudReadPayload,
@@ -39,11 +38,9 @@ const REQUEST_TIMEOUT_MS = 15_000;
 export class CloudClient {
   private readonly logger = new Logger('WhatsAppCloudClient');
   private readonly messagesUrl: string;
-  private readonly mediaUrl: string;
 
   constructor(private readonly config: CloudProviderConfig) {
     this.messagesUrl = `https://graph.facebook.com/${config.apiVersion}/${config.phoneNumberId}/messages`;
-    this.mediaUrl = `https://graph.facebook.com/${config.apiVersion}/${config.phoneNumberId}/media`;
   }
 
   get endpoint(): string {
@@ -59,97 +56,6 @@ export class CloudClient {
       payload,
       payload.typing_indicator ? 'typing_indicator' : 'read',
     );
-  }
-
-  /**
-   * Put an image on Meta's own storage and get back an id to send it by.
-   *
-   * WHY THIS EXISTS: a header image sent as `{ link }` is fetched by Meta from
-   * the public internet at send time, and that fetch is the single point in the
-   * outbound path that depends on a third party being reachable from Meta's
-   * network. It failed in production with 131053 against a URL that answered
-   * 200 to everything else, Meta's own crawler included. An id is served from
-   * Meta's storage instead — the same reason an approved template's header
-   * image never fails.
-   *
-   * TWO HOPS, and the first one is ours: the bytes are pulled from `sourceUrl`
-   * by this container, which can see the bucket, and pushed to Graph. Meta is
-   * never asked to reach anything.
-   *
-   * Uploaded media expires after about 30 days, so the id this returns is a
-   * cache entry and not a constant — the caller is expected to re-upload when a
-   * send reports the media as gone.
-   */
-  async uploadMedia(sourceUrl: string): Promise<string> {
-    const what = `media upload ${sourceUrl}`;
-    const started = performance.now();
-
-    let file: Blob;
-    try {
-      const source = await fetchWithTimeout(sourceUrl, {}, REQUEST_TIMEOUT_MS);
-      if (!source.ok) {
-        throw new Error(`source responded ${source.status}`);
-      }
-      file = await source.blob();
-    } catch (err) {
-      const message = `[Cloud] ${what} could not read the source: ${
-        err instanceof Error ? err.message : String(err)
-      }`;
-      this.logger.error(message);
-      throw transportError(message, err);
-    }
-
-    const form = new FormData();
-    form.append('messaging_product', 'whatsapp');
-    // The filename matters: Graph infers the type from the part when the blob
-    // carries none, and an extensionless part is rejected as unsupported.
-    form.append('file', file, filenameFor(sourceUrl, file.type));
-
-    let response: Response;
-    try {
-      response = await fetchWithTimeout(
-        this.mediaUrl,
-        {
-          method: 'POST',
-          // NO Content-Type header: fetch sets it from the FormData along with
-          // the multipart boundary, and setting it by hand omits the boundary
-          // and makes Graph reject the body.
-          headers: { Authorization: `Bearer ${this.config.accessToken}` },
-          body: form,
-        },
-        REQUEST_TIMEOUT_MS,
-      );
-    } catch (err) {
-      const message = transportMessage(what, err);
-      this.logger.error(message);
-      throw transportError(message, err);
-    }
-
-    const elapsed = Math.round(performance.now() - started);
-    const raw: unknown = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      const body: CloudErrorBody | null = isCloudErrorBody(raw) ? raw : null;
-      const error = toWhatsappError(
-        response.status,
-        body,
-        response.statusText,
-        raw,
-      );
-      this.logger.error(
-        `[Cloud] ${what} -> ${response.status} in ${elapsed}ms: ${error.message}`,
-      );
-      throw error;
-    }
-
-    if (!isCloudMediaUploadResponse(raw)) {
-      const message = `[Cloud] ${what} returned no media id`;
-      this.logger.error(message);
-      throw transportError(message, raw);
-    }
-
-    this.logger.log(`[Cloud] ${what} -> id ${raw.id} in ${elapsed}ms`);
-    return raw.id;
   }
 
   private async post(
@@ -222,19 +128,6 @@ function transportMessage(what: string, err: unknown): string {
   }
   const reason = err instanceof Error ? err.message : 'unknown transport error';
   return `[Cloud] ${what} failed to reach graph.facebook.com: ${reason}`;
-}
-
-/**
- * A filename Graph will accept, derived from the source URL.
- *
- * Falls back to the MIME type's extension when the URL has none — a part with
- * no extension comes back as an unsupported type rather than as a clear error.
- */
-function filenameFor(sourceUrl: string, mimeType: string): string {
-  const last = sourceUrl.split('?')[0]?.split('/').pop() ?? '';
-  if (/\.[a-z0-9]{2,5}$/i.test(last)) return last;
-  const ext = mimeType.split('/')[1]?.split('+')[0] ?? 'jpg';
-  return `upload.${ext}`;
 }
 
 function describe(payload: CloudSendPayload): string {

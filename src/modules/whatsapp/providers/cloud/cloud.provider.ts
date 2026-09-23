@@ -35,18 +35,6 @@ import {
 /** Meta's cap on a `cta_url` button label. */
 const CTA_BUTTON_TEXT_MAX = 20;
 
-/**
- * Did this send fail because the media id we used is no longer there?
- *
- * Meta keeps uploaded media for about 30 days and reports a gone id through the
- * same family of codes as an unfetchable link, which is what `MEDIA_ERROR`
- * covers. Narrow on purpose: this only ever runs on a send that DID carry an
- * id, so a media error on that send points at the id before anything else, and
- * anything broader would re-upload on failures an upload cannot fix.
- */
-function isStaleMediaError(err: unknown): boolean {
-  return err instanceof WhatsappError && err.code === 'MEDIA_ERROR';
-}
 
 /**
  * Meta WhatsApp Cloud API implementation of the port.
@@ -58,26 +46,6 @@ function isStaleMediaError(err: unknown): boolean {
 export class CloudProvider implements WhatsappProvider {
   readonly name = 'cloud' as const;
 
-  /**
-   * Source URL → the media id Meta gave us for it.
-   *
-   * IN PROCESS, not Redis, and that is the whole design. Uploading is idempotent
-   * and cheap, the set of images is one brand cover, and a cold process pays a
-   * single upload on its first card. Sharing this between the api and the worker
-   * would buy one avoided upload per restart at the cost of a Redis dependency
-   * inside a provider that is constructed by hand, outside Nest's DI — see
-   * `whatsapp-provider.factory.ts`.
-   *
-   * Entries are dropped when Meta says the id is gone (they last about 30 days),
-   * so this heals itself without a TTL to keep in step with Meta's.
-   */
-  private readonly mediaIds = new Map<string, string>();
-
-  /**
-   * In-flight uploads, so a burst of cards does not upload the same image N
-   * times. The first caller uploads, the rest await the same promise.
-   */
-  private readonly mediaUploads = new Map<string, Promise<string>>();
 
   readonly capabilities: ProviderCapabilities = {
     typingIndicator: true,
@@ -261,7 +229,7 @@ export class CloudProvider implements WhatsappProvider {
     }
 
     const send = async (
-      image: { link: string } | { id: string } | null,
+      image: { link: string } | null,
     ): Promise<SendResult> => {
       const header = image
         ? { header: { type: 'image' as const, image } }
@@ -296,61 +264,45 @@ export class CloudProvider implements WhatsappProvider {
 
     if (!payload.imageUrl) return send(null);
 
-    const source = payload.imageUrl;
-    const mediaId = await this.mediaIdFor(source);
-
-    // The upload itself failed — the bucket is unreachable from here, or Graph
-    // refused the file. Fall back to the link so the card is no worse off than
-    // it was before ids existed: Meta may still manage the fetch, and if it
-    // does not, the caller's own template fallback catches it.
-    if (!mediaId) return send({ link: source });
-
+    /**
+     * ALWAYS A LINK, never an uploaded media id.
+     *
+     * Verified against Graph on a live send: `{ id }` comes back 400 with
+     * 131008, "header image must contain link". A `cta_url` header requires a
+     * link, unlike a TEMPLATE's header media, which really is uploaded once at
+     * approval — the resemblance is what makes the mistake tempting, and this
+     * repo has already made it once, in production.
+     */
     try {
-      return await send({ id: mediaId });
+      return await send({ link: payload.imageUrl });
     } catch (err) {
-      // An id that Meta no longer recognises — uploaded media lasts about 30
-      // days. Drop it and go once more with a fresh one, which is what makes
-      // the cache self-healing rather than something with a TTL to maintain.
-      if (!isStaleMediaError(err)) throw err;
-
-      this.mediaIds.delete(source);
-      const fresh = await this.mediaIdFor(source);
-      return send(fresh ? { id: fresh } : { link: source });
+      /**
+       * Last resort before the caller's own fallback, which is a MARKETING
+       * template and therefore BILLED.
+       *
+       * The link is the fragile part: the bucket is Cloudflare's rate-limited
+       * `*.r2.dev` development endpoint, and when Meta cannot fetch it the send
+       * comes back 131053. A card with no picture is still free-form, still
+       * inside the 24h window, and still carries the button that is the entire
+       * reason for this message type — so dropping the image to keep the send
+       * free is a far better trade than a billed template saying the same words.
+       *
+       * ON ANY ERROR, not just a media one. The retry was first written to
+       * catch MEDIA_ERROR, and the next failure arrived as an unmapped code and
+       * sailed straight past it into the billed fallback. Whatever Meta's
+       * objection to a header turns out to be, the answer is the same. An error
+       * that has nothing to do with the image simply fails again and
+       * propagates, at the cost of one extra call on an already-failing send.
+       */
+      this.logger.warn(
+        `Card to ${to} refused with its image, retrying without one: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return send(null);
     }
   }
 
-  /**
-   * The media id for an image, uploading it the first time it is asked for.
-   *
-   * Returns null rather than throwing: a card whose image could not be uploaded
-   * should still go out. Failing the send over the picture would turn a
-   * cosmetic problem into a missed message.
-   */
-  private async mediaIdFor(sourceUrl: string): Promise<string | null> {
-    const cached = this.mediaIds.get(sourceUrl);
-    if (cached) return cached;
-
-    const inFlight = this.mediaUploads.get(sourceUrl);
-    if (inFlight) return inFlight.catch(() => null);
-
-    const upload = this.client
-      .uploadMedia(sourceUrl)
-      .then((id) => {
-        this.mediaIds.set(sourceUrl, id);
-        return id;
-      })
-      .finally(() => this.mediaUploads.delete(sourceUrl));
-
-    this.mediaUploads.set(sourceUrl, upload);
-
-    return upload.catch((err: unknown) => {
-      this.logger.warn(
-        `Could not upload ${sourceUrl} to WhatsApp, falling back to a link: ` +
-          (err instanceof Error ? err.message : String(err)),
-      );
-      return null;
-    });
-  }
 
   async sendInteractiveList(
     to: E164,

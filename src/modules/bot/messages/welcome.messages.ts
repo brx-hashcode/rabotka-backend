@@ -48,6 +48,30 @@ const APP_URL = 'https://rabotka.work/login?redirect=/home';
  *   assistant passes the place the person actually asked about, so the card
  *   opens there instead of making them navigate again.
  */
+/**
+ * THE HEADER IMAGE, AND WHY IT IS A LINK.
+ *
+ * Verified against Graph on a live send, because two rounds of guessing had
+ * already cost a production regression:
+ *
+ *   header.image = { link }  ->  200, delivered
+ *   header.image = { id }    ->  400, 131008 "header image must contain link"
+ *
+ * A `cta_url` header REQUIRES a link. It does not take an uploaded media id,
+ * however reasonable that looks next to templates, whose header media really is
+ * uploaded once at approval. Sending an id here fails every time.
+ *
+ * That is worth knowing because a link is the fragile option and the instinct
+ * to replace it is a good one. The bucket is `*.r2.dev`, Cloudflare's
+ * development endpoint, which is rate-limited and not meant for production
+ * traffic — when Meta cannot fetch it the send comes back 131053. That is a
+ * transient failure of the HOST, not of the shape of the message, and the fix
+ * for it is a real domain in front of the bucket, not a different payload.
+ *
+ * Until then `CloudProvider` retries the card without its image on any refusal,
+ * so a bucket hiccup costs the picture rather than falling through to the
+ * approved MARKETING template, which is billed.
+ */
 export function welcomePlatformMessage(
   destination: string = WELCOME_PATH,
 ): string {
