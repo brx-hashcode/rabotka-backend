@@ -207,7 +207,19 @@ export function buildSystemPromptParts(ctx: PromptContext): SystemPromptParts {
     // qui distingue Rabotka du bouche-à-oreille et n'a jamais été dit.
     '- Un chiffre, un statut, un montant : DEUX PHRASES, pas plus. Personne ne veut six lignes pour un solde.',
     "- Une question qui demande une explication — « c'est quoi Rabotka », « pourquoi », « comment ça marche », « comment ça se passe si… » — mérite une VRAIE réponse : ce que c'est, pourquoi ça existe, et ce que ça change pour la personne. Prends la place qu'il faut.",
-    "- Pour ces réponses-là, structure en lignes courtes avec un mot en gras devant : « *Sans commission* — le prix se règle entre vous, Rabotka ne prend rien. » On lit ça d'un coup d'œil sur un téléphone ; un pavé de six lignes, non.",
+    // L'EXEMPLE DE MISE EN FORME NE DOIT PAS ÊTRE UN FAIT.
+    //
+    // Il l'était : « *Sans commission* — le prix se règle entre vous, Rabotka
+    // ne prend rien. » Le modèle l'a recopié tel quel comme une RÉPONSE, dans
+    // deux conversations différentes, et il a construit dessus — « sans frais
+    // de déblocage si elle est déjà vérifiée », ce qui est faux et parle
+    // d'argent. Le corpus, lui, est juste et complet : aucune commission SUR
+    // CE QUE VOUS GAGNEZ, mais le déblocage d'un contact se paie
+    // (`c-est-quoi-rabotka.md`). L'exemple coupait la seconde moitié.
+    //
+    // Un exemple se fait citer. Celui-ci ne porte donc plus aucune affirmation
+    // sur le produit — seulement la forme demandée.
+    "- Pour ces réponses-là, structure en lignes courtes avec un mot en gras devant : « *Un exemple* — la phrase qui explique, en une ligne. » On lit ça d'un coup d'œil sur un téléphone ; un pavé de six lignes, non.",
     '- Jamais de tableau : WhatsApp ne les affiche pas, ils arrivent en bouillie de barres verticales.',
     "- Ne dis jamais tout ce que tu sais parce que tu le sais. « C'est quoi Rabotka » et « comment ça marche » sont deux questions : la première décrit et donne la raison, la seconde raconte les étapes. Chacune sa réponse.",
     '- Ne décris jamais un bouton, un filtre, un onglet ou un champ que la documentation ne mentionne pas. Tu connais le NOM des pages, pas leur contenu.',
@@ -528,7 +540,19 @@ export function buildAnonymousSystemPromptParts(
     // qui distingue Rabotka du bouche-à-oreille et n'a jamais été dit.
     '- Un chiffre, un statut, un montant : DEUX PHRASES, pas plus. Personne ne veut six lignes pour un solde.',
     "- Une question qui demande une explication — « c'est quoi Rabotka », « pourquoi », « comment ça marche », « comment ça se passe si… » — mérite une VRAIE réponse : ce que c'est, pourquoi ça existe, et ce que ça change pour la personne. Prends la place qu'il faut.",
-    "- Pour ces réponses-là, structure en lignes courtes avec un mot en gras devant : « *Sans commission* — le prix se règle entre vous, Rabotka ne prend rien. » On lit ça d'un coup d'œil sur un téléphone ; un pavé de six lignes, non.",
+    // L'EXEMPLE DE MISE EN FORME NE DOIT PAS ÊTRE UN FAIT.
+    //
+    // Il l'était : « *Sans commission* — le prix se règle entre vous, Rabotka
+    // ne prend rien. » Le modèle l'a recopié tel quel comme une RÉPONSE, dans
+    // deux conversations différentes, et il a construit dessus — « sans frais
+    // de déblocage si elle est déjà vérifiée », ce qui est faux et parle
+    // d'argent. Le corpus, lui, est juste et complet : aucune commission SUR
+    // CE QUE VOUS GAGNEZ, mais le déblocage d'un contact se paie
+    // (`c-est-quoi-rabotka.md`). L'exemple coupait la seconde moitié.
+    //
+    // Un exemple se fait citer. Celui-ci ne porte donc plus aucune affirmation
+    // sur le produit — seulement la forme demandée.
+    "- Pour ces réponses-là, structure en lignes courtes avec un mot en gras devant : « *Un exemple* — la phrase qui explique, en une ligne. » On lit ça d'un coup d'œil sur un téléphone ; un pavé de six lignes, non.",
     '- Jamais de tableau : WhatsApp ne les affiche pas, ils arrivent en bouillie de barres verticales.',
     "- Ne dis jamais tout ce que tu sais parce que tu le sais. « C'est quoi Rabotka » et « comment ça marche » sont deux questions : la première décrit et donne la raison, la seconde raconte les étapes. Chacune sa réponse.",
     "- Ne décris jamais un écran, un bouton ou une page : cette personne n'a rien à ouvrir pour l'instant.",
