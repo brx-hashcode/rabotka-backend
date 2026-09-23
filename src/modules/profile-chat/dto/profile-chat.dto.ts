@@ -5,11 +5,11 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   Max,
   MaxLength,
   Min,
 } from 'class-validator';
-
 
 export const MESSAGE_MAX_LENGTH = 2_000;
 
@@ -30,6 +30,20 @@ export class SendMessageDto {
   body!: string;
 }
 
+/**
+ * The one inbound socket payload this module accepts.
+ *
+ * A single validated uuid and nothing else — no body, no flag, nothing that
+ * gets stored. `ProfileChatGateway` applies a `ValidationPipe` by hand, since
+ * the global one does not reach gateways; see the note at the top of that file
+ * for why an inbound handler is allowed here at all.
+ */
+export class TypingDto {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  conversationId!: string;
+}
+
 export class ReportRedactionDto {
   @ApiPropertyOptional({
     description: 'Why the sender believes the detection was wrong',
@@ -40,7 +54,6 @@ export class ReportRedactionDto {
   @MaxLength(500)
   note?: string;
 }
-
 
 export class ListConversationsDto {
   @ApiPropertyOptional({ description: 'Page number (1-based)', default: 1 })

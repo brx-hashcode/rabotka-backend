@@ -70,6 +70,17 @@ export interface MessageView {
    * the thread and come back, which component state could not.
    */
   reported: boolean;
+  /**
+   * Taken back by its author. Both parties get a tombstone — empty body, no
+   * offsets — and the client draws "Ce message a été supprimé" in its place.
+   *
+   * The ROW is not emptied. Moderation's raw thread still reads the original,
+   * which is the whole point on a platform where the thing people try to send
+   * is a phone number: "sent it, then deleted it" is precisely the behaviour
+   * the moderation queue exists to catch, and erasing the body on request
+   * would hand anyone a way to clear their own evidence.
+   */
+  deletedAt: Date | null;
   createdAt: Date;
   readAt: Date | null;
 }
@@ -550,9 +561,13 @@ export class ProfileChatService {
     // A HELD message was never delivered, so it does not exist for the
     // recipient — but the author must still see it, marked as not delivered,
     // or their own message simply vanishes with no explanation.
+    // NOT filtered on `deleted_at`: a deleted message stays in the thread as a
+    // tombstone, the way WhatsApp leaves "Ce message a été supprimé" behind. A
+    // message that simply vanished mid-conversation would read as a bug to the
+    // other party, and would let somebody quietly rewrite a thread. The body is
+    // emptied in `toMessageView`, not here.
     const visible: Prisma.ProfileMessageWhereInput = {
       conversation_id: conversationId,
-      deleted_at: null,
       // Cleared for this side only. The rows stay, and the other side still
       // reads every one of them.
       ...(hiddenAt ? { created_at: { gt: hiddenAt } } : {}),
@@ -884,6 +899,66 @@ export class ProfileChatService {
     return count;
   }
 
+  /**
+   * Takes a message back, for both sides.
+   *
+   * Only the author, and no time window: the person who most needs this is the
+   * one who has just realised what they typed, but the one who needs it a week
+   * later has the same claim on their own words. A window would only decide
+   * which regrets are allowed.
+   *
+   * Sets `deleted_at` and nothing else. The body stays in the row — see
+   * `MessageView.deletedAt` for why that is deliberate rather than an
+   * oversight — and so do the redaction offsets, which are the moderation
+   * queue's record of what was caught.
+   */
+  async deleteMessage(messageId: string, profileId: string): Promise<void> {
+    const message = await this.prisma.profileMessage.findUnique({
+      where: { id: messageId },
+      select: {
+        id: true,
+        sender_id: true,
+        conversation_id: true,
+        deleted_at: true,
+      },
+    });
+    if (!message) throw new NotFoundException('Message introuvable');
+
+    // Membership first, and NotFound rather than Forbidden for a message that
+    // is not this profile's to see — the same reasoning as
+    // `requireParticipant`: "it exists but is not yours" is itself information.
+    const conversation = await this.requireParticipant(
+      message.conversation_id,
+      profileId,
+    );
+
+    if (message.sender_id !== profileId) {
+      throw new ForbiddenException('Seul l’auteur peut supprimer ce message');
+    }
+    if (conversation.closed_at) {
+      throw new BadRequestException('Cette discussion est close');
+    }
+
+    // Idempotent. A second tap — or a retry over a connection that dropped
+    // after the write — is the same person asking for the same thing, and from
+    // where they stand nothing went wrong.
+    if (message.deleted_at) return;
+
+    await this.prisma.profileMessage.update({
+      where: { id: messageId },
+      data: { deleted_at: new Date() },
+    });
+
+    // Both sides, not only the other one: the author may have the thread open
+    // in a second tab, and the tombstone has to land there too.
+    const counterpartId =
+      conversation.worker_id === profileId
+        ? conversation.employer_id
+        : conversation.worker_id;
+    this.gateway.emitDeleted(profileId, conversation.id, messageId);
+    this.gateway.emitDeleted(counterpartId, conversation.id, messageId);
+  }
+
   // ── Reports ────────────────────────────────────────────────────────────────
 
   /**
@@ -985,6 +1060,8 @@ export class ProfileChatService {
       moderation_status: MessageModerationStatus;
       created_at: Date;
       read_at: Date | null;
+      /** Absent on the send path, where the message is a line old. */
+      deleted_at?: Date | null;
       redactions: {
         start_offset: number;
         end_offset: number;
@@ -1000,6 +1077,28 @@ export class ProfileChatService {
     viewerId: string,
   ): MessageView {
     const mine = row.sender_id === viewerId;
+    const deletedAt = row.deleted_at ?? null;
+
+    // A tombstone carries nothing but the fact that it is one. Not even the
+    // author gets their own text back: they asked for it to be gone, and a
+    // thread where one side still reads what the other took back is not what
+    // "supprimé" says on the button.
+    if (deletedAt) {
+      return {
+        id: row.id,
+        conversationId: row.conversation_id,
+        senderId: row.sender_id,
+        mine,
+        body: '',
+        status: MessageModerationStatus.CLEAN,
+        redactions: [],
+        reported: false,
+        createdAt: row.created_at,
+        readAt: row.read_at,
+        deletedAt,
+      };
+    }
+
     return {
       id: row.id,
       conversationId: row.conversation_id,
@@ -1020,6 +1119,7 @@ export class ProfileChatService {
       reported: mine && (row.reports?.length ?? 0) > 0,
       createdAt: row.created_at,
       readAt: row.read_at,
+      deletedAt: null,
     };
   }
 
@@ -1060,5 +1160,4 @@ export class ProfileChatService {
   private async isEnabled(): Promise<boolean> {
     return (await this.config.get(ENABLED_KEY, 'true')) !== 'false';
   }
-
 }

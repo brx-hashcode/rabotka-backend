@@ -34,8 +34,10 @@ import {
  * SENDING IS A REQUEST, NOT AN EMIT, and that is the reason this is a
  * controller rather than a gateway. Moderation has to hand the author a verdict
  * — which fragments of their own message stayed behind — and that is a
- * request/response shape. The socket side is push-only and carries no inbound
- * surface at all.
+ * request/response shape. Everything that writes a row lives here — sending,
+ * reading, deleting. The socket's only inbound handler is `typing`, which
+ * stores nothing; see `profile-chat.gateway.ts` for the conditions anything
+ * else would have to meet to join it.
  *
  * It also keeps the global `ValidationPipe` in play. It does not run on
  * gateways: `chat.gateway.ts` accepts a message body over the socket that no
@@ -213,6 +215,29 @@ export class ProfileChatController {
     @Body() dto: ReportRedactionDto,
   ) {
     await this.chat.reportRedaction(messageId, req.user.profileId, dto.note);
+    return { ok: true };
+  }
+
+  /**
+   * Take one of your own messages back.
+   *
+   * Both parties then see a tombstone rather than the message — nothing
+   * vanishes from the thread, and nothing is erased from the row moderation
+   * reads. Throttled like sending: the ceiling stops a script walking a
+   * thread, it does not ration ordinary use.
+   *
+   * Two segments, so it never collides with `DELETE :id` above — that one hides
+   * a whole conversation and means something entirely different.
+   */
+  @Delete('messages/:messageId')
+  @UseGuards(ProfileAuthGuard, ActiveProfileGuard)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Supprimer un message envoyé' })
+  async deleteMessage(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('messageId', ParseUUIDPipe) messageId: string,
+  ) {
+    await this.chat.deleteMessage(messageId, req.user.profileId);
     return { ok: true };
   }
 }
