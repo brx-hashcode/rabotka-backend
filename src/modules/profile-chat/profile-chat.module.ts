@@ -7,6 +7,10 @@ import { ProfileChatService } from './profile-chat.service';
 import { ModerationService } from './moderation/moderation.service';
 import { ProfileChatGateway } from './profile-chat.gateway';
 import { PresenceService } from './presence.service';
+import { AdminConversationController } from './admin-profile-chat.controller';
+import { AdminConversationThreadController } from './admin-profile-chat-thread.controller';
+import { AdminProfileChatService } from './admin-profile-chat.service';
+import { LogModule } from '../log/log.module';
 
 /**
  * Profile-to-profile messaging before contact details are unlocked.
@@ -21,13 +25,21 @@ import { PresenceService } from './presence.service';
  * at three.
  */
 @Module({
-  imports: [PrismaModule, AuthModule, SystemConfigModule],
-  controllers: [ProfileChatController],
+  // LogModule is here for the thread controller alone: reading two people's
+  // messages writes an audit row, and that row is the permission model rather
+  // than telemetry.
+  imports: [PrismaModule, AuthModule, SystemConfigModule, LogModule],
+  controllers: [
+    ProfileChatController,
+    AdminConversationController,
+    AdminConversationThreadController,
+  ],
   providers: [
     ProfileChatService,
     ModerationService,
     ProfileChatGateway,
     PresenceService,
+    AdminProfileChatService,
   ],
   exports: [ProfileChatService],
 })

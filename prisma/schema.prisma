@@ -2508,6 +2508,11 @@ model ProfileConversation {
   @@index([application_id], map: "idx_profile_conversation_application")
   @@index([worker_id, last_message_at(sort: Desc)], name: "idx_profile_conversation_worker")
   @@index([employer_id, last_message_at(sort: Desc)], name: "idx_profile_conversation_employer")
+  /// The back-office list, which sorts every conversation on the platform by
+  /// recency. The two indexes above lead with a participant, so neither can
+  /// serve a global ORDER BY — without this it is a seq scan plus a full sort
+  /// on every page.
+  @@index([last_message_at(sort: Desc)], name: "idx_profile_conversation_last_message")
   @@map("profile_conversations")
 }
 
