@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { AFRICAN_COUNTRY_CODES, PRIORITY_REGION } from './africa';
 
 export type Country = { code: string; name: string };
 
@@ -61,9 +62,29 @@ export class GeoService {
     );
   }
 
-  /** Every country, already sorted by French name. */
+  /**
+   * The countries on offer: Africa, with West and Central Africa first.
+   *
+   * NOT every country in the dataset. The pickers used to list all 252, so an
+   * employer posting a job in Brazzaville scrolled past Afghanistan, Albania
+   * and Andorra before reaching anything this platform operates in.
+   *
+   * Two groups, each still in the dataset's French alphabetical order, so the
+   * region the platform actually works in is at the top and the rest of the
+   * continent follows without disappearing.
+   *
+   * Selection only — see `africa.ts`. `findCountry` and `resolveLocation` are
+   * untouched and still accept any code in the dataset, so a profile created
+   * before this narrowing keeps its country and keeps matching filters.
+   */
   listCountries(): Country[] {
-    return DATA.countries;
+    const african = DATA.countries.filter((c) =>
+      AFRICAN_COUNTRY_CODES.has(c.code),
+    );
+    return [
+      ...african.filter((c) => PRIORITY_REGION.has(c.code)),
+      ...african.filter((c) => !PRIORITY_REGION.has(c.code)),
+    ];
   }
 
   /** The country for an ISO 3166-1 alpha-2 code, or null. */
