@@ -4,6 +4,7 @@ import { ConversationService } from './conversation.service';
 import { BotModule } from '../bot/bot.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { VovaModule } from '../rag/vova.module';
+import { BotPauseModule } from '../bot/services/bot-pause.module';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { VovaModule } from '../rag/vova.module';
     // Imported directly, not through BotModule: the unregistered branch never
     // reaches the orchestrator, so it needs its own handle on the assistant.
     VovaModule,
+    BotPauseModule,
   ],
   controllers: [ConversationController],
   providers: [ConversationService],

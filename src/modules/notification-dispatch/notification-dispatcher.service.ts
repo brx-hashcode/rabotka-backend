@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
+import { BotPauseService } from '../bot/services/bot-pause.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { notificationDispatchCounter } from '../whatsapp/telemetry/metrics';
 import type { TemplateKey, TemplateParams } from '../whatsapp/contracts';
@@ -74,6 +75,7 @@ export class NotificationDispatcher {
     private readonly whatsApp: WhatsAppService,
     private readonly loginLink: WhatsAppLoginLinkService,
     private readonly systemConfig: SystemConfigService,
+    private readonly botPause: BotPauseService,
   ) {}
 
   /**
@@ -101,6 +103,28 @@ export class NotificationDispatcher {
     input: DispatchInput<K>,
   ): Promise<DispatchResult> {
     const { phone, profileId, template, freeForm, body } = input;
+
+    /**
+     * An admin has taken this conversation over — nothing automated goes out.
+     *
+     * This is the chokepoint EVERY scheduled message passes through: the
+     * reminder processor and `BotNotificationService` both dispatch here.
+     * Suppressing the bot's replies alone would not have been enough — a
+     * mission reminder landing mid-handover means the admin is talking over a
+     * robot, which is the thing the toggle exists to stop.
+     *
+     * The admin's OWN messages do not come through here. They are enqueued
+     * straight onto the outbound queue by `whatsapp-admin.service`, so they
+     * are unaffected and a paused profile can still be answered.
+     */
+    if (await this.botPause.isPaused(profileId)) {
+      notificationDispatchCounter.inc({
+        mode: 'template',
+        reason: 'bot_paused',
+        template: template.key,
+      });
+      return { mode: 'TEMPLATE', sent: false };
+    }
 
     if (!freeForm || !profileId) {
       return this.sendTemplate(
