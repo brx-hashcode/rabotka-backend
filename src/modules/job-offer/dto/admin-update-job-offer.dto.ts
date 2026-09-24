@@ -67,9 +67,15 @@ export class AdminUpdateJobOfferDto extends LocationDto {
   @IsUUID()
   categoryId?: string | null;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    description:
+      'Always optional, like on creation. "" clears an address already set.',
+  })
   @IsOptional()
   @IsString()
+  @ValidateIf(
+    (o: AdminUpdateJobOfferDto) => (o.address ?? '').trim().length > 0,
+  )
   @MinLength(10)
   address?: string;
 

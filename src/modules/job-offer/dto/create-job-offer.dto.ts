@@ -11,9 +11,13 @@ import {
   Max,
   MinLength,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
 import { EmploymentType, PaymentFlow } from '@prisma/client';
 import { LocationDto } from '../../../common/dto/location.dto';
+
+/** Mirrored by `ADDRESS_MIN` in the service, which enforces the same bound. */
+const ADDRESS_MIN_LENGTH = 10;
 
 export class CreateJobOfferDto extends LocationDto {
   @ApiProperty({ example: 'Plombier pour réparation urgente' })
@@ -73,12 +77,19 @@ export class CreateJobOfferDto extends LocationDto {
   @ApiPropertyOptional({
     example: '123 Avenue de la Paix, Poto-Poto, Brazzaville',
     description:
-      'Required unless isRemote is true — a remote job has no site. ' +
-      'Enforced in the service, which is the only place that knows both fields.',
+      'Always optional. Much of the informal work here happens at the ' +
+      "worker's own place — a tailor, a mechanic, a hairdresser — and the " +
+      'client travels to them, so there is no address to give. The city and ' +
+      'country carry the geography. When supplied it must be a real address ' +
+      `of at least ${ADDRESS_MIN_LENGTH} characters.`,
   })
   @IsOptional()
   @IsString()
-  @MinLength(10)
+  // Skipped for "", which is how a client CLEARS an address it had set.
+  // Without this the only way to remove one would be to omit the field, and
+  // omitting it means "leave it alone" on the update path.
+  @ValidateIf((o: CreateJobOfferDto) => (o.address ?? '').trim().length > 0)
+  @MinLength(ADDRESS_MIN_LENGTH)
   address?: string;
 
   @ApiPropertyOptional({
