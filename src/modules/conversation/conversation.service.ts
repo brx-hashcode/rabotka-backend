@@ -8,6 +8,7 @@ import {
   MessageDirection,
 } from '@prisma/client';
 import { BotOrchestratorService } from '../bot/services/bot-orchestrator.service';
+import { BotPauseService } from '../bot/services/bot-pause.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import {
@@ -34,6 +35,7 @@ export class ConversationService {
     @Inject(REDIS_CONNECTION) private readonly redis: Redis,
     private readonly configService: ConfigService,
     private readonly vova: VovaService,
+    private readonly botPause: BotPauseService,
   ) {}
 
   /**
@@ -117,6 +119,23 @@ export class ConversationService {
       this.logger.log(
         `Conversation (profile ${profile.id}): "${textForBot.slice(0, 50)}${textForBot.length > 50 ? '...' : ''}"`,
       );
+
+      /**
+       * An admin has taken this conversation over — the bot stays quiet.
+       *
+       * AFTER the bookkeeping, and that ordering is the point: the message is
+       * still stored and still appears in the admin's thread. Suppressing the
+       * REPLY is the whole feature; dropping the message would hide from the
+       * admin the very thing they are there to answer.
+       *
+       * Before the bot graph runs, so a paused profile costs nothing — no
+       * flow, no model call, no tokens.
+       */
+      if (await this.botPause.isPaused(profile.id)) {
+        await bookkeeping;
+        this.logger.log(`Bot paused for ${profile.id} — no reply sent`);
+        return { profileId: profile.id, replies: [] };
+      }
 
       const replies = await this.botOrchestrator.handle(
         profile.id,

@@ -296,6 +296,15 @@ export type AdminProfileReferredBy = {
 };
 
 export type AdminProfileDetailResponse = AdminProfileListItem & {
+  /**
+   * When the bot stops being silent for this profile, or null when it was
+   * never paused.
+   *
+   * A DEADLINE, not a flag: a date in the past means the pause has lapsed and
+   * the bot is answering again, so a reader has to compare it with the clock
+   * rather than test for its presence.
+   */
+  botPausedUntil: Date | null;
   /** Legacy single category, superseded by `categoryIds`/`categoryNames`. */
   categoryId: string | null;
   categoryName: string | null;
@@ -793,6 +802,7 @@ export class ProfileService {
         status: true,
         profile_type: true,
         whatsapp_connected: true,
+        bot_paused_until: true,
         verification_status: true,
         verified_by: true,
         verified_at: true,
@@ -922,6 +932,13 @@ export class ProfileService {
       status: profile.status,
       profileType: profile.profile_type,
       whatsappConnected: profile.whatsapp_connected,
+      /**
+       * When VoVa stops being silent for this profile, or null when it is not
+       * paused. An expired deadline reads as "not paused" — the column is only
+       * cleared when somebody toggles it off, so the admin UI must judge it
+       * against the clock rather than on the field being present.
+       */
+      botPausedUntil: profile.bot_paused_until,
       verificationStatus: profile.verification_status,
       verifiedBy: profile.verified_by
         ? (verifierNames.get(profile.verified_by) ?? profile.verified_by)

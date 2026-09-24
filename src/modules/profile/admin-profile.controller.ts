@@ -52,6 +52,7 @@ import { MessageDirection, BotPlatform } from '@prisma/client';
 import { KYC_REJECTED_CTA_PATH } from '../../common/constants/whatsapp-templates';
 import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
 import { NotificationDispatcher } from '../notification-dispatch/notification-dispatcher.service';
+import { BotPauseService } from '../bot/services/bot-pause.service';
 import { kycRejectedFreeForm } from '../bot/messages/notifications.messages';
 import { AdminListProfilesDto } from './dto/admin-list-profiles.dto';
 import {
@@ -89,6 +90,10 @@ export class AdminProfileController {
     // what this controller did before the dispatcher existed.
     @Optional()
     private readonly dispatcher?: NotificationDispatcher,
+    // Appended and @Optional() for the same positional reason as the
+    // dispatcher above: specs build this controller by position.
+    @Optional()
+    private readonly botPause?: BotPauseService,
   ) {}
 
   /**
@@ -591,6 +596,12 @@ export class AdminProfileController {
       );
     }
 
+    // An admin who is mid-handover keeps the bot quiet by talking. Only
+    // EXTENDS an existing pause — sending a message is not itself a request to
+    // silence the bot, and an admin who never touched the toggle has not asked
+    // for one.
+    await this.botPause?.refresh(id);
+
     return { success: true, deliveryMode: delivery?.mode ?? null };
   }
 
@@ -661,6 +672,58 @@ export class AdminProfileController {
         ...(adminUserId ? { sent_by_id: adminUserId } : {}),
       },
     });
+  }
+
+  /**
+   * Take the conversation over: VoVa says nothing to this profile.
+   *
+   * Scoped to ONE profile on purpose. The switch in Settings turns the
+   * assistant off for everybody; this is an admin answering one person and
+   * not wanting a robot talking over them while they do it.
+   *
+   * It suppresses the bot's replies AND anything scheduled — a mission
+   * reminder landing mid-handover is exactly the interruption this prevents.
+   * The admin's own messages are unaffected: they never go through the
+   * notification dispatcher.
+   *
+   * Idempotent, and calling it again pushes the deadline out.
+   */
+  @Post(':id/bot-pause')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({ summary: 'Pause the bot for this profile (admin only)' })
+  async pauseBot(
+    @Param('id') id: string,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
+    const until = await this.botPause!.pause(id);
+    await this.logService.create({
+      action: 'PROFILE_BOT_PAUSED',
+      entityType: 'PROFILE',
+      entityId: id,
+      userId: req.user?.userId,
+      metadata: { until: until.toISOString() },
+      ...extractRequestMeta(req),
+    });
+    return { botPausedUntil: until };
+  }
+
+  /** Hand the conversation back to the bot, before the pause lapses on its own. */
+  @Delete(':id/bot-pause')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({ summary: 'Resume the bot for this profile (admin only)' })
+  async resumeBot(
+    @Param('id') id: string,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
+    await this.botPause!.resume(id);
+    await this.logService.create({
+      action: 'PROFILE_BOT_RESUMED',
+      entityType: 'PROFILE',
+      entityId: id,
+      userId: req.user?.userId,
+      ...extractRequestMeta(req),
+    });
+    return { botPausedUntil: null };
   }
 
   @Patch(':id')

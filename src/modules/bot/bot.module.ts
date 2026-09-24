@@ -19,6 +19,7 @@ import { BotStateService } from './services/bot-state.service';
 import { BotInboxService } from './services/bot-inbox.service';
 import { BotDraftService } from './services/bot-draft.service';
 import { BotRouterService } from './router/bot-router.service';
+import { BotPauseModule } from './services/bot-pause.module';
 import { BotOrchestratorService } from './services/bot-orchestrator.service';
 import { BotNotificationService } from './services/bot-notification.service';
 import { ContractModule } from '../contract/contract.module';
@@ -26,6 +27,7 @@ import { WhatsAppDocumentModule } from '../whatsapp/documents/whatsapp-document.
 
 @Module({
   imports: [
+    BotPauseModule,
     // For the mission contract delivered over WhatsApp when an unlock completes.
     ContractModule,
     WhatsAppDocumentModule,
@@ -56,6 +58,6 @@ import { WhatsAppDocumentModule } from '../whatsapp/documents/whatsapp-document.
     BotNotificationService,
     BotOrchestratorService,
   ],
-  exports: [BotOrchestratorService, BotNotificationService],
+  exports: [BotOrchestratorService, BotNotificationService, BotPauseModule],
 })
 export class BotModule {}

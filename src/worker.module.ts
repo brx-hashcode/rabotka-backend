@@ -37,6 +37,7 @@ import { PenaltyNotificationProcessor } from './modules/penalty/penalty-notifica
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ProfileChatProcessor } from './modules/profile-chat/profile-chat.processor';
 import { BroadcastProcessor } from './modules/broadcast/broadcast.processor';
+import { BotPauseService } from './modules/bot/services/bot-pause.service';
 import { NotificationDispatcher } from './modules/notification-dispatch/notification-dispatcher.service';
 import { ProfileNotificationService } from './modules/profile-notification/profile-notification.service';
 
@@ -245,10 +246,16 @@ export class WorkerModule {
         idempotency: IdempotencyService,
         mail: MailService,
       ) => {
+        // The worker builds its providers by hand, so a new dependency on the
+        // dispatcher has to be supplied here too. It is a per-profile bot
+        // pause, and the worker is exactly where it matters: this is the
+        // process that fires the scheduled reminders an admin mid-handover
+        // must not be interrupted by.
         const dispatcher = new NotificationDispatcher(
           whatsApp,
           loginLink,
           systemConfig,
+          new BotPauseService(prisma),
         );
         // The gateway holds no server outside the HTTP app, so its emit is
         // already a no-op there (see `emitNew`). A stub says that outright
@@ -302,7 +309,12 @@ export class WorkerModule {
           queue,
           prisma,
           systemConfig,
-          new NotificationDispatcher(whatsApp, loginLink, systemConfig),
+          new NotificationDispatcher(
+            whatsApp,
+            loginLink,
+            systemConfig,
+            new BotPauseService(prisma),
+          ),
           whatsApp,
         ),
       inject: [

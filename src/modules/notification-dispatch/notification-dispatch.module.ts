@@ -3,6 +3,7 @@ import { NotificationDispatcher } from './notification-dispatcher.service';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { WhatsAppLoginLinkModule } from '../auth/whatsapp-login-link.module';
 import { SystemConfigModule } from '../system-config/system-config.module';
+import { BotPauseModule } from '../bot/services/bot-pause.module';
 
 /**
  * The one way a notification should reach WhatsApp.
@@ -16,6 +17,7 @@ import { SystemConfigModule } from '../system-config/system-config.module';
     forwardRef(() => WhatsAppModule),
     WhatsAppLoginLinkModule,
     SystemConfigModule,
+    BotPauseModule,
   ],
   providers: [NotificationDispatcher],
   exports: [NotificationDispatcher],

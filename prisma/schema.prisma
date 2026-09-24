@@ -447,6 +447,16 @@ model Profile {
   rating_count                      Int                @default(0)
   whatsapp_connected                Boolean            @default(false)
   whatsapp_activation_bonus_granted Boolean            @default(false)
+
+  /// While this is in the future, the bot says NOTHING to this profile: no
+  /// reply to an inbound message, no scheduled reminder or nudge. An admin who
+  /// has taken the conversation over is not talked over by a robot.
+  ///
+  /// A deadline rather than a boolean, so a forgotten toggle heals itself. Every
+  /// admin message pushes it out again, so an active handover stays paused for
+  /// as long as it is active, and a profile nobody came back to is returned to
+  /// the bot instead of being silently cut off from it forever.
+  bot_paused_until                  DateTime?          @db.Timestamptz
   payment_link                      String?
   payment_link_expires_at           DateTime?
   verification_status               VerificationStatus @default(PENDING)
