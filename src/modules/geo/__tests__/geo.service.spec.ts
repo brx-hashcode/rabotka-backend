@@ -1,5 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
 import { GeoService } from '../geo.service';
+import { AFRICAN_COUNTRY_CODES, PRIORITY_REGION } from '../africa';
 
 /**
  * Runs against the real checked-in dataset, not a fixture. The point of that
@@ -10,13 +11,42 @@ import { GeoService } from '../geo.service';
 describe('GeoService', () => {
   const geo = new GeoService();
 
-  it('serves a complete country list, sorted for a French reader', () => {
+  it('offers Africa only, with West and Central Africa first', () => {
     const countries = geo.listCountries();
-    expect(countries.length).toBeGreaterThan(200);
+    const codes = countries.map((c) => c.code);
 
-    const names = countries.map((c) => c.name);
-    expect([...names].sort((a, b) => a.localeCompare(b, 'fr'))).toEqual(names);
+    // The dataset holds 252; the pickers used to list every one, so an
+    // employer hiring in Brazzaville scrolled past Afghanistan first.
+    expect(countries.length).toBeLessThan(80);
+    expect(countries.every((c) => AFRICAN_COUNTRY_CODES.has(c.code))).toBe(
+      true,
+    );
+    expect(codes).not.toContain('FR');
+    expect(codes).not.toContain('AF');
+
+    // The region the platform works in sorts above the rest of the continent,
+    // and nothing from outside it is mixed in.
+    const firstOther = codes.findIndex((c) => !PRIORITY_REGION.has(c));
+    expect(firstOther).toBe(PRIORITY_REGION.size);
+    expect(
+      codes.slice(0, firstOther).every((c) => PRIORITY_REGION.has(c)),
+    ).toBe(true);
+
+    // Each group still reads alphabetically for a French speaker.
+    for (const group of [codes.slice(0, firstOther), codes.slice(firstOther)]) {
+      const names = group.map((c) => geo.findCountry(c)!.name);
+      expect([...names].sort((a, b) => a.localeCompare(b, 'fr'))).toEqual(
+        names,
+      );
+    }
     expect(countries.every((c) => /^[A-Z]{2}$/.test(c.code))).toBe(true);
+  });
+
+  it('narrows what is OFFERED, never what is accepted', () => {
+    // A profile created before this narrowing keeps its country, and a filter
+    // on it keeps matching. Refusing a stored value would be data loss.
+    expect(geo.findCountry('FR')).not.toBeNull();
+    expect(geo.listCities('FR').length).toBeGreaterThan(0);
   });
 
   it('knows the home market', () => {
@@ -48,12 +78,13 @@ describe('GeoService', () => {
 
     // A real country the dataset has no populated places for must read as
     // "no cities", not "no such country" — otherwise the picker tells someone
-    // their own country does not exist.
-    const empty = geo
-      .listCountries()
-      .find((c) => geo.listCities(c.code).length === 0);
+    // their own country does not exist. Every AFRICAN country has cities, so
+    // this is checked against the wider dataset rather than the offered list.
+    const empty = ['AQ', 'BV', 'HM', 'UM'].find(
+      (code) => geo.findCountry(code) && geo.listCities(code).length === 0,
+    );
     expect(empty).toBeDefined();
-    expect(geo.listCities(empty!.code)).toEqual([]);
+    expect(geo.listCities(empty!)).toEqual([]);
   });
 
   describe('canonicalCity()', () => {
