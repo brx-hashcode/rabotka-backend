@@ -25,6 +25,7 @@ import { templateReply } from '../../../common/constants/whatsapp-carousel';
 import {
   supportCardBotMessage,
   hasPenaltiesBotMessage,
+  kycRejectedHelpMessage,
   openAppBotMessage,
 } from '../messages/menu.messages';
 import type { BotProfile, BotState } from '../types/bot-state.types';
@@ -232,6 +233,21 @@ export class BotOrchestratorService {
         return this.wantsAppCard(text)
           ? [...vovaReply, this.openAppCard(profile.first_name)]
           : vovaReply;
+      }
+
+      // The assistant had nothing — disabled, out of budget, timed out, threw.
+      //
+      // A REFUSED dossier does not get the mute door in that case. The generic
+      // card says nothing about why the account is walled, on the reasoning
+      // that the assistant supplies the reason; when the assistant is silent
+      // nobody does, and « Ma CNI a été volée, comment dois-je faire ? » was
+      // answered with "tout est dans l'application".
+      //
+      // This says what `prompts.ts` already tells the assistant to say on this
+      // branch — documents cannot be re-sent, the route is a réclamation — and
+      // says it without needing a model to be up.
+      if (profile.verification_status === VerificationStatus.REJECTED) {
+        return [kycRejectedHelpMessage(profile.first_name)];
       }
       return [this.openAppCard(profile.first_name)];
     }

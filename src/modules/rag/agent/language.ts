@@ -98,8 +98,26 @@ const FRENCH_MARKERS = [
  * is not a French message; it is an unanswered question, and the caller has
  * history it can ask instead.
  */
+/**
+ * URLs and bare domains, removed before a single word is counted.
+ *
+ * A link carries no evidence of what language anybody speaks, and one of them
+ * carried the opposite: this product lives at `rabotka.work`, which folds to
+ * "rabotka work" — and `work` is an ENGLISH_MARKER. So every link to our own
+ * site scored 1-0 for English, and the bot sends those links constantly. A
+ * Congolese worker who pasted the link we had just sent them was answered in
+ * English, in a French-only product.
+ *
+ * Stripping rather than special-casing `.work`: the next domain we buy would
+ * reintroduce it, and no URL has ever been a language signal.
+ */
+const URL_PATTERN =
+  /\b(?:https?:\/\/|www\.)\S+|\b[a-z0-9-]+\.(?:work|com|net|org|cg|fr|io|app)\b\S*/gi;
+
 export function detectLanguageOrNull(text: string): ReplyLanguage | null {
-  const words = foldText(text).split(/\s+/).filter(Boolean);
+  const words = foldText(text.replace(URL_PATTERN, ' '))
+    .split(/\s+/)
+    .filter(Boolean);
   if (words.length === 0) return null;
 
   const english = words.filter((w) => ENGLISH_MARKERS.includes(w)).length;
