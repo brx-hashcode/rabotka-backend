@@ -471,7 +471,10 @@ export class JobOfferService {
       ...(dto.isRemote
         ? { address: null, country_code: null, country_name: null, city: null }
         : {
-            address: dto.address!.trim(),
+            // Null rather than "" when nothing was given: an empty string
+            // would read as "an address exists and is blank" everywhere that
+            // checks this column, including the offer card.
+            address: dto.address?.trim() || null,
             // An offer that says nothing about where it is inherits the
             // employer's own location. Most people recruit where they are, and
             // a null here would drop the offer out of the proximity term
@@ -1244,19 +1247,22 @@ export class JobOfferService {
         `Le montant doit être entre ${AMOUNT_MIN_FCFA} et ${AMOUNT_MAX_FCFA} FCFA`,
       );
     }
-    // A remote job has no site to travel to, so no address is required —
-    // but if one is supplied anyway it still has to be a real address rather
-    // than a stray character.
+    /**
+     * AN ADDRESS IS NEVER REQUIRED — only well-formed when given.
+     *
+     * It used to be mandatory for anything not remote, on the assumption that
+     * on-site work means the worker travels to a street address. Most of the
+     * informal work on this platform is the other way round: a tailor, a
+     * mechanic, a hairdresser works at their own place and the client comes to
+     * them. Those offers have no address to give, and demanding one left them
+     * unpostable or filled the column with "chez moi".
+     *
+     * The city and country still carry the geography — they are inherited from
+     * the employer when the offer does not declare them, which is what the
+     * proximity term actually reads. The address was only ever the last line of
+     * detail on top of that.
+     */
     if (
-      !dto.isRemote &&
-      (!dto.address || dto.address.trim().length < ADDRESS_MIN)
-    ) {
-      throw new BadRequestException(
-        `L'adresse doit contenir au moins ${ADDRESS_MIN} caractères`,
-      );
-    }
-    if (
-      dto.isRemote &&
       dto.address != null &&
       dto.address.trim().length > 0 &&
       dto.address.trim().length < ADDRESS_MIN
@@ -1866,7 +1872,9 @@ export class JobOfferService {
       data.country_name = null;
       data.city = null;
     } else {
-      if (dto.address !== undefined) data.address = dto.address.trim();
+      // Clearing it is allowed now that it is optional: sending "" on an offer
+      // that had one removes it, rather than storing a blank.
+      if (dto.address !== undefined) data.address = dto.address.trim() || null;
       Object.assign(data, this.geo.resolveLocation(dto));
     }
     if (dto.note !== undefined) data.note = dto.note.trim() || null;
