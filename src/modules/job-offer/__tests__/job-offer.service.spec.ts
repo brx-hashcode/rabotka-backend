@@ -547,6 +547,39 @@ describe('JobOfferService', () => {
       ).toThrow(BadRequestException);
     });
 
+    /**
+     * An on-site offer with no address at all.
+     *
+     * This used to be refused, on the assumption that on-site means the worker
+     * travels to a street address. Most informal work here is the other way
+     * round — a tailor, a mechanic, a hairdresser works at their own place and
+     * the client comes to them — so those offers were unpostable, or the column
+     * filled up with "chez moi".
+     */
+    it('accepts an on-site offer with no address', () => {
+      const { address: _address, ...withoutAddress } = baseDto;
+      expect(() =>
+        service.validateCreateDto({ ...withoutAddress, isRemote: false }),
+      ).not.toThrow();
+    });
+
+    it('accepts an empty address, which is how one is cleared', () => {
+      expect(() =>
+        service.validateCreateDto({ ...baseDto, address: '   ' }),
+      ).not.toThrow();
+    });
+
+    it('still refuses a too-short address on a REMOTE offer', () => {
+      // Optional everywhere does not mean unvalidated anywhere.
+      expect(() =>
+        service.validateCreateDto({
+          ...baseDto,
+          isRemote: true,
+          address: 'short',
+        }),
+      ).toThrow(BadRequestException);
+    });
+
     it('throws when quantity is invalid (0)', () => {
       expect(() =>
         service.validateCreateDto({ ...baseDto, quantity: 0 }),
