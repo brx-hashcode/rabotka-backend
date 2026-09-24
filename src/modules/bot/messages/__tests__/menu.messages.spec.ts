@@ -1,9 +1,13 @@
 import {
+  kycRejectedHelpMessage,
   openAppBotMessage,
   supportCardBotMessage,
   whatsappSupportLink,
 } from '../menu.messages';
-import { OPEN_APP_CTA_PATH } from '../../../../common/constants/whatsapp-templates';
+import {
+  CLAIM_FORM_CTA_PATH,
+  OPEN_APP_CTA_PATH,
+} from '../../../../common/constants/whatsapp-templates';
 
 const contact = {
   email: 'contact@rabotka.work',
@@ -97,5 +101,32 @@ describe('the app card', () => {
     expect(payload.fallbackTemplate).toBe('openApp');
     // The template is the one that has to name the person.
     expect(payload.fallbackVariables).toMatchObject({ '1': 'Fariol' });
+  });
+});
+
+/**
+ * The reply a refused dossier gets when the assistant is silent.
+ *
+ * From a real transcript: « Ma CNI a été volé, il ne me reste plus que la copie
+ * maintenant comment dois-je faire ? » was answered with "Compte, missions et
+ * messages : tout est dans l'application."
+ */
+describe('kycRejectedHelpMessage', () => {
+  const card = (reply: string) =>
+    JSON.parse(reply.slice('[CTA:]'.length)) as Record<string, unknown>;
+
+  it('names the route forward instead of just opening the app', () => {
+    const body = String(card(kycRejectedHelpMessage('Richesse')).body);
+    expect(body).toMatch(/réclamation/i);
+    expect(body).toMatch(/refusée/i);
+    // The one thing the prompt forbids telling them to do.
+    expect(body).not.toMatch(/renvoyer vos documents|reprenez votre photo/i);
+  });
+
+  it('lands on the claim form, not the generic door', () => {
+    const payload = card(kycRejectedHelpMessage('Richesse'));
+    expect(payload.path).toBe(CLAIM_FORM_CTA_PATH);
+    expect(payload.path).not.toBe(OPEN_APP_CTA_PATH);
+    expect(String(payload.buttonText)).toMatch(/réclamation/i);
   });
 });
