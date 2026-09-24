@@ -220,6 +220,15 @@ export const PENALTIES_PAYMENT_CTA_PATH = 'penalites/paiement';
  */
 export const OPEN_APP_CTA_PATH = 'home';
 /**
+ * The claim form — `/claims/new` in rabotka-client.
+ *
+ * Used by the REFUSED fallback below, and only there. The generic door stays
+ * mute about why an account is walled precisely so it can be reused for all
+ * three states; this one is the exception, because a refused dossier has
+ * exactly one route forward and the person cannot find it on their own.
+ */
+export const CLAIM_FORM_CTA_PATH = 'claims/new';
+/**
  * Where the unread-message nudge lands — the conversation LIST, never a
  * specific thread.
  *

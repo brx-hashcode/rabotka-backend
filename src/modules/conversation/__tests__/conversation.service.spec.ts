@@ -5,12 +5,14 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { BotOrchestratorService } from '../../bot/services/bot-orchestrator.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
+import { BotPauseService } from '../../bot/services/bot-pause.service';
 import { VovaService } from '../../rag/vova.service';
 
 const PROFILE_ID = 'profile-uuid-1';
 const PHONE = '+24200000001';
 
 describe('ConversationService', () => {
+  const botPause = { isPaused: jest.fn() };
   let service: ConversationService;
   let prisma: jest.Mocked<PrismaService>;
   let botOrchestrator: jest.Mocked<BotOrchestratorService>;
@@ -18,6 +20,9 @@ describe('ConversationService', () => {
   let vova: jest.Mocked<VovaService>;
 
   beforeEach(async () => {
+    // Reset per test: the shared object would otherwise carry a `true` from
+    // the pause test into every one that follows it.
+    botPause.isPaused.mockResolvedValue(false);
     const mockPrismaService = {
       profile: { findUnique: jest.fn() },
       conversation: { upsert: jest.fn().mockResolvedValue({}) },
@@ -54,6 +59,9 @@ describe('ConversationService', () => {
           },
         },
         { provide: VovaService, useValue: mockVova },
+        // Not paused by default: every existing test here asserts what the bot
+        // REPLIES, and a paused profile replies nothing.
+        { provide: BotPauseService, useValue: botPause },
         {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue('https://rabotka.work') },
@@ -77,9 +85,7 @@ describe('ConversationService', () => {
       expect(result.profileId).toBeNull();
       expect(result.replies).toHaveLength(1);
       // Registry, not a literal — see bot-orchestrator.service.spec.ts.
-      expect(result.replies[0]).toContain(
-        '"fallbackText"',
-      );
+      expect(result.replies[0]).toContain('"fallbackText"');
       expect(botOrchestrator.handle).not.toHaveBeenCalled();
     });
 
@@ -113,9 +119,7 @@ describe('ConversationService', () => {
       // The slash is expanded before the branch — it used to be expanded after,
       // so `/compte` reached the matcher still carrying it.
       expect(vova.handleAnonymous).not.toHaveBeenCalled();
-      expect(result.replies[0]).toContain(
-        '"fallbackText"',
-      );
+      expect(result.replies[0]).toContain('"fallbackText"');
     });
 
     it('sends a bare greeting to the assistant, not the card', async () => {
@@ -147,9 +151,7 @@ describe('ConversationService', () => {
         const result = await service.handleIncomingMessage(PHONE, command);
 
         expect(vova.handleAnonymous).not.toHaveBeenCalled();
-        expect(result.replies[0]).toContain(
-          '"fallbackText"',
-        );
+        expect(result.replies[0]).toContain('"fallbackText"');
       }
     });
 
@@ -161,9 +163,7 @@ describe('ConversationService', () => {
 
       const result = await service.handleIncomingMessage(PHONE, 'Bonjour');
 
-      expect(result.replies[0]).toContain(
-        '"fallbackText"',
-      );
+      expect(result.replies[0]).toContain('"fallbackText"');
     });
 
     it('sends the landing page CTA to the assistant, not the card', async () => {
@@ -198,9 +198,7 @@ describe('ConversationService', () => {
 
       expect(result.replies).toHaveLength(2);
       expect(result.replies[0]).toContain('Créez votre compte');
-      expect(result.replies[1]).toContain(
-        '"fallbackText"',
-      );
+      expect(result.replies[1]).toContain('"fallbackText"');
     });
 
     it('writes nothing to Postgres for an unknown phone', async () => {
@@ -237,6 +235,32 @@ describe('ConversationService', () => {
         { id: PROFILE_ID },
       );
       expect(result.replies).toEqual(['Hello from bot']);
+    });
+
+    /**
+     * An admin has taken the conversation over.
+     *
+     * The message must still be STORED — it is the thing the admin is there to
+     * answer, and dropping it would hide it from the very person handling it.
+     * Only the reply is withheld.
+     */
+    it('stays silent for a paused profile, but still records the message', async () => {
+      (botOrchestrator.loadProfileByPhone as jest.Mock).mockResolvedValue({
+        id: PROFILE_ID,
+      });
+      botPause.isPaused.mockResolvedValue(true);
+
+      const result = await service.handleIncomingMessage(PHONE, 'bonjour');
+
+      expect(result.replies).toEqual([]);
+      // The bot graph never runs, so a paused profile costs no model call.
+      expect(botOrchestrator.handle).not.toHaveBeenCalled();
+      // But the message is stored — it is the thing the admin is answering.
+      expect(whatsApp.saveMessage).toHaveBeenCalledWith(
+        PROFILE_ID,
+        'INBOUND',
+        'bonjour',
+      );
     });
 
     it('filters out empty/falsy replies from bot', async () => {

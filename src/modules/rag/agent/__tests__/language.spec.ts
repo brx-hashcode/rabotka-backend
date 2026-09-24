@@ -155,3 +155,49 @@ describe('detectLanguageOrNull', () => {
     expect(detectLanguage('ok')).toBe('fr');
   });
 });
+
+/**
+ * From a real conversation: a worker pasted the link the bot had just sent
+ * them and was answered in English, in a French-only product.
+ *
+ * `rabotka.work` folds to "rabotka work", and `work` is an ENGLISH_MARKER — so
+ * OUR OWN DOMAIN scored a point for English on every link anybody sent back.
+ */
+describe('links carry no language', () => {
+  it('does not read our own domain as English', () => {
+    for (const url of [
+      'https://rabotka.work/home',
+      'https://rabotka.work',
+      'rabotka.work/jobs',
+      'https://rabotka.work/discussions',
+    ]) {
+      expect(detectLanguageOrNull(url)).toBeNull();
+      // Nothing to go on falls back to French, which is the product's language.
+      expect(detectLanguage(url)).toBe('fr');
+    }
+  });
+
+  it('still reads the words AROUND a link', () => {
+    expect(detectLanguage('regarde https://rabotka.work/home et dis moi')).toBe(
+      'fr',
+    );
+    expect(detectLanguage('can you check https://rabotka.work for me')).toBe(
+      'en',
+    );
+  });
+
+  it('lets history decide when a message is only a link', () => {
+    // The link itself is evidence-free, so the last user turn that said
+    // something wins — rather than the domain casting a vote of its own.
+    expect(
+      resolveLanguage('https://rabotka.work/home', [
+        { role: 'user', text: 'I want to find a job' },
+      ]),
+    ).toBe('en');
+    expect(
+      resolveLanguage('https://rabotka.work/home', [
+        { role: 'user', text: 'je cherche un travailleur' },
+      ]),
+    ).toBe('fr');
+  });
+});

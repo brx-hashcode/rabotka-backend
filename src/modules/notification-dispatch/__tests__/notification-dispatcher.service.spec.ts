@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotificationDispatcher } from '../notification-dispatcher.service';
+import { BotPauseService } from '../../bot/services/bot-pause.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { WhatsAppLoginLinkService } from '../../auth/whatsapp-login-link.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
@@ -20,6 +21,7 @@ const freeForm = {
 
 describe('NotificationDispatcher', () => {
   let dispatcher: NotificationDispatcher;
+  const botPause = { isPaused: jest.fn() };
   let whatsApp: {
     sendInteractiveCta: jest.Mock;
     sendTemplateMessage: jest.Mock;
@@ -31,6 +33,8 @@ describe('NotificationDispatcher', () => {
   let module: TestingModule;
 
   beforeEach(async () => {
+    // Reset per test, or the paused case leaks `true` into everything after it.
+    botPause.isPaused.mockResolvedValue(false);
     whatsApp = {
       sendInteractiveCta: jest.fn().mockResolvedValue(true),
       sendTemplateMessage: jest.fn().mockResolvedValue(true),
@@ -50,6 +54,9 @@ describe('NotificationDispatcher', () => {
         { provide: WhatsAppService, useValue: whatsApp },
         { provide: WhatsAppLoginLinkService, useValue: loginLink },
         { provide: SystemConfigService, useValue: systemConfig },
+        // Not paused by default: every test below asserts what the dispatcher
+        // SENDS, and a paused profile is sent nothing at all.
+        { provide: BotPauseService, useValue: botPause },
       ],
     }).compile();
 
@@ -80,6 +87,29 @@ describe('NotificationDispatcher', () => {
       }),
     );
     expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The half that suppressing the bot's REPLIES alone would have missed.
+   *
+   * Every scheduled message — the reminder processor, BotNotificationService —
+   * dispatches through here. A mission reminder landing while an admin is
+   * mid-handover means the admin is talking over a robot, which is the whole
+   * thing the toggle exists to stop.
+   */
+  it('sends nothing at all while the bot is paused for that profile', async () => {
+    botPause.isPaused.mockResolvedValue(true);
+
+    const result = await dispatcher.send({
+      phone: PHONE,
+      profileId: PROFILE_ID,
+      template,
+      freeForm,
+    });
+
+    expect(result).toEqual({ mode: 'TEMPLATE', sent: false });
+    expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+    expect(whatsApp.sendInteractiveCta).not.toHaveBeenCalled();
   });
 
   it('sends the template outside the window', async () => {

@@ -8,6 +8,7 @@ import { MailModule } from '../mail/mail.module';
 import { AuthModule } from '../auth/auth.module';
 import { WhatsAppLoginLinkModule } from '../auth/whatsapp-login-link.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
+import { BotPauseModule } from '../bot/services/bot-pause.module';
 import { NotificationDispatchModule } from '../notification-dispatch/notification-dispatch.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { LogModule } from '../log/log.module';
@@ -37,6 +38,7 @@ import { WhatsAppDocumentModule } from '../whatsapp/documents/whatsapp-document.
     WhatsAppLoginLinkModule,
     WhatsAppModule,
     NotificationDispatchModule,
+    BotPauseModule,
     WalletModule,
     LogModule,
     PrismaModule,

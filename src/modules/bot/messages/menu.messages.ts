@@ -1,5 +1,6 @@
 import { ctaReply } from '../../../common/constants/whatsapp-carousel';
 import {
+  CLAIM_FORM_CTA_PATH,
   OPEN_APP_CTA_PATH,
   PENALTIES_PAYMENT_CTA_PATH,
   WHATSAPP_TEMPLATES,
@@ -108,6 +109,49 @@ export function accountSuspendedBotMessage(contact: ContactInfo): string {
  * `openApp` is UTILITY rather than MARKETING, so that fallback is the cheap
  * kind rather than the expensive one — but free beats cheap on every reply.
  */
+/**
+ * What a REFUSED dossier gets when the assistant has nothing to say.
+ *
+ * The generic door (`openAppBotMessage`) is deliberately mute about why an
+ * account is walled — one card serves all three walled states, and the
+ * assistant is supposed to supply the reason. That holds right up until the
+ * assistant returns null, which it does whenever VoVa is disabled, out of
+ * budget, timed out or thrown. Then the mute card is the ONLY thing sent.
+ *
+ * From a real transcript: a worker whose KYC had just been refused wrote « Ma
+ * CNI a été volé, il ne me reste plus que la copie maintenant comment dois-je
+ * faire ? » and received "Compte, missions et messages : tout est dans
+ * l'application." A stolen identity document is the moment this product is
+ * most obliged to answer, and it answered with a door.
+ *
+ * So the refused state gets its own fallback, and it says the one thing the
+ * system prompt already tells the assistant to say (`prompts.ts`, the REJECTED
+ * branch): documents cannot be re-sent from the app, and the route forward is
+ * a réclamation. Deterministic on purpose — it has to work on the day the
+ * model does not.
+ *
+ * The button lands on the claim FORM rather than `/home`: somebody who has
+ * just been told to file a réclamation should not then have to find it.
+ */
+export function kycRejectedHelpMessage(firstName: string): string {
+  return ctaReply({
+    body: [
+      '*Votre vérification a été refusée*',
+      '',
+      'Vos documents ne peuvent pas être renvoyés depuis l’application.',
+      'Pour faire examiner votre situation — pièce perdue, volée, ou refus que vous contestez — ouvrez une réclamation : l’équipe vous répondra dans la conversation.',
+    ].join('\n'),
+    buttonText: 'Ouvrir une réclamation',
+    path: CLAIM_FORM_CTA_PATH,
+    // The window may have shut between the reply being built and the job
+    // draining. `openApp` is the approved UTILITY letter we already own; it
+    // lands on /home rather than the form, which is the honest limit of a
+    // template written for something else.
+    fallbackTemplate: 'openApp',
+    fallbackVariables: WHATSAPP_TEMPLATES.openApp.variables(firstName),
+  });
+}
+
 export function openAppBotMessage(firstName: string): string {
   return ctaReply({
     body: [
