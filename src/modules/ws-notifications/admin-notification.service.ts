@@ -19,6 +19,29 @@ export class AdminNotificationService {
     });
   }
 
+  /**
+   * Whether an unread alert for this event and entity was created since `since`.
+   *
+   * Backs `dedupeWindowMs`: while the first alert is still waiting to be read,
+   * a repeat adds noise and no information.
+   */
+  async hasRecentUnread(
+    event: string,
+    entityId: string,
+    since: Date,
+  ): Promise<boolean> {
+    const existing = await this.prisma.adminNotification.findFirst({
+      where: {
+        event,
+        entity_id: entityId,
+        read: false,
+        created_at: { gte: since },
+      },
+      select: { id: true },
+    });
+    return existing !== null;
+  }
+
   async findRecent(limit = 50) {
     return this.prisma.adminNotification.findMany({
       orderBy: { created_at: 'desc' },

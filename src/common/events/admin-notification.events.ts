@@ -4,6 +4,12 @@ export enum AdminNotificationEvent {
   PROFILE_UPDATED = 'admin.notification.profile.updated',
   PROFILE_STATUS_CHANGED = 'admin.notification.profile.status_changed',
   PROFILE_KYC_VERIFIED = 'admin.notification.profile.kyc_verified',
+  /** Typed a support keyword to the WhatsApp bot — may want a human. */
+  SUPPORT_REQUESTED = 'admin.notification.profile.support_requested',
+
+  // Conversation (in-app chat)
+  /** Moderation held a message back whole; it never reached the recipient. */
+  CONVERSATION_MESSAGE_HELD = 'admin.notification.conversation.message_held',
 
   // Job Offer
   JOB_OFFER_CREATED = 'admin.notification.job_offer.created',
@@ -45,7 +51,8 @@ export type AdminEntityType =
   | 'claim'
   | 'event'
   | 'payment'
-  | 'penalty';
+  | 'penalty'
+  | 'conversation';
 
 export interface AdminNotificationPayload {
   event: AdminNotificationEvent;
@@ -55,4 +62,14 @@ export interface AdminNotificationPayload {
   entityId: string;
   metadata?: Record<string, unknown>;
   timestamp: string;
+  /**
+   * Suppresses a repeat while an earlier alert is still unread.
+   *
+   * For events one person can fire in a burst — a support keyword typed three
+   * times, a string of held messages in one conversation. If an UNREAD alert
+   * with the same event and entity was created within this many milliseconds,
+   * the new one is neither stored nor pushed. Once an admin has read it, the
+   * next occurrence alerts again.
+   */
+  dedupeWindowMs?: number;
 }

@@ -15,6 +15,7 @@ import {
 } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import {
   notificationDedupeKey,
   notifyProfile,
@@ -36,6 +37,13 @@ import type { RedactionCategory } from './moderation/patterns';
  * there is no evidence to tune it against until real threads exist.
  */
 const NOTIFICATION_DEDUPE_SECONDS = 30 * 60;
+
+/**
+ * One admin alert per conversation per hour while it is unread: someone who
+ * keeps retyping the same number produces a string of held messages, and one
+ * alert already says "look at this conversation".
+ */
+const HELD_ALERT_WINDOW_MS = 60 * 60 * 1000;
 
 /** Fallback when `messaging.nudge_delay_seconds` is unset or nonsense. */
 const DEFAULT_NUDGE_DELAY_SECONDS = 300;
@@ -683,6 +691,19 @@ export class ProfileChatService {
 
     const authorView = this.toMessageView(message, senderId);
 
+    // Not awaited: the alert looks up both names, and the sender is waiting on
+    // this response. It cannot fail the send either — the message is stored.
+    if (verdict.status === MessageModerationStatus.HELD) {
+      void this.alertHeldMessage(
+        conversation,
+        message.id,
+        senderId,
+        verdict.spans.map((span) => span.category),
+      ).catch((err) =>
+        this.logger.warn(`Held-message alert failed: ${String(err)}`),
+      );
+    }
+
     // Pushed as the RECIPIENT'S view, built by the same code path the HTTP
     // response uses. `deliverableFor` returns null for a held message, which is
     // what stops a push announcing something nobody may read.
@@ -701,6 +722,54 @@ export class ProfileChatService {
     }
 
     return authorView;
+  }
+
+  /**
+   * Tells the admins a message was held, so they can read the thread and close
+   * it if needed — until now a held message only showed up as a count in the
+   * Conversations list, found by whoever happened to scan it.
+   *
+   * Carries names and categories, never the message text: the admin list
+   * deliberately shows none, and reading a thread is a separate, logged step.
+   */
+  private async alertHeldMessage(
+    conversation: ProfileConversation,
+    messageId: string,
+    senderId: string,
+    categories: RedactionCategory[],
+  ): Promise<void> {
+    const recipientId =
+      conversation.worker_id === senderId
+        ? conversation.employer_id
+        : conversation.worker_id;
+    const people = await this.prisma.profile.findMany({
+      where: { id: { in: [senderId, recipientId] } },
+      select: { id: true, first_name: true, last_name: true },
+    });
+    const nameOf = (id: string) => {
+      const p = people.find((row) => row.id === id);
+      return p ? `${p.first_name} ${p.last_name}`.trim() : 'Un profil';
+    };
+    const distinct = [...new Set(categories)];
+
+    this.events.emit(AdminNotificationEvent.CONVERSATION_MESSAGE_HELD, {
+      event: AdminNotificationEvent.CONVERSATION_MESSAGE_HELD,
+      title: 'Message retenu',
+      message:
+        `${nameOf(senderId)} → ${nameOf(recipientId)} : un message a été retenu` +
+        (distinct.length ? ` (${distinct.join(', ')})` : ''),
+      entityType: 'conversation',
+      entityId: conversation.id,
+      metadata: {
+        conversationId: conversation.id,
+        messageId,
+        senderId,
+        recipientId,
+        categories: distinct,
+      },
+      timestamp: new Date().toISOString(),
+      dedupeWindowMs: HELD_ALERT_WINDOW_MS,
+    });
   }
 
   /**

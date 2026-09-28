@@ -76,4 +76,85 @@ describe('WsNotificationsListener', () => {
 
     expect(emitMock).toHaveBeenCalledTimes(events.length);
   });
+
+  describe('dedupeWindowMs', () => {
+    let service: { create: jest.Mock; hasRecentUnread: jest.Mock };
+
+    const held: AdminNotificationPayload = {
+      event: AdminNotificationEvent.CONVERSATION_MESSAGE_HELD,
+      title: 'Message retenu',
+      message: 'A → B : un message a été retenu (phone)',
+      entityType: 'conversation',
+      entityId: 'conv-1',
+      timestamp: '2026-09-28T10:00:00.000Z',
+      dedupeWindowMs: 60 * 60 * 1000,
+    };
+
+    beforeEach(() => {
+      emitMock = jest.fn();
+      service = {
+        create: jest.fn().mockResolvedValue(undefined),
+        hasRecentUnread: jest.fn().mockResolvedValue(false),
+      };
+      listener = new WsNotificationsListener(
+        {
+          server: { to: jest.fn().mockReturnValue({ emit: emitMock }) },
+        } as unknown as WsNotificationsGateway,
+        service as any,
+      );
+    });
+
+    it('stores and pushes when nothing unread matches', async () => {
+      const before = Date.now();
+      await listener.handleAdminNotification(held);
+
+      const [event, entityId, since] = service.hasRecentUnread.mock.calls[0];
+      expect(event).toBe(AdminNotificationEvent.CONVERSATION_MESSAGE_HELD);
+      expect(entityId).toBe('conv-1');
+      // The window reaches back from now, not from the payload's timestamp.
+      expect((since as Date).getTime()).toBeGreaterThanOrEqual(
+        before - 60 * 60 * 1000,
+      );
+      expect(service.create).toHaveBeenCalledTimes(1);
+      expect(emitMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('drops the repeat while an earlier alert is unread', async () => {
+      service.hasRecentUnread.mockResolvedValue(true);
+
+      await listener.handleAdminNotification(held);
+
+      expect(service.create).not.toHaveBeenCalled();
+      expect(emitMock).not.toHaveBeenCalled();
+    });
+
+    // The window is an implementation detail of the listener: it must not be
+    // stored as a column nor shown to the admin client.
+    it('strips the window from what it stores and pushes', async () => {
+      await listener.handleAdminNotification(held);
+
+      expect(service.create.mock.calls[0][0]).not.toHaveProperty(
+        'dedupeWindowMs',
+      );
+      expect(emitMock.mock.calls[0][1]).not.toHaveProperty('dedupeWindowMs');
+    });
+
+    // A duplicate is a nuisance; a missed support request is the failure.
+    it('alerts anyway when the lookup fails', async () => {
+      service.hasRecentUnread.mockRejectedValue(new Error('db down'));
+
+      await listener.handleAdminNotification(held);
+
+      expect(emitMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('never looks anything up without a window', async () => {
+      const { dedupeWindowMs: _omit, ...plain } = held;
+
+      await listener.handleAdminNotification(plain);
+
+      expect(service.hasRecentUnread).not.toHaveBeenCalled();
+      expect(emitMock).toHaveBeenCalledTimes(1);
+    });
+  });
 });
