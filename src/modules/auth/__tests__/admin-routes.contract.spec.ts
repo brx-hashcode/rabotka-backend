@@ -70,6 +70,10 @@ const PUBLIC_PREFIXES = new Set([
   // The two OIDC discovery documents. Excluded from the global prefix in
   // main.ts, and public by definition — a list of URLs and a set of public keys.
   '.well-known',
+  // Render errors reported by the web client's error boundary. @Public() on
+  // purpose: the crash can happen before any session exists. It changes no
+  // state — one throttled, length-capped log line per report.
+  'client-errors',
 ]);
 
 /**
