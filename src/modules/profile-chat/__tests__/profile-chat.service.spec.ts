@@ -10,6 +10,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ProfileChatService } from '../profile-chat.service';
 import { PROFILE_NOTIFICATION_EVENT } from '../../profile-notification/profile-notification.events';
 import { ModerationService } from '../moderation/moderation.service';
+import { AdminNotificationEvent } from '../../../common/events/admin-notification.events';
 
 const WORKER = 'w-1';
 const EMPLOYER = 'e-1';
@@ -91,6 +92,10 @@ describe('ProfileChatService', () => {
         findUnique: jest
           .fn()
           .mockResolvedValue({ first_name: 'Sara', last_name: 'Colombe' }),
+        findMany: jest.fn().mockResolvedValue([
+          { id: WORKER, first_name: 'Sara', last_name: 'Colombe' },
+          { id: EMPLOYER, first_name: 'Paul', last_name: 'Mabiala' },
+        ]),
       },
       redactionReport: {
         createMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -354,6 +359,118 @@ describe('ProfileChatService', () => {
   });
 
   describe('holding a message back', () => {
+    const heldAlert = () =>
+      events.emit.mock.calls.find(
+        ([name]) => name === AdminNotificationEvent.CONVERSATION_MESSAGE_HELD,
+      )?.[1];
+    /** The alert is emitted after a lookup the send does not wait for. */
+    const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+    it('alerts the admins, naming both sides and linking the conversation', async () => {
+      prisma.profileMessage.create.mockResolvedValue(
+        storedMessage({
+          body: '0612345678',
+          moderation_status: MessageModerationStatus.HELD,
+          redactions: [{ start_offset: 0, end_offset: 10, category: 'PHONE' }],
+        }),
+      );
+
+      await service.sendMessage(CONV, WORKER, '0612345678');
+      await flush();
+
+      const alert = heldAlert();
+      expect(alert).toMatchObject({
+        event: AdminNotificationEvent.CONVERSATION_MESSAGE_HELD,
+        entityType: 'conversation',
+        entityId: CONV,
+        dedupeWindowMs: 60 * 60 * 1000,
+        metadata: expect.objectContaining({
+          conversationId: CONV,
+          messageId: 'm-1',
+          senderId: WORKER,
+          recipientId: EMPLOYER,
+          categories: ['PHONE'],
+        }),
+      });
+      expect(alert.message).toContain('Sara Colombe → Paul Mabiala');
+      expect(maskedAlert()).toBeUndefined();
+    });
+
+    // The admin list carries no message text on purpose; reading a thread is
+    // a separate, logged step. An alert must not become the way around that.
+    it('never puts the held text in the alert', async () => {
+      prisma.profileMessage.create.mockResolvedValue(
+        storedMessage({
+          body: '0612345678',
+          moderation_status: MessageModerationStatus.HELD,
+          redactions: [{ start_offset: 0, end_offset: 10, category: 'PHONE' }],
+        }),
+      );
+
+      await service.sendMessage(CONV, WORKER, '0612345678');
+      await flush();
+
+      expect(JSON.stringify(heldAlert())).not.toContain('0612345678');
+    });
+
+    const maskedAlert = () =>
+      events.emit.mock.calls.find(
+        ([name]) => name === AdminNotificationEvent.CONVERSATION_CONTACT_MASKED,
+      )?.[1];
+
+    // Delivered with the number cut out: still an attempt to take the contact
+    // off the platform, so the admins hear about it — as a different alert.
+    it('alerts on a masked contact in a delivered message', async () => {
+      await service.sendMessage(CONV, WORKER, BODY_WITH_PHONE);
+      await flush();
+
+      expect(heldAlert()).toBeUndefined();
+      const alert = maskedAlert();
+      expect(alert).toMatchObject({
+        title: 'Coordonnées masquées',
+        entityType: 'conversation',
+        entityId: CONV,
+        dedupeWindowMs: 60 * 60 * 1000,
+        metadata: expect.objectContaining({
+          held: false,
+          categories: ['PHONE'],
+        }),
+      });
+      expect(alert.message).toContain('Sara Colombe → Paul Mabiala');
+      // The alert must not become a way to read the masked digits.
+      expect(JSON.stringify(alert)).not.toMatch(/06 12 34 56 78/);
+    });
+
+    it('does not alert for a clean message', async () => {
+      prisma.profileMessage.create.mockResolvedValue(
+        storedMessage({
+          body: 'bonjour',
+          moderation_status: MessageModerationStatus.CLEAN,
+          redactions: [],
+        }),
+      );
+      await service.sendMessage(CONV, WORKER, 'bonjour');
+      await flush();
+
+      expect(heldAlert()).toBeUndefined();
+      expect(maskedAlert()).toBeUndefined();
+    });
+
+    it('still returns the message when the alert lookup fails', async () => {
+      prisma.profileMessage.create.mockResolvedValue(
+        storedMessage({
+          moderation_status: MessageModerationStatus.HELD,
+          redactions: [{ start_offset: 0, end_offset: 10, category: 'PHONE' }],
+        }),
+      );
+      prisma.profile.findMany.mockRejectedValue(new Error('db down'));
+
+      await expect(
+        service.sendMessage(CONV, WORKER, '0612345678'),
+      ).resolves.toMatchObject({ status: MessageModerationStatus.HELD });
+      await flush();
+    });
+
     it('holds one that is mostly contact details, and delivers nothing', async () => {
       prisma.profileMessage.create.mockResolvedValue(
         storedMessage({

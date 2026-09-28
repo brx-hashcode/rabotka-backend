@@ -17,12 +17,42 @@ export class WsNotificationsListener {
   async handleAdminNotification(
     payload: AdminNotificationPayload,
   ): Promise<void> {
+    const { dedupeWindowMs, ...notification } = payload;
+
+    if (dedupeWindowMs && (await this.isDuplicate(payload, dedupeWindowMs))) {
+      this.logger.debug(
+        `Suppressed repeat: ${payload.event} for ${payload.entityId}`,
+      );
+      return;
+    }
+
     this.logger.debug(`Broadcasting: ${payload.event} — ${payload.title}`);
 
-    await this.notificationService.create(payload).catch((err) => {
+    await this.notificationService.create(notification).catch((err) => {
       this.logger.error('Failed to persist notification', err);
     });
 
-    this.gateway.server.to('admins').emit('notification', payload);
+    this.gateway.server.to('admins').emit('notification', notification);
+  }
+
+  /**
+   * Fails OPEN: if the lookup errors, the alert goes out. A duplicate in the
+   * bell is a nuisance; a support request or a held message nobody hears
+   * about is the thing these alerts exist to prevent.
+   */
+  private async isDuplicate(
+    payload: AdminNotificationPayload,
+    windowMs: number,
+  ): Promise<boolean> {
+    try {
+      return await this.notificationService.hasRecentUnread(
+        payload.event,
+        payload.entityId,
+        new Date(Date.now() - windowMs),
+      );
+    } catch (err) {
+      this.logger.warn(`Dedupe lookup failed, alerting anyway: ${err}`);
+      return false;
+    }
   }
 }

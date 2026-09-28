@@ -24,6 +24,8 @@ import { QueueService } from '../../../../common/services/queue/queue.service';
 import { ConfigService } from '@nestjs/config';
 import { WHATSAPP_TEMPLATES } from '../../../../common/constants/whatsapp-templates';
 import { VovaService } from '../../../rag/vova.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { AdminNotificationEvent } from '../../../../common/events/admin-notification.events';
 
 const PROFILE_ID = 'profile-uuid-1';
 const PHONE = '+242000000';
@@ -55,6 +57,7 @@ function makeDeps() {
     // Null is "I did not answer this" — the assistant's default state, and what
     // every expectation in this file assumes.
     vova: { handle: jest.fn().mockResolvedValue(null) },
+    events: { emit: jest.fn() },
     prisma: {
       $transaction: jest.fn().mockResolvedValue([]),
       profile: {
@@ -266,6 +269,7 @@ describe('BotOrchestratorService', () => {
           provide: VovaService,
           useValue: deps.vova,
         },
+        { provide: EventEmitter2, useValue: deps.events },
       ],
     }).compile();
 
@@ -376,6 +380,51 @@ describe('BotOrchestratorService', () => {
       // A card whose button opens the support chat.
       expect(result[0]).toMatch(/^\[CTA:\]/);
       expect(result[0]).toContain('https://wa.me/242060000000');
+    });
+
+    // The card gives contact details, but the person may want a human in the
+    // thread — the team has to hear about it, whatever the reply looks like.
+    it.each(['support', 'Support', ' aide ', 'réclamation'])(
+      'alerts the admins when "%s" is typed',
+      async (word) => {
+        deps.router.route.mockReturnValue({ type: 'unknown' });
+
+        const result = await service.handle(PROFILE_ID, PHONE, word);
+
+        expect(deps.events.emit).toHaveBeenCalledWith(
+          AdminNotificationEvent.SUPPORT_REQUESTED,
+          expect.objectContaining({
+            event: AdminNotificationEvent.SUPPORT_REQUESTED,
+            entityType: 'profile',
+            entityId: PROFILE_ID,
+            dedupeWindowMs: 30 * 60 * 1000,
+          }),
+        );
+        // Still answered: the alert is in addition to the card, never instead.
+        expect(result[0]).toMatch(/^\[CTA:\]/);
+      },
+    );
+
+    it('does not alert for an ordinary message', async () => {
+      deps.router.route.mockReturnValue({ type: 'unknown' });
+
+      await service.handle(PROFILE_ID, PHONE, 'bonjour');
+
+      expect(deps.events.emit).not.toHaveBeenCalledWith(
+        AdminNotificationEvent.SUPPORT_REQUESTED,
+        expect.anything(),
+      );
+    });
+
+    it('still answers when the alert cannot be emitted', async () => {
+      deps.router.route.mockReturnValue({ type: 'unknown' });
+      deps.events.emit.mockImplementation(() => {
+        throw new Error('emitter down');
+      });
+
+      const result = await service.handle(PROFILE_ID, PHONE, 'support');
+
+      expect(result[0]).toMatch(/^\[CTA:\]/);
     });
 
     // The landing page's WhatsApp CTA opens with a greeting and then states an
@@ -642,6 +691,14 @@ describe('BotOrchestratorService', () => {
       await service.handle(PROFILE_ID, PHONE, 'support');
 
       expect(deps.vova.handle).not.toHaveBeenCalled();
+      // Suspended people are who the support copy tells to type it.
+      expect(deps.events.emit).toHaveBeenCalledWith(
+        AdminNotificationEvent.SUPPORT_REQUESTED,
+        expect.objectContaining({
+          entityId: PROFILE_ID,
+          metadata: expect.objectContaining({ accountStatus: 'SUSPENDED' }),
+        }),
+      );
     });
   });
 

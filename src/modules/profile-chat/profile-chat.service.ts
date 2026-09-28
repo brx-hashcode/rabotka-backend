@@ -15,6 +15,7 @@ import {
 } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import {
   notificationDedupeKey,
   notifyProfile,
@@ -36,6 +37,13 @@ import type { RedactionCategory } from './moderation/patterns';
  * there is no evidence to tune it against until real threads exist.
  */
 const NOTIFICATION_DEDUPE_SECONDS = 30 * 60;
+
+/**
+ * One admin alert per conversation per hour while it is unread, for each kind
+ * (held, masked): someone who keeps retyping the same number produces a string
+ * of them, and one alert already says "look at this conversation".
+ */
+const CONTACT_ALERT_WINDOW_MS = 60 * 60 * 1000;
 
 /** Fallback when `messaging.nudge_delay_seconds` is unset or nonsense. */
 const DEFAULT_NUDGE_DELAY_SECONDS = 300;
@@ -683,6 +691,20 @@ export class ProfileChatService {
 
     const authorView = this.toMessageView(message, senderId);
 
+    // Not awaited: the alert looks up both names, and the sender is waiting on
+    // this response. It cannot fail the send either — the message is stored.
+    if (verdict.status !== MessageModerationStatus.CLEAN) {
+      void this.alertContactDetected(
+        conversation,
+        message.id,
+        senderId,
+        verdict.status === MessageModerationStatus.HELD,
+        verdict.spans.map((span) => span.category),
+      ).catch((err) =>
+        this.logger.warn(`Contact-detection alert failed: ${String(err)}`),
+      );
+    }
+
     // Pushed as the RECIPIENT'S view, built by the same code path the HTTP
     // response uses. `deliverableFor` returns null for a held message, which is
     // what stops a push announcing something nobody may read.
@@ -701,6 +723,63 @@ export class ProfileChatService {
     }
 
     return authorView;
+  }
+
+  /**
+   * Tells the admins contact details went into a conversation, so they can read
+   * the thread and close it if needed. Two kinds, because they are different
+   * news: a HELD message never arrived, a masked one arrived with the details
+   * cut out — someone trying to take the contact off the platform either way.
+   *
+   * Carries names and categories, never the message text: the admin list
+   * deliberately shows none, and reading a thread is a separate, logged step.
+   */
+  private async alertContactDetected(
+    conversation: ProfileConversation,
+    messageId: string,
+    senderId: string,
+    held: boolean,
+    categories: RedactionCategory[],
+  ): Promise<void> {
+    const recipientId =
+      conversation.worker_id === senderId
+        ? conversation.employer_id
+        : conversation.worker_id;
+    const people = await this.prisma.profile.findMany({
+      where: { id: { in: [senderId, recipientId] } },
+      select: { id: true, first_name: true, last_name: true },
+    });
+    const nameOf = (id: string) => {
+      const p = people.find((row) => row.id === id);
+      return p ? `${p.first_name} ${p.last_name}`.trim() : 'Un profil';
+    };
+    const distinct = [...new Set(categories)];
+    const event = held
+      ? AdminNotificationEvent.CONVERSATION_MESSAGE_HELD
+      : AdminNotificationEvent.CONVERSATION_CONTACT_MASKED;
+    const what = held
+      ? 'un message a été retenu'
+      : 'des coordonnées ont été masquées';
+
+    this.events.emit(event, {
+      event,
+      title: held ? 'Message retenu' : 'Coordonnées masquées',
+      message:
+        `${nameOf(senderId)} → ${nameOf(recipientId)} : ${what}` +
+        (distinct.length ? ` (${distinct.join(', ')})` : ''),
+      entityType: 'conversation',
+      entityId: conversation.id,
+      metadata: {
+        conversationId: conversation.id,
+        messageId,
+        senderId,
+        recipientId,
+        held,
+        categories: distinct,
+      },
+      timestamp: new Date().toISOString(),
+      dedupeWindowMs: CONTACT_ALERT_WINDOW_MS,
+    });
   }
 
   /**

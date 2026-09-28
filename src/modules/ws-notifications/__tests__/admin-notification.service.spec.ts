@@ -10,6 +10,7 @@ const mockPrisma = {
     updateMany: jest.fn().mockResolvedValue({}),
     deleteMany: jest.fn().mockResolvedValue({}),
     delete: jest.fn().mockResolvedValue({}),
+    findFirst: jest.fn().mockResolvedValue(null),
   },
 };
 
@@ -59,6 +60,35 @@ describe('AdminNotificationService', () => {
   it('clears all', async () => {
     await service.clearAll();
     expect(mockPrisma.adminNotification.deleteMany).toHaveBeenCalled();
+  });
+
+  describe('hasRecentUnread', () => {
+    const since = new Date('2026-09-28T09:00:00.000Z');
+
+    // Read alerts do not count: once an admin has looked, the next occurrence
+    // is news again.
+    it('matches only unread alerts of the same event and entity since then', async () => {
+      await service.hasRecentUnread('evt', 'conv-1', since);
+      expect(mockPrisma.adminNotification.findFirst).toHaveBeenCalledWith({
+        where: {
+          event: 'evt',
+          entity_id: 'conv-1',
+          read: false,
+          created_at: { gte: since },
+        },
+        select: { id: true },
+      });
+    });
+
+    it('is true when one exists and false otherwise', async () => {
+      mockPrisma.adminNotification.findFirst.mockResolvedValueOnce({ id: 'n' });
+      await expect(
+        service.hasRecentUnread('evt', 'conv-1', since),
+      ).resolves.toBe(true);
+      await expect(
+        service.hasRecentUnread('evt', 'conv-1', since),
+      ).resolves.toBe(false);
+    });
   });
 
   it('deletes one', async () => {
