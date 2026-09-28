@@ -81,7 +81,11 @@ import { CsrfController } from './csrf.controller';
               // client credentials from a partner's backend. The person-side
               // routes live under `/profile/identity-checks` and are NOT
               // matched here — they use the session cookie.
-              url.includes('/api/v1/identity-checks')
+              url.includes('/api/v1/identity-checks') ||
+              // Error reports from the web client's error boundary. Sent with
+              // `sendBeacon`, which cannot attach the CSRF header, and the
+              // endpoint only writes a throttled log line — no state to forge.
+              url.includes('/api/v1/client-errors')
             );
           },
         });
