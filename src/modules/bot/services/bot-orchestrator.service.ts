@@ -1,4 +1,6 @@
 import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { AdminNotificationEvent } from '../../../common/events/admin-notification.events';
 import { VovaService } from '../../rag/vova.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import {
@@ -109,6 +111,9 @@ function looksLikeFlowInput(input: string): boolean {
  */
 const LOGIN_STAMP_THROTTLE_MS = 15 * 60 * 1000;
 
+/** One unread support alert per profile at a time, over this window. */
+const SUPPORT_ALERT_WINDOW_MS = 30 * 60 * 1000;
+
 @Injectable()
 export class BotOrchestratorService {
   private readonly logger = new Logger(BotOrchestratorService.name);
@@ -143,6 +148,7 @@ export class BotOrchestratorService {
      */
     @Inject(forwardRef(() => VovaService))
     private readonly vova: VovaService,
+    private readonly events: EventEmitter2,
   ) {}
 
   /**
@@ -211,6 +217,7 @@ export class BotOrchestratorService {
     if (
       CMD_SUPPORT.includes(stripChatFormattingChars(text).trim().toLowerCase())
     ) {
+      this.alertSupportRequested(profile);
       return [await this.supportCardMessage()];
     }
 
@@ -894,6 +901,44 @@ export class BotOrchestratorService {
         activated_at: true,
       },
     });
+  }
+
+  /**
+   * Tells the admins someone asked for support on WhatsApp.
+   *
+   * The card answers with contact details, but the person often wants a human
+   * in the conversation — and until now nobody on the team knew they had
+   * asked. The alert opens their profile, where the Messages panel and the
+   * VoVa switch let an admin take over the thread.
+   *
+   * At most one unread alert per profile per 30 minutes. Never throws: the
+   * card is what the person is waiting for.
+   */
+  private alertSupportRequested(profile: {
+    id: string;
+    first_name: string;
+    last_name: string;
+    phone: string;
+    status: string;
+  }): void {
+    try {
+      const name = `${profile.first_name} ${profile.last_name}`.trim();
+      this.events.emit(AdminNotificationEvent.SUPPORT_REQUESTED, {
+        event: AdminNotificationEvent.SUPPORT_REQUESTED,
+        title: 'Demande de support',
+        message: `${name || 'Un profil'} (${profile.phone}) a demandé le support sur WhatsApp`,
+        entityType: 'profile',
+        entityId: profile.id,
+        metadata: { channel: 'whatsapp', accountStatus: profile.status },
+        timestamp: new Date().toISOString(),
+        dedupeWindowMs: SUPPORT_ALERT_WINDOW_MS,
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Support alert failed for profile ${profile.id}`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
   }
 
   /**
