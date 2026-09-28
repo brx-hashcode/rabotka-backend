@@ -10,6 +10,8 @@ export enum AdminNotificationEvent {
   // Conversation (in-app chat)
   /** Moderation held a message back whole; it never reached the recipient. */
   CONVERSATION_MESSAGE_HELD = 'admin.notification.conversation.message_held',
+  /** Contact details were masked inside a message that was still delivered. */
+  CONVERSATION_CONTACT_MASKED = 'admin.notification.conversation.contact_masked',
 
   // Job Offer
   JOB_OFFER_CREATED = 'admin.notification.job_offer.created',

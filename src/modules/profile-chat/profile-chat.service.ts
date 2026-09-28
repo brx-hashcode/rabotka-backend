@@ -39,11 +39,11 @@ import type { RedactionCategory } from './moderation/patterns';
 const NOTIFICATION_DEDUPE_SECONDS = 30 * 60;
 
 /**
- * One admin alert per conversation per hour while it is unread: someone who
- * keeps retyping the same number produces a string of held messages, and one
- * alert already says "look at this conversation".
+ * One admin alert per conversation per hour while it is unread, for each kind
+ * (held, masked): someone who keeps retyping the same number produces a string
+ * of them, and one alert already says "look at this conversation".
  */
-const HELD_ALERT_WINDOW_MS = 60 * 60 * 1000;
+const CONTACT_ALERT_WINDOW_MS = 60 * 60 * 1000;
 
 /** Fallback when `messaging.nudge_delay_seconds` is unset or nonsense. */
 const DEFAULT_NUDGE_DELAY_SECONDS = 300;
@@ -693,14 +693,15 @@ export class ProfileChatService {
 
     // Not awaited: the alert looks up both names, and the sender is waiting on
     // this response. It cannot fail the send either — the message is stored.
-    if (verdict.status === MessageModerationStatus.HELD) {
-      void this.alertHeldMessage(
+    if (verdict.status !== MessageModerationStatus.CLEAN) {
+      void this.alertContactDetected(
         conversation,
         message.id,
         senderId,
+        verdict.status === MessageModerationStatus.HELD,
         verdict.spans.map((span) => span.category),
       ).catch((err) =>
-        this.logger.warn(`Held-message alert failed: ${String(err)}`),
+        this.logger.warn(`Contact-detection alert failed: ${String(err)}`),
       );
     }
 
@@ -725,17 +726,19 @@ export class ProfileChatService {
   }
 
   /**
-   * Tells the admins a message was held, so they can read the thread and close
-   * it if needed — until now a held message only showed up as a count in the
-   * Conversations list, found by whoever happened to scan it.
+   * Tells the admins contact details went into a conversation, so they can read
+   * the thread and close it if needed. Two kinds, because they are different
+   * news: a HELD message never arrived, a masked one arrived with the details
+   * cut out — someone trying to take the contact off the platform either way.
    *
    * Carries names and categories, never the message text: the admin list
    * deliberately shows none, and reading a thread is a separate, logged step.
    */
-  private async alertHeldMessage(
+  private async alertContactDetected(
     conversation: ProfileConversation,
     messageId: string,
     senderId: string,
+    held: boolean,
     categories: RedactionCategory[],
   ): Promise<void> {
     const recipientId =
@@ -751,12 +754,18 @@ export class ProfileChatService {
       return p ? `${p.first_name} ${p.last_name}`.trim() : 'Un profil';
     };
     const distinct = [...new Set(categories)];
+    const event = held
+      ? AdminNotificationEvent.CONVERSATION_MESSAGE_HELD
+      : AdminNotificationEvent.CONVERSATION_CONTACT_MASKED;
+    const what = held
+      ? 'un message a été retenu'
+      : 'des coordonnées ont été masquées';
 
-    this.events.emit(AdminNotificationEvent.CONVERSATION_MESSAGE_HELD, {
-      event: AdminNotificationEvent.CONVERSATION_MESSAGE_HELD,
-      title: 'Message retenu',
+    this.events.emit(event, {
+      event,
+      title: held ? 'Message retenu' : 'Coordonnées masquées',
       message:
-        `${nameOf(senderId)} → ${nameOf(recipientId)} : un message a été retenu` +
+        `${nameOf(senderId)} → ${nameOf(recipientId)} : ${what}` +
         (distinct.length ? ` (${distinct.join(', ')})` : ''),
       entityType: 'conversation',
       entityId: conversation.id,
@@ -765,10 +774,11 @@ export class ProfileChatService {
         messageId,
         senderId,
         recipientId,
+        held,
         categories: distinct,
       },
       timestamp: new Date().toISOString(),
-      dedupeWindowMs: HELD_ALERT_WINDOW_MS,
+      dedupeWindowMs: CONTACT_ALERT_WINDOW_MS,
     });
   }
 

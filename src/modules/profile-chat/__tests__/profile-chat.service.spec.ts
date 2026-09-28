@@ -393,6 +393,7 @@ describe('ProfileChatService', () => {
         }),
       });
       expect(alert.message).toContain('Sara Colombe → Paul Mabiala');
+      expect(maskedAlert()).toBeUndefined();
     });
 
     // The admin list carries no message text on purpose; reading a thread is
@@ -412,12 +413,47 @@ describe('ProfileChatService', () => {
       expect(JSON.stringify(heldAlert())).not.toContain('0612345678');
     });
 
-    it('does not alert for a delivered message, masked or clean', async () => {
+    const maskedAlert = () =>
+      events.emit.mock.calls.find(
+        ([name]) => name === AdminNotificationEvent.CONVERSATION_CONTACT_MASKED,
+      )?.[1];
+
+    // Delivered with the number cut out: still an attempt to take the contact
+    // off the platform, so the admins hear about it — as a different alert.
+    it('alerts on a masked contact in a delivered message', async () => {
       await service.sendMessage(CONV, WORKER, BODY_WITH_PHONE);
+      await flush();
+
+      expect(heldAlert()).toBeUndefined();
+      const alert = maskedAlert();
+      expect(alert).toMatchObject({
+        title: 'Coordonnées masquées',
+        entityType: 'conversation',
+        entityId: CONV,
+        dedupeWindowMs: 60 * 60 * 1000,
+        metadata: expect.objectContaining({
+          held: false,
+          categories: ['PHONE'],
+        }),
+      });
+      expect(alert.message).toContain('Sara Colombe → Paul Mabiala');
+      // The alert must not become a way to read the masked digits.
+      expect(JSON.stringify(alert)).not.toMatch(/06 12 34 56 78/);
+    });
+
+    it('does not alert for a clean message', async () => {
+      prisma.profileMessage.create.mockResolvedValue(
+        storedMessage({
+          body: 'bonjour',
+          moderation_status: MessageModerationStatus.CLEAN,
+          redactions: [],
+        }),
+      );
       await service.sendMessage(CONV, WORKER, 'bonjour');
       await flush();
 
       expect(heldAlert()).toBeUndefined();
+      expect(maskedAlert()).toBeUndefined();
     });
 
     it('still returns the message when the alert lookup fails', async () => {
