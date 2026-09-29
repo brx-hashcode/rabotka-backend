@@ -808,7 +808,13 @@ describe('ApplicationService (extended)', () => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue({
         ...mockApplication,
         status: ApplicationStatus.ACCEPTED,
-        job_offer: { ...mockJobOffer, status: JobOfferStatus.COMPLETED },
+        // A closed offer has begun; the shared fixture is scheduled ahead, and
+        // an unstarted mission is refused before any of this is reached.
+        job_offer: {
+          ...mockJobOffer,
+          status: JobOfferStatus.COMPLETED,
+          scheduled_at: hoursFromNow(-2),
+        },
       });
       (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
         status: JobOfferStatus.COMPLETED,
