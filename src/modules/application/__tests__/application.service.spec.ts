@@ -1093,12 +1093,42 @@ describe('ApplicationService', () => {
       return tx;
     };
 
-    const setupApplication = (status: ApplicationStatus) => {
+    // The shared fixture is scheduled 5h ahead; a worker can only finish a
+    // mission once it has begun, so these default to one that started 1h ago.
+    const setupApplication = (
+      status: ApplicationStatus,
+      scheduledAt: Date = hoursFromNow(-1),
+    ) => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue({
         ...mockApplication,
         status,
+        job_offer: { ...mockJobOffer, scheduled_at: scheduledAt },
       });
     };
+
+    it('refuses to complete an ACCEPTED mission that has not started yet', async () => {
+      // The 24h reminder lands the worker on the mission page the day before;
+      // tapping "Terminer" there must not end a job nobody has done.
+      setupApplication(ApplicationStatus.ACCEPTED, hoursFromNow(24));
+      const tx = setupTx();
+
+      await expect(
+        service.markCompletedByWorker(APPLICATION_ID, WORKER_ID),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(tx.application.update).not.toHaveBeenCalled();
+    });
+
+    it('completes an ACCEPTED mission once its date has passed', async () => {
+      // The auto-start scan runs every 15 min, so a mission can still read
+      // ACCEPTED shortly after it began — the date decides, not the status.
+      setupApplication(ApplicationStatus.ACCEPTED, hoursFromNow(-0.1));
+      const tx = setupTx();
+
+      await service.markCompletedByWorker(APPLICATION_ID, WORKER_ID);
+
+      expect(tx.application.update).toHaveBeenCalled();
+    });
 
     it('refuses a worker who is not the one on this mission', async () => {
       setupApplication(ApplicationStatus.ACCEPTED);

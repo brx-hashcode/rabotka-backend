@@ -1993,6 +1993,21 @@ export class ApplicationService {
         'Cette mission ne peut pas être marquée comme terminée',
       );
     }
+    // A hired worker can't finish a mission that hasn't begun. The 24h reminder
+    // deep-links to the mission page the day before, and a worker tapping the
+    // button there to "confirm" completed a job they had not done yet.
+    // STARTED/END are past this point by definition; the auto-start scan flips
+    // ACCEPTED to STARTED at `scheduled_at`, but it runs every 15 minutes, so
+    // the date — not the status — is what decides.
+    if (
+      application.status === ApplicationStatus.ACCEPTED &&
+      application.job_offer.scheduled_at &&
+      application.job_offer.scheduled_at > new Date()
+    ) {
+      throw new BadRequestException(
+        "La mission n'a pas encore commencé : vous pourrez la terminer après son début.",
+      );
+    }
 
     const fees = await this.systemConfigService.getFees();
     let rejectedOrphanIds: string[] = [];
