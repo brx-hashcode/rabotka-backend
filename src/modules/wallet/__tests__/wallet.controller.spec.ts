@@ -28,8 +28,20 @@ describe('WalletController', () => {
       makePrisma('ADMIN') as any,
       { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
-    const result = await controller.getRevenue(makeReq() as any);
+    const result = await controller.getRevenue(makeReq() as any, {});
     expect(result).toEqual({ totalRevenue: 1000, balance: 1000 });
+  });
+
+  it('forwards the date window to the service', async () => {
+    const service = makeService();
+    const controller = new WalletController(
+      service as any,
+      makePrisma('FINANCE') as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
+    );
+    const dto = { created_from: '2026-09-01', created_to: '2026-09-30' };
+    await controller.getRevenue(makeReq() as any, dto);
+    expect(service.getSystemRevenue).toHaveBeenCalledWith(dto);
   });
 
   it('returns revenue for SUPER_ADMIN role', async () => {
@@ -38,7 +50,7 @@ describe('WalletController', () => {
       makePrisma('SUPER_ADMIN') as any,
       { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
-    const result = await controller.getRevenue(makeReq() as any);
+    const result = await controller.getRevenue(makeReq() as any, {});
     expect(result).toEqual({ totalRevenue: 1000, balance: 1000 });
   });
 
@@ -48,7 +60,7 @@ describe('WalletController', () => {
       makePrisma('VIEWER') as any,
       { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
-    await expect(controller.getRevenue(makeReq() as any)).rejects.toThrow(
+    await expect(controller.getRevenue(makeReq() as any, {})).rejects.toThrow(
       ForbiddenException,
     );
   });
@@ -59,7 +71,7 @@ describe('WalletController', () => {
       makePrisma(null) as any,
       { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
-    await expect(controller.getRevenue(makeReq() as any)).rejects.toThrow(
+    await expect(controller.getRevenue(makeReq() as any, {})).rejects.toThrow(
       ForbiddenException,
     );
   });
