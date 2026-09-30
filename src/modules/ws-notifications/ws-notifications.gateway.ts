@@ -13,16 +13,12 @@ import { createAdapter } from '@socket.io/redis-adapter';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import type { JwtPayload } from '../auth/guards/jwt-auth.guard';
+import { socketCorsOrigin } from '../../common/utils/allowed-origins';
 
 @WebSocketGateway({
   namespace: '/admin-notifications',
   cors: {
-    origin: (
-      origin: string,
-      callback: (err: Error | null, allow?: boolean) => void,
-    ) => {
-      callback(null, true);
-    },
+    origin: socketCorsOrigin,
     credentials: true,
   },
 })

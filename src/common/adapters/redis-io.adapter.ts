@@ -1,9 +1,11 @@
+import type { IncomingMessage } from 'node:http';
 import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import Redis from 'ioredis';
 import type { Server, ServerOptions } from 'socket.io';
+import { socketOriginAllowed } from '../utils/allowed-origins';
 
 /**
  * Socket.IO adapter backed by Redis pub/sub so rooms and emits work across
@@ -44,7 +46,17 @@ export class RedisIoAdapter extends IoAdapter {
   }
 
   createIOServer(port: number, options?: ServerOptions): Server {
-    const server = super.createIOServer(port, options) as Server;
+    const server = super.createIOServer(port, {
+      ...options,
+      // The `cors` setting on each gateway only governs the long-polling
+      // transport: a WebSocket upgrade is not subject to CORS, and the browser
+      // attaches the session cookie to it regardless. This runs on every
+      // handshake of either transport, so it is the check that actually stops a
+      // page on another site opening a socket as the signed-in user.
+      allowRequest: (req: IncomingMessage, callback) => {
+        callback(null, socketOriginAllowed(req.headers.origin));
+      },
+    }) as Server;
     if (this.adapterConstructor) {
       server.adapter(this.adapterConstructor);
     }

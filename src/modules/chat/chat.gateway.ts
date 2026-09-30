@@ -7,6 +7,7 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
+import { socketCorsOrigin } from '../../common/utils/allowed-origins';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -36,10 +37,7 @@ function parseCookies(header: string | undefined): Record<string, string> {
 @WebSocketGateway({
   namespace: '/chat',
   cors: {
-    origin: (
-      _origin: string,
-      callback: (err: Error | null, allow?: boolean) => void,
-    ) => callback(null, true),
+    origin: socketCorsOrigin,
     credentials: true,
   },
 })
