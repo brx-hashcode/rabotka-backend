@@ -32,6 +32,7 @@ import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { AdminListWalletTransactionsDto } from './dto/admin-list-wallet-transactions.dto';
 import { AdminListPaymentsDto } from './dto/admin-list-payments.dto';
+import { AdminWalletRevenueDto } from './dto/admin-wallet-revenue.dto';
 import { AdminListMobileMoneyTransactionsDto } from './dto/admin-list-mobile-money-transactions.dto';
 import { AdminRecordMobileMoneyWithdrawalDto } from './dto/admin-record-mobile-money-withdrawal.dto';
 import { ArchiveService } from '../admin-archive/archive.service';
@@ -78,7 +79,7 @@ export class WalletController {
   @ApiOperation({
     summary: 'Get system revenue (admin only)',
     description:
-      'Returns total revenue (system wallet balance). Only users with role ADMIN or SUPER_ADMIN can access.',
+      'Returns revenue and payment counts, optionally limited to payments created between created_from and created_to. Only users with role ADMIN, SUPER_ADMIN or FINANCE can access.',
   })
   @ApiResponse({
     status: 200,
@@ -88,17 +89,28 @@ export class WalletController {
       properties: {
         totalRevenue: { type: 'number', example: 2348000 },
         balance: { type: 'number', example: 2348000 },
+        completedCount: { type: 'number', example: 120 },
+        pendingCount: { type: 'number', example: 3 },
+        failedCount: { type: 'number', example: 7 },
+        revenueByType: {
+          type: 'object',
+          properties: {
+            penalty: { type: 'number', example: 48000 },
+            contactUnlock: { type: 'number', example: 2300000 },
+          },
+        },
       },
     },
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({
     status: 403,
-    description: 'Forbidden - requires ADMIN or SUPER_ADMIN role',
+    description: 'Forbidden - requires ADMIN, SUPER_ADMIN or FINANCE role',
   })
   async getRevenue(
     @Req() req: AdminAuthenticatedRequest,
-  ): Promise<{ totalRevenue: number; balance: number }> {
+    @Query() dto: AdminWalletRevenueDto,
+  ): Promise<Awaited<ReturnType<WalletService['getSystemRevenue']>>> {
     const user = await this.prisma.user.findUnique({
       where: { id: req.user.userId },
       select: { role: true },
@@ -108,7 +120,7 @@ export class WalletController {
         'Only ADMIN, SUPER_ADMIN or FINANCE can access wallet data',
       );
     }
-    return this.walletService.getSystemRevenue();
+    return this.walletService.getSystemRevenue(dto);
   }
 
   @Get('monthly-revenue')

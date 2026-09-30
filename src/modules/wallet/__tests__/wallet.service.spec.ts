@@ -258,6 +258,50 @@ describe('WalletService', () => {
       expect(result.totalRevenue).toBeDefined();
       expect(result.balance).toBeDefined();
     });
+
+    describe('date window', () => {
+      const wheres = () =>
+        [
+          ...(prisma.payment.aggregate as jest.Mock).mock.calls,
+          ...(prisma.payment.count as jest.Mock).mock.calls,
+        ].map(([args]) => args.where);
+
+      beforeEach(() => {
+        (prisma.wallet.findFirst as jest.Mock).mockResolvedValue(
+          mockSystemWallet,
+        );
+        (prisma.payment.aggregate as jest.Mock).mockReset().mockResolvedValue({
+          _sum: { amount: 0 },
+          _count: 0,
+        });
+        (prisma.payment.count as jest.Mock).mockReset().mockResolvedValue(0);
+      });
+
+      it('narrows every figure to payments created inside the window', async () => {
+        await service.getSystemRevenue({
+          created_from: '2026-01-01',
+          created_to: '2026-12-31',
+        });
+
+        expect(wheres()).toHaveLength(5);
+        for (const where of wheres()) {
+          expect(where.created_at).toEqual({
+            gte: new Date('2026-01-01'),
+            // The whole end day counts, as in the payments list.
+            lte: new Date('2026-12-31T23:59:59.999Z'),
+          });
+        }
+      });
+
+      it('stays all-time when no window is given', async () => {
+        await service.getSystemRevenue();
+
+        expect(wheres()).toHaveLength(5);
+        for (const where of wheres()) {
+          expect(where).not.toHaveProperty('created_at');
+        }
+      });
+    });
   });
 
   describe('what counts as revenue', () => {
