@@ -9,6 +9,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Server, Socket } from 'socket.io';
 import type { JwtPayload } from '../auth/guards/jwt-auth.guard';
+import { socketCorsOrigin } from '../../common/utils/allowed-origins';
 
 /** What moved. The client turns this into the query keys it needs to drop. */
 export type JobEvent = {
@@ -40,12 +41,7 @@ export type JobEvent = {
 @WebSocketGateway({
   namespace: '/job-events',
   cors: {
-    origin: (
-      _origin: string,
-      callback: (err: Error | null, allow?: boolean) => void,
-    ) => {
-      callback(null, true);
-    },
+    origin: socketCorsOrigin,
     credentials: true,
   },
 })
