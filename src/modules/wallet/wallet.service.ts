@@ -675,7 +675,14 @@ export class WalletService {
     ]);
   }
 
-  async getSystemRevenue(): Promise<{
+  /**
+   * Revenue figures for the Finance cards, optionally narrowed to payments
+   * created inside a window. `balance` is the system wallet's live balance and
+   * ignores the window.
+   */
+  async getSystemRevenue(
+    params: { created_from?: string; created_to?: string } = {},
+  ): Promise<{
     totalRevenue: number;
     balance: number;
     completedCount: number;
@@ -684,6 +691,20 @@ export class WalletService {
     revenueByType: { penalty: number; contactUnlock: number };
   }> {
     const systemWallet = await this.getOrCreateSystemWallet();
+
+    const window: Prisma.PaymentWhereInput =
+      params.created_from || params.created_to
+        ? {
+            created_at: {
+              ...(params.created_from
+                ? { gte: new Date(params.created_from) }
+                : {}),
+              ...(params.created_to
+                ? { lte: new Date(params.created_to + 'T23:59:59.999Z') }
+                : {}),
+            },
+          }
+        : {};
 
     const [
       completedAgg,
@@ -696,20 +717,30 @@ export class WalletService {
         where: {
           status: PaymentStatus.COMPLETED,
           type: { in: [...REVENUE_PAYMENT_TYPES] },
+          ...window,
         },
         _sum: { amount: true },
         _count: true,
       }),
-      this.prisma.payment.count({ where: { status: PaymentStatus.PENDING } }),
-      this.prisma.payment.count({ where: { status: PaymentStatus.FAILED } }),
+      this.prisma.payment.count({
+        where: { status: PaymentStatus.PENDING, ...window },
+      }),
+      this.prisma.payment.count({
+        where: { status: PaymentStatus.FAILED, ...window },
+      }),
       this.prisma.payment.aggregate({
-        where: { status: PaymentStatus.COMPLETED, type: PaymentType.PENALTY },
+        where: {
+          status: PaymentStatus.COMPLETED,
+          type: PaymentType.PENALTY,
+          ...window,
+        },
         _sum: { amount: true },
       }),
       this.prisma.payment.aggregate({
         where: {
           status: PaymentStatus.COMPLETED,
           type: PaymentType.CONTACT_UNLOCK,
+          ...window,
         },
         _sum: { amount: true },
       }),
