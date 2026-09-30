@@ -201,6 +201,32 @@ describe('BroadcastService', () => {
       ];
       expect(data.status).toBe(BroadcastStatus.SCHEDULED);
     });
+
+    it('refuses a schedule that is already in the past', async () => {
+      deps.prisma.broadcast.findUnique.mockResolvedValue(draft());
+      deps.prisma.profile.count.mockResolvedValue(1);
+
+      await expect(
+        service.send(BROADCAST_ID, {
+          scheduledAt: new Date(Date.now() - 60_000),
+        }),
+      ).rejects.toThrow(/déjà passée/);
+      expect(deps.queue.addJob).not.toHaveBeenCalled();
+    });
+
+    it('refuses to send a broadcast that is already scheduled', async () => {
+      // Its delayed job is still waiting; a second send would leave two, and
+      // the first would fire at the old time.
+      deps.prisma.broadcast.findUnique.mockResolvedValue(
+        draft({ status: BroadcastStatus.SCHEDULED }),
+      );
+      deps.prisma.profile.count.mockResolvedValue(1);
+
+      await expect(service.send(BROADCAST_ID)).rejects.toThrow(
+        /déjà programmé/,
+      );
+      expect(deps.queue.addJob).not.toHaveBeenCalled();
+    });
   });
 
   describe('cancel', () => {
