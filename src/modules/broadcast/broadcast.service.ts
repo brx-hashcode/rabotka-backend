@@ -369,8 +369,21 @@ export class BroadcastService {
     opts: { scheduledAt?: Date } = {},
   ): Promise<{ recipientCount: number; estimatedCost: number }> {
     const broadcast = await this.getOrThrow(id);
+    // A scheduled broadcast already has a delayed job waiting, and that job
+    // only looks at the status when it fires. Sending again would leave two of
+    // them, and the first would go out at the OLD time. Cancel, then start over.
+    if (broadcast.status === BroadcastStatus.SCHEDULED) {
+      throw new BadRequestException(
+        'Cet envoi est déjà programmé — annulez-le pour en programmer un autre',
+      );
+    }
     if (!EDITABLE.includes(broadcast.status)) {
       throw new BadRequestException('Cet envoi est déjà parti');
+    }
+    // Without this a past time is sent at once while the row says SCHEDULED,
+    // which reads as a schedule that was honoured.
+    if (opts.scheduledAt && opts.scheduledAt.getTime() <= Date.now()) {
+      throw new BadRequestException('L’heure programmée est déjà passée');
     }
 
     const filters = broadcast.audience as unknown as AudienceFilters;
