@@ -21,6 +21,7 @@ import type { MessageView } from './profile-chat.service';
 import { PresenceService } from './presence.service';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { TypingDto } from './dto/profile-chat.dto';
+import { socketCorsOrigin } from '../../common/utils/allowed-origins';
 
 /** Well under the 90s TTL, so one missed tick never drops somebody offline. */
 const PRESENCE_REFRESH_MS = 45_000;
@@ -70,12 +71,7 @@ const MEMBERSHIP_TTL_MS = 60_000;
 @WebSocketGateway({
   namespace: '/messagerie',
   cors: {
-    origin: (
-      _origin: string,
-      callback: (err: Error | null, allow?: boolean) => void,
-    ) => {
-      callback(null, true);
-    },
+    origin: socketCorsOrigin,
     credentials: true,
   },
 })

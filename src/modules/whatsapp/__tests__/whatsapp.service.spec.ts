@@ -308,6 +308,8 @@ describe('WhatsAppService', () => {
       (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
         phone: PHONE,
         first_name: 'Alice',
+        status: 'PENDING_ACTIVATION',
+        verification_status: 'VERIFIED',
       });
       (provider.isConfigured as jest.Mock).mockReturnValue(true);
 
@@ -315,6 +317,74 @@ describe('WhatsAppService', () => {
 
       expect(provider.sendText).toHaveBeenCalled();
     });
+
+    it('activates a pending account whose KYC has passed', async () => {
+      redis.get.mockResolvedValue(PROFILE_ID);
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        phone: PHONE,
+        first_name: 'Alice',
+        status: 'PENDING_ACTIVATION',
+        verification_status: 'VERIFIED',
+        activated_at: null,
+      });
+
+      await service.verifyWhatsAppToken('valid-token');
+
+      expect(prisma.profile.update).toHaveBeenCalledWith({
+        where: { id: PROFILE_ID },
+        data: {
+          whatsapp_connected: true,
+          status: 'ACTIVE',
+          activated_at: expect.any(Date),
+        },
+      });
+    });
+
+    // Any signed-in profile can ask for this link, so whatever it sets, a
+    // suspended user can set for themselves.
+    it.each(['SUSPENDED', 'BANNED'])(
+      'does not lift a %s account',
+      async (status) => {
+        redis.get.mockResolvedValue(PROFILE_ID);
+        (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+          phone: PHONE,
+          first_name: 'Alice',
+          status,
+          verification_status: 'VERIFIED',
+        });
+        (provider.isConfigured as jest.Mock).mockReturnValue(true);
+
+        await service.verifyWhatsAppToken('valid-token');
+
+        expect(prisma.profile.update).toHaveBeenCalledWith({
+          where: { id: PROFILE_ID },
+          data: { whatsapp_connected: true },
+        });
+        expect(provider.sendText).not.toHaveBeenCalled();
+        // The link is still spent: it proved the phone, which is all it can do.
+        expect(redis.del).toHaveBeenCalled();
+      },
+    );
+
+    it.each(['PENDING', 'REJECTED'])(
+      'does not activate an account whose KYC is %s',
+      async (verification_status) => {
+        redis.get.mockResolvedValue(PROFILE_ID);
+        (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+          phone: PHONE,
+          first_name: 'Alice',
+          status: 'PENDING_ACTIVATION',
+          verification_status,
+        });
+
+        await service.verifyWhatsAppToken('valid-token');
+
+        expect(prisma.profile.update).toHaveBeenCalledWith({
+          where: { id: PROFILE_ID },
+          data: { whatsapp_connected: true },
+        });
+      },
+    );
 
     it('does not send message when Twilio is not configured', async () => {
       redis.get.mockResolvedValue(PROFILE_ID);

@@ -9,6 +9,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Server, Socket } from 'socket.io';
 import type { JwtPayload } from '../../auth/guards/jwt-auth.guard';
+import { socketCorsOrigin } from '../../../common/utils/allowed-origins';
 
 export type InAppAdPayload = {
   deliveryId: string;
@@ -32,12 +33,7 @@ export type InAppAdPayload = {
 @WebSocketGateway({
   namespace: '/ad-inbox',
   cors: {
-    origin: (
-      _origin: string,
-      callback: (err: Error | null, allow?: boolean) => void,
-    ) => {
-      callback(null, true);
-    },
+    origin: socketCorsOrigin,
     credentials: true,
   },
 })

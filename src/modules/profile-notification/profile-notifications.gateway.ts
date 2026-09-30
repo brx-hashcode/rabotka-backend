@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { Server, Socket } from 'socket.io';
 import type { JwtPayload } from '../auth/guards/jwt-auth.guard';
 import type { ProfileNotificationDto } from './profile-notification.service';
+import { socketCorsOrigin } from '../../common/utils/allowed-origins';
 
 /**
  * Pushes a new notification to the recipient's open tabs, so the bell updates
@@ -21,12 +22,7 @@ import type { ProfileNotificationDto } from './profile-notification.service';
 @WebSocketGateway({
   namespace: '/notifications',
   cors: {
-    origin: (
-      _origin: string,
-      callback: (err: Error | null, allow?: boolean) => void,
-    ) => {
-      callback(null, true);
-    },
+    origin: socketCorsOrigin,
     credentials: true,
   },
 })

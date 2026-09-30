@@ -9,16 +9,12 @@ import {
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
+import { socketCorsOrigin } from '../../common/utils/allowed-origins';
 
 @WebSocketGateway({
   namespace: '/payment-status',
   cors: {
-    origin: (
-      _origin: string,
-      callback: (err: Error | null, allow?: boolean) => void,
-    ) => {
-      callback(null, true);
-    },
+    origin: socketCorsOrigin,
     credentials: false,
   },
 })

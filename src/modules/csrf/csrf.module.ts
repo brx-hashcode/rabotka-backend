@@ -8,6 +8,7 @@ import {
   CSRF_VISITOR_COOKIE,
 } from './csrf.constants';
 import { CsrfController } from './csrf.controller';
+import { isCsrfExemptPath } from './csrf-exempt';
 
 @Module({
   imports: [ConfigModule],
@@ -54,39 +55,10 @@ import { CsrfController } from './csrf.controller';
             const isBearer =
               typeof authHeader === 'string' &&
               authHeader.startsWith('Bearer ');
-            return (
-              isBearer ||
-              url.includes('/whatsapp/incoming') ||
-              // Meta's webhook. A provider cannot carry a CSRF token, and
-              // without this the POST is answered with a JSON 403 by this very
-              // middleware — signature verification never runs, and Meta
-              // retries against the 403 for days.
-              url.includes('/webhooks/whatsapp/') ||
-              url.includes('/auth/mobile/') ||
-              // The OIDC server-to-server endpoints. A partner's BACKEND calls
-              // these, authenticating with HTTP Basic client credentials or a
-              // bearer token — neither of which a browser attaches ambiently,
-              // so there is no CSRF to protect against. Note that the `isBearer`
-              // escape above does NOT cover `/oauth/token`: it authenticates
-              // with `Basic`, so without this line every token exchange would
-              // be answered with a 403 and no integration would ever complete.
-              //
-              // Deliberately NOT listed: `/oauth/interaction/*`. Those are
-              // called by Rabotka's own consent page, from FRONTEND_URL, with
-              // the session cookie attached — exactly the shape CSRF exists for.
-              url.includes('/oauth/token') ||
-              url.includes('/oauth/revoke') ||
-              url.includes('/oauth/userinfo') ||
-              // The partner identity-check API, same reasoning: HTTP Basic
-              // client credentials from a partner's backend. The person-side
-              // routes live under `/profile/identity-checks` and are NOT
-              // matched here — they use the session cookie.
-              url.includes('/api/v1/identity-checks') ||
-              // Error reports from the web client's error boundary. Sent with
-              // `sendBeacon`, which cannot attach the CSRF header, and the
-              // endpoint only writes a throttled log line — no state to forge.
-              url.includes('/api/v1/client-errors')
-            );
+            // The exempt routes, and why each is one, are in csrf-exempt.ts.
+            // Note the `isBearer` escape does NOT cover `/oauth/token`, which
+            // authenticates with `Basic` — that is why it is listed there.
+            return isBearer || isCsrfExemptPath(url);
           },
         });
       },
