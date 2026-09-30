@@ -337,6 +337,85 @@ describe('AuthService', () => {
         service.verifyOtp('user@example.com', '123456'),
       ).rejects.toThrow(UnauthorizedException);
     });
+
+    it('counts the guess against the code, with a limit', async () => {
+      redis.eval.mockResolvedValue(0);
+
+      await expect(
+        service.verifyOtp('user@example.com', '999999'),
+      ).rejects.toThrow(UnauthorizedException);
+
+      // Two keys — the code and its miss counter — then the guess, the limit
+      // and the counter's TTL. The script is what destroys the code on the
+      // fifth miss; a guess that is not counted is a guess that is free.
+      const [, keyCount, otpKey, attemptsKey, guess, limit, ttl] = redis.eval
+        .mock.calls[0] as [
+        string,
+        number,
+        string,
+        string,
+        string,
+        number,
+        number,
+      ];
+      expect(keyCount).toBe(2);
+      expect(otpKey).toContain('otp:user@example.com');
+      expect(attemptsKey).toContain('otp-attempts:user@example.com');
+      expect(guess).toBe('999999');
+      expect(limit).toBe(5);
+      expect(ttl).toBe(300);
+    });
+  });
+
+  describe('OTP send limit', () => {
+    it('refuses a sixth code for the same identifier in the window', async () => {
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(mockProfile);
+      redis.incr.mockResolvedValue(6);
+
+      await expect(service.sendOtp('user@example.com')).rejects.toMatchObject({
+        status: 429,
+      });
+      expect(redis.set).not.toHaveBeenCalled();
+    });
+
+    it('starts the window on the first send', async () => {
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(mockProfile);
+      redis.incr.mockResolvedValue(1);
+
+      await service.sendOtp('user@example.com');
+
+      expect(redis.expire).toHaveBeenCalledWith(
+        expect.stringContaining('otp-sends:user@example.com'),
+        900,
+      );
+    });
+
+    it('gives a fresh code a clean slate of guesses', async () => {
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(mockProfile);
+
+      await service.sendOtp('user@example.com');
+
+      expect(redis.del).toHaveBeenCalledWith(
+        expect.stringContaining('otp-attempts:user@example.com'),
+      );
+    });
+
+    it('limits admin codes separately, per admin email', async () => {
+      (prisma.user.findUnique as jest.Mock).mockResolvedValue({
+        id: 'u-1',
+        email: 'admin@example.com',
+        is_active: true,
+        first_name: 'Ada',
+      });
+      redis.incr.mockResolvedValue(6);
+
+      await expect(
+        service.sendAdminOtp('admin@example.com'),
+      ).rejects.toMatchObject({ status: 429 });
+      expect(redis.incr).toHaveBeenCalledWith(
+        expect.stringContaining('admin:otp-sends:admin@example.com'),
+      );
+    });
   });
 
   describe('mobile token flow', () => {
@@ -1216,6 +1295,46 @@ describe('AuthService', () => {
         error = e;
       }
       expect(error?.status).toBe(401);
+    });
+
+    it('uses up the pending login after five wrong codes', async () => {
+      redis.get.mockResolvedValueOnce(USER_ID);
+      (prisma.user.findUnique as jest.Mock).mockResolvedValue({
+        totp_secret: 'SEC',
+        totp_enabled: true,
+        is_active: true,
+      });
+      const otplib = require('otplib');
+      otplib.verify.mockResolvedValueOnce({ valid: false });
+      redis.incr.mockResolvedValue(5);
+
+      await expect(
+        service.verifyTotpLogin('pending-tok', 'bad-code'),
+      ).rejects.toMatchObject({ status: 401 });
+
+      // Without this the six digits could simply be tried until one matched.
+      expect(redis.del).toHaveBeenCalledWith(
+        expect.stringContaining('admin:totp:pending:pending-tok'),
+        expect.stringContaining('admin:totp:attempts:pending-tok'),
+      );
+    });
+
+    it('keeps the pending login alive below the limit', async () => {
+      redis.get.mockResolvedValueOnce(USER_ID);
+      (prisma.user.findUnique as jest.Mock).mockResolvedValue({
+        totp_secret: 'SEC',
+        totp_enabled: true,
+        is_active: true,
+      });
+      const otplib = require('otplib');
+      otplib.verify.mockResolvedValueOnce({ valid: false });
+      redis.incr.mockResolvedValue(2);
+
+      await expect(
+        service.verifyTotpLogin('pending-tok', 'bad-code'),
+      ).rejects.toMatchObject({ status: 401 });
+
+      expect(redis.del).not.toHaveBeenCalled();
     });
 
     it('returns token when TOTP code is valid', async () => {
