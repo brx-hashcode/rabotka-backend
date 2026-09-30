@@ -1,4 +1,8 @@
-import { isOriginAllowed, parseAllowedOrigins } from '../allowed-origins';
+import {
+  isOriginAllowed,
+  knownOrigins,
+  parseAllowedOrigins,
+} from '../allowed-origins';
 
 describe('parseAllowedOrigins', () => {
   it('splits, trims and drops trailing slashes', () => {
@@ -47,5 +51,29 @@ describe('isOriginAllowed', () => {
 
   it('lets through a client that sends no Origin, which is not a browser', () => {
     expect(isOriginAllowed(undefined, prod)).toBe(true);
+  });
+});
+
+describe('knownOrigins', () => {
+  it('adds the front ends the backend is told about by name', () => {
+    // The admin is served through a same-origin proxy, so nothing ever needed
+    // it listed for CORS — but its socket still arrives with its Origin.
+    expect(
+      knownOrigins({
+        ALLOW_ORIGINS: 'https://partner.example.com',
+        FRONTEND_URL: 'https://app.rabotka.work/',
+        ADMIN_BASE_URL: 'https://admin.rabotka.work/some/path',
+      }),
+    ).toEqual([
+      'https://partner.example.com',
+      'https://app.rabotka.work',
+      'https://admin.rabotka.work',
+    ]);
+  });
+
+  it('ignores unset or malformed urls', () => {
+    expect(
+      knownOrigins({ FRONTEND_URL: 'not a url', ADMIN_BASE_URL: '  ' }),
+    ).toEqual([]);
   });
 });

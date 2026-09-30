@@ -7,7 +7,7 @@
  * admin chat or notification socket as whoever was signed in, and read it.
  *
  * The list is `ALLOW_ORIGINS`, the same one the HTTP API already answers CORS
- * from, so there is one place to add a front end.
+ * from, plus the two front ends the backend is told about by name.
  */
 export function parseAllowedOrigins(raw: string | undefined): string[] {
   return (raw ?? '')
@@ -43,9 +43,42 @@ export function isOriginAllowed(
  */
 export function socketOriginAllowed(origin: string | undefined): boolean {
   return isOriginAllowed(origin, {
-    allowed: parseAllowedOrigins(process.env.ALLOW_ORIGINS),
+    allowed: knownOrigins(process.env),
     isProduction: process.env.NODE_ENV === 'production',
   });
+}
+
+/**
+ * `ALLOW_ORIGINS`, and the origins of `FRONTEND_URL` and `ADMIN_BASE_URL`.
+ *
+ * The two urls are included because `ALLOW_ORIGINS` need not name our own
+ * front ends at all: the admin reaches the API through a same-origin reverse
+ * proxy (`/api/v1`), which needs no CORS entry and so may never have been given
+ * one. Its socket still arrives with the admin's Origin, and refusing it would
+ * take the admin's live updates down on deploy.
+ */
+export function knownOrigins(env: {
+  ALLOW_ORIGINS?: string;
+  FRONTEND_URL?: string;
+  ADMIN_BASE_URL?: string;
+}): string[] {
+  const origins = new Set(parseAllowedOrigins(env.ALLOW_ORIGINS));
+  for (const url of [env.FRONTEND_URL, env.ADMIN_BASE_URL]) {
+    const origin = originOf(url);
+    if (origin) origins.add(origin);
+  }
+  return [...origins];
+}
+
+function originOf(url: string | undefined): string | null {
+  if (!url?.trim()) return null;
+  try {
+    const { origin } = new URL(url.trim());
+    // An opaque origin serialises as the string "null".
+    return origin === 'null' ? null : normaliseOrigin(origin);
+  } catch {
+    return null;
+  }
 }
 
 export function socketCorsOrigin(
