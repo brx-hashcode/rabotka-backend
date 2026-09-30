@@ -13,6 +13,7 @@ import { RedisIoAdapter } from './common/adapters/redis-io.adapter';
 import { CSRF_UTILITIES } from './modules/csrf/csrf.constants';
 import { csrfVisitorMiddleware } from './modules/csrf/csrf-visitor.middleware';
 import { requestIdMiddleware } from './common/middleware/request-id.middleware';
+import { securityHeaders } from './common/middleware/security-headers.middleware';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -48,9 +49,28 @@ async function bootstrap() {
 
   const httpAdapter = app.getHttpAdapter().getInstance();
   httpAdapter.set('trust proxy', 1);
+  // No reason to tell every caller which framework answers.
+  httpAdapter.disable('x-powered-by');
+
+  const isProduction = environment === 'production';
+
+  // First, so the headers are on every response — static files, the docs page
+  // and the JSON 403 the CSRF wrapper writes below included.
+  app.use(securityHeaders(isProduction));
+
+  // The interactive API reference lists every route, parameter and schema, and
+  // can call them. That is a map of the API for whoever finds it, so production
+  // serves it only when asked to with API_DOCS_ENABLED=true; everywhere else it
+  // is on, as it has always been.
+  const docsEnabled =
+    !isProduction || configService.get<string>('API_DOCS_ENABLED') === 'true';
 
   httpAdapter.get('/', (_, res) => {
-    res.redirect('/api-docs');
+    if (docsEnabled) {
+      res.redirect('/api-docs');
+      return;
+    }
+    res.status(404).json({ statusCode: 404, message: 'Not Found' });
   });
 
   httpAdapter.use(
@@ -134,59 +154,62 @@ async function bootstrap() {
     })
     .build();
 
-  const document = SwaggerModule.createDocument(app, config);
+  if (docsEnabled) {
+    const document = SwaggerModule.createDocument(app, config);
 
-  app.use(
-    '/api-docs',
-    apiReference({
-      defaultOpenAllTags: true,
-      additionalHeaders: [
-        {
-          name: 'X-CSRF-TOKEN',
-          description: 'CSRF token',
-          required: true,
+    app.use(
+      '/api-docs',
+      apiReference({
+        defaultOpenAllTags: true,
+        additionalHeaders: [
+          {
+            name: 'X-CSRF-TOKEN',
+            description: 'CSRF token',
+            required: true,
+          },
+        ],
+        hideClientButton: false,
+
+        showSidebar: true,
+        showDeveloperTools: environment === 'development' ? 'localhost' : false,
+        showToolbar: environment === 'development' ? 'localhost' : false,
+        operationTitleSource: 'summary',
+        theme: 'moon',
+        persistAuth: false,
+        // The reference page must not report usage to its vendor.
+        telemetry: false,
+        layout: 'classic',
+        isEditable: false,
+        isLoading: false,
+        hideModels: false,
+        documentDownloadType: 'both',
+        hideTestRequestButton: false,
+        hideSearch: false,
+        showOperationId: false,
+        hideDarkModeToggle: false,
+        withDefaultFonts: true,
+        expandAllModelSections: false,
+        expandAllResponses: false,
+        orderSchemaPropertiesBy: 'alpha',
+        orderRequiredPropertiesFirst: true,
+        _integration: 'nestjs',
+        darkMode: true,
+        spec: {
+          content: document,
         },
-      ],
-      hideClientButton: false,
-
-      showSidebar: true,
-      showDeveloperTools: environment === 'development' ? 'localhost' : false,
-      showToolbar: environment === 'development' ? 'localhost' : false,
-      operationTitleSource: 'summary',
-      theme: 'moon',
-      persistAuth: false,
-      telemetry: true,
-      layout: 'classic',
-      isEditable: false,
-      isLoading: false,
-      hideModels: false,
-      documentDownloadType: 'both',
-      hideTestRequestButton: false,
-      hideSearch: false,
-      showOperationId: false,
-      hideDarkModeToggle: false,
-      withDefaultFonts: true,
-      expandAllModelSections: false,
-      expandAllResponses: false,
-      orderSchemaPropertiesBy: 'alpha',
-      orderRequiredPropertiesFirst: true,
-      _integration: 'nestjs',
-      darkMode: true,
-      spec: {
-        content: document,
-      },
-      defaultHttpClient: {
-        targetKey: 'js',
-        clientKey: 'fetch',
-      },
-      configuration: {
-        proxy:
-          environment === 'development'
-            ? `http://localhost:${port}`
-            : undefined,
-      },
-    } as Parameters<typeof apiReference>[0]),
-  );
+        defaultHttpClient: {
+          targetKey: 'js',
+          clientKey: 'fetch',
+        },
+        configuration: {
+          proxy:
+            environment === 'development'
+              ? `http://localhost:${port}`
+              : undefined,
+        },
+      } as Parameters<typeof apiReference>[0]),
+    );
+  }
 
   // Back Socket.IO with Redis so rooms/emits work across API instances.
   const redisIoAdapter = new RedisIoAdapter(app);
@@ -196,7 +219,9 @@ async function bootstrap() {
   await app.listen(port);
 
   logger.log(`🚀 Application is running on: http://localhost:${port}`);
-  logger.log(`📚 API Documentation: http://localhost:${port}/api-docs`);
+  if (docsEnabled) {
+    logger.log(`📚 API Documentation: http://localhost:${port}/api-docs`);
+  }
   logger.log(`🌍 Environment: ${environment}`);
 }
 
