@@ -6,7 +6,12 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
-import { AccountStatus, BotPlatform, MessageDirection } from '@prisma/client';
+import {
+  AccountStatus,
+  BotPlatform,
+  MessageDirection,
+  VerificationStatus,
+} from '@prisma/client';
 import {
   REDIS_CONNECTION,
   REDIS_KEY_PREFIX,
@@ -861,6 +866,8 @@ export class WhatsAppService {
         first_name: true,
         profile_type: true,
         activated_at: true,
+        status: true,
+        verification_status: true,
       },
     });
 
@@ -868,22 +875,43 @@ export class WhatsAppService {
       throw new BadRequestException('Profil introuvable');
     }
 
-    // Preserved if already set: this is when the account opened, and a user who
-    // re-verifies later has not opened a second account.
-    const activatedAt = profile.activated_at;
+    // This link proves one thing: the person holds the phone. It used to set
+    // `status: ACTIVE` on that proof alone, whatever the account's state — and
+    // any signed-in profile can ask for the link. So a SUSPENDED or BANNED user
+    // lifted their own suspension by tapping it, and one still waiting on KYC
+    // walked past the review.
+    //
+    // It may only finish an activation that is otherwise earned: an account
+    // that is merely pending, and whose KYC has already passed — the same rule
+    // `verifyProfileKyc` and the bot's Menu command apply.
+    const activates =
+      profile.status === AccountStatus.PENDING_ACTIVATION &&
+      profile.verification_status === VerificationStatus.VERIFIED;
 
-    // Activate the account. `activated_at` records when the account became
-    // usable — this path issues no session, so `last_login_at` would be a lie.
     await this.prisma.profile.update({
       where: { id: profileId },
       data: {
         whatsapp_connected: true,
-        status: AccountStatus.ACTIVE,
-        activated_at: activatedAt ?? new Date(),
+        ...(activates
+          ? {
+              status: AccountStatus.ACTIVE,
+              // Preserved if already set: this is when the account opened, and
+              // a user who re-verifies later has not opened a second account.
+              // This path issues no session, so `last_login_at` would be a lie.
+              activated_at: profile.activated_at ?? new Date(),
+            }
+          : {}),
       },
     });
 
     await this.redis.del(redisKey);
+
+    if (!activates) {
+      this.logger.log(
+        `WhatsApp verified for profile ${profileId} (status ${profile.status} unchanged)`,
+      );
+      return;
+    }
 
     // Grant welcome credit (idempotent)
     const creditAmount = await this.walletService.grantWelcomeCredit(
