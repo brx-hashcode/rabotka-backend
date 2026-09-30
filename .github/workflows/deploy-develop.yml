@@ -278,6 +278,12 @@ jobs:
           ADMIN_BASE_URL=$(echo "$VAULT_SECRET" | jq -r '.ADMIN_BASE_URL')
           ALLOW_ORIGINS=$(echo "$VAULT_SECRET" | jq -r '.ALLOW_ORIGINS')
           SUPER_ADMIN_EMAIL=$(echo "$VAULT_SECRET" | jq -r '.SUPER_ADMIN_EMAIL')
+          # Optional, and blank is the safe value for all three: the API
+          # reference stays off, /metrics stays closed to the internet, and the
+          # file proxy fetches from the configured storage hosts only.
+          API_DOCS_ENABLED=$(echo "$VAULT_SECRET" | jq -r '.API_DOCS_ENABLED // ""')
+          METRICS_TOKEN=$(echo "$VAULT_SECRET" | jq -r '.METRICS_TOKEN // ""')
+          PROXY_ALLOWED_HOSTS=$(echo "$VAULT_SECRET" | jq -r '.PROXY_ALLOWED_HOSTS // ""')
           # --- WhatsApp: provider switch and both credential sets ---
           # Every value here comes from Vault, the provider included, so moving
           # an environment between Twilio and the Meta Cloud API is a Vault edit
