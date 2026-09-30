@@ -587,11 +587,15 @@ jobs:
       - name: Check health endpoint
         run: |
           for i in 1 2 3 4 5; do
+            # The step runs under bash -e, and curl exits non-zero when it times
+            # out or cannot connect, so without the fallback one slow answer
+            # ends the step on attempt 1 and the retries below never happen.
+            # A failed request still prints 000, which is simply not 200.
             STATUS=$(curl -o /tmp/health_response.txt -s -w "%{http_code}" \
               --max-time 30 \
-              "https://${{ secrets.PROD_API_DOMAIN }}/api/v1/health")
+              "https://${{ secrets.PROD_API_DOMAIN }}/api/v1/health") || true
             echo "Attempt $i — HTTP status: $STATUS"
-            cat /tmp/health_response.txt
+            cat /tmp/health_response.txt 2>/dev/null || true
             [ "$STATUS" = "200" ] && exit 0
             sleep 15
           done
