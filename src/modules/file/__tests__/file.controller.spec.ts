@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { FileController } from '../file.controller';
 
 function makeStorage() {
@@ -106,7 +106,7 @@ describe('FileController', () => {
 
   it('uses public access override', async () => {
     await controller.uploadFile(
-      [makeFile({ mimetype: 'application/pdf' })],
+      [makeFile({ mimetype: 'application/pdf', originalname: 'doc.pdf' })],
       undefined,
       'public',
     );
@@ -119,7 +119,7 @@ describe('FileController', () => {
 
   it('uses private access override', async () => {
     await controller.uploadFile(
-      [makeFile({ mimetype: 'image/png' })],
+      [makeFile({ mimetype: 'image/png', originalname: 'logo.png' })],
       undefined,
       'private',
     );
@@ -130,11 +130,176 @@ describe('FileController', () => {
     );
   });
 
+  describe('accepted types', () => {
+    it.each([
+      ['page.html', 'text/html'],
+      ['logo.svg', 'image/svg+xml'],
+      ['run.exe', 'application/octet-stream'],
+      ['noextension', 'image/jpeg'],
+    ])('refuses %s', async (originalname, mimetype) => {
+      await expect(
+        controller.uploadFile(
+          [makeFile({ originalname, mimetype })],
+          undefined,
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(storage.upload).not.toHaveBeenCalled();
+    });
+
+    it('refuses a file whose name and declared type disagree', async () => {
+      // `payload.html` sent as image/jpeg used to be stored as `.html`.
+      await expect(
+        controller.uploadFile(
+          [makeFile({ originalname: 'payload.html', mimetype: 'image/jpeg' })],
+          undefined,
+          'public',
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      await expect(
+        controller.uploadFile(
+          [makeFile({ originalname: 'photo.jpg', mimetype: 'text/html' })],
+          undefined,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('stores the type it decided on, not the one it was told', async () => {
+      await controller.uploadFile(
+        [makeFile({ originalname: 'NOTES.MD', mimetype: '' })],
+        undefined,
+        'public',
+      );
+
+      expect(storage.upload).toHaveBeenCalledWith(
+        expect.any(Buffer),
+        expect.stringMatching(/^\d+_[0-9a-f]{16}\.md$/),
+        expect.objectContaining({ mimeType: 'text/plain; charset=utf-8' }),
+      );
+    });
+
+    it('stores nothing from a batch that contains a refused file', async () => {
+      await expect(
+        controller.uploadFile(
+          [
+            makeFile(),
+            makeFile({ originalname: 'x.html', mimetype: 'text/html' }),
+          ],
+          'true',
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(storage.upload).not.toHaveBeenCalled();
+    });
+  });
+
   describe('proxyFile()', () => {
     let fetchSpy: jest.SpyInstance;
 
+    beforeEach(() => {
+      mockConfigService.get.mockImplementation((key: string) =>
+        key === 'CLOUDFLARE_PUBLIC_BASE_URL'
+          ? 'https://cdn.example.com'
+          : undefined,
+      );
+    });
+
     afterEach(() => {
       fetchSpy?.mockRestore();
+      mockConfigService.get.mockReset();
+    });
+
+    const makeRes = () =>
+      ({
+        setHeader: jest.fn(),
+        send: jest.fn(),
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn(),
+      }) as any;
+
+    it.each([
+      'https://evil.example.org/x.pdf',
+      'https://cdn.example.com.evil.org/x.pdf',
+      'http://169.254.169.254/latest/meta-data/',
+      'http://redis:6379/',
+      'http://[::1]:5500/api/v1/metrics',
+      'https://user:pass@cdn.example.com/x.pdf',
+      'file:///etc/passwd',
+    ])('refuses %s', async (url) => {
+      fetchSpy = jest.spyOn(global, 'fetch' as any);
+      await expect(controller.proxyFile(url, makeRes())).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('refuses everything when no storage host is configured', async () => {
+      mockConfigService.get.mockReturnValue(undefined);
+      fetchSpy = jest.spyOn(global, 'fetch' as any);
+      await expect(
+        controller.proxyFile('https://cdn.example.com/img.jpg', makeRes()),
+      ).rejects.toThrow(ForbiddenException);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('does not follow redirects', async () => {
+      fetchSpy = jest.spyOn(global, 'fetch' as any).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: { get: jest.fn().mockReturnValue(null) },
+        arrayBuffer: jest.fn().mockResolvedValue(new ArrayBuffer(1)),
+      } as any);
+      await controller.proxyFile('https://cdn.example.com/img.jpg', makeRes());
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://cdn.example.com/img.jpg',
+        expect.objectContaining({ redirect: 'error' }),
+      );
+    });
+
+    it('answers 502 when the fetch itself fails', async () => {
+      fetchSpy = jest
+        .spyOn(global, 'fetch' as any)
+        .mockRejectedValueOnce(new TypeError('redirect mode is set to error'));
+      const res = makeRes();
+      await controller.proxyFile('https://cdn.example.com/img.jpg', res);
+      expect(res.status).toHaveBeenCalledWith(502);
+    });
+
+    it('refuses a body larger than the ceiling', async () => {
+      fetchSpy = jest.spyOn(global, 'fetch' as any).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: {
+          get: jest
+            .fn()
+            .mockImplementation((h: string) =>
+              h === 'content-length' ? String(31 * 1024 * 1024) : null,
+            ),
+        },
+        arrayBuffer: jest.fn(),
+      } as any);
+      const res = makeRes();
+      await controller.proxyFile('https://cdn.example.com/big.pdf', res);
+      expect(res.status).toHaveBeenCalledWith(413);
+      expect(res.send).not.toHaveBeenCalled();
+    });
+
+    it('cannot be made to break out of the filename header', async () => {
+      fetchSpy = jest.spyOn(global, 'fetch' as any).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: { get: jest.fn().mockReturnValue(null) },
+        arrayBuffer: jest.fn().mockResolvedValue(new ArrayBuffer(1)),
+      } as any);
+      const res = makeRes();
+      await controller.proxyFile(
+        'https://cdn.example.com/a%22%0d%0aX-Evil:%201.pdf',
+        res,
+      );
+      expect(res.setHeader).toHaveBeenCalledWith(
+        'Content-Disposition',
+        // The quote, CR and LF are gone: nothing can end the value early.
+        'attachment; filename="a_X-Evil__1.pdf"',
+      );
     });
 
     it('returns 400 when no url provided', async () => {
