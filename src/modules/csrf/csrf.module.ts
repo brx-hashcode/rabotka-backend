@@ -10,6 +10,8 @@ import {
 import { CsrfController } from './csrf.controller';
 import { isCsrfExemptPath } from './csrf-exempt';
 
+const CSRF_SECRET_MIN_LENGTH = 32;
+
 @Module({
   imports: [ConfigModule],
   controllers: [CsrfController],
@@ -22,8 +24,18 @@ import { isCsrfExemptPath } from './csrf-exempt';
         const secureCookies =
           configService.get<string>('SECURE_COOKIES') === 'true';
 
+        // It used to fall back to an empty string, which signs every token
+        // with a key anyone can reproduce. A missing secret now stops the
+        // boot instead of quietly making the protection decorative.
+        const secret = configService.get<string>('CSRF_SECRET')?.trim() ?? '';
+        if (secret.length < CSRF_SECRET_MIN_LENGTH) {
+          throw new Error(
+            `CSRF_SECRET must be set to at least ${CSRF_SECRET_MIN_LENGTH} characters (openssl rand -base64 32)`,
+          );
+        }
+
         return doubleCsrf({
-          getSecret: () => configService.get<string>('CSRF_SECRET') ?? '',
+          getSecret: () => secret,
           getSessionIdentifier: (req) => {
             return (
               req.cookies?.[CSRF_VISITOR_COOKIE] ??
