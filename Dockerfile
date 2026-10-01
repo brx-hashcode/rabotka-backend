@@ -116,6 +116,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         postgresql-client \
         chromium \
         libreoffice-writer \
+        qpdf \
         fonts-liberation \
         fonts-dejavu-core \
         fonts-noto-core \
@@ -212,6 +213,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         tini \
         postgresql-client \
         libreoffice-writer \
+        qpdf \
         fonts-liberation \
         fonts-dejavu-core \
         fonts-noto-core \
