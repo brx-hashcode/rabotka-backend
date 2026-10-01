@@ -652,6 +652,8 @@ describe('AuthService', () => {
       expect(result.token).toBe('jwt-token-abc');
       expect(jwtService.sign).toHaveBeenCalledWith(
         expect.objectContaining({ sub: USER_ID, type: 'admin' }),
+        // An admin session is a working day, not the profile's 30 days.
+        { expiresIn: '12h' },
       );
       expect(prisma.user.update).toHaveBeenCalledWith(
         expect.objectContaining({
