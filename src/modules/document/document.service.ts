@@ -18,6 +18,7 @@ import { REDIS_KEY_PREFIX } from '../../common/services/redis/redis.constants';
 import { GoogleDocsService } from './google-docs.service';
 import { fetchWithTimeout } from '../../common/utils/fetch-with-timeout.util';
 import { launchBrowser } from '../../common/utils/puppeteer';
+import { protectPdf } from './pdf-protection';
 import { UpdateDocumentDto } from './dto/update-document.dto';
 import { ListDocumentsDto } from './dto/list-documents.dto';
 import {
@@ -467,59 +468,7 @@ export class DocumentService {
     const pdfBuffer =
       libreOfficePdf ?? (await this.convertWithPuppeteer(docxBuffer));
 
-    return this.protectPdf(pdfBuffer);
-  }
-
-  private async protectPdf(pdfBuffer: Buffer): Promise<Buffer> {
-    const os = await import('node:os');
-    const path = await import('node:path');
-    const fs = await import('node:fs/promises');
-    const qpdfModule = await import('node-qpdf');
-    const qpdf = qpdfModule.default ?? qpdfModule;
-
-    // Random, not the timestamp alone: two PDFs protected in the same
-    // millisecond would read and overwrite each other's files.
-    const id = `${Date.now()}_${randomBytes(6).toString('hex')}`;
-    const tmp = os.tmpdir();
-    const inputPath = path.join(tmp, `rabotka_${id}_in.pdf`);
-    const outputPath = path.join(tmp, `rabotka_${id}_out.pdf`);
-
-    try {
-      await fs.writeFile(inputPath, pdfBuffer);
-      await qpdf.encrypt(inputPath, {
-        keyLength: 128,
-        password: {
-          // The owner password is what lifts the restrictions below, and
-          // nothing in Rabotka ever needs to lift them: a generated PDF is
-          // re-rendered, never edited. So it is a fresh random value per
-          // document that nobody holds. It used to be PDF_OWNER_PASSWORD,
-          // which the deploy workflows set to the literal word "password" —
-          // one string that unlocked every contract and invoice.
-          owner: randomBytes(24).toString('base64url'),
-          user: '',
-        },
-        restrictions: {
-          print: 'full',
-          modify: 'n',
-          copy: 'n',
-          useSubset: 'n',
-          modifyAnnotations: 'n',
-        },
-        outputFile: outputPath,
-      });
-      return await fs.readFile(outputPath);
-    } catch (err: any) {
-      if (err?.code === 'ENOENT') {
-        this.logger.warn(
-          'qpdf binary not found — returning unprotected PDF. Install qpdf for production use.',
-        );
-        return pdfBuffer;
-      }
-      throw err;
-    } finally {
-      await fs.unlink(inputPath).catch(() => {});
-      await fs.unlink(outputPath).catch(() => {});
-    }
+    return protectPdf(pdfBuffer, this.logger);
   }
 
   private async convertWithLibreOffice(
