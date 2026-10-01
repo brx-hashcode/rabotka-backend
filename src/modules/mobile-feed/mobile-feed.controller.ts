@@ -702,6 +702,7 @@ export class MobileFeedController {
   }
 
   @Post('job-offers/:id/confirm-hire')
+  @UseGuards(ActiveProfileGuard)
   @ApiOperation({
     summary: '[Mobile/EMPLOYER] Confirm the hire on a CDD/CDI/STAGE offer',
     description:
@@ -726,6 +727,7 @@ export class MobileFeedController {
   }
 
   @Delete('job-offers/:id')
+  @UseGuards(ActiveProfileGuard)
   @ApiOperation({
     summary: '[Mobile/EMPLOYER] Delete one of my job offers',
     description:

@@ -20,6 +20,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const { status, message, internal } =
       this.extractStatusAndMessage(exception);
     const code = this.extractCode(exception);
+    const accountBlock = this.extractAccountBlock(exception);
 
     if (request.url === '/favicon.ico' && status === 404) {
       response.status(HttpStatus.NO_CONTENT).end();
@@ -37,6 +38,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       statusCode: status,
       message,
       ...(code ? { code } : {}),
+      ...accountBlock,
       timestamp: new Date().toISOString(),
       path: request.url,
     });
@@ -50,6 +52,31 @@ export class HttpExceptionFilter implements ExceptionFilter {
    * unable to tell one 403 from another. Kept generic rather than tied to any
    * single exception type.
    */
+  /**
+   * The two fields `AccountNotActiveException` adds: which status blocked the
+   * request, and the admin's stated reason. Both were being dropped here, so a
+   * suspended user was told they were suspended and never why — the very thing
+   * the suspension reason was written down for.
+   *
+   * Named fields, not "everything in the body": an exception body can carry
+   * whatever its author put there, and this is the response.
+   */
+  private extractAccountBlock(exception: unknown): {
+    accountStatus?: string;
+    reason?: string;
+  } {
+    if (!(exception instanceof HttpException)) return {};
+
+    const body = exception.getResponse();
+    if (typeof body !== 'object' || body === null) return {};
+
+    const { accountStatus, reason } = body as Record<string, unknown>;
+    return {
+      ...(typeof accountStatus === 'string' ? { accountStatus } : {}),
+      ...(typeof reason === 'string' ? { reason } : {}),
+    };
+  }
+
   private extractCode(exception: unknown): string | undefined {
     if (!(exception instanceof HttpException)) return undefined;
 
