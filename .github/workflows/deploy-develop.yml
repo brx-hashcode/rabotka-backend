@@ -352,7 +352,6 @@ jobs:
           WATERMARK_OPACITY=0.3
           SMTP_MOCK=false
           SMTP_FROM_NAME=Rabotka
-          PDF_OWNER_PASSWORD=password
           PORT=$(echo "$VAULT_SECRET" | jq -r '.PORT')
           APP_ENV=develop
           ARCJET_ENV=development
