@@ -13,10 +13,8 @@ import Redis from 'ioredis';
 import { UserRole } from '@prisma/client';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator.js';
 import { clearAuthCookie, readAuthCookie } from '../auth-cookie.util';
-import {
-  REDIS_CONNECTION,
-  REDIS_KEY_PREFIX,
-} from '../../../common/services/redis/redis.constants';
+import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
+import { isSessionRevoked } from '../session-revocation';
 
 export interface JwtPayload {
   sub: string;
@@ -84,12 +82,8 @@ export class JwtAuthGuard implements CanActivate {
         secret: this.configService.get<string>('JWT_SECRET'),
       });
 
-      if (payload.jti) {
-        const blocked = await this.redis.get(
-          `${REDIS_KEY_PREFIX}jwtblocklist:${payload.jti}`,
-        );
-        if (blocked)
-          throw new UnauthorizedException('Session invalide ou expirée');
+      if (await isSessionRevoked(this.redis, payload.jti)) {
+        throw new UnauthorizedException('Session invalide ou expirée');
       }
 
       const tokenType = payload.type || 'profile';

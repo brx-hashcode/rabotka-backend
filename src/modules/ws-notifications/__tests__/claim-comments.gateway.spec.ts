@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { ClaimCommentsGateway } from '../claim-comments.gateway';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
+import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 
 describe('ClaimCommentsGateway', () => {
   let gateway: ClaimCommentsGateway;
@@ -16,7 +17,10 @@ describe('ClaimCommentsGateway', () => {
     ({ id: 'c-1', join: jest.fn(), handshake }) as any;
   const withCookie = () => socket({ headers: { cookie: 'a=1; sid=tok' } });
 
+  let redis: { get: jest.Mock };
+
   beforeEach(async () => {
+    redis = { get: jest.fn().mockResolvedValue(null) };
     jwt = { verify: jest.fn() };
     prisma = {
       user: { findUnique: jest.fn() },
@@ -34,6 +38,7 @@ describe('ClaimCommentsGateway', () => {
           },
         },
         { provide: PrismaService, useValue: prisma },
+        { provide: REDIS_CONNECTION, useValue: redis },
       ],
     }).compile();
     gateway = module.get<ClaimCommentsGateway>(ClaimCommentsGateway);
@@ -123,6 +128,24 @@ describe('ClaimCommentsGateway', () => {
       expect(client.join).not.toHaveBeenCalled();
     },
   );
+
+  it('refuses a session the user signed out of', async () => {
+    jwt.verify.mockReturnValue({
+      sub: 'profile-1',
+      type: 'profile',
+      jti: 'jti-1',
+    });
+    prisma.claim.findUnique.mockResolvedValue({ profile_id: 'profile-1' });
+    redis.get.mockResolvedValue('1');
+    const client = withCookie();
+
+    await gateway.handleJoinClaim(client, { claimId: 'claim-1' });
+
+    expect(redis.get).toHaveBeenCalledWith(
+      expect.stringContaining('jwtblocklist:jti-1'),
+    );
+    expect(client.join).not.toHaveBeenCalled();
+  });
 
   it('refuses rather than throws when the lookup fails', async () => {
     jwt.verify.mockReturnValue({ sub: 'profile-1', type: 'profile' });

@@ -7,11 +7,15 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
+import Redis from 'ioredis';
+import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+import { isSessionRevoked } from '../auth/session-revocation';
 import {
   Logger,
   OnModuleDestroy,
   UsePipes,
   ValidationPipe,
+  Inject,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -115,10 +119,11 @@ export class ProfileChatGateway
     private readonly configService: ConfigService,
     private readonly presence: PresenceService,
     private readonly prisma: PrismaService,
+    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
   ) {}
 
-  handleConnection(client: Socket): void {
-    const profileId = this.resolveProfileId(client);
+  async handleConnection(client: Socket): Promise<void> {
+    const profileId = await this.resolveProfileId(client);
 
     if (!profileId) {
       this.logger.debug(`Messaging client ${client.id} rejected`);
@@ -296,7 +301,7 @@ export class ProfileChatGateway
     return counterpartId;
   }
 
-  private resolveProfileId(client: Socket): string | null {
+  private async resolveProfileId(client: Socket): Promise<string | null> {
     const token = this.extractToken(client);
     if (!token) return null;
 
@@ -308,6 +313,9 @@ export class ProfileChatGateway
       // Admins have their own namespaces; a staff token must not land in a
       // profile room and receive two users' private messages.
       if ((payload.type ?? 'profile') !== 'profile') return null;
+
+      // A session the user signed out of must not keep its sockets either.
+      if (await isSessionRevoked(this.redis, payload.jti)) return null;
 
       return payload.sub || null;
     } catch {
