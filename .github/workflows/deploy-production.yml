@@ -248,7 +248,6 @@ jobs:
           WATERMARK_OPACITY=0.3
           SMTP_MOCK=false
           SMTP_FROM_NAME=Rabotka
-          PDF_OWNER_PASSWORD=password
           APP_ENV=prod
           ARCJET_ENV=development
           API_DOMAIN=${{ secrets.PROD_API_DOMAIN }}

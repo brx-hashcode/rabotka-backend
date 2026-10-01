@@ -7,6 +7,7 @@ import {
   InternalServerErrorException,
   HttpException,
 } from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -476,17 +477,25 @@ export class DocumentService {
     const qpdfModule = await import('node-qpdf');
     const qpdf = qpdfModule.default ?? qpdfModule;
 
-    const ts = Date.now();
+    // Random, not the timestamp alone: two PDFs protected in the same
+    // millisecond would read and overwrite each other's files.
+    const id = `${Date.now()}_${randomBytes(6).toString('hex')}`;
     const tmp = os.tmpdir();
-    const inputPath = path.join(tmp, `rabotka_${ts}_in.pdf`);
-    const outputPath = path.join(tmp, `rabotka_${ts}_out.pdf`);
+    const inputPath = path.join(tmp, `rabotka_${id}_in.pdf`);
+    const outputPath = path.join(tmp, `rabotka_${id}_out.pdf`);
 
     try {
       await fs.writeFile(inputPath, pdfBuffer);
       await qpdf.encrypt(inputPath, {
         keyLength: 128,
         password: {
-          owner: process.env.PDF_OWNER_PASSWORD ?? 'rabotka-owner',
+          // The owner password is what lifts the restrictions below, and
+          // nothing in Rabotka ever needs to lift them: a generated PDF is
+          // re-rendered, never edited. So it is a fresh random value per
+          // document that nobody holds. It used to be PDF_OWNER_PASSWORD,
+          // which the deploy workflows set to the literal word "password" —
+          // one string that unlocked every contract and invoice.
+          owner: randomBytes(24).toString('base64url'),
           user: '',
         },
         restrictions: {
