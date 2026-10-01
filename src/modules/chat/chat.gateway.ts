@@ -8,7 +8,11 @@ import {
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { socketCorsOrigin } from '../../common/utils/allowed-origins';
-import { Logger } from '@nestjs/common';
+import { Inject, Logger } from '@nestjs/common';
+import Redis from 'ioredis';
+import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { isSessionRevoked } from '../auth/session-revocation';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
@@ -19,7 +23,7 @@ import {
   type ChatMessageItem,
 } from './chat.service';
 
-type AdminJwtPayload = { sub: string; type?: string };
+type AdminJwtPayload = { sub: string; type?: string; jti?: string };
 
 function parseCookies(header: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};
@@ -54,12 +58,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly chatService: ChatService,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
+    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
+    private readonly prisma: PrismaService,
   ) {}
 
   // ── Connection lifecycle ────────────────────────────────────────────────────
 
   async handleConnection(client: Socket): Promise<void> {
-    const userId = this.authenticate(client);
+    const userId = await this.authenticate(client);
     if (!userId) {
       client.disconnect(true);
       return;
@@ -88,7 +94,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  private authenticate(client: Socket): string | null {
+  private async authenticate(client: Socket): Promise<string | null> {
     try {
       const cookieName = this.config.get<string>('AUTH_COOKIE_NAME');
       const cookies = parseCookies(client.handshake.headers.cookie);
@@ -100,6 +106,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         secret: this.config.get<string>('JWT_SECRET'),
       });
       if (payload.type !== 'admin' || !payload.sub) return null;
+      // The HTTP side refuses a signed-out session and a deactivated admin on
+      // every request; a socket used to keep both for as long as it stayed up.
+      if (await isSessionRevoked(this.redis, payload.jti)) return null;
+      const admin = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
+        select: { is_active: true },
+      });
+      if (!admin?.is_active) return null;
       return payload.sub;
     } catch {
       return null;

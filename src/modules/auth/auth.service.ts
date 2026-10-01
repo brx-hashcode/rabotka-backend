@@ -30,9 +30,9 @@ import {
   canMintLoginCode,
 } from './whatsapp-login-link.service';
 import * as otplib from 'otplib';
+import { JWT_BLOCKLIST_PREFIX } from './session-revocation';
+import { adminSessionHours } from './auth-cookie.util';
 import * as QRCode from 'qrcode';
-
-const JWT_BLOCKLIST_PREFIX = `${REDIS_KEY_PREFIX}jwtblocklist:`;
 
 const TOTP_PENDING_PREFIX = `${REDIS_KEY_PREFIX}admin:totp:pending:`;
 const TOTP_PENDING_TTL = 300;
@@ -685,7 +685,7 @@ export class AuthService {
     }
 
     const payload = { sub: user.id, type: 'admin', jti: randomUUID() };
-    const token = this.jwtService.sign(payload);
+    const token = this.signAdminSession(payload);
 
     await this.prisma.user.update({
       where: { id: user.id },
@@ -694,6 +694,20 @@ export class AuthService {
     await this.recordAdminLogin(user.id, 'otp', meta);
 
     return { success: true, token };
+  }
+
+  /**
+   * An admin session token, with the admin lifetime rather than the profile
+   * one — see `adminSessionHours`. Every admin login path goes through here.
+   */
+  private signAdminSession(payload: {
+    sub: string;
+    type: string;
+    jti: string;
+  }): string {
+    return this.jwtService.sign(payload, {
+      expiresIn: `${adminSessionHours(this.configService)}h`,
+    });
   }
 
   async getAdminById(userId: string): Promise<{
@@ -1050,7 +1064,7 @@ export class AuthService {
     }
 
     const jwtPayload = { sub: user.id, type: 'admin', jti: randomUUID() };
-    const token = this.jwtService.sign(jwtPayload);
+    const token = this.signAdminSession(jwtPayload);
 
     await this.redis.set(
       this.qrKey(sessionId),
@@ -1379,7 +1393,7 @@ export class AuthService {
     );
 
     const payload = { sub: userId, type: 'admin', jti: randomUUID() };
-    const token = this.jwtService.sign(payload);
+    const token = this.signAdminSession(payload);
 
     await this.prisma.user.update({
       where: { id: userId },

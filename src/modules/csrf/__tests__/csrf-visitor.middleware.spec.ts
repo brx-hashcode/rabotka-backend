@@ -47,6 +47,14 @@ describe('csrfVisitorMiddleware', () => {
     expect(next).toHaveBeenCalled();
   });
 
+  it('keeps the visitor id for a year, counted in milliseconds', () => {
+    // Express reads maxAge in ms; this was a year in SECONDS, about 8.7 hours.
+    const res = makeResMock();
+    csrfVisitorMiddleware({ cookies: {} } as any, res, makeNext());
+    const [, , options] = res.cookie.mock.calls[0];
+    expect(options.maxAge).toBe(365 * 24 * 60 * 60 * 1000);
+  });
+
   it('sets secure=false when SECURE_COOKIES is not set', () => {
     delete process.env.SECURE_COOKIES;
     const req = { cookies: {} } as any;

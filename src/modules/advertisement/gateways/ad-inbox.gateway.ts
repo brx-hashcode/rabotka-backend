@@ -4,7 +4,10 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
-import { Logger } from '@nestjs/common';
+import Redis from 'ioredis';
+import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
+import { isSessionRevoked } from '../../auth/session-revocation';
+import { Logger, Inject } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Server, Socket } from 'socket.io';
@@ -37,7 +40,9 @@ export type InAppAdPayload = {
     credentials: true,
   },
 })
-export class AdInboxGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class AdInboxGateway
+  implements OnGatewayConnection, OnGatewayDisconnect
+{
   private readonly logger = new Logger(AdInboxGateway.name);
 
   @WebSocketServer()
@@ -46,19 +51,24 @@ export class AdInboxGateway implements OnGatewayConnection, OnGatewayDisconnect 
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
   ) {}
 
-  handleConnection(client: Socket): void {
-    const profileId = this.resolveProfileId(client);
+  async handleConnection(client: Socket): Promise<void> {
+    const profileId = await this.resolveProfileId(client);
 
     if (!profileId) {
-      this.logger.debug(`Ad inbox client ${client.id} rejected: no profile token`);
+      this.logger.debug(
+        `Ad inbox client ${client.id} rejected: no profile token`,
+      );
       client.disconnect(true);
       return;
     }
 
     void client.join(`profile:${profileId}`);
-    this.logger.debug(`Ad inbox client ${client.id} joined profile:${profileId}`);
+    this.logger.debug(
+      `Ad inbox client ${client.id} joined profile:${profileId}`,
+    );
   }
 
   handleDisconnect(client: Socket): void {
@@ -70,7 +80,7 @@ export class AdInboxGateway implements OnGatewayConnection, OnGatewayDisconnect 
   }
 
   /** Reads the auth cookie (or `auth.token`) off the handshake and verifies it. */
-  private resolveProfileId(client: Socket): string | null {
+  private async resolveProfileId(client: Socket): Promise<string | null> {
     const token = this.extractToken(client);
     if (!token) return null;
 
@@ -81,6 +91,9 @@ export class AdInboxGateway implements OnGatewayConnection, OnGatewayDisconnect 
 
       // Admins have no ad inbox — only profile tokens map to a room.
       if ((payload.type ?? 'profile') !== 'profile') return null;
+
+      // A session the user signed out of must not keep its sockets either.
+      if (await isSessionRevoked(this.redis, payload.jti)) return null;
 
       return payload.sub || null;
     } catch {

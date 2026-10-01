@@ -4,7 +4,10 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
-import { Logger } from '@nestjs/common';
+import Redis from 'ioredis';
+import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+import { isSessionRevoked } from '../auth/session-revocation';
+import { Logger, Inject } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Server, Socket } from 'socket.io';
@@ -56,10 +59,11 @@ export class JobEventsGateway
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
   ) {}
 
-  handleConnection(client: Socket): void {
-    const profileId = this.resolveProfileId(client);
+  async handleConnection(client: Socket): Promise<void> {
+    const profileId = await this.resolveProfileId(client);
 
     if (!profileId) {
       this.logger.debug(`Job events client ${client.id} rejected: no token`);
@@ -90,7 +94,7 @@ export class JobEventsGateway
   }
 
   /** Reads the auth cookie (or `auth.token`) off the handshake and verifies it. */
-  private resolveProfileId(client: Socket): string | null {
+  private async resolveProfileId(client: Socket): Promise<string | null> {
     const token = this.extractToken(client);
     if (!token) return null;
 
@@ -101,6 +105,9 @@ export class JobEventsGateway
 
       // Admins have no missions — only profile tokens map to a room.
       if ((payload.type ?? 'profile') !== 'profile') return null;
+
+      // A session the user signed out of must not keep its sockets either.
+      if (await isSessionRevoked(this.redis, payload.jti)) return null;
 
       return payload.sub || null;
     } catch {

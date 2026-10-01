@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { REDIS_CONNECTION } from '../../../../common/services/redis/redis.constants';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { AdInboxGateway } from '../ad-inbox.gateway';
@@ -31,6 +32,10 @@ describe('AdInboxGateway', () => {
         AdInboxGateway,
         { provide: JwtService, useValue: jwtService },
         {
+          provide: REDIS_CONNECTION,
+          useValue: { get: jest.fn().mockResolvedValue(null) },
+        },
+        {
           provide: ConfigService,
           useValue: {
             get: jest.fn((key: string) =>
@@ -46,21 +51,21 @@ describe('AdInboxGateway', () => {
   });
 
   describe('handleConnection()', () => {
-    it('joins the room derived from the handshake token, not from client input', () => {
+    it('joins the room derived from the handshake token, not from client input', async () => {
       const client = makeClient({ auth: { token: 'jwt-token' } });
 
-      gateway.handleConnection(client);
+      await gateway.handleConnection(client);
 
       expect(client.join).toHaveBeenCalledWith('profile:profile-1');
       expect(client.disconnect).not.toHaveBeenCalled();
     });
 
-    it('reads the token from the auth cookie when no auth payload is given', () => {
+    it('reads the token from the auth cookie when no auth payload is given', async () => {
       const client = makeClient({
         headers: { cookie: 'other=1; rabotka_token=jwt-from-cookie' },
       });
 
-      gateway.handleConnection(client);
+      await gateway.handleConnection(client);
 
       expect(jwtService.verify).toHaveBeenCalledWith(
         'jwt-from-cookie',
@@ -69,39 +74,39 @@ describe('AdInboxGateway', () => {
       expect(client.join).toHaveBeenCalledWith('profile:profile-1');
     });
 
-    it('disconnects a client with no token', () => {
+    it('disconnects a client with no token', async () => {
       const client = makeClient();
 
-      gateway.handleConnection(client);
+      await gateway.handleConnection(client);
 
       expect(client.join).not.toHaveBeenCalled();
       expect(client.disconnect).toHaveBeenCalledWith(true);
     });
 
-    it('disconnects a client whose token fails verification', () => {
+    it('disconnects a client whose token fails verification', async () => {
       jwtService.verify.mockImplementation(() => {
         throw new Error('invalid signature');
       });
       const client = makeClient({ auth: { token: 'forged' } });
 
-      gateway.handleConnection(client);
+      await gateway.handleConnection(client);
 
       expect(client.join).not.toHaveBeenCalled();
       expect(client.disconnect).toHaveBeenCalledWith(true);
     });
 
-    it('disconnects admin tokens — they have no ad inbox', () => {
+    it('disconnects admin tokens — they have no ad inbox', async () => {
       jwtService.verify.mockReturnValue({ sub: 'user-1', type: 'admin' });
       const client = makeClient({ auth: { token: 'admin-token' } });
 
-      gateway.handleConnection(client);
+      await gateway.handleConnection(client);
 
       expect(client.disconnect).toHaveBeenCalledWith(true);
     });
   });
 
   describe('emitNewAd()', () => {
-    it('emits to the profile room', () => {
+    it('emits to the profile room', async () => {
       const payload = {
         deliveryId: 'dl-1',
         advertisementId: 'ad-1',

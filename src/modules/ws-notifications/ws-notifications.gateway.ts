@@ -12,6 +12,8 @@ import { Server, Socket } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { isSessionRevoked } from '../auth/session-revocation';
 import type { JwtPayload } from '../auth/guards/jwt-auth.guard';
 import { socketCorsOrigin } from '../../common/utils/allowed-origins';
 
@@ -40,6 +42,7 @@ export class WsNotificationsGateway
     private readonly configService: ConfigService,
     private readonly jwtService: JwtService,
     @Inject(REDIS_CONNECTION) private readonly redis: Redis,
+    private readonly prisma: PrismaService,
   ) {}
 
   afterInit(): void {
@@ -69,7 +72,7 @@ export class WsNotificationsGateway
     this.subClient?.disconnect();
   }
 
-  handleConnection(client: Socket): void {
+  async handleConnection(client: Socket): Promise<void> {
     try {
       const token = this.extractToken(client);
       if (!token) {
@@ -84,6 +87,19 @@ export class WsNotificationsGateway
 
       if (payload.type !== 'admin') {
         this.logger.debug('WS client rejected: not an admin');
+        client.disconnect(true);
+        return;
+      }
+
+      // Same two checks AdminAuthGuard makes on every HTTP request.
+      const admin = (await isSessionRevoked(this.redis, payload.jti))
+        ? null
+        : await this.prisma.user.findUnique({
+            where: { id: payload.sub },
+            select: { is_active: true },
+          });
+      if (!admin?.is_active) {
+        this.logger.debug('WS client rejected: signed out or deactivated');
         client.disconnect(true);
         return;
       }
