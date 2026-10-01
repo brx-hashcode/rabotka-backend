@@ -42,6 +42,7 @@ import { setAuthCookie } from '../auth/auth-cookie.util';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
+import { UnblockedProfileGuard } from '../auth/guards/unblocked-profile.guard';
 import { ContactedProfilesService } from '../recommendation/contacted-profiles.service';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { WalletService } from '../wallet/wallet.service';
@@ -386,7 +387,7 @@ export class ProfileController {
   }
 
   @Patch()
-  @UseGuards(ProfileAuthGuard)
+  @UseGuards(ProfileAuthGuard, UnblockedProfileGuard)
   @ApiBearerAuth()
   @ApiCookieAuth()
   @ApiOperation({
@@ -437,7 +438,7 @@ export class ProfileController {
   }
 
   @Post('avatar')
-  @UseGuards(ProfileAuthGuard)
+  @UseGuards(ProfileAuthGuard, UnblockedProfileGuard)
   @UseInterceptors(
     FileInterceptor('avatar', {
       limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
@@ -573,7 +574,7 @@ export class ProfileController {
   }
 
   @Post('phone-change/request')
-  @UseGuards(ProfileAuthGuard)
+  @UseGuards(ProfileAuthGuard, UnblockedProfileGuard)
   @ApiBearerAuth()
   @ApiCookieAuth()
   @ApiOperation({
@@ -596,7 +597,7 @@ export class ProfileController {
   }
 
   @Post('phone-change/confirm')
-  @UseGuards(ProfileAuthGuard)
+  @UseGuards(ProfileAuthGuard, UnblockedProfileGuard)
   @ApiBearerAuth()
   @ApiCookieAuth()
   @ApiOperation({

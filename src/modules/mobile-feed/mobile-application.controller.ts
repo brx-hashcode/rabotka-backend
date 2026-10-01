@@ -113,6 +113,7 @@ export class MobileApplicationController {
   }
 
   @Post(':id/reject')
+  @UseGuards(ActiveProfileGuard)
   @ApiOperation({
     summary: '[Mobile/EMPLOYER] Reject a candidate (→ REJECTED)',
   })
@@ -167,6 +168,7 @@ export class MobileApplicationController {
   }
 
   @Post(':id/rate')
+  @UseGuards(ActiveProfileGuard)
   @ApiOperation({
     summary: '[Mobile/EMPLOYER] Rate the worker for a finished mission',
     description:

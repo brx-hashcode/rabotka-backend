@@ -59,3 +59,21 @@ export function assertAccountActive(
     throw new AccountNotActiveException(status, reason);
   }
 }
+
+/**
+ * The weaker rule: refuses a SUSPENDED or BANNED account, lets a pending one
+ * through.
+ *
+ * For actions a new account needs BEFORE it is activated — completing its
+ * profile, its photo, its portfolio, its number — which `assertAccountActive`
+ * would block for everyone still waiting on KYC. What it must still stop is a
+ * suspended account carrying on as though nothing happened.
+ */
+export function assertAccountNotBlocked(
+  status: AccountStatus,
+  reason?: string | null,
+): void {
+  if (status === AccountStatus.SUSPENDED || status === AccountStatus.BANNED) {
+    throw new AccountNotActiveException(status, reason);
+  }
+}

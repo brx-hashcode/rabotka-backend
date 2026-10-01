@@ -26,12 +26,17 @@ export function csrfVisitorMiddleware(
   req.csrfSessionId = visitorId;
 
   const secureCookies = process.env.SECURE_COOKIES === 'true';
+  // Secure in production regardless — see the note in csrf.module.ts.
+  const isProduction = process.env.NODE_ENV === 'production';
   res.cookie(CSRF_VISITOR_COOKIE, visitorId, {
     sameSite: secureCookies ? 'none' : 'lax',
     path: '/',
-    secure: secureCookies,
+    secure: isProduction || secureCookies,
     httpOnly: true,
-    maxAge: 60 * 60 * 24 * 365,
+    // Milliseconds — Express's unit. This was written in seconds, so the
+    // visitor id meant to last a year expired after about eight and a half
+    // hours, and every visitor's CSRF token with it.
+    maxAge: 365 * 24 * 60 * 60 * 1000,
   });
 
   next();

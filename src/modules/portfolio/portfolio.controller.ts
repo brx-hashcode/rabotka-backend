@@ -21,6 +21,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
+import { UnblockedProfileGuard } from '../auth/guards/unblocked-profile.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { PortfolioService } from './portfolio.service';
 import { CreatePortfolioItemDto } from './dto/create-portfolio-item.dto';
@@ -46,6 +47,7 @@ export class PortfolioController {
   constructor(private readonly portfolioService: PortfolioService) {}
 
   @Post()
+  @UseGuards(UnblockedProfileGuard)
   @UseInterceptors(FilesInterceptor('images', 10, IMAGE_UPLOAD_OPTIONS))
   @ApiBearerAuth()
   @ApiCookieAuth()
@@ -68,6 +70,7 @@ export class PortfolioController {
   }
 
   @Patch(':id')
+  @UseGuards(UnblockedProfileGuard)
   @ApiBearerAuth()
   @ApiCookieAuth()
   @ApiOperation({ summary: 'Update a portfolio item (title / description)' })
@@ -80,6 +83,7 @@ export class PortfolioController {
   }
 
   @Delete(':id')
+  @UseGuards(UnblockedProfileGuard)
   @ApiBearerAuth()
   @ApiCookieAuth()
   @ApiOperation({ summary: 'Delete a portfolio item and its images' })
@@ -92,6 +96,7 @@ export class PortfolioController {
   }
 
   @Post(':id/images')
+  @UseGuards(UnblockedProfileGuard)
   @UseInterceptors(FilesInterceptor('images', 10, IMAGE_UPLOAD_OPTIONS))
   @ApiBearerAuth()
   @ApiCookieAuth()
@@ -106,6 +111,7 @@ export class PortfolioController {
   }
 
   @Delete(':id/images/:imageId')
+  @UseGuards(UnblockedProfileGuard)
   @ApiBearerAuth()
   @ApiCookieAuth()
   @ApiOperation({ summary: 'Remove a single image from a portfolio item' })

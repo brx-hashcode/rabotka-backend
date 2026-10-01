@@ -1,3 +1,4 @@
+import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { Test } from '@nestjs/testing';
 import { WsNotificationsGateway } from '../ws-notifications.gateway';
 import { WsNotificationsListener } from '../ws-notifications.listener';
@@ -15,6 +16,7 @@ describe('WsNotificationsModule', () => {
         { provide: ConfigService, useValue: { get: jest.fn() } },
         { provide: JwtService, useValue: { verify: jest.fn() } },
         { provide: REDIS_CONNECTION, useValue: {} },
+        { provide: PrismaService, useValue: {} },
         { provide: AdminNotificationService, useValue: { create: jest.fn() } },
       ],
     }).compile();

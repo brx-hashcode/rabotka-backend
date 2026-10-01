@@ -47,6 +47,14 @@ describe('csrfVisitorMiddleware', () => {
     expect(next).toHaveBeenCalled();
   });
 
+  it('keeps the visitor id for a year, counted in milliseconds', () => {
+    // Express reads maxAge in ms; this was a year in SECONDS, about 8.7 hours.
+    const res = makeResMock();
+    csrfVisitorMiddleware({ cookies: {} } as any, res, makeNext());
+    const [, , options] = res.cookie.mock.calls[0];
+    expect(options.maxAge).toBe(365 * 24 * 60 * 60 * 1000);
+  });
+
   it('sets secure=false when SECURE_COOKIES is not set', () => {
     delete process.env.SECURE_COOKIES;
     const req = { cookies: {} } as any;
@@ -59,6 +67,22 @@ describe('csrfVisitorMiddleware', () => {
       CSRF_VISITOR_COOKIE,
       expect.any(String),
       expect.objectContaining({ secure: false }),
+    );
+  });
+
+  it('is Secure in production even without SECURE_COOKIES', () => {
+    // Nothing sets SECURE_COOKIES in the deploys, so tying the flag to it
+    // alone sent this cookie without Secure in production.
+    process.env.NODE_ENV = 'production';
+    const res = makeResMock();
+
+    csrfVisitorMiddleware({ cookies: {} } as any, res, makeNext());
+
+    expect(res.cookie).toHaveBeenCalledWith(
+      CSRF_VISITOR_COOKIE,
+      expect.any(String),
+      // SameSite is still SECURE_COOKIES's call, and stays Lax.
+      expect.objectContaining({ secure: true, sameSite: 'lax' }),
     );
   });
 

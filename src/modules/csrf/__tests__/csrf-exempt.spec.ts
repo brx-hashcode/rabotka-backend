@@ -14,6 +14,9 @@ describe('isCsrfExemptPath', () => {
     '/api/v1/identity-checks/2f1c',
     '/api/v1/client-errors',
     '/api/v1/client-errors/',
+    '/api/v1/webhooks/payment/callback',
+    '/api/v1/webhooks/payment/mtn-momo',
+    '/api/v1/webhooks/payment/penalties/2f1c',
   ])('exempts %s', (url) => {
     expect(isCsrfExemptPath(url)).toBe(true);
   });

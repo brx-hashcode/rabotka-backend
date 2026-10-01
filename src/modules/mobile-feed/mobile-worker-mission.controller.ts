@@ -105,6 +105,7 @@ export class MobileWorkerMissionController {
   }
 
   @Post(':id/complete')
+  @UseGuards(ActiveProfileGuard)
   @ApiOperation({
     summary: '[Mobile/WORKER] Mark my side done and rate the employer',
     description:
@@ -129,6 +130,7 @@ export class MobileWorkerMissionController {
   }
 
   @Post(':id/rate')
+  @UseGuards(ActiveProfileGuard)
   @ApiOperation({
     summary: '[Mobile/WORKER] Rate the employer, without completing anything',
     description:
@@ -277,6 +279,7 @@ export class MobileWorkerMissionController {
   }
 
   @Post(':id/cancel')
+  @UseGuards(ActiveProfileGuard)
   @ApiOperation({
     summary: '[Mobile/WORKER] Cancel my own application or mission',
     description:

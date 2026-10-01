@@ -17,8 +17,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
 
-    const { status, message } = this.extractStatusAndMessage(exception);
+    const { status, message, internal } =
+      this.extractStatusAndMessage(exception);
     const code = this.extractCode(exception);
+    const accountBlock = this.extractAccountBlock(exception);
 
     if (request.url === '/favicon.ico' && status === 404) {
       response.status(HttpStatus.NO_CONTENT).end();
@@ -27,13 +29,16 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     if (status >= 500) {
       const stack = exception instanceof Error ? exception.stack : undefined;
-      this.logger.error(`Exception: ${status} - ${message}`, stack);
+      // The log gets the real message; the caller may have been given a
+      // generic one. See `extractStatusAndMessage`.
+      this.logger.error(`Exception: ${status} - ${internal ?? message}`, stack);
     }
 
     response.status(status).json({
       statusCode: status,
       message,
       ...(code ? { code } : {}),
+      ...accountBlock,
       timestamp: new Date().toISOString(),
       path: request.url,
     });
@@ -47,6 +52,31 @@ export class HttpExceptionFilter implements ExceptionFilter {
    * unable to tell one 403 from another. Kept generic rather than tied to any
    * single exception type.
    */
+  /**
+   * The two fields `AccountNotActiveException` adds: which status blocked the
+   * request, and the admin's stated reason. Both were being dropped here, so a
+   * suspended user was told they were suspended and never why — the very thing
+   * the suspension reason was written down for.
+   *
+   * Named fields, not "everything in the body": an exception body can carry
+   * whatever its author put there, and this is the response.
+   */
+  private extractAccountBlock(exception: unknown): {
+    accountStatus?: string;
+    reason?: string;
+  } {
+    if (!(exception instanceof HttpException)) return {};
+
+    const body = exception.getResponse();
+    if (typeof body !== 'object' || body === null) return {};
+
+    const { accountStatus, reason } = body as Record<string, unknown>;
+    return {
+      ...(typeof accountStatus === 'string' ? { accountStatus } : {}),
+      ...(typeof reason === 'string' ? { reason } : {}),
+    };
+  }
+
   private extractCode(exception: unknown): string | undefined {
     if (!(exception instanceof HttpException)) return undefined;
 
@@ -60,6 +90,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
   private extractStatusAndMessage(exception: unknown): {
     status: number;
     message: string;
+    /** The real message, when `message` is a stand-in for it. */
+    internal?: string;
   } {
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
@@ -76,10 +108,16 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const multerStatus = multerErrorStatus(exception);
     if (multerStatus) return multerStatus;
 
+    // An error nobody turned into an HttpException was not written for the
+    // caller. Its message is a Prisma query, a missing env var, a stack of
+    // internals — and it used to be sent out verbatim with the 500. The caller
+    // gets the generic sentence; the log keeps the real one. An HttpException,
+    // 5xx included, was written on purpose and is passed through above.
     if (exception instanceof Error) {
       return {
         status: HttpStatus.INTERNAL_SERVER_ERROR,
-        message: exception.message,
+        message: 'Erreur interne du serveur',
+        internal: exception.message,
       };
     }
 

@@ -10,6 +10,26 @@ import type { CookieOptions, Request, Response } from 'express';
 const DEFAULT_MAX_AGE_DAYS = 30;
 
 /**
+ * How long an ADMIN session lives, in hours.
+ *
+ * Admins used to get the same 30 days as a worker opening the app from
+ * WhatsApp. The reasons for that length do not apply to them — they sign in on
+ * a desktop browser that keeps its cookies — while the cost of a stolen admin
+ * cookie is every profile, payment and identity document on the platform for a
+ * month. A working day is the default; `ADMIN_SESSION_HOURS` overrides it.
+ */
+const DEFAULT_ADMIN_SESSION_HOURS = 12;
+
+export function adminSessionHours(config: ConfigService): number {
+  const hours = Number(
+    config.get<string>('ADMIN_SESSION_HOURS') ?? DEFAULT_ADMIN_SESSION_HOURS,
+  );
+  return Number.isFinite(hours) && hours > 0
+    ? hours
+    : DEFAULT_ADMIN_SESSION_HOURS;
+}
+
+/**
  * The one definition of the session cookie.
  *
  * Every login path — OTP, admin OTP, admin QR, admin TOTP, WhatsApp link,
@@ -20,6 +40,7 @@ export function setAuthCookie(
   res: Response,
   config: ConfigService,
   token: string,
+  options: { kind?: 'profile' | 'admin' } = {},
 ): void {
   const days = Number(
     config.get<string>('AUTH_COOKIE_MAX_AGE_DAYS') ?? DEFAULT_MAX_AGE_DAYS,
@@ -27,9 +48,16 @@ export function setAuthCookie(
   const maxAgeDays =
     Number.isFinite(days) && days > 0 ? days : DEFAULT_MAX_AGE_DAYS;
 
+  // The cookie must not outlive the token in it — see the note on
+  // JWT_EXPIRES_IN in auth.module.ts — so an admin's matches the admin token.
+  const maxAge =
+    options.kind === 'admin'
+      ? adminSessionHours(config) * 60 * 60 * 1000
+      : maxAgeDays * 24 * 60 * 60 * 1000;
+
   res.cookie(authCookieName(config), token, {
     ...cookieAttributes(config),
-    maxAge: maxAgeDays * 24 * 60 * 60 * 1000,
+    maxAge,
   });
 }
 

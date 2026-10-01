@@ -174,6 +174,12 @@ jobs:
           ADMIN_BASE_URL=$(echo "$VAULT_SECRET" | jq -r '.ADMIN_BASE_URL')
           ALLOW_ORIGINS=$(echo "$VAULT_SECRET" | jq -r '.ALLOW_ORIGINS')
           SUPER_ADMIN_EMAIL=$(echo "$VAULT_SECRET" | jq -r '.SUPER_ADMIN_EMAIL')
+          # Optional, and blank is the safe value for all three: the API
+          # reference stays off, /metrics stays closed to the internet, and the
+          # file proxy fetches from the configured storage hosts only.
+          API_DOCS_ENABLED=$(echo "$VAULT_SECRET" | jq -r '.API_DOCS_ENABLED // ""')
+          METRICS_TOKEN=$(echo "$VAULT_SECRET" | jq -r '.METRICS_TOKEN // ""')
+          PROXY_ALLOWED_HOSTS=$(echo "$VAULT_SECRET" | jq -r '.PROXY_ALLOWED_HOSTS // ""')
           # --- WhatsApp: provider switch and both credential sets ---
           # Every value here comes from Vault, the provider included, so moving
           # an environment between Twilio and the Meta Cloud API is a Vault edit
@@ -242,7 +248,6 @@ jobs:
           WATERMARK_OPACITY=0.3
           SMTP_MOCK=false
           SMTP_FROM_NAME=Rabotka
-          PDF_OWNER_PASSWORD=password
           APP_ENV=prod
           ARCJET_ENV=development
           API_DOMAIN=${{ secrets.PROD_API_DOMAIN }}
@@ -581,11 +586,15 @@ jobs:
       - name: Check health endpoint
         run: |
           for i in 1 2 3 4 5; do
+            # The step runs under bash -e, and curl exits non-zero when it times
+            # out or cannot connect, so without the fallback one slow answer
+            # ends the step on attempt 1 and the retries below never happen.
+            # A failed request still prints 000, which is simply not 200.
             STATUS=$(curl -o /tmp/health_response.txt -s -w "%{http_code}" \
               --max-time 30 \
-              "https://${{ secrets.PROD_API_DOMAIN }}/api/v1/health")
+              "https://${{ secrets.PROD_API_DOMAIN }}/api/v1/health") || true
             echo "Attempt $i — HTTP status: $STATUS"
-            cat /tmp/health_response.txt
+            cat /tmp/health_response.txt 2>/dev/null || true
             [ "$STATUS" = "200" ] && exit 0
             sleep 15
           done

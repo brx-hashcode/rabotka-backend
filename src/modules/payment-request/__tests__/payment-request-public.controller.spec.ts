@@ -1,5 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { PaymentRequestPublicController } from '../payment-request-public.controller';
+import {
+  PaymentRequestPublicController,
+  boundedPayload,
+} from '../payment-request-public.controller';
 import { PaymentRequestService } from '../payment-request.service';
 import { LogService } from '../../log/log.service';
 
@@ -75,5 +78,34 @@ describe('PaymentRequestPublicController', () => {
       }),
     );
     expect(result).toEqual({ status: 'COMPLETED' });
+  });
+
+  it('keeps a callback body of a normal size whole in the log', async () => {
+    const body = { paymentId: 'gw-1', status: '1' };
+    await controller.paymentCallback(body);
+    expect(mockLogService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ metadata: { payload: body } }),
+    );
+  });
+});
+
+describe('boundedPayload', () => {
+  it('returns a provider-sized body unchanged', () => {
+    const body = { paymentId: 'gw-1', transaction_id: 'tx-1' };
+    expect(boundedPayload(body)).toBe(body);
+  });
+
+  it('truncates a body far larger than any provider sends', () => {
+    // Anyone can post here; a megabyte body must not become a megabyte row.
+    const stored = boundedPayload({ junk: 'x'.repeat(1_000_000) });
+    expect(typeof stored).toBe('string');
+    expect((stored as string).length).toBeLessThan(4_100);
+    expect(stored).toMatch(/\[truncated, \d+ chars\]$/);
+  });
+
+  it('survives a body that cannot be serialised', () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(boundedPayload(circular)).toBe('[unserialisable payload]');
   });
 });

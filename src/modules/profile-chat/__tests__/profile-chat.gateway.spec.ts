@@ -23,14 +23,14 @@ describe('ProfileChatGateway — typing', () => {
   let to: jest.Mock;
 
   /** A connected socket, registered the way `handleConnection` would. */
-  const connect = (socketId: string, profileId: string) => {
+  const connect = async (socketId: string, profileId: string) => {
     const client = {
       id: socketId,
       handshake: { auth: { token: profileId }, headers: {} },
       join: jest.fn(),
       disconnect: jest.fn(),
     };
-    gateway.handleConnection(client as never);
+    await gateway.handleConnection(client as never);
     return client;
   };
 
@@ -63,12 +63,13 @@ describe('ProfileChatGateway — typing', () => {
       config as never,
       presence as never,
       prisma as never,
+      { get: jest.fn().mockResolvedValue(null) } as never,
     );
     gateway.server = { to } as never;
   });
 
   it('relays to the counterpart, and only to the counterpart', async () => {
-    const client = connect('s-1', WORKER);
+    const client = await connect('s-1', WORKER);
 
     await gateway.handleTyping(client as never, { conversationId: CONV });
 
@@ -82,7 +83,7 @@ describe('ProfileChatGateway — typing', () => {
     // nothing. Silence rather than an error: an error would let somebody walk
     // uuids and learn which conversations exist.
     prisma.profileConversation.findFirst.mockResolvedValue(null);
-    const client = connect('s-1', 'stranger');
+    const client = await connect('s-1', 'stranger');
 
     await gateway.handleTyping(client as never, { conversationId: CONV });
 
@@ -90,7 +91,7 @@ describe('ProfileChatGateway — typing', () => {
   });
 
   it('asks the database with the membership clause, never trusting the payload', async () => {
-    const client = connect('s-1', WORKER);
+    const client = await connect('s-1', WORKER);
 
     await gateway.handleTyping(client as never, { conversationId: CONV });
 
@@ -114,7 +115,7 @@ describe('ProfileChatGateway — typing', () => {
   });
 
   it('holds a rate floor per socket', async () => {
-    const client = connect('s-1', WORKER);
+    const client = await connect('s-1', WORKER);
 
     await gateway.handleTyping(client as never, { conversationId: CONV });
     await gateway.handleTyping(client as never, { conversationId: CONV });
@@ -125,8 +126,8 @@ describe('ProfileChatGateway — typing', () => {
   });
 
   it('caches the membership instead of querying on every keystroke', async () => {
-    const first = connect('s-1', WORKER);
-    const second = connect('s-2', WORKER);
+    const first = await connect('s-1', WORKER);
+    const second = await connect('s-2', WORKER);
 
     await gateway.handleTyping(first as never, { conversationId: CONV });
     await gateway.handleTyping(second as never, { conversationId: CONV });
@@ -136,12 +137,12 @@ describe('ProfileChatGateway — typing', () => {
   });
 
   it("forgets a profile's cached membership once its last socket is gone", async () => {
-    const client = connect('s-1', WORKER);
+    const client = await connect('s-1', WORKER);
     await gateway.handleTyping(client as never, { conversationId: CONV });
 
     gateway.handleDisconnect(client as never);
 
-    const again = connect('s-2', WORKER);
+    const again = await connect('s-2', WORKER);
     await gateway.handleTyping(again as never, { conversationId: CONV });
 
     expect(prisma.profileConversation.findFirst).toHaveBeenCalledTimes(2);
@@ -151,7 +152,7 @@ describe('ProfileChatGateway — typing', () => {
     prisma.profileConversation.findFirst.mockRejectedValue(
       new Error('connection refused'),
     );
-    const client = connect('s-1', WORKER);
+    const client = await connect('s-1', WORKER);
 
     await expect(
       gateway.handleTyping(client as never, { conversationId: CONV }),
@@ -167,6 +168,7 @@ describe('ProfileChatGateway — emitDeleted', () => {
     const gateway = new ProfileChatGateway(
       { verify: jest.fn() } as never,
       { get: jest.fn() } as never,
+      {} as never,
       {} as never,
       {} as never,
     );

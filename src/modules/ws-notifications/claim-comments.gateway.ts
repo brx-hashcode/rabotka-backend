@@ -7,7 +7,10 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
-import { Logger } from '@nestjs/common';
+import { Inject, Logger } from '@nestjs/common';
+import Redis from 'ioredis';
+import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+import { isSessionRevoked } from '../auth/session-revocation';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
@@ -46,6 +49,7 @@ export class ClaimCommentsGateway
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
+    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
   ) {}
 
   handleConnection(client: Socket): void {
@@ -87,6 +91,8 @@ export class ClaimCommentsGateway
     if (!payload?.sub) return false;
 
     try {
+      if (await isSessionRevoked(this.redis, payload.jti)) return false;
+
       if (payload.type === 'admin') {
         const admin = await this.prisma.user.findUnique({
           where: { id: payload.sub },

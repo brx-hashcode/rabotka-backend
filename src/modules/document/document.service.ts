@@ -7,6 +7,7 @@ import {
   InternalServerErrorException,
   HttpException,
 } from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -17,6 +18,7 @@ import { REDIS_KEY_PREFIX } from '../../common/services/redis/redis.constants';
 import { GoogleDocsService } from './google-docs.service';
 import { fetchWithTimeout } from '../../common/utils/fetch-with-timeout.util';
 import { launchBrowser } from '../../common/utils/puppeteer';
+import { protectPdf } from './pdf-protection';
 import { UpdateDocumentDto } from './dto/update-document.dto';
 import { ListDocumentsDto } from './dto/list-documents.dto';
 import {
@@ -466,51 +468,7 @@ export class DocumentService {
     const pdfBuffer =
       libreOfficePdf ?? (await this.convertWithPuppeteer(docxBuffer));
 
-    return this.protectPdf(pdfBuffer);
-  }
-
-  private async protectPdf(pdfBuffer: Buffer): Promise<Buffer> {
-    const os = await import('node:os');
-    const path = await import('node:path');
-    const fs = await import('node:fs/promises');
-    const qpdfModule = await import('node-qpdf');
-    const qpdf = qpdfModule.default ?? qpdfModule;
-
-    const ts = Date.now();
-    const tmp = os.tmpdir();
-    const inputPath = path.join(tmp, `rabotka_${ts}_in.pdf`);
-    const outputPath = path.join(tmp, `rabotka_${ts}_out.pdf`);
-
-    try {
-      await fs.writeFile(inputPath, pdfBuffer);
-      await qpdf.encrypt(inputPath, {
-        keyLength: 128,
-        password: {
-          owner: process.env.PDF_OWNER_PASSWORD ?? 'rabotka-owner',
-          user: '',
-        },
-        restrictions: {
-          print: 'full',
-          modify: 'n',
-          copy: 'n',
-          useSubset: 'n',
-          modifyAnnotations: 'n',
-        },
-        outputFile: outputPath,
-      });
-      return await fs.readFile(outputPath);
-    } catch (err: any) {
-      if (err?.code === 'ENOENT') {
-        this.logger.warn(
-          'qpdf binary not found — returning unprotected PDF. Install qpdf for production use.',
-        );
-        return pdfBuffer;
-      }
-      throw err;
-    } finally {
-      await fs.unlink(inputPath).catch(() => {});
-      await fs.unlink(outputPath).catch(() => {});
-    }
+    return protectPdf(pdfBuffer, this.logger);
   }
 
   private async convertWithLibreOffice(

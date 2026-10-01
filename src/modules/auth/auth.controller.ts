@@ -60,6 +60,11 @@ export class AuthController {
     setAuthCookie(res, this.configService, token);
   }
 
+  /** The admin session cookie: same attributes, the admin lifetime. */
+  private setAdminAuthCookie(res: Response, token: string): void {
+    setAuthCookie(res, this.configService, token, { kind: 'admin' });
+  }
+
   @Post('send-otp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -466,7 +471,7 @@ export class AuthController {
       return { success: true, totpRequired: true, pendingToken: result.token };
     }
 
-    this.setAuthCookie(res, result.token);
+    this.setAdminAuthCookie(res, result.token);
 
     return { success: true };
   }
@@ -682,7 +687,7 @@ export class AuthController {
       };
     }
 
-    this.setAuthCookie(res, result.token!);
+    this.setAdminAuthCookie(res, result.token!);
 
     return { success: true };
   }
@@ -743,7 +748,7 @@ export class AuthController {
       extractRequestMeta(req),
     );
 
-    this.setAuthCookie(res, result.token);
+    this.setAdminAuthCookie(res, result.token);
 
     return { success: true };
   }
