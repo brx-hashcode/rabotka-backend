@@ -53,27 +53,59 @@ export class PaymentRequestPublicController {
     return result;
   }
 
+  /**
+   * The providers' callbacks. Reachable by anyone — a provider cannot carry a
+   * session or a CSRF token — and safe to be, because nothing in the body is
+   * trusted: the handler re-checks the payment with the provider before acting.
+   *
+   * What anyone COULD do is make each call cost us a provider lookup and an
+   * audit row, so both are bounded: a per-IP throttle well above what a
+   * provider sends, and a cap on how much of the body is kept.
+   */
   @Post('webhooks/payment/callback')
+  @Throttle({ default: { limit: 120, ttl: 60_000 } })
   @ApiOperation({ summary: 'Payment gateway webhook callback' })
   async paymentCallback(@Body() payload: Record<string, string>) {
     const result = await this.service.handlePaymentCallback(payload);
     await this.logService.create({
       action: 'PAYMENT_WEBHOOK_RECEIVED',
       entityType: 'PaymentRequest',
-      metadata: { payload },
+      metadata: { payload: boundedPayload(payload) },
     });
     return result;
   }
 
   @Post('webhooks/payment/mtn-momo')
+  @Throttle({ default: { limit: 120, ttl: 60_000 } })
   @ApiOperation({ summary: 'MTN MoMo payment webhook callback' })
   async mtnMomoCallback(@Body() payload: Record<string, string>) {
     const result = await this.service.handlePaymentCallback(payload);
     await this.logService.create({
       action: 'PAYMENT_WEBHOOK_RECEIVED',
       entityType: 'PaymentRequest',
-      metadata: { gateway: 'MTN_MOMO', payload },
+      metadata: { gateway: 'MTN_MOMO', payload: boundedPayload(payload) },
     });
     return result;
   }
+}
+
+/** Largest callback body kept in the audit log, in characters of JSON. */
+const MAX_LOGGED_PAYLOAD = 4_000;
+
+/**
+ * The callback body as it should be stored: whole when it is the size a
+ * provider sends, a truncated string when it is not. A real callback is a few
+ * hundred bytes; anything far larger is not one, and must not become a large
+ * row in the audit log for every request.
+ */
+export function boundedPayload(payload: unknown): unknown {
+  let json: string;
+  try {
+    json = JSON.stringify(payload) ?? '';
+  } catch {
+    return '[unserialisable payload]';
+  }
+  return json.length <= MAX_LOGGED_PAYLOAD
+    ? payload
+    : `${json.slice(0, MAX_LOGGED_PAYLOAD)}… [truncated, ${json.length} chars]`;
 }

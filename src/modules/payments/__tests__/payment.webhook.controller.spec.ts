@@ -47,6 +47,19 @@ describe('PaymentWebhookController', () => {
     ).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['a prefix of it', WEBHOOK_SECRET.slice(0, -1)],
+    ['it with more after', `${WEBHOOK_SECRET}x`],
+    ['not a string', ['test-secret'] as unknown as string],
+  ])('penaltySuccess refuses %s', async (_label, presented) => {
+    await expect(
+      controller.penaltySuccess('profile-1', presented),
+    ).rejects.toThrow(UnauthorizedException);
+    expect(
+      mockPaymentService.handlePenaltyPaymentSuccess,
+    ).not.toHaveBeenCalled();
+  });
+
   it('penaltySuccess throws UnauthorizedException when secret is missing', async () => {
     await expect(
       controller.penaltySuccess('profile-1', undefined as any),

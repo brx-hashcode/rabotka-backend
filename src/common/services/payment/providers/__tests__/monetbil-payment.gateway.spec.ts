@@ -160,6 +160,17 @@ describe('MonetbilPaymentGateway', () => {
       expect(result.gatewayRef).toBe('gw-ref-2');
     });
 
+    // The callback route is public: a body with nothing to look up must not
+    // cost a call to Monetbil.
+    it.each([{}, { paymentId: '' }, { paymentId: { $ne: 1 } }])(
+      'does not call Monetbil for a body without a usable reference (%j)',
+      async (body) => {
+        const result = await gateway.handleWebhookPayload(body);
+        expect(result).toMatchObject({ gatewayRef: '', status: 'PENDING' });
+        expect(fetchSpy).not.toHaveBeenCalled();
+      },
+    );
+
     it('uses PENDING status as PENDING', async () => {
       fetchSpy.mockRejectedValueOnce(new Error('err')); // triggers PENDING in checkPaymentStatus
       const result = await gateway.handleWebhookPayload({ paymentId: 'gw-1' });
