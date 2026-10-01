@@ -53,7 +53,13 @@ const CSRF_SECRET_MIN_LENGTH = 32;
           cookieOptions: {
             sameSite: secureCookies ? 'none' : 'lax',
             path: '/',
-            secure: secureCookies,
+            // Secure in production whatever SECURE_COOKIES says, exactly as
+            // the session cookie already is (auth-cookie.util.ts). The flag
+            // was tied to SECURE_COOKIES alone, which no deploy sets, so these
+            // cookies went out without it. SECURE_COOKIES still decides the
+            // rest — SameSite=None and the __Host- name — so turning this on
+            // renames nothing and changes no cross-site behaviour.
+            secure: isProduction || secureCookies,
             httpOnly: true,
           },
           ignoredMethods: ['GET', 'HEAD', 'OPTIONS'],

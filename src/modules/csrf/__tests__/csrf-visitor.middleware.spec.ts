@@ -70,6 +70,22 @@ describe('csrfVisitorMiddleware', () => {
     );
   });
 
+  it('is Secure in production even without SECURE_COOKIES', () => {
+    // Nothing sets SECURE_COOKIES in the deploys, so tying the flag to it
+    // alone sent this cookie without Secure in production.
+    process.env.NODE_ENV = 'production';
+    const res = makeResMock();
+
+    csrfVisitorMiddleware({ cookies: {} } as any, res, makeNext());
+
+    expect(res.cookie).toHaveBeenCalledWith(
+      CSRF_VISITOR_COOKIE,
+      expect.any(String),
+      // SameSite is still SECURE_COOKIES's call, and stays Lax.
+      expect.objectContaining({ secure: true, sameSite: 'lax' }),
+    );
+  });
+
   it('sets secure=true and sameSite=none when SECURE_COOKIES=true', () => {
     process.env.SECURE_COOKIES = 'true';
     const req = { cookies: {} } as any;
