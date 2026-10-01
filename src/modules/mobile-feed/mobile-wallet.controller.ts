@@ -8,6 +8,7 @@ import {
 import { IsInt, Max, Min } from 'class-validator';
 import { PaymentRequestType } from '@prisma/client';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
+import { UnblockedProfileGuard } from '../auth/guards/unblocked-profile.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { WalletService } from '../wallet/wallet.service';
 import { PaymentRequestService } from '../payment-request/payment-request.service';
@@ -50,6 +51,7 @@ export class MobileWalletController {
   }
 
   @Post('top-up')
+  @UseGuards(UnblockedProfileGuard)
   @ApiOperation({
     summary: '[Mobile] Start a mobile-money wallet top-up',
     description:
