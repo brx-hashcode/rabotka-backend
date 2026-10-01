@@ -123,6 +123,12 @@ export class MonetbilPaymentGateway implements IPaymentGateway {
     const gatewayRef = body['paymentId'] ?? body['payment_ref'] ?? '';
     const transactionId = body['transaction_id'];
 
+    // Nothing to look up. Without this an empty or junk body still cost a call
+    // to Monetbil, on an endpoint anyone can reach.
+    if (typeof gatewayRef !== 'string' || !gatewayRef) {
+      return { gatewayRef: '', status: 'PENDING', rawPayload: payload };
+    }
+
     // Re-verify via API — don't trust the body status field
     const verified = await this.checkPaymentStatus(gatewayRef);
 

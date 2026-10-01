@@ -399,7 +399,7 @@ export class PaymentRequestService {
     const { gatewayRef, status, transactionId } =
       await this.paymentGateway.handleWebhookPayload(payload);
 
-    if (!gatewayRef) {
+    if (typeof gatewayRef !== 'string' || !gatewayRef) {
       this.logger.warn('Payment callback missing gatewayRef');
       return { received: true };
     }

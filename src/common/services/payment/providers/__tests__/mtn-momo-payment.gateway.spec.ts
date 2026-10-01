@@ -91,7 +91,10 @@ describe('MtnMomoPaymentGateway', () => {
     });
 
     it('sends trailing slash on requesttopay URL', async () => {
-      (gateway as any).cachedToken = { value: 'tok', expiresAt: Date.now() + 99999 };
+      (gateway as any).cachedToken = {
+        value: 'tok',
+        expiresAt: Date.now() + 99999,
+      };
       fetchSpy.mockResolvedValueOnce(makeResponse({}, true, 202));
       await gateway.initiatePayment(params);
       const url = fetchSpy.mock.calls[0][0] as string;
@@ -99,7 +102,10 @@ describe('MtnMomoPaymentGateway', () => {
     });
 
     it('sends Host header on requesttopay', async () => {
-      (gateway as any).cachedToken = { value: 'tok', expiresAt: Date.now() + 99999 };
+      (gateway as any).cachedToken = {
+        value: 'tok',
+        expiresAt: Date.now() + 99999,
+      };
       fetchSpy.mockResolvedValueOnce(makeResponse({}, true, 202));
       await gateway.initiatePayment(params);
       const init = fetchSpy.mock.calls[0][1] as RequestInit;
@@ -108,7 +114,10 @@ describe('MtnMomoPaymentGateway', () => {
     });
 
     it('prepends 242 to local phone number', async () => {
-      (gateway as any).cachedToken = { value: 'tok', expiresAt: Date.now() + 99999 };
+      (gateway as any).cachedToken = {
+        value: 'tok',
+        expiresAt: Date.now() + 99999,
+      };
       fetchSpy.mockResolvedValueOnce(makeResponse({}, true, 202));
       await gateway.initiatePayment({ ...params, phone: '061234567' });
       const init = fetchSpy.mock.calls[0][1] as RequestInit;
@@ -117,7 +126,10 @@ describe('MtnMomoPaymentGateway', () => {
     });
 
     it('does not double-prefix 242 when already present', async () => {
-      (gateway as any).cachedToken = { value: 'tok', expiresAt: Date.now() + 99999 };
+      (gateway as any).cachedToken = {
+        value: 'tok',
+        expiresAt: Date.now() + 99999,
+      };
       fetchSpy.mockResolvedValueOnce(makeResponse({}, true, 202));
       await gateway.initiatePayment({ ...params, phone: '242061234567' });
       const init = fetchSpy.mock.calls[0][1] as RequestInit;
@@ -126,7 +138,10 @@ describe('MtnMomoPaymentGateway', () => {
     });
 
     it('normalizes +242 prefix', async () => {
-      (gateway as any).cachedToken = { value: 'tok', expiresAt: Date.now() + 99999 };
+      (gateway as any).cachedToken = {
+        value: 'tok',
+        expiresAt: Date.now() + 99999,
+      };
       fetchSpy.mockResolvedValueOnce(makeResponse({}, true, 202));
       await gateway.initiatePayment({ ...params, phone: '+242061234567' });
       const init = fetchSpy.mock.calls[0][1] as RequestInit;
@@ -135,9 +150,15 @@ describe('MtnMomoPaymentGateway', () => {
     });
 
     it('uses description as payerMessage and payeeNote', async () => {
-      (gateway as any).cachedToken = { value: 'tok', expiresAt: Date.now() + 99999 };
+      (gateway as any).cachedToken = {
+        value: 'tok',
+        expiresAt: Date.now() + 99999,
+      };
       fetchSpy.mockResolvedValueOnce(makeResponse({}, true, 202));
-      await gateway.initiatePayment({ ...params, description: 'Recharge du wallet — 5 000 FCFA' });
+      await gateway.initiatePayment({
+        ...params,
+        description: 'Recharge du wallet — 5 000 FCFA',
+      });
       const init = fetchSpy.mock.calls[0][1] as RequestInit;
       const body = JSON.parse(init.body as string);
       expect(body.payerMessage).toBe('Recharge du wallet — 5 000 FCFA');
@@ -145,7 +166,10 @@ describe('MtnMomoPaymentGateway', () => {
     });
 
     it('falls back to Paiement Rabotka when no description', async () => {
-      (gateway as any).cachedToken = { value: 'tok', expiresAt: Date.now() + 99999 };
+      (gateway as any).cachedToken = {
+        value: 'tok',
+        expiresAt: Date.now() + 99999,
+      };
       fetchSpy.mockResolvedValueOnce(makeResponse({}, true, 202));
       const { description: _, ...noDesc } = params;
       await gateway.initiatePayment(noDesc);
@@ -205,6 +229,12 @@ describe('MtnMomoPaymentGateway', () => {
         value: 'tok',
         expiresAt: Date.now() + 99999,
       };
+    });
+
+    it('does not call MTN for a body without a usable reference', async () => {
+      const result = await gateway.handleWebhookPayload({ referenceId: 42 });
+      expect(result).toMatchObject({ gatewayRef: '', status: 'PENDING' });
+      expect(fetchSpy).not.toHaveBeenCalled();
     });
 
     it('re-verifies and returns status using externalId as fallback', async () => {

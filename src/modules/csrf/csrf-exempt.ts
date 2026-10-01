@@ -19,6 +19,13 @@
  *   matched.
  * - `client-errors` — sent with `sendBeacon`, which cannot attach the header,
  *   and the endpoint only writes a throttled log line.
+ * - `webhooks/payment` — the payment providers' callbacks. These were missing,
+ *   so every callback was answered 403 here and never reached its handler. The
+ *   polling job covers the first two minutes of a payment; after it gives up
+ *   it puts the request back to PENDING precisely so the callback can settle
+ *   it, and that callback never arrived — a customer who approved on their
+ *   phone after two minutes paid and got nothing. The handlers do not trust
+ *   the body: they re-check the payment with the provider before acting.
  */
 const CSRF_EXEMPT_PREFIXES = [
   '/api/v1/whatsapp/incoming',
@@ -29,6 +36,7 @@ const CSRF_EXEMPT_PREFIXES = [
   '/api/v1/oauth/userinfo',
   '/api/v1/identity-checks',
   '/api/v1/client-errors',
+  '/api/v1/webhooks/payment',
 ] as const;
 
 /**
