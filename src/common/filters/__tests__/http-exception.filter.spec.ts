@@ -1,6 +1,8 @@
 import { Logger } from '@nestjs/common';
 import { HttpException, HttpStatus, ArgumentsHost } from '@nestjs/common';
+import { AccountStatus } from '@prisma/client';
 import { HttpExceptionFilter } from '../http-exception.filter';
+import { AccountNotActiveException } from '../../exceptions/account-not-active.exception';
 
 jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
 
@@ -233,6 +235,35 @@ describe('HttpExceptionFilter', () => {
         host,
       );
       expect(status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  describe('account blocks', () => {
+    it('tells a suspended user why, not only that they are', () => {
+      const { host, json } = makeHost('/api');
+      filter.catch(
+        new AccountNotActiveException(
+          AccountStatus.SUSPENDED,
+          'Documents illisibles',
+        ),
+        host,
+      );
+      expect(json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          statusCode: 403,
+          code: 'ACCOUNT_NOT_ACTIVE',
+          accountStatus: 'SUSPENDED',
+          reason: 'Documents illisibles',
+        }),
+      );
+    });
+
+    it('adds nothing to an ordinary exception', () => {
+      const { host, json } = makeHost('/api');
+      filter.catch(new HttpException('Nope', HttpStatus.FORBIDDEN), host);
+      const body = json.mock.calls[0][0];
+      expect(body).not.toHaveProperty('accountStatus');
+      expect(body).not.toHaveProperty('reason');
     });
   });
 });
