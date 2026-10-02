@@ -318,6 +318,16 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    // The agent app's suggested workers. Its own key rather than the employer
+    // feed's: a tight threshold chosen for what an employer is shown must not
+    // silently empty the list an agent is meant to call through.
+    key: 'agent.candidate_min_score',
+    value: '0.3',
+    category: ConfigCategory.MATCHING,
+    label: 'Score minimum des travailleurs suggérés aux agents',
+    isSecret: false,
+  },
+  {
     key: 'matching.cf_enabled',
     value: 'false',
     category: ConfigCategory.MATCHING,

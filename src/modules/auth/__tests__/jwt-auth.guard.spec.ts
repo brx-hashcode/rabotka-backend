@@ -100,6 +100,23 @@ describe('JwtAuthGuard', () => {
     expect(req.user.type).toBe('admin');
   });
 
+  it.each(['agent', 'agent_refresh'])(
+    'refuses a field-agent %s token, so no profile or admin route accepts it',
+    async (type) => {
+      (jwtService.verify as jest.Mock).mockReturnValue({
+        sub: 'agent-1',
+        type,
+      });
+
+      const ctx = makeContext(undefined, 'Bearer agent-token');
+      await expect(guard.canActivate(ctx)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      const req = ctx.switchToHttp().getRequest<{ user?: unknown }>();
+      expect(req.user).toBeUndefined();
+    },
+  );
+
   it('throws UnauthorizedException when no token', async () => {
     const ctx = makeContext();
     await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);

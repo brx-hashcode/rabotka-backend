@@ -389,6 +389,17 @@ enum RatingDirection {
   WORKER_TO_EMPLOYER
 }
 
+/// Whether an agent may use the agent app. Checked uncached on every request
+/// by AgentAuthGuard, so a suspension takes effect on the next call rather
+/// than when the token expires.
+enum AgentStatus {
+  ACTIVE
+  SUSPENDED
+  /// Terminal: the agency relationship is over. Kept as a row, never deleted,
+  /// because placements and earnings will point at it.
+  REVOKED
+}
+
 model SystemConfig {
   id         String         @id @default(uuid()) @db.Uuid
   key        String         @unique
@@ -617,6 +628,159 @@ model User {
   @@index([role], name: "idx_user_role")
   @@index([deleted_at], name: "idx_user_deleted_at")
   @@map("users")
+}
+
+/// A field agent: someone who calls workers on Rabotka's behalf and gets them
+/// onto jobs, from the separate agent app.
+///
+/// A third identity, beside Profile (end users) and User (staff), on purpose.
+/// The same person may also hold a worker or employer Profile, and the two are
+/// independent accounts — an agent is not a capability of a profile. They meet
+/// only through the phone number, which is what conflict-of-interest checks
+/// compare.
+///
+/// Created by an admin only; there is no signup. Login is email + a one-time
+/// code sent by email.
+model Agent {
+  id         String   @id @default(uuid()) @db.Uuid
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  first_name String
+  last_name  String
+  /// The login identity: the OTP is sent here. Lowercased and trimmed on write.
+  email      String   @unique
+  /// E.164, normalised with `toE164` on write — unlike `profiles.phone`, which
+  /// is stored as typed. Not a login identity: it is what conflict-of-interest
+  /// checks compare against profiles, and the default Mobile Money number.
+  phone      String   @unique
+
+  /// The identity document the admin checked. The number is normalised
+  /// (uppercased, separators removed) and unique per type, so the same person
+  /// cannot be created twice. Never returned to the agent app.
+  id_document_type   DocumentType
+  id_document_number String
+
+  /// Public bucket, like `Profile.avatar_url`. The key is kept so a replaced
+  /// avatar can be deleted.
+  avatar_url         String?
+  avatar_storage_key String?
+
+  status        AgentStatus @default(ACTIVE)
+  /// Why the agent is SUSPENDED or REVOKED. Cleared on reactivation, so it
+  /// always describes the current status.
+  status_reason String?
+
+  /// The admin who created the agent. A bare id, like `Profile.verified_by`:
+  /// staff accounts are archived rather than deleted.
+  created_by_user_id String    @db.Uuid
+  last_login_at      DateTime?
+
+  zones          AgentZone[]
+  kyc_documents  AgentKycDocument[]
+  ledger_entries AgentLedgerEntry[]
+
+  @@unique([id_document_type, id_document_number], name: "idx_agent_id_document")
+  @@index([status], name: "idx_agent_status")
+  @@map("agents")
+}
+
+/// One city an agent covers. An agent sees only the jobs located in their
+/// zones.
+///
+/// A city, in the canonical spelling `GeoService.canonicalCity` produces —
+/// the same form `JobOffer.city` is written in, so the zone filter is an
+/// equality rather than a fuzzy match.
+model AgentZone {
+  agent_id     String @db.Uuid
+  country_code String @db.VarChar(2)
+  city         String
+
+  agent Agent @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+
+  @@id([agent_id, country_code, city])
+  @@index([country_code, city], name: "idx_agent_zone_city")
+  @@map("agent_zones")
+}
+
+/// An agent's identity documents, uploaded by the admin who created them.
+///
+/// Mirrors KycDocument: one row per category — DOCUMENT (front),
+/// DOCUMENT_BACK, SELFIE — and a PASSPORT has no back. The document type is
+/// the agent's own `id_document_type`, so it is not repeated per row.
+///
+/// The file lives ONLY in the private KYC bucket, under
+/// `kyc-documents/agents/`, and is read back through the authenticated admin
+/// stream route. No url is ever stored or issued.
+/// Which part of an agent's money a ledger movement touches.
+///
+/// PENDING: earned, not yet withdrawable (confirmation window running).
+/// AVAILABLE: withdrawable. LOCKED: held by a withdrawal request in progress.
+/// PAID_OUT: transferred to the agent by an admin.
+enum AgentLedgerBucket {
+  PENDING
+  AVAILABLE
+  LOCKED
+  PAID_OUT
+}
+
+/// Why a ledger movement happened. One business event can be several rows —
+/// a release is −PENDING and +AVAILABLE — so the buckets always sum true.
+enum AgentLedgerKind {
+  COMMISSION_EARNED
+  COMMISSION_RELEASED
+  COMMISSION_CANCELLED
+  WITHDRAWAL_REQUESTED
+  WITHDRAWAL_PAID
+  WITHDRAWAL_REJECTED
+  /// An admin correction, always with a note in `description`.
+  ADJUSTMENT
+}
+
+/// An agent's money, as an append-only ledger.
+///
+/// Deliberately NOT the profile Wallet: that holds spending credit with a
+/// mutable `balance` column and admin-deletable transactions. Here there is no
+/// stored balance and no update or delete path — every balance is
+/// SUM(amount) GROUP BY bucket over these rows, and a mistake is corrected by
+/// an ADJUSTMENT row, never by editing history.
+///
+/// `idempotency_key` is unique, so replaying the job that wrote a movement
+/// cannot write it twice.
+model AgentLedgerEntry {
+  id              String            @id @default(uuid()) @db.Uuid
+  created_at      DateTime          @default(now())
+  agent_id        String            @db.Uuid
+  kind            AgentLedgerKind
+  bucket          AgentLedgerBucket
+  /// Signed, in FCFA: positive into the bucket, negative out of it.
+  amount          Decimal           @db.Decimal(12, 2)
+  /// What the movement is about: 'commission', 'withdrawal', 'adjustment'.
+  reference_type  String
+  reference_id    String?           @db.Uuid
+  description     String?
+  idempotency_key String            @unique
+
+  agent Agent @relation(fields: [agent_id], references: [id], onDelete: Restrict)
+
+  @@index([agent_id, bucket], name: "idx_agent_ledger_agent_bucket")
+  @@index([agent_id, created_at(sort: Desc)], name: "idx_agent_ledger_agent_time")
+  @@map("agent_ledger_entries")
+}
+
+model AgentKycDocument {
+  id                  String              @id @default(uuid()) @db.Uuid
+  created_at          DateTime            @default(now())
+  updated_at          DateTime            @updatedAt
+  agent_id            String              @db.Uuid
+  document_category   KycDocumentCategory
+  storage_key         String
+  uploaded_by_user_id String              @db.Uuid
+
+  agent Agent @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+
+  @@unique([agent_id, document_category], name: "idx_agent_kyc_document_category")
+  @@map("agent_kyc_documents")
 }
 
 model KycDocument {

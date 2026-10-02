@@ -296,6 +296,13 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    key: 'agent.candidate_min_score',
+    value: '0.3',
+    category: ConfigCategory.MATCHING,
+    label: 'Score minimum des travailleurs suggérés aux agents',
+    isSecret: false,
+  },
+  {
     key: 'matching.cf_enabled',
     value: 'false',
     category: ConfigCategory.MATCHING,

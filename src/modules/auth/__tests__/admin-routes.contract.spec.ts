@@ -85,6 +85,21 @@ const PUBLIC_PREFIXES = new Set([
 const PROFILE_PREFIX = /^profile(\/|$)/;
 
 /**
+ * The field-agent app. Its own identity and its own guard: everything under
+ * `agent/` carries AgentAuthGuard — asserted below — except the login itself,
+ * which the caller reaches before having a session.
+ */
+const AGENT_PREFIX = /^agent(\/|$)/;
+const AGENT_PUBLIC = new Map([
+  [
+    'agent/auth',
+    'Login: send/verify the email code, refresh, logout. No session exists ' +
+      'yet; per-email send caps and IP throttles stand in for one. `logout` ' +
+      'carries AgentAuthGuard on the handler.',
+  ],
+]);
+
+/**
  * Namespaces that are public all the way down. `webhooks/*` authenticate by
  * provider signature rather than by session, and `public/*` is public by name.
  */
@@ -164,8 +179,34 @@ describe('admin route contract', () => {
     (c) =>
       !PUBLIC_PREFIXES.has(c.prefix) &&
       !PROFILE_PREFIX.test(c.prefix) &&
+      !AGENT_PREFIX.test(c.prefix) &&
       !PUBLIC_NAMESPACE.test(c.prefix),
   );
+
+  it('guards every agent controller with AgentAuthGuard', () => {
+    const agentControllers = controllers.filter((c) =>
+      AGENT_PREFIX.test(c.prefix),
+    );
+    expect(agentControllers.length).toBeGreaterThan(0);
+
+    const unguarded = agentControllers
+      .filter((c) => !AGENT_PUBLIC.has(c.prefix))
+      .filter((c) => !/@UseGuards\([^)]*AgentAuthGuard[^)]*\)/s.test(c.head))
+      .map((c) => `${c.prefix} (${c.file})`);
+    expect(unguarded).toEqual([]);
+  });
+
+  it('never mounts a profile or admin guard on an agent controller', () => {
+    // An agent token is refused by both; mounting one would lock agents out
+    // at best, and at worst signal that the route was meant for someone else.
+    const mixed = controllers
+      .filter((c) => AGENT_PREFIX.test(c.prefix))
+      .filter((c) =>
+        /(AdminAuthGuard|ProfileAuthGuard|JwtAuthGuard)/.test(c.head + c.body),
+      )
+      .map((c) => `${c.prefix} (${c.file})`);
+    expect(mixed).toEqual([]);
+  });
 
   it('finds the controllers (guards against a silent no-op)', () => {
     expect(controllers.length).toBeGreaterThan(25);

@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { randomInt, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import Redis from 'ioredis';
 import { AccountStatus } from '@prisma/client';
 
@@ -32,12 +32,17 @@ import {
 import * as otplib from 'otplib';
 import { JWT_BLOCKLIST_PREFIX } from './session-revocation';
 import { adminSessionHours } from './auth-cookie.util';
+import {
+  assertCanSendOtp,
+  consumeOtp,
+  generateOtp,
+  storeOtp,
+} from './otp-store';
 import * as QRCode from 'qrcode';
 
 const TOTP_PENDING_PREFIX = `${REDIS_KEY_PREFIX}admin:totp:pending:`;
 const TOTP_PENDING_TTL = 300;
 
-const OTP_TTL_SECONDS = 300;
 const OTP_KEY_PREFIX = `${REDIS_KEY_PREFIX}otp:`;
 const MOBILE_REFRESH_PREFIX = `${REDIS_KEY_PREFIX}mobile:refresh:`;
 const DEFAULT_REFRESH_TTL_SECONDS = 24 * 60 * 60;
@@ -46,58 +51,15 @@ const RESEND_COOLDOWN_SECONDS = 60;
 const RESEND_COOLDOWN_KEY_PREFIX = `${REDIS_KEY_PREFIX}otp:resend:`;
 const ADMIN_RESEND_COOLDOWN_KEY_PREFIX = `${REDIS_KEY_PREFIX}admin:otp:resend:`;
 
-/**
- * How many wrong guesses one code survives.
- *
- * There was no limit at all: a 6-digit code lives five minutes, and nothing but
- * the global per-IP throttle stood between it and a client simply trying them.
- * After this many misses the code is destroyed, so the guesser has to request
- * another — and requests are capped per identifier below.
- */
-const OTP_MAX_ATTEMPTS = 5;
+// The attempt limit, send cap and check-and-delete script live in otp-store.ts,
+// shared with the field-agent login.
 const OTP_ATTEMPTS_KEY_PREFIX = `${REDIS_KEY_PREFIX}otp-attempts:`;
 const ADMIN_OTP_ATTEMPTS_KEY_PREFIX = `${REDIS_KEY_PREFIX}admin:otp-attempts:`;
-
-/**
- * How many codes one identifier may be sent per window.
- *
- * The other half of the attempt limit: without it a guesser resets their five
- * tries by asking for a fresh code. It also bounds what an anonymous caller can
- * spend on somebody else's number — every WhatsApp code is a paid template.
- */
-const OTP_MAX_SENDS = 5;
-const OTP_SEND_WINDOW_SECONDS = 15 * 60;
 const OTP_SENDS_KEY_PREFIX = `${REDIS_KEY_PREFIX}otp-sends:`;
 const ADMIN_OTP_SENDS_KEY_PREFIX = `${REDIS_KEY_PREFIX}admin:otp-sends:`;
 
 const TOTP_MAX_ATTEMPTS = 5;
 const TOTP_ATTEMPTS_PREFIX = `${REDIS_KEY_PREFIX}admin:totp:attempts:`;
-
-/**
- * KEYS[1] the code, KEYS[2] its miss counter.
- * ARGV[1] the guess, ARGV[2] the miss limit, ARGV[3] the counter's TTL.
- *
- * Returns 1 on a match (code and counter deleted), 0 on a miss or when there is
- * no code. The miss that reaches the limit deletes the code too, so every later
- * guess — the right one included — finds nothing.
- *
- * One script rather than a GET and an INCR: two round trips would let parallel
- * guesses all read the counter before any of them wrote it.
- */
-const LUA_VERIFY_AND_DELETE_OTP = `
-local v = redis.call('GET', KEYS[1])
-if v == false then return 0 end
-if v == ARGV[1] then
-  redis.call('DEL', KEYS[1], KEYS[2])
-  return 1
-end
-local misses = redis.call('INCR', KEYS[2])
-if misses == 1 then redis.call('EXPIRE', KEYS[2], ARGV[3]) end
-if misses >= tonumber(ARGV[2]) then
-  redis.call('DEL', KEYS[1], KEYS[2])
-end
-return 0
-`;
 
 type JwtExpiresIn = `${number}${'s' | 'm' | 'h' | 'd'}` | `${number}`;
 
@@ -788,8 +750,7 @@ export class AuthService {
     attemptsKey: string,
     otp: string,
   ): Promise<void> {
-    await this.redis.set(otpKey, otp, 'EX', OTP_TTL_SECONDS);
-    await this.redis.del(attemptsKey);
+    await storeOtp(this.redis, otpKey, attemptsKey, otp);
   }
 
   /** True when the guess matches; the code is spent either way it ends. */
@@ -798,16 +759,7 @@ export class AuthService {
     attemptsKey: string,
     otp: string,
   ): Promise<boolean> {
-    const matched = await this.redis.eval(
-      LUA_VERIFY_AND_DELETE_OTP,
-      2,
-      otpKey,
-      attemptsKey,
-      otp,
-      OTP_MAX_ATTEMPTS,
-      OTP_TTL_SECONDS,
-    );
-    return matched === 1;
+    return consumeOtp(this.redis, otpKey, attemptsKey, otp);
   }
 
   /**
@@ -819,17 +771,7 @@ export class AuthService {
     prefix: string,
     identifier: string,
   ): Promise<void> {
-    const key = `${prefix}${identifier}`;
-    const sends = await this.redis.incr(key);
-    if (sends === 1) {
-      await this.redis.expire(key, OTP_SEND_WINDOW_SECONDS);
-    }
-    if (sends > OTP_MAX_SENDS) {
-      throw new HttpException(
-        'Trop de codes demandés. Veuillez réessayer dans quelques minutes.',
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
+    await assertCanSendOtp(this.redis, `${prefix}${identifier}`);
   }
 
   /**
@@ -876,7 +818,7 @@ export class AuthService {
    * fix, as the note in `referral/utils/referral-code.util.ts`.
    */
   private generateOtp(): string {
-    return randomInt(100000, 1000000).toString();
+    return generateOtp();
   }
 
   private async findProfileByEmail(email: string) {

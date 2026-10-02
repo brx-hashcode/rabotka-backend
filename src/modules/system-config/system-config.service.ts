@@ -229,6 +229,7 @@ export class SystemConfigService implements OnModuleInit {
   private static readonly UNIT_INTERVAL_KEYS = new Set([
     'matching.min_notification_score',
     'matching.recommendation_min_score',
+    'agent.candidate_min_score',
   ]);
 
   /**
@@ -804,6 +805,13 @@ export class SystemConfigService implements OnModuleInit {
       '1000',
     );
     return Number(val);
+  }
+
+  /** Threshold for the agent app's suggested workers — see the seeded key. */
+  async getAgentCandidateMinScore(): Promise<number> {
+    const val = await this.get('agent.candidate_min_score', '0.3');
+    const n = Number(val);
+    return Number.isFinite(n) ? n : 0.3;
   }
 
   async getRecommendationMinScore(): Promise<number> {

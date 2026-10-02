@@ -3,7 +3,7 @@ import { I18nMiddleware } from 'nestjs-i18n';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { apiReference } from '@scalar/nestjs-api-reference';
+import { apiDocsPage } from './common/docs/api-docs-page';
 import cookieParser from 'cookie-parser';
 import express from 'express';
 import * as path from 'node:path';
@@ -152,6 +152,10 @@ async function bootstrap() {
       scheme: 'bearer',
       bearerFormat: 'JWT',
     })
+    // Every operation, so a token entered once in the reference's
+    // Authentication panel is sent on all of them. Public routes simply
+    // ignore it; the docs page also captures login tokens by itself.
+    .addSecurityRequirements('bearer')
     .build();
 
   if (docsEnabled) {
@@ -159,55 +163,63 @@ async function bootstrap() {
 
     app.use(
       '/api-docs',
-      apiReference({
-        defaultOpenAllTags: true,
-        additionalHeaders: [
-          {
-            name: 'X-CSRF-TOKEN',
-            description: 'CSRF token',
-            required: true,
-          },
-        ],
-        hideClientButton: false,
+      // Our own page around Scalar: it adds the session script that fills in
+      // the CSRF token and the bearer token by itself — see
+      // common/docs/docs-session.script.ts.
+      apiDocsPage(
+        {
+          defaultOpenAllTags: true,
+          additionalHeaders: [
+            {
+              name: 'X-CSRF-TOKEN',
+              description:
+                'Filled in automatically once GET /api/v1/csrf has been called. Not needed with a Bearer token.',
+              required: false,
+            },
+          ],
+          hideClientButton: false,
 
-        showSidebar: true,
-        showDeveloperTools: environment === 'development' ? 'localhost' : false,
-        showToolbar: environment === 'development' ? 'localhost' : false,
-        operationTitleSource: 'summary',
-        theme: 'moon',
-        persistAuth: false,
-        // The reference page must not report usage to its vendor.
-        telemetry: false,
-        layout: 'classic',
-        isEditable: false,
-        isLoading: false,
-        hideModels: false,
-        documentDownloadType: 'both',
-        hideTestRequestButton: false,
-        hideSearch: false,
-        showOperationId: false,
-        hideDarkModeToggle: false,
-        withDefaultFonts: true,
-        expandAllModelSections: false,
-        expandAllResponses: false,
-        orderSchemaPropertiesBy: 'alpha',
-        orderRequiredPropertiesFirst: true,
-        _integration: 'nestjs',
-        darkMode: true,
-        spec: {
-          content: document,
-        },
-        defaultHttpClient: {
-          targetKey: 'js',
-          clientKey: 'fetch',
-        },
-        configuration: {
-          proxy:
-            environment === 'development'
-              ? `http://localhost:${port}`
-              : undefined,
-        },
-      } as Parameters<typeof apiReference>[0]),
+          showSidebar: true,
+          showDeveloperTools:
+            environment === 'development' ? 'localhost' : false,
+          showToolbar: environment === 'development' ? 'localhost' : false,
+          operationTitleSource: 'summary',
+          theme: 'moon',
+          persistAuth: false,
+          // The reference page must not report usage to its vendor.
+          telemetry: false,
+          layout: 'classic',
+          isEditable: false,
+          isLoading: false,
+          hideModels: false,
+          documentDownloadType: 'both',
+          hideTestRequestButton: false,
+          hideSearch: false,
+          showOperationId: false,
+          hideDarkModeToggle: false,
+          withDefaultFonts: true,
+          expandAllModelSections: false,
+          expandAllResponses: false,
+          orderSchemaPropertiesBy: 'alpha',
+          orderRequiredPropertiesFirst: true,
+          _integration: 'nestjs',
+          darkMode: true,
+          spec: {
+            content: document,
+          },
+          defaultHttpClient: {
+            targetKey: 'js',
+            clientKey: 'fetch',
+          },
+          configuration: {
+            proxy:
+              environment === 'development'
+                ? `http://localhost:${port}`
+                : undefined,
+          },
+        } as Parameters<typeof apiDocsPage>[0],
+        '/api/v1',
+      ),
     );
   }
 
