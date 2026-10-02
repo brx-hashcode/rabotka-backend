@@ -12,6 +12,10 @@ import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { BotNotificationService } from '../../bot/services/bot-notification.service';
 import { MatchingService } from '../../matching/matching.service';
+import {
+  rankWorkersForOffer,
+  type RankedWorkerRef,
+} from '../../matching/rank-workers-for-offer';
 import { EngineRolloutService } from '../../recommendation-engine/engine-rollout.service';
 import { InteractionEventService } from '../../recommendation-engine/interaction-event.service';
 import { RecommendationEngineService } from '../../recommendation-engine/recommendation-engine.service';
@@ -42,8 +46,6 @@ export type NotifyOutcome = {
   skippedAlreadySent: number;
   failed: number;
 };
-
-type RankedWorkerRef = { id: string; score: number };
 
 /**
  * Decides who hears about a new job offer, and tells them.
@@ -164,47 +166,28 @@ export class JobNotificationService {
   }
 
   /**
-   * Ranks the workers worth telling, on whichever engine this employer is
-   * bucketed onto.
-   *
-   * Bucketed by employer rather than by worker: bucketing per worker would split
-   * a single offer's fan-out across both rankers, and any comparison of
-   * notification-to-application conversion between the two would then be
-   * measuring a mixture of itself.
+   * Ranks the workers worth telling. The ranking itself is shared with the
+   * agent app's suggested candidates — see `rankWorkersForOffer`.
    */
-  private async rank(
+  private rank(
     offer: { id: string; employer_id: string },
     limit: number,
     minScore: number,
   ): Promise<RankedWorkerRef[]> {
-    if ((await this.rollout.versionFor(offer.employer_id)) === 'v2') {
-      try {
-        // No fallback on an empty result, unlike the feed controllers. There an
-        // empty list is a bug; here it is the whole point of `keepAtLeast: 0`,
-        // and falling through would restore the floored threshold this exists
-        // to escape. Only a throw falls back.
-        return await this.engine.recommendWorkersForJobOffer(offer.id, limit, {
-          minScore,
-          keepAtLeast: 0,
-          explore: false,
-          strictCategory: true,
-          requireVerified: await this.systemConfig.notifyRequiresVerified(),
-        });
-      } catch (err) {
-        this.logger.warn(
-          `v2 ranking failed for offer ${offer.id}, falling back to legacy`,
-          err instanceof Error ? err.message : String(err),
-        );
-      }
-    }
-
-    // Legacy keeps its caller-side threshold: its own `applyThreshold` is
-    // floored, so it returns its best few however bad they are.
-    const ranked = await this.matching.findMatchingWorkersForJob(
-      offer.id,
-      limit,
+    return rankWorkersForOffer(
+      {
+        matching: this.matching,
+        engine: this.engine,
+        rollout: this.rollout,
+        logger: this.logger,
+      },
+      offer,
+      {
+        limit,
+        minScore,
+        requireVerified: () => this.systemConfig.notifyRequiresVerified(),
+      },
     );
-    return ranked.filter((w) => w.score >= minScore);
   }
 
   /**

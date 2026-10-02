@@ -18,7 +18,12 @@ import { isSessionRevoked } from '../session-revocation';
 
 export interface JwtPayload {
   sub: string;
-  type?: 'profile' | 'admin';
+  /**
+   * `agent` tokens are minted by the field-agent login and accepted ONLY by
+   * `AgentAuthGuard`; this guard refuses them, so no profile or admin route can
+   * be reached with one whatever its own type check says.
+   */
+  type?: 'profile' | 'admin' | 'agent';
   jti?: string;
   iat?: number;
   exp?: number;
@@ -87,6 +92,13 @@ export class JwtAuthGuard implements CanActivate {
       }
 
       const tokenType = payload.type || 'profile';
+
+      // Signed with the same secret, so it verifies — but an agent is neither a
+      // profile nor an admin, and must not be mapped onto either. Covers the
+      // agent refresh token (`agent_refresh`) as well as the access token.
+      if (tokenType === 'agent' || String(tokenType).startsWith('agent')) {
+        throw new UnauthorizedException('Session invalide ou expirée');
+      }
 
       (request as AuthenticatedRequest).user = {
         ...(tokenType === 'profile'

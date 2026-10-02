@@ -7,6 +7,7 @@ export {
 } from './referral-rewarded';
 export { sendOtpEmail } from './otp';
 export { adminCreatedEmail } from './admin-created';
+export { agentCreatedEmail } from './agent-created';
 export { adminUpdatedEmail } from './admin-updated';
 export { kycApprovedEmail } from './kyc-approved';
 export { kycRejectedEmail } from './kyc-rejected';
