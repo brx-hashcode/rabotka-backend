@@ -257,3 +257,11 @@ export class AdminListAgentsDto {
   @Matches(/^[A-Z]{2}$/, { each: true, message: 'country must be an ISO code' })
   country?: string[];
 }
+
+export class CancelAgentCommissionDto {
+  @ApiProperty({ description: 'Why the commission is taken back; logged' })
+  @Transform(trim)
+  @IsString()
+  @Length(3, 500, { message: 'Indiquez la raison (3 à 500 caractères)' })
+  reason: string;
+}

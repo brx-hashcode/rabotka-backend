@@ -687,6 +687,7 @@ model Agent {
   call_logs      AgentCallLog[]
   phone_reveals  AgentPhoneReveal[]
   applications   Application[]
+  commissions    AgentCommission[]
 
   @@unique([id_document_type, id_document_number], name: "idx_agent_id_document")
   @@index([status], name: "idx_agent_status")
@@ -774,6 +775,54 @@ model AgentLedgerEntry {
   @@index([agent_id, bucket], name: "idx_agent_ledger_agent_bucket")
   @@index([agent_id, created_at(sort: Desc)], name: "idx_agent_ledger_agent_time")
   @@map("agent_ledger_entries")
+}
+
+enum AgentCommissionStatus {
+  /// Earned; the confirmation window is running.
+  PENDING
+  /// Released to the agent's withdrawable balance.
+  AVAILABLE
+  /// Taken back: the mission was cancelled or a no-show, or an admin cancelled it.
+  CANCELLED
+  /// The placement did not qualify (see `reason`). No money moved.
+  INELIGIBLE
+}
+
+/// One per placement an agent made: an application created from their
+/// invitation whose contact unlock completed. Created by the commission sweep,
+/// never by a request, so a retried payment cannot earn twice
+/// (`application_id` is unique).
+///
+/// `application_id`, `contact_unlock_attempt_id`, `job_offer_id` and
+/// `worker_id` carry no foreign key on purpose: like the ledger's
+/// `reference_id`, a money record must outlive whatever it points at.
+model AgentCommission {
+  id                        String                @id @default(uuid()) @db.Uuid
+  created_at                DateTime              @default(now())
+  updated_at                DateTime              @updatedAt
+  agent_id                  String                @db.Uuid
+  application_id            String                @unique @db.Uuid
+  contact_unlock_attempt_id String                @unique @db.Uuid
+  job_offer_id              String                @db.Uuid
+  worker_id                 String                @db.Uuid
+  /// Snapshot of agent.commission_per_placement_fcfa when earned; 0 when INELIGIBLE.
+  amount                    Decimal               @db.Decimal(10, 2)
+  status                    AgentCommissionStatus @default(PENDING)
+  /// When the money becomes withdrawable. Null while waiting for the mission
+  /// to complete (release event COMPLETED).
+  available_at              DateTime?             @db.Timestamptz
+  released_at               DateTime?             @db.Timestamptz
+  cancelled_at              DateTime?             @db.Timestamptz
+  /// Why it is INELIGIBLE or CANCELLED.
+  reason                    String?
+  /// The agent.commission_* settings in force when it was decided.
+  rules_snapshot            Json
+
+  agent Agent @relation(fields: [agent_id], references: [id], onDelete: Restrict)
+
+  @@index([status, available_at], name: "idx_agent_commission_status_available")
+  @@index([agent_id, created_at(sort: Desc)], name: "idx_agent_commission_agent_time")
+  @@map("agent_commissions")
 }
 
 /// Where one (job, worker) pair stands in an agent's pipeline.

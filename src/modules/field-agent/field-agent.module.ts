@@ -11,6 +11,8 @@ import { AdminAgentController } from './admin-agent.controller';
 import { AdminAgentService } from './admin-agent.service';
 import { AgentAuthController } from './agent-auth.controller';
 import { AgentAuthService } from './agent-auth.service';
+import { AgentCommissionScheduler } from './agent-commission.scheduler';
+import { AgentCommissionService } from './agent-commission.service';
 import { AgentInviteService } from './agent-invite.service';
 import { AgentLeadService } from './agent-lead.service';
 import { AgentPortalController } from './agent-portal.controller';
@@ -56,6 +58,8 @@ import { ProfileAgentInviteController } from './profile-agent-invite.controller'
     AgentStatsService,
     AgentLeadService,
     AgentInviteService,
+    AgentCommissionService,
+    AgentCommissionScheduler,
     AgentAuthGuard,
   ],
 })

@@ -330,6 +330,50 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    key: 'agent.commission_per_placement_fcfa',
+    value: '400',
+    category: ConfigCategory.AGENT,
+    label: 'Commission de l’agent par placement (FCFA)',
+    isSecret: false,
+  },
+  {
+    key: 'agent.commission_release_event',
+    value: 'UNLOCKED',
+    category: ConfigCategory.AGENT,
+    label:
+      'Événement qui démarre le délai de confirmation (UNLOCKED ou COMPLETED)',
+    isSecret: false,
+  },
+  {
+    key: 'agent.commission_confirmation_hours',
+    value: '72',
+    category: ConfigCategory.AGENT,
+    label:
+      'Délai de confirmation avant que la commission soit retirable (heures)',
+    isSecret: false,
+  },
+  {
+    key: 'agent.commission_requires_momo_worker',
+    value: 'true',
+    category: ConfigCategory.AGENT,
+    label: 'Exiger un paiement Mobile Money du travailleur',
+    isSecret: false,
+  },
+  {
+    key: 'agent.commission_requires_momo_employer',
+    value: 'true',
+    category: ConfigCategory.AGENT,
+    label: 'Exiger un paiement Mobile Money de l’employeur',
+    isSecret: false,
+  },
+  {
+    key: 'agent.commission_multi_seat_mode',
+    value: 'PER_PLACEMENT',
+    category: ConfigCategory.AGENT,
+    label: 'Offres à plusieurs postes : commission par placement ou une seule',
+    isSecret: false,
+  },
+  {
     key: 'matching.cf_enabled',
     value: 'false',
     category: ConfigCategory.MATCHING,

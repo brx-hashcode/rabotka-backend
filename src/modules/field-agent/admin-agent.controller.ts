@@ -28,7 +28,12 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { AgentLeadStatus, KycDocumentCategory, UserRole } from '@prisma/client';
+import {
+  AgentCommissionStatus,
+  AgentLeadStatus,
+  KycDocumentCategory,
+  UserRole,
+} from '@prisma/client';
 import type { Response } from 'express';
 import { ALLOWED_IMAGE_MIME_TYPES } from '../../common/constants/image-upload';
 import { imageMulterOptions } from '../../common/utils/image-upload.util';
@@ -42,6 +47,7 @@ import type {
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { LogService } from '../log/log.service';
 import { AdminAgentService, AgentStatusAction } from './admin-agent.service';
+import { AgentCommissionService } from './agent-commission.service';
 import { AgentLeadService } from './agent-lead.service';
 import { AgentWalletService } from './agent-wallet.service';
 import {
@@ -52,6 +58,7 @@ import {
 import {
   AdminListAgentsDto,
   AgentStatusReasonDto,
+  CancelAgentCommissionDto,
   CreateAgentDto,
   ReplaceAgentAvatarDto,
   ReplaceAgentKycDocumentDto,
@@ -89,6 +96,7 @@ export class AdminAgentController {
     private readonly wallet: AgentWalletService,
     private readonly stats: AgentStatsService,
     private readonly leads: AgentLeadService,
+    private readonly commissions: AgentCommissionService,
   ) {}
 
   @Post('uploads/kyc')
@@ -261,6 +269,57 @@ export class AdminAgentController {
       page: Math.max(page, 1),
       limit: Math.min(Math.max(limit, 1), 100),
     });
+  }
+
+  /**
+   * One row per placement: earned, released, cancelled — or ineligible, with
+   * the reason. MANAGER like the wallet: it is money.
+   */
+  @Get(':id/commissions')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: "Agent's commissions, one per placement" })
+  @ApiQuery({ name: 'status', required: false, enum: AgentCommissionStatus })
+  async getCommissions(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query(
+      'status',
+      new ParseEnumPipe(AgentCommissionStatus, { optional: true }),
+    )
+    status?: AgentCommissionStatus,
+  ) {
+    await this.agents.getDetail(id);
+    return this.commissions.list(id, {
+      status,
+      page: Math.max(page, 1),
+      limit: Math.min(Math.max(limit, 1), 100),
+    });
+  }
+
+  /**
+   * Takes a commission back (a placement found to be fake). From the pending
+   * balance, or from the available one while it still covers it. ADMIN only.
+   */
+  @Post(':id/commissions/:commissionId/cancel')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Cancel a pending or available commission' })
+  @ApiResponse({
+    status: 409,
+    description: 'Already settled, or no longer covered by the balance',
+  })
+  cancelCommission(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('commissionId', ParseUUIDPipe) commissionId: string,
+    @Body() dto: CancelAgentCommissionDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
+    return this.commissions.adminCancel(
+      id,
+      commissionId,
+      dto.reason,
+      req.user.userId,
+    );
   }
 
   /**
