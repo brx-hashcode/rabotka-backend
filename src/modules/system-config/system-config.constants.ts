@@ -355,6 +355,62 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    // Paid to the agent for each placement that reaches a completed contact
+    // unlock. Snapshotted on the commission, so changing it never rewrites
+    // what was already earned. 0 turns commissions off.
+    key: 'agent.commission_per_placement_fcfa',
+    value: '400',
+    category: ConfigCategory.AGENT,
+    label: 'Commission de l’agent par placement (FCFA)',
+    isSecret: false,
+  },
+  {
+    // What starts the confirmation window: UNLOCKED (both parties paid) or
+    // COMPLETED (the mission was marked done).
+    key: 'agent.commission_release_event',
+    value: 'UNLOCKED',
+    category: ConfigCategory.AGENT,
+    label:
+      'Événement qui démarre le délai de confirmation (UNLOCKED ou COMPLETED)',
+    isSecret: false,
+  },
+  {
+    // Hours after that event before the commission can be withdrawn. A
+    // mission cancelled or a no-show in the meantime cancels it.
+    key: 'agent.commission_confirmation_hours',
+    value: '72',
+    category: ConfigCategory.AGENT,
+    label:
+      'Délai de confirmation avant que la commission soit retirable (heures)',
+    isSecret: false,
+  },
+  {
+    // Only placements the worker paid by Mobile Money earn — not wallet
+    // credit the platform itself issued.
+    key: 'agent.commission_requires_momo_worker',
+    value: 'true',
+    category: ConfigCategory.AGENT,
+    label: 'Exiger un paiement Mobile Money du travailleur',
+    isSecret: false,
+  },
+  {
+    key: 'agent.commission_requires_momo_employer',
+    value: 'true',
+    category: ConfigCategory.AGENT,
+    label: 'Exiger un paiement Mobile Money de l’employeur',
+    isSecret: false,
+  },
+  {
+    // Multi-seat offers, where the employer pays once for every seat:
+    // PER_PLACEMENT — each placed worker earns; FIRST_ONLY — only the
+    // placement that carried the employer's payment does.
+    key: 'agent.commission_multi_seat_mode',
+    value: 'PER_PLACEMENT',
+    category: ConfigCategory.AGENT,
+    label: 'Offres à plusieurs postes : commission par placement ou une seule',
+    isSecret: false,
+  },
+  {
     key: 'matching.cf_enabled',
     value: 'false',
     category: ConfigCategory.MATCHING,

@@ -21,10 +21,12 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { AgentLeadStatus } from '@prisma/client';
+import { AgentCommissionStatus, AgentLeadStatus } from '@prisma/client';
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
 import { AgentAuthService } from './agent-auth.service';
+import { AgentCommissionService } from './agent-commission.service';
 import { AgentLeadService } from './agent-lead.service';
+import { AgentWalletService } from './agent-wallet.service';
 import { AgentPortalService } from './agent-portal.service';
 import { AgentLogCallDto } from './dto/agent-lead.dto';
 import {
@@ -53,6 +55,8 @@ export class AgentPortalController {
     private readonly portal: AgentPortalService,
     private readonly agentAuth: AgentAuthService,
     private readonly leads: AgentLeadService,
+    private readonly wallet: AgentWalletService,
+    private readonly commissions: AgentCommissionService,
   ) {}
 
   @Get('me')
@@ -188,5 +192,48 @@ export class AgentPortalController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.leads.invite(req.agent.agentId, id);
+  }
+
+  @Get('wallet')
+  @ApiOperation({
+    summary: 'My balance and its movements',
+    description:
+      'pending: earned, in the confirmation window · available: withdrawable · locked: in a withdrawal · paidOut: transferred.',
+  })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  async getWallet(
+    @Req() req: AgentAuthenticatedRequest,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+  ) {
+    const agentId = req.agent.agentId;
+    const [balance, entries] = await Promise.all([
+      this.wallet.getBalance(agentId),
+      this.wallet.listEntries(agentId, Math.max(page, 1), clamp(limit, 1, 50)),
+    ]);
+    return { balance, entries };
+  }
+
+  @Get('commissions')
+  @ApiOperation({ summary: 'My commissions, one per placement, newest first' })
+  @ApiQuery({ name: 'status', required: false, enum: AgentCommissionStatus })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  listCommissions(
+    @Req() req: AgentAuthenticatedRequest,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query(
+      'status',
+      new ParseEnumPipe(AgentCommissionStatus, { optional: true }),
+    )
+    status?: AgentCommissionStatus,
+  ) {
+    return this.commissions.list(req.agent.agentId, {
+      status,
+      page: Math.max(page, 1),
+      limit: clamp(limit, 1, 50),
+    });
   }
 }
