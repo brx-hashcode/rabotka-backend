@@ -1,12 +1,14 @@
 import { NotFoundException } from '@nestjs/common';
 import {
   AccountStatus,
+  AgentLeadStatus,
   ApplicationStatus,
   JobOfferStatus,
   ProfileType,
   VerificationStatus,
 } from '@prisma/client';
-import { AgentPortalService, jobsInZonesWhere } from '../agent-portal.service';
+import { AgentPortalService } from '../agent-portal.service';
+import { jobsInZonesWhere } from '../agent-zones';
 
 const ZONE = { country_code: 'CG', city: 'Brazzaville' };
 
@@ -76,6 +78,7 @@ describe('AgentPortalService', () => {
   let rollout: { versionFor: jest.Mock };
   let matching: { findMatchingWorkersForJob: jest.Mock };
   let engine: { recommendWorkersForJobOffer: jest.Mock };
+  let leads: { ensureLeads: jest.Mock };
   let service: AgentPortalService;
 
   beforeEach(() => {
@@ -93,6 +96,7 @@ describe('AgentPortalService', () => {
         findMany: jest.fn().mockResolvedValue([]),
       },
       profile: { findMany: jest.fn().mockResolvedValue([]) },
+      agentLead: { findMany: jest.fn().mockResolvedValue([]) },
     };
     rollout = { versionFor: jest.fn().mockResolvedValue('legacy') };
     matching = { findMatchingWorkersForJob: jest.fn().mockResolvedValue([]) };
@@ -100,12 +104,19 @@ describe('AgentPortalService', () => {
     const systemConfig = {
       getAgentCandidateMinScore: jest.fn().mockResolvedValue(0.3),
     };
+    leads = {
+      ensureLeads: jest.fn(
+        (_agent: string, _job: string, ids: string[]) =>
+          new Map(ids.map((id) => [id, { id: `lead-${id}` }])),
+      ),
+    };
     service = new AgentPortalService(
       prisma,
       systemConfig as any,
       matching as any,
       engine as any,
       rollout as any,
+      leads as any,
     );
   });
 
@@ -190,6 +201,26 @@ describe('AgentPortalService', () => {
       expect(prisma.application.findMany.mock.calls[0][0].where).toMatchObject({
         job_offer_id: 'job-1',
         status: { not: ApplicationStatus.CANCELLED },
+      });
+    });
+
+    it('drops workers an agent already closed, and attaches a lead to each one shown', async () => {
+      matching.findMatchingWorkersForJob.mockResolvedValue([
+        { id: 'w1', score: 0.9 },
+        { id: 'w2', score: 0.8 }, // declined earlier
+      ]);
+      prisma.profile.findMany.mockResolvedValue([worker('w1'), worker('w2')]);
+      prisma.agentLead.findMany.mockResolvedValue([{ worker_id: 'w2' }]);
+
+      const result = await service.getCandidates('agent-1', 'job-1', 10);
+
+      expect(result.map((c) => c.id)).toEqual(['w1']);
+      expect(result[0].lead).toEqual({ id: 'lead-w1' });
+      expect(leads.ensureLeads).toHaveBeenCalledWith('agent-1', 'job-1', [
+        'w1',
+      ]);
+      expect(prisma.agentLead.findMany.mock.calls[0][0].where.status).toEqual({
+        in: [AgentLeadStatus.DECLINED, AgentLeadStatus.UNREACHABLE],
       });
     });
 

@@ -264,7 +264,7 @@ const STATS_TIMEZONE = 'Africa/Brazzaville';
 /**
  * Open offers with the location the agent app filters on: the offer's own
  * city and country, or — when the offer names no city — the employer's.
- * Mirrors `jobsInZonesWhere` in agent-portal.service.ts.
+ * Mirrors `jobsInZonesWhere` in agent-zones.ts.
  */
 const OPEN_JOBS_SQL = Prisma.sql`
     SELECT

@@ -4,11 +4,14 @@ import { AdminAgentController } from '../admin-agent.controller';
 import { AdminAgentService } from '../admin-agent.service';
 import { AgentAuthController } from '../agent-auth.controller';
 import { AgentAuthService } from '../agent-auth.service';
+import { AgentInviteService } from '../agent-invite.service';
+import { AgentLeadService } from '../agent-lead.service';
 import { AgentPortalController } from '../agent-portal.controller';
 import { AgentPortalService } from '../agent-portal.service';
 import { AgentWalletService } from '../agent-wallet.service';
 import { FieldAgentModule } from '../field-agent.module';
 import { AgentAuthGuard } from '../guards/agent-auth.guard';
+import { ProfileAgentInviteController } from '../profile-agent-invite.controller';
 
 describe('FieldAgentModule', () => {
   it('registers the agent-app, login and back-office controllers', () => {
@@ -21,6 +24,7 @@ describe('FieldAgentModule', () => {
         AgentAuthController,
         AgentPortalController,
         AdminAgentController,
+        ProfileAgentInviteController,
       ]),
     );
   });
@@ -38,6 +42,8 @@ describe('FieldAgentModule', () => {
         AgentPortalService,
         AdminAgentService,
         AgentWalletService,
+        AgentLeadService,
+        AgentInviteService,
         AgentAuthGuard,
       ]),
     );

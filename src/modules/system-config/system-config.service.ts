@@ -218,6 +218,9 @@ export class SystemConfigService implements OnModuleInit {
     'fees.welcome_credit_worker',
     'fees.welcome_credit_employer',
     'matching.max_notification_workers',
+    'agent.phone_reveal_daily_cap',
+    'agent.lead_claim_hours',
+    'agent.invite_expiry_hours',
   ]);
 
   /**
@@ -805,6 +808,28 @@ export class SystemConfigService implements OnModuleInit {
       '1000',
     );
     return Number(val);
+  }
+
+  /** The field-agent pipeline settings, read together by the lead service. */
+  async getAgentLeadSettings(): Promise<{
+    revealDailyCap: number;
+    claimHours: number;
+    inviteExpiryHours: number;
+  }> {
+    const [cap, claim, invite] = await Promise.all([
+      this.get('agent.phone_reveal_daily_cap', '30'),
+      this.get('agent.lead_claim_hours', '24'),
+      this.get('agent.invite_expiry_hours', '48'),
+    ]);
+    const int = (v: string, d: number) => {
+      const n = Number.parseInt(v, 10);
+      return Number.isFinite(n) && n > 0 ? n : d;
+    };
+    return {
+      revealDailyCap: int(cap, 30),
+      claimHours: int(claim, 24),
+      inviteExpiryHours: int(invite, 48),
+    };
   }
 
   /** Threshold for the agent app's suggested workers — see the seeded key. */

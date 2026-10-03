@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ApplicationModule } from '../application/application.module';
 import { AuthModule } from '../auth/auth.module';
 import { FileModule } from '../file/file.module';
 import { LogModule } from '../log/log.module';
@@ -10,11 +11,14 @@ import { AdminAgentController } from './admin-agent.controller';
 import { AdminAgentService } from './admin-agent.service';
 import { AgentAuthController } from './agent-auth.controller';
 import { AgentAuthService } from './agent-auth.service';
+import { AgentInviteService } from './agent-invite.service';
+import { AgentLeadService } from './agent-lead.service';
 import { AgentPortalController } from './agent-portal.controller';
 import { AgentPortalService } from './agent-portal.service';
 import { AgentWalletService } from './agent-wallet.service';
 import { AgentStatsService } from './agent-stats.service';
 import { AgentAuthGuard } from './guards/agent-auth.guard';
+import { ProfileAgentInviteController } from './profile-agent-invite.controller';
 
 /**
  * Field agents: the people who call workers on Rabotka's behalf, from their
@@ -30,6 +34,7 @@ import { AgentAuthGuard } from './guards/agent-auth.guard';
 @Module({
   imports: [
     ConfigModule,
+    ApplicationModule,
     forwardRef(() => AuthModule),
     FileModule,
     LogModule,
@@ -41,6 +46,7 @@ import { AgentAuthGuard } from './guards/agent-auth.guard';
     AgentAuthController,
     AgentPortalController,
     AdminAgentController,
+    ProfileAgentInviteController,
   ],
   providers: [
     AgentAuthService,
@@ -48,6 +54,8 @@ import { AgentAuthGuard } from './guards/agent-auth.guard';
     AdminAgentService,
     AgentWalletService,
     AgentStatsService,
+    AgentLeadService,
+    AgentInviteService,
     AgentAuthGuard,
   ],
 })

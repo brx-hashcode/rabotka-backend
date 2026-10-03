@@ -327,6 +327,33 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Score minimum des travailleurs suggérés aux agents',
     isSecret: false,
   },
+  // ── AGENT ───────────────────────────────────────────────────────────────
+  {
+    // How many worker phone numbers one agent may reveal per day (Brazzaville
+    // days). Every reveal is logged; the cap bounds what a single account can
+    // harvest.
+    key: 'agent.phone_reveal_daily_cap',
+    value: '30',
+    category: ConfigCategory.AGENT,
+    label: 'Numéros de travailleurs révélés par agent et par jour',
+    isSecret: false,
+  },
+  {
+    // How long an agent holds a lead without inviting the worker. After it,
+    // any agent covering the city may claim it.
+    key: 'agent.lead_claim_hours',
+    value: '24',
+    category: ConfigCategory.AGENT,
+    label: 'Durée de réservation d’un candidat par un agent (heures)',
+    isSecret: false,
+  },
+  {
+    key: 'agent.invite_expiry_hours',
+    value: '48',
+    category: ConfigCategory.AGENT,
+    label: 'Validité du lien d’invitation envoyé au travailleur (heures)',
+    isSecret: false,
+  },
   {
     key: 'matching.cf_enabled',
     value: 'false',

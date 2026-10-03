@@ -24,10 +24,11 @@ import {
   ApiConsumes,
   ApiCookieAuth,
   ApiOperation,
+  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { KycDocumentCategory, UserRole } from '@prisma/client';
+import { AgentLeadStatus, KycDocumentCategory, UserRole } from '@prisma/client';
 import type { Response } from 'express';
 import { ALLOWED_IMAGE_MIME_TYPES } from '../../common/constants/image-upload';
 import { imageMulterOptions } from '../../common/utils/image-upload.util';
@@ -41,6 +42,7 @@ import type {
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { LogService } from '../log/log.service';
 import { AdminAgentService, AgentStatusAction } from './admin-agent.service';
+import { AgentLeadService } from './agent-lead.service';
 import { AgentWalletService } from './agent-wallet.service';
 import {
   AgentStatsService,
@@ -86,6 +88,7 @@ export class AdminAgentController {
     private readonly logService: LogService,
     private readonly wallet: AgentWalletService,
     private readonly stats: AgentStatsService,
+    private readonly leads: AgentLeadService,
   ) {}
 
   @Post('uploads/kyc')
@@ -222,6 +225,42 @@ export class AdminAgentController {
   @ApiOperation({ summary: 'Agent activity timeline (latest 50)' })
   getLogs(@Param('id', ParseUUIDPipe) id: string) {
     return this.logService.getByEntity('Agent', id);
+  }
+
+  /** The agent's leads with their call history, and counts per status. */
+  @Get(':id/leads')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({ summary: "Agent's leads and calls" })
+  @ApiQuery({ name: 'status', required: false, enum: AgentLeadStatus })
+  async getLeads(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('status', new ParseEnumPipe(AgentLeadStatus, { optional: true }))
+    status?: AgentLeadStatus,
+  ) {
+    await this.agents.getDetail(id); // 404 for an unknown agent
+    return this.leads.adminListLeads(id, {
+      status,
+      page: Math.max(page, 1),
+      limit: Math.min(Math.max(limit, 1), 100),
+    });
+  }
+
+  /** Every worker number the agent revealed, with today's count against the cap. */
+  @Get(':id/reveals')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({ summary: 'Phone numbers the agent revealed' })
+  async getReveals(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+  ) {
+    await this.agents.getDetail(id);
+    return this.leads.adminListReveals(id, {
+      page: Math.max(page, 1),
+      limit: Math.min(Math.max(limit, 1), 100),
+    });
   }
 
   /**
