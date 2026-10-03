@@ -317,9 +317,15 @@ export class ApplicationService {
     private readonly jobEvents: JobEventsGateway,
   ) {}
 
+  /**
+   * `options.agentId`: the field agent whose invitation the worker accepted.
+   * Recorded on the application so the placement can be attributed; every
+   * check below applies exactly as when a worker applies alone.
+   */
   async create(
     jobOfferId: string,
     workerId: string,
+    options: { agentId?: string } = {},
   ): Promise<ApplicationListItem> {
     const [jobOffer, worker] = await Promise.all([
       this.prisma.jobOffer.findUnique({
@@ -457,6 +463,7 @@ export class ApplicationService {
           job_offer_id: jobOfferId,
           worker_id: workerId,
           status: ApplicationStatus.PENDING,
+          ...(options.agentId ? { agent_id: options.agentId } : {}),
         },
         include: { job_offer: true },
       });

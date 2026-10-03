@@ -1,10 +1,15 @@
 import {
+  Body,
   Controller,
   DefaultValuePipe,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
+  ParseEnumPipe,
   ParseIntPipe,
   ParseUUIDPipe,
+  Post,
   Query,
   Req,
   UseGuards,
@@ -16,8 +21,12 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { AgentLeadStatus } from '@prisma/client';
+import { extractRequestMeta } from '../../common/utils/request-meta.util';
 import { AgentAuthService } from './agent-auth.service';
+import { AgentLeadService } from './agent-lead.service';
 import { AgentPortalService } from './agent-portal.service';
+import { AgentLogCallDto } from './dto/agent-lead.dto';
 import {
   AgentAuthGuard,
   type AgentAuthenticatedRequest,
@@ -30,9 +39,10 @@ const clamp = (n: number, min: number, max: number) =>
  * The agent app's API. Bearer-authenticated agents only (AgentAuthGuard);
  * nothing here accepts a profile or admin session.
  *
- * Read-only for now: browse the jobs in your zones and the workers suggested
- * for them. Every response is built from agent-selects.ts — no employer
- * contact, no worker phone.
+ * Browse the jobs in your zones and the workers suggested for them, then work
+ * those workers as leads: claim, reveal the number, log calls, send the
+ * invitation. Every response is built from whitelisted selects — no employer
+ * contact, and a worker's phone only through the logged, capped reveal.
  */
 @ApiTags('Agent – App')
 @Controller('agent')
@@ -42,6 +52,7 @@ export class AgentPortalController {
   constructor(
     private readonly portal: AgentPortalService,
     private readonly agentAuth: AgentAuthService,
+    private readonly leads: AgentLeadService,
   ) {}
 
   @Get('me')
@@ -96,5 +107,86 @@ export class AgentPortalController {
       id,
       clamp(limit, 1, 50),
     );
+  }
+
+  @Get('leads')
+  @ApiOperation({ summary: 'My leads, most recently worked first' })
+  @ApiQuery({ name: 'status', required: false, enum: AgentLeadStatus })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  listLeads(
+    @Req() req: AgentAuthenticatedRequest,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('status', new ParseEnumPipe(AgentLeadStatus, { optional: true }))
+    status?: AgentLeadStatus,
+  ) {
+    return this.leads.listMine(req.agent.agentId, {
+      status,
+      page: Math.max(page, 1),
+      limit: clamp(limit, 1, 50),
+    });
+  }
+
+  @Post('leads/:id/claim')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Take charge of a suggested worker',
+    description:
+      'First agent wins. The claim lapses after agent.lead_claim_hours without progress; claiming again renews it.',
+  })
+  @ApiResponse({ status: 409, description: 'Another agent holds this worker' })
+  claim(
+    @Req() req: AgentAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.leads.claim(req.agent.agentId, id);
+  }
+
+  @Post('leads/:id/reveal-phone')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "The worker's phone numbers (claimer only, logged)",
+    description:
+      'Counts against agent.phone_reveal_daily_cap — distinct workers per day, Brazzaville time.',
+  })
+  @ApiResponse({ status: 429, description: 'Daily cap reached' })
+  revealPhone(
+    @Req() req: AgentAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.leads.revealPhone(
+      req.agent.agentId,
+      id,
+      extractRequestMeta(req).ipAddress,
+    );
+  }
+
+  @Post('leads/:id/calls')
+  @ApiOperation({
+    summary: 'Record a call and its outcome (claimer only)',
+    description:
+      'NOT_INTERESTED closes the lead as DECLINED; UNREACHABLE and WRONG_NUMBER as UNREACHABLE. Any other outcome renews the claim.',
+  })
+  logCall(
+    @Req() req: AgentAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AgentLogCallDto,
+  ) {
+    return this.leads.logCall(req.agent.agentId, id, dto.outcome, dto.note);
+  }
+
+  @Post('leads/:id/invite')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get the invitation link to send the worker (claimer only)',
+    description:
+      'Returns the link, a ready message, and a WhatsApp share link once the number was revealed. A new link replaces the previous one.',
+  })
+  invite(
+    @Req() req: AgentAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.leads.invite(req.agent.agentId, id);
   }
 }

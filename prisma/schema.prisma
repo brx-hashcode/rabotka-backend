@@ -309,6 +309,8 @@ enum ConfigCategory {
   CONTACT
   STORAGE
   GENERAL
+  /// Field agents: phone-reveal cap, claim and invitation lifetimes.
+  AGENT
 }
 
 enum InteractionActor {
@@ -565,6 +567,8 @@ model Profile {
   interaction_events              InteractionEvent[]            @relation("InteractionActor")
   interaction_profile             InteractionProfile?
   referrals_made                  Referral[]                    @relation("ReferralReferrer")
+  agent_leads                     AgentLead[]
+  agent_phone_reveals             AgentPhoneReveal[]
   referral_received               Referral?                     @relation("ReferralReferee")
   oauth_authorizations            OAuthAuthorization[]
   identity_checks                 IdentityCheck[]
@@ -679,6 +683,10 @@ model Agent {
   zones          AgentZone[]
   kyc_documents  AgentKycDocument[]
   ledger_entries AgentLedgerEntry[]
+  leads_claimed  AgentLead[]        @relation("AgentLeadClaimer")
+  call_logs      AgentCallLog[]
+  phone_reveals  AgentPhoneReveal[]
+  applications   Application[]
 
   @@unique([id_document_type, id_document_number], name: "idx_agent_id_document")
   @@index([status], name: "idx_agent_status")
@@ -766,6 +774,110 @@ model AgentLedgerEntry {
   @@index([agent_id, bucket], name: "idx_agent_ledger_agent_bucket")
   @@index([agent_id, created_at(sort: Desc)], name: "idx_agent_ledger_agent_time")
   @@map("agent_ledger_entries")
+}
+
+/// Where one (job, worker) pair stands in an agent's pipeline.
+enum AgentLeadStatus {
+  /// Shown to agents as a candidate; nobody is working it.
+  SUGGESTED
+  /// An agent holds it until `claim_expires_at`; after that it is open again.
+  CLAIMED
+  /// The invitation link was issued; waiting on the worker.
+  INVITED
+  /// The worker accepted: the application exists (`application_id`).
+  CONFIRMED
+  /// The worker said no — on the phone or on the invitation.
+  DECLINED
+  /// Unreachable, or the number is wrong.
+  UNREACHABLE
+}
+
+/// What a call to a worker came to.
+enum AgentCallOutcome {
+  INTERESTED
+  NOT_AVAILABLE
+  NOT_INTERESTED
+  UNREACHABLE
+  WRONG_NUMBER
+  CALL_BACK
+}
+
+/// One worker suggested for one job, and the agent working it.
+///
+/// UNIQUE per (job, worker): at most one agent works a given worker for a given
+/// job, and the first to claim it wins — which is what makes "which agent
+/// placed this worker" unambiguous when the commission comes to be paid.
+///
+/// A claim is a lease, not ownership: once `claim_expires_at` passes without
+/// an invitation, any agent covering the city may claim the lead.
+model AgentLead {
+  id                  String          @id @default(uuid()) @db.Uuid
+  created_at          DateTime        @default(now())
+  updated_at          DateTime        @updatedAt
+  job_offer_id        String          @db.Uuid
+  worker_id           String          @db.Uuid
+  status              AgentLeadStatus @default(SUGGESTED)
+  claimed_by_agent_id String?         @db.Uuid
+  claimed_at          DateTime?
+  claim_expires_at    DateTime?
+  /// 32 random bytes, base64url. The invitation link carries it; only the
+  /// worker of this lead can redeem it.
+  invite_token        String?         @unique
+  invited_at          DateTime?
+  invite_expires_at   DateTime?
+  /// The application the worker created by accepting. Unique: one placement
+  /// per lead.
+  application_id      String?         @unique @db.Uuid
+  decided_at          DateTime?
+
+  job_offer   JobOffer           @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
+  worker      Profile            @relation(fields: [worker_id], references: [id], onDelete: Cascade)
+  claimed_by  Agent?             @relation("AgentLeadClaimer", fields: [claimed_by_agent_id], references: [id], onDelete: SetNull)
+  application Application?       @relation(fields: [application_id], references: [id], onDelete: SetNull)
+  calls       AgentCallLog[]
+  reveals     AgentPhoneReveal[]
+
+  @@unique([job_offer_id, worker_id], name: "idx_agent_lead_job_worker")
+  @@index([claimed_by_agent_id, status], name: "idx_agent_lead_agent_status")
+  @@index([job_offer_id, status], name: "idx_agent_lead_job_status")
+  @@map("agent_leads")
+}
+
+/// One call an agent made about a lead. Append-only.
+model AgentCallLog {
+  id         String           @id @default(uuid()) @db.Uuid
+  created_at DateTime         @default(now())
+  lead_id    String           @db.Uuid
+  agent_id   String           @db.Uuid
+  outcome    AgentCallOutcome
+  note       String?
+
+  lead  AgentLead @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  agent Agent     @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+
+  @@index([lead_id, created_at], name: "idx_agent_call_lead_time")
+  @@index([agent_id, created_at], name: "idx_agent_call_agent_time")
+  @@map("agent_call_logs")
+}
+
+/// One time an agent was shown a worker's phone number. Append-only; the
+/// daily cap counts these rows, and support answers "who had my number" from
+/// them.
+model AgentPhoneReveal {
+  id         String   @id @default(uuid()) @db.Uuid
+  created_at DateTime @default(now())
+  agent_id   String   @db.Uuid
+  lead_id    String   @db.Uuid
+  worker_id  String   @db.Uuid
+  ip_address String?
+
+  agent  Agent     @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+  lead   AgentLead @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  worker Profile   @relation(fields: [worker_id], references: [id], onDelete: Cascade)
+
+  @@index([agent_id, created_at], name: "idx_agent_reveal_agent_time")
+  @@index([worker_id, created_at], name: "idx_agent_reveal_worker_time")
+  @@map("agent_phone_reveals")
 }
 
 model AgentKycDocument {
@@ -1042,6 +1154,7 @@ model JobOffer {
   contact_unlock_attempts ContactUnlockAttempt[]
   contact_records         ContactRecord[]
   saved_by                SavedJob[]
+  agent_leads             AgentLead[]
   deleted_at              DateTime?              @db.Timestamptz
 
   @@index([employer_id], name: "idx_job_offer_employer")
@@ -1091,6 +1204,11 @@ model Application {
   assignment             Assignment?
   contact_unlock_attempt ContactUnlockAttempt?
   contract               Contract?
+  /// The field agent who brought this worker, when the application came from
+  /// an agent invitation. Null for every application a worker made alone.
+  agent_id               String?               @db.Uuid
+  agent                  Agent?                @relation(fields: [agent_id], references: [id], onDelete: SetNull)
+  agent_lead             AgentLead?
   /// Threads that last showed this application as their context. Plural since
   /// conversations became one per pair: the key is the pair, not this row.
   conversations          ProfileConversation[]
