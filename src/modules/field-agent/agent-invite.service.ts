@@ -106,9 +106,11 @@ export class AgentInviteService {
         event: AdminNotificationEvent.AGENT_PLACEMENT,
         title: 'Nouveau placement agent',
         message: `${lead.claimed_by?.first_name ?? 'Un agent'} a placé ${workerName} sur « ${lead.job_offer.title} »`,
-        entityType: 'agent',
-        entityId: lead.claimed_by_agent_id,
-        metadata: { applicationId, workerId },
+        // The application, not the agent: that is what an admin opens next,
+        // and its detail names the agent.
+        entityType: 'agent-placement',
+        entityId: applicationId,
+        metadata: { agentId: lead.claimed_by_agent_id, workerId },
         timestamp: new Date().toISOString(),
       });
     } catch {

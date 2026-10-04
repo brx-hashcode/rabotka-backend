@@ -95,8 +95,8 @@ describe('AgentInviteService', () => {
     expect(events.emit).toHaveBeenCalledWith(
       'admin.notification.agent.placement',
       expect.objectContaining({
-        entityType: 'agent',
-        entityId: 'agent-1',
+        entityType: 'agent-placement',
+        entityId: 'app-1',
         message: 'Jean a placé Sophie Test sur « Plombier »',
       }),
     );
