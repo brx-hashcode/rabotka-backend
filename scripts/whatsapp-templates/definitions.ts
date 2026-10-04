@@ -50,6 +50,8 @@ export const AUTHORED_KEYS: ReadonlySet<WhatsAppTemplateName> = new Set([
   // The in-app messaging nudge. Same reasoning as the broadcast one: new,
   // Cloud-only, nothing to translate from.
   'newMessageNudge',
+  // A field agent's invitation to a worker. New, Cloud-only.
+  'agentInvitation',
 ]);
 
 /**
@@ -408,6 +410,41 @@ export function authoredTemplates(): Partial<
               text: 'Voir mes messages',
               url: 'https://rabotka.work/s/{{1}}',
               example: ['https://rabotka.work/s/discussions'],
+            },
+          ],
+        },
+      ],
+    },
+
+    /**
+     * A field agent's invitation, sent to the worker after the agent called
+     * them. Copy as written by the business; the button opens the worker's
+     * invitation page signed in (one-tap login code).
+     *
+     * UTILITY is asked for — it follows a call the worker took — but Meta may
+     * file it MARKETING (« nouvelle opportunité » reads as an offer), as it did
+     * for `rabotka_open_app_v2`.
+     */
+    agentInvitation: {
+      name: 'rabotka_agent_invitation_v1',
+      language: 'fr',
+      category: 'UTILITY',
+      components: [
+        {
+          type: 'BODY',
+          text: 'Bonjour {{1}}, c’est {{2}}, agent Rabotka. Je vous propose une nouvelle opportunité : « {{3}} ». Cliquez sur le bouton ci-dessous pour découvrir les détails et postuler.',
+          example: {
+            body_text: [['Sophie', 'Jean', 'Agent de sécurité événementiel']],
+          },
+        },
+        {
+          type: 'BUTTONS',
+          buttons: [
+            {
+              type: 'URL',
+              text: 'Voir l’offre',
+              url: 'https://rabotka.work/s/{{1}}',
+              example: ['https://rabotka.work/s/invitations-example'],
             },
           ],
         },

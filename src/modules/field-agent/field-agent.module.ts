@@ -6,6 +6,7 @@ import { FileModule } from '../file/file.module';
 import { LogModule } from '../log/log.module';
 import { MailModule } from '../mail/mail.module';
 import { MatchingModule } from '../matching/matching.module';
+import { NotificationDispatchModule } from '../notification-dispatch/notification-dispatch.module';
 import { RecommendationEngineModule } from '../recommendation-engine/recommendation-engine.module';
 import { AdminAgentWithdrawalController } from './admin-agent-withdrawal.controller';
 import { AdminAgentController } from './admin-agent.controller';
@@ -44,6 +45,7 @@ import { ProfileAgentInviteController } from './profile-agent-invite.controller'
     LogModule,
     MailModule,
     MatchingModule,
+    forwardRef(() => NotificationDispatchModule),
     RecommendationEngineModule,
   ],
   controllers: [

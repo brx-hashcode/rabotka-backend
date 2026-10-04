@@ -381,6 +381,13 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    key: 'agent.invite_whatsapp_enabled',
+    value: 'false',
+    category: ConfigCategory.AGENT,
+    label: 'Envoyer l’invitation de l’agent au travailleur par WhatsApp',
+    isSecret: false,
+  },
+  {
     key: 'matching.cf_enabled',
     value: 'false',
     category: ConfigCategory.MATCHING,
