@@ -148,8 +148,21 @@ export class LogService {
   }
 
   async getByProfileId(profileId: string): Promise<LogEntry[]> {
+    return this.findTimeline({ profile_id: profileId });
+  }
+
+  /**
+   * The timeline of a record that is not a profile — a field agent, today —
+   * keyed by the `entityType`/`entityId` its writers log under. Same shape and
+   * cap as the profile timeline, so the admin renders both with one component.
+   */
+  async getByEntity(entityType: string, entityId: string): Promise<LogEntry[]> {
+    return this.findTimeline({ entity_type: entityType, entity_id: entityId });
+  }
+
+  private async findTimeline(where: Prisma.LogWhereInput): Promise<LogEntry[]> {
     const logs = await this.prisma.log.findMany({
-      where: { profile_id: profileId },
+      where,
       orderBy: { created_at: 'desc' },
       select: {
         id: true,

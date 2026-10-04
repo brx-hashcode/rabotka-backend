@@ -9,6 +9,10 @@
  *   A provider cannot carry a CSRF token, and a 403 from this middleware means
  *   signature verification never runs and Meta retries against it for days.
  * - `auth/mobile` — the mobile app, which holds no cookie session.
+ * - `agent/auth` — the field-agent app's login, for the same reason: it holds
+ *   no cookie, and its tokens travel in the body and the Authorization header.
+ *   Everything else under `agent/` is Bearer-authenticated, which the
+ *   `isBearer` escape already covers.
  * - `oauth/token`, `oauth/revoke`, `oauth/userinfo` — called by a partner's
  *   BACKEND with HTTP Basic client credentials or a bearer token, neither of
  *   which a browser attaches ambiently. `/oauth/interaction/*` is deliberately
@@ -31,6 +35,7 @@ const CSRF_EXEMPT_PREFIXES = [
   '/api/v1/whatsapp/incoming',
   '/api/v1/webhooks/whatsapp',
   '/api/v1/auth/mobile',
+  '/api/v1/agent/auth',
   '/api/v1/oauth/token',
   '/api/v1/oauth/revoke',
   '/api/v1/oauth/userinfo',

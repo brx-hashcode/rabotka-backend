@@ -50,6 +50,23 @@ const REFERRAL_DEFAULTS: Record<string, string> = {
 const REFERRAL_COMMISSION_TYPES = ['FIXED', 'PERCENTAGE'] as const;
 const MAX_PERCENT = 100;
 
+const AGENT_COMMISSION_AMOUNT_KEY = 'agent.commission_per_placement_fcfa';
+const AGENT_COMMISSION_RELEASE_EVENTS = ['UNLOCKED', 'COMPLETED'] as const;
+const AGENT_COMMISSION_MULTI_SEAT_MODES = [
+  'PER_PLACEMENT',
+  'FIRST_ONLY',
+] as const;
+
+export type AgentCommissionSettings = {
+  amountFcfa: number;
+  /** What starts the confirmation window. */
+  releaseEvent: (typeof AGENT_COMMISSION_RELEASE_EVENTS)[number];
+  confirmationHours: number;
+  requiresMomoWorker: boolean;
+  requiresMomoEmployer: boolean;
+  multiSeatMode: (typeof AGENT_COMMISSION_MULTI_SEAT_MODES)[number];
+};
+
 /**
  * Fan-out width when the config says nothing. Kept in step with the seeded
  * value of `matching.max_notification_workers`.
@@ -218,6 +235,10 @@ export class SystemConfigService implements OnModuleInit {
     'fees.welcome_credit_worker',
     'fees.welcome_credit_employer',
     'matching.max_notification_workers',
+    'agent.phone_reveal_daily_cap',
+    'agent.lead_claim_hours',
+    'agent.invite_expiry_hours',
+    'agent.withdrawal_min_fcfa',
   ]);
 
   /**
@@ -229,6 +250,7 @@ export class SystemConfigService implements OnModuleInit {
   private static readonly UNIT_INTERVAL_KEYS = new Set([
     'matching.min_notification_score',
     'matching.recommendation_min_score',
+    'agent.candidate_min_score',
   ]);
 
   /**
@@ -240,7 +262,19 @@ export class SystemConfigService implements OnModuleInit {
   private static readonly NON_NEGATIVE_INT_KEYS = new Set([
     REFERRAL_MAX_REWARDED_KEY,
     REFERRAL_MAX_PAYOUT_KEY,
+    // 0 = commissions off.
+    AGENT_COMMISSION_AMOUNT_KEY,
+    // 0 = withdrawable as soon as the release event happens.
+    'agent.commission_confirmation_hours',
   ]);
+
+  /** Keys whose value is one of a fixed set; anything else is refused. */
+  private static readonly CHOICE_KEYS: Record<string, readonly string[]> = {
+    'agent.commission_release_event': AGENT_COMMISSION_RELEASE_EVENTS,
+    'agent.commission_multi_seat_mode': AGENT_COMMISSION_MULTI_SEAT_MODES,
+    'agent.commission_requires_momo_worker': ['true', 'false'],
+    'agent.commission_requires_momo_employer': ['true', 'false'],
+  };
 
   async set(key: string, value: string, adminId?: string): Promise<void> {
     await this.setMany({ [key]: value }, adminId);
@@ -273,6 +307,7 @@ export class SystemConfigService implements OnModuleInit {
       SystemConfigService.assertValueValid(key, value);
     }
     await this.assertReferralBlockCoherent(updates);
+    await this.assertAgentCommissionBelowFees(updates);
 
     // Read before writing: the stamp below is driven by the TRANSITION, not by
     // the new value, so re-saving `true` over `true` must not move it. Moving it
@@ -320,6 +355,12 @@ export class SystemConfigService implements OnModuleInit {
         );
       }
     }
+    const choices = SystemConfigService.CHOICE_KEYS[key];
+    if (choices && !choices.includes(value)) {
+      throw new BadRequestException(
+        `La valeur de "${key}" doit être ${choices.join(' ou ')}`,
+      );
+    }
     if (SystemConfigService.UNIT_INTERVAL_KEYS.has(key)) {
       const n = Number(value);
       if (!Number.isFinite(n) || n < 0 || n > 1) {
@@ -327,6 +368,37 @@ export class SystemConfigService implements OnModuleInit {
           `La valeur de "${key}" doit être un nombre entre 0 et 1`,
         );
       }
+    }
+  }
+
+  /**
+   * An agent's commission is paid out of what the placement brought in — the
+   * two contact-unlock fees — so it must stay below their sum, or Rabotka pays
+   * to place people. Checked against the state the write would leave, like
+   * the parrainage block, and only when it touches one of the three values.
+   */
+  private async assertAgentCommissionBelowFees(
+    updates: Record<string, string>,
+  ): Promise<void> {
+    const keys = [
+      AGENT_COMMISSION_AMOUNT_KEY,
+      'fees.contact_unlock_fee_employer',
+      'fees.contact_unlock_fee_worker',
+    ];
+    if (!keys.some((key) => key in updates)) return;
+
+    const stored = await this.mgetBatch([
+      { key: AGENT_COMMISSION_AMOUNT_KEY, fallback: '400' },
+      { key: 'fees.contact_unlock_fee_employer', fallback: '500' },
+      { key: 'fees.contact_unlock_fee_worker', fallback: '100' },
+    ]);
+    const [commission, employerFee, workerFee] = keys.map((key, i) =>
+      Number(updates[key] ?? stored[i]),
+    );
+    if (commission > 0 && commission >= employerFee + workerFee) {
+      throw new BadRequestException(
+        `La commission de l'agent (${commission} FCFA) doit rester inférieure au total des frais de déverrouillage (${employerFee + workerFee} FCFA)`,
+      );
     }
   }
 
@@ -804,6 +876,69 @@ export class SystemConfigService implements OnModuleInit {
       '1000',
     );
     return Number(val);
+  }
+
+  /** The field-agent pipeline settings, read together by the lead service. */
+  async getAgentLeadSettings(): Promise<{
+    revealDailyCap: number;
+    claimHours: number;
+    inviteExpiryHours: number;
+  }> {
+    const [cap, claim, invite] = await Promise.all([
+      this.get('agent.phone_reveal_daily_cap', '30'),
+      this.get('agent.lead_claim_hours', '24'),
+      this.get('agent.invite_expiry_hours', '48'),
+    ]);
+    const int = (v: string, d: number) => {
+      const n = Number.parseInt(v, 10);
+      return Number.isFinite(n) && n > 0 ? n : d;
+    };
+    return {
+      revealDailyCap: int(cap, 30),
+      claimHours: int(claim, 24),
+      inviteExpiryHours: int(invite, 48),
+    };
+  }
+
+  /** The smallest withdrawal an agent may request, in FCFA. */
+  async getAgentWithdrawalMinFcfa(): Promise<number> {
+    const raw = await this.get('agent.withdrawal_min_fcfa', '2000');
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : 2000;
+  }
+
+  /** The rules a placement's commission is decided and released by. */
+  async getAgentCommissionSettings(): Promise<AgentCommissionSettings> {
+    const [amount, event, hours, momoWorker, momoEmployer, multiSeat] =
+      await this.mgetBatch([
+        { key: AGENT_COMMISSION_AMOUNT_KEY, fallback: '400' },
+        { key: 'agent.commission_release_event', fallback: 'UNLOCKED' },
+        { key: 'agent.commission_confirmation_hours', fallback: '72' },
+        { key: 'agent.commission_requires_momo_worker', fallback: 'true' },
+        { key: 'agent.commission_requires_momo_employer', fallback: 'true' },
+        { key: 'agent.commission_multi_seat_mode', fallback: 'PER_PLACEMENT' },
+      ]);
+    const nonNegative = (v: string | null, d: number) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n >= 0 ? n : d;
+    };
+    return {
+      amountFcfa: nonNegative(amount, 400),
+      releaseEvent: event === 'COMPLETED' ? 'COMPLETED' : 'UNLOCKED',
+      confirmationHours: nonNegative(hours, 72),
+      // Anything but an explicit "false" keeps the safer rule on.
+      requiresMomoWorker: momoWorker !== 'false',
+      requiresMomoEmployer: momoEmployer !== 'false',
+      multiSeatMode:
+        multiSeat === 'FIRST_ONLY' ? 'FIRST_ONLY' : 'PER_PLACEMENT',
+    };
+  }
+
+  /** Threshold for the agent app's suggested workers — see the seeded key. */
+  async getAgentCandidateMinScore(): Promise<number> {
+    const val = await this.get('agent.candidate_min_score', '0.3');
+    const n = Number(val);
+    return Number.isFinite(n) ? n : 0.3;
   }
 
   async getRecommendationMinScore(): Promise<number> {

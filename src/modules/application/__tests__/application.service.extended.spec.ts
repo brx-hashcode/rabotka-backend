@@ -713,6 +713,57 @@ describe('ApplicationService (extended)', () => {
       expect(result.employerName).toBe('—');
     });
 
+    it('has no agent for an application the worker made alone', async () => {
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(adminApp);
+      const result = await service.getApplicationDetailForAdmin(APPLICATION_ID);
+      expect(result.agent).toBeNull();
+    });
+
+    it('names the agent who placed the worker, and the commission', async () => {
+      const invitedAt = new Date('2026-10-03T00:00:00Z');
+      const acceptedAt = new Date('2026-10-03T01:00:00Z');
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        ...adminApp,
+        agent: {
+          id: 'agent-1',
+          first_name: 'Jean',
+          last_name: 'Paul',
+          avatar_url: null,
+          phone: '+242064022567',
+          status: 'ACTIVE',
+        },
+        agent_lead: { invited_at: invitedAt, decided_at: acceptedAt },
+      });
+      (prisma as any).agentCommission = {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'com-1',
+          status: 'PENDING',
+          amount: 400,
+          available_at: null,
+          reason: null,
+        }),
+      };
+
+      const result = await service.getApplicationDetailForAdmin(APPLICATION_ID);
+      expect(result.agent).toEqual({
+        id: 'agent-1',
+        firstName: 'Jean',
+        lastName: 'Paul',
+        avatarUrl: null,
+        phone: '+242064022567',
+        status: 'ACTIVE',
+        invitedAt: invitedAt.toISOString(),
+        acceptedAt: acceptedAt.toISOString(),
+        commission: {
+          id: 'com-1',
+          status: 'PENDING',
+          amount: 400,
+          availableAt: null,
+          reason: null,
+        },
+      });
+    });
+
     it('handles null reliabilityScore', async () => {
       const noScoreApp = {
         ...adminApp,

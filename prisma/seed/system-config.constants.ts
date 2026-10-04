@@ -296,6 +296,91 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    key: 'agent.candidate_min_score',
+    value: '0.3',
+    category: ConfigCategory.MATCHING,
+    label: 'Score minimum des travailleurs suggérés aux agents',
+    isSecret: false,
+  },
+  // ── AGENT ───────────────────────────────────────────────────────────────
+  {
+    // How many worker phone numbers one agent may reveal per day (Brazzaville
+    // days). Every reveal is logged; the cap bounds what a single account can
+    // harvest.
+    key: 'agent.phone_reveal_daily_cap',
+    value: '30',
+    category: ConfigCategory.AGENT,
+    label: 'Numéros de travailleurs révélés par agent et par jour',
+    isSecret: false,
+  },
+  {
+    // How long an agent holds a lead without inviting the worker. After it,
+    // any agent covering the city may claim it.
+    key: 'agent.lead_claim_hours',
+    value: '24',
+    category: ConfigCategory.AGENT,
+    label: 'Durée de réservation d’un candidat par un agent (heures)',
+    isSecret: false,
+  },
+  {
+    key: 'agent.invite_expiry_hours',
+    value: '48',
+    category: ConfigCategory.AGENT,
+    label: 'Validité du lien d’invitation envoyé au travailleur (heures)',
+    isSecret: false,
+  },
+  {
+    key: 'agent.commission_per_placement_fcfa',
+    value: '400',
+    category: ConfigCategory.AGENT,
+    label: 'Commission de l’agent par placement (FCFA)',
+    isSecret: false,
+  },
+  {
+    key: 'agent.commission_release_event',
+    value: 'UNLOCKED',
+    category: ConfigCategory.AGENT,
+    label:
+      'Événement qui démarre le délai de confirmation (UNLOCKED ou COMPLETED)',
+    isSecret: false,
+  },
+  {
+    key: 'agent.commission_confirmation_hours',
+    value: '72',
+    category: ConfigCategory.AGENT,
+    label:
+      'Délai de confirmation avant que la commission soit retirable (heures)',
+    isSecret: false,
+  },
+  {
+    key: 'agent.commission_requires_momo_worker',
+    value: 'true',
+    category: ConfigCategory.AGENT,
+    label: 'Exiger un paiement Mobile Money du travailleur',
+    isSecret: false,
+  },
+  {
+    key: 'agent.commission_requires_momo_employer',
+    value: 'true',
+    category: ConfigCategory.AGENT,
+    label: 'Exiger un paiement Mobile Money de l’employeur',
+    isSecret: false,
+  },
+  {
+    key: 'agent.commission_multi_seat_mode',
+    value: 'PER_PLACEMENT',
+    category: ConfigCategory.AGENT,
+    label: 'Offres à plusieurs postes : commission par placement ou une seule',
+    isSecret: false,
+  },
+  {
+    key: 'agent.withdrawal_min_fcfa',
+    value: '2000',
+    category: ConfigCategory.AGENT,
+    label: 'Montant minimum d’un retrait agent (FCFA)',
+    isSecret: false,
+  },
+  {
     key: 'matching.cf_enabled',
     value: 'false',
     category: ConfigCategory.MATCHING,

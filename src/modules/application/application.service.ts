@@ -114,6 +114,29 @@ export type AdminApplicationDetailResponse = AdminApplicationListItem & {
   penalties: AdminApplicationPenaltyItem[];
   completionNote: string | null;
   contractId: string | null;
+  /**
+   * The field agent whose invitation the worker accepted, when there was one:
+   * who placed them, when, and what the placement earns the agent.
+   */
+  agent: AdminApplicationAgent | null;
+};
+
+export type AdminApplicationAgent = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  avatarUrl: string | null;
+  phone: string;
+  status: string;
+  invitedAt: string | null;
+  acceptedAt: string | null;
+  commission: {
+    id: string;
+    status: string;
+    amount: number;
+    availableAt: string | null;
+    reason: string | null;
+  } | null;
 };
 
 export type ApplicationListItem = {
@@ -317,9 +340,15 @@ export class ApplicationService {
     private readonly jobEvents: JobEventsGateway,
   ) {}
 
+  /**
+   * `options.agentId`: the field agent whose invitation the worker accepted.
+   * Recorded on the application so the placement can be attributed; every
+   * check below applies exactly as when a worker applies alone.
+   */
   async create(
     jobOfferId: string,
     workerId: string,
+    options: { agentId?: string } = {},
   ): Promise<ApplicationListItem> {
     const [jobOffer, worker] = await Promise.all([
       this.prisma.jobOffer.findUnique({
@@ -457,6 +486,7 @@ export class ApplicationService {
           job_offer_id: jobOfferId,
           worker_id: workerId,
           status: ApplicationStatus.PENDING,
+          ...(options.agentId ? { agent_id: options.agentId } : {}),
         },
         include: { job_offer: true },
       });
@@ -2700,12 +2730,38 @@ export class ApplicationService {
         contract: {
           select: { id: true },
         },
+        agent: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            avatar_url: true,
+            phone: true,
+            status: true,
+          },
+        },
+        agent_lead: {
+          select: { invited_at: true, decided_at: true },
+        },
       },
     });
 
     if (!app) {
       throw new NotFoundException('Candidature introuvable');
     }
+
+    const commission = app.agent
+      ? await this.prisma.agentCommission.findUnique({
+          where: { application_id: app.id },
+          select: {
+            id: true,
+            status: true,
+            amount: true,
+            available_at: true,
+            reason: true,
+          },
+        })
+      : null;
 
     return {
       id: app.id,
@@ -2751,6 +2807,27 @@ export class ApplicationService {
       })),
       completionNote: (app as any).assignment?.note ?? null,
       contractId: (app as any).contract?.id ?? null,
+      agent: app.agent
+        ? {
+            id: app.agent.id,
+            firstName: app.agent.first_name,
+            lastName: app.agent.last_name,
+            avatarUrl: app.agent.avatar_url,
+            phone: app.agent.phone,
+            status: app.agent.status,
+            invitedAt: app.agent_lead?.invited_at?.toISOString() ?? null,
+            acceptedAt: app.agent_lead?.decided_at?.toISOString() ?? null,
+            commission: commission
+              ? {
+                  id: commission.id,
+                  status: commission.status,
+                  amount: Number(commission.amount),
+                  availableAt: commission.available_at?.toISOString() ?? null,
+                  reason: commission.reason,
+                }
+              : null,
+          }
+        : null,
     };
   }
 

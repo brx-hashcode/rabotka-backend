@@ -7,6 +7,8 @@ describe('isCsrfExemptPath', () => {
     '/api/v1/webhooks/whatsapp/cloud?hub.mode=subscribe',
     '/api/v1/auth/mobile/send-otp',
     '/api/v1/auth/mobile/refresh',
+    '/api/v1/agent/auth/send-otp',
+    '/api/v1/agent/auth/verify-otp',
     '/api/v1/oauth/token',
     '/api/v1/oauth/revoke',
     '/api/v1/oauth/userinfo',
@@ -55,6 +57,9 @@ describe('isCsrfExemptPath', () => {
   it('protects everything else', () => {
     expect(isCsrfExemptPath('/api/v1/auth/logout')).toBe(false);
     expect(isCsrfExemptPath('/api/v1/admin/wallet/revenue')).toBe(false);
+    // Only the agent LOGIN is exempt; the rest of agent/ rides on Bearer.
+    expect(isCsrfExemptPath('/api/v1/agent/jobs')).toBe(false);
+    expect(isCsrfExemptPath('/api/v1/admin/agents')).toBe(false);
     expect(isCsrfExemptPath('/')).toBe(false);
     expect(isCsrfExemptPath('')).toBe(false);
   });

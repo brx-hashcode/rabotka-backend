@@ -70,6 +70,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { WsNotificationsModule } from './modules/ws-notifications/ws-notifications.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { ContactUnlockModule } from './modules/contact-unlock/contact-unlock.module';
+import { FieldAgentModule } from './modules/field-agent/field-agent.module';
 import { StorageModule } from './common/services/storage/storage.module';
 import { PaymentGatewayModule } from './common/services/payment/payment-gateway.module';
 import { AdvertisementModule } from './modules/advertisement/advertisement.module';
@@ -210,6 +211,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     WsNotificationsModule,
     AdvertisementModule,
     ChatModule,
+    FieldAgentModule,
   ],
   controllers: [AppController],
   providers: [

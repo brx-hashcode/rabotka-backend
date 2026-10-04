@@ -318,6 +318,109 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    // The agent app's suggested workers. Its own key rather than the employer
+    // feed's: a tight threshold chosen for what an employer is shown must not
+    // silently empty the list an agent is meant to call through.
+    key: 'agent.candidate_min_score',
+    value: '0.3',
+    category: ConfigCategory.MATCHING,
+    label: 'Score minimum des travailleurs suggérés aux agents',
+    isSecret: false,
+  },
+  // ── AGENT ───────────────────────────────────────────────────────────────
+  {
+    // How many worker phone numbers one agent may reveal per day (Brazzaville
+    // days). Every reveal is logged; the cap bounds what a single account can
+    // harvest.
+    key: 'agent.phone_reveal_daily_cap',
+    value: '30',
+    category: ConfigCategory.AGENT,
+    label: 'Numéros de travailleurs révélés par agent et par jour',
+    isSecret: false,
+  },
+  {
+    // How long an agent holds a lead without inviting the worker. After it,
+    // any agent covering the city may claim it.
+    key: 'agent.lead_claim_hours',
+    value: '24',
+    category: ConfigCategory.AGENT,
+    label: 'Durée de réservation d’un candidat par un agent (heures)',
+    isSecret: false,
+  },
+  {
+    key: 'agent.invite_expiry_hours',
+    value: '48',
+    category: ConfigCategory.AGENT,
+    label: 'Validité du lien d’invitation envoyé au travailleur (heures)',
+    isSecret: false,
+  },
+  {
+    // Paid to the agent for each placement that reaches a completed contact
+    // unlock. Snapshotted on the commission, so changing it never rewrites
+    // what was already earned. 0 turns commissions off.
+    key: 'agent.commission_per_placement_fcfa',
+    value: '400',
+    category: ConfigCategory.AGENT,
+    label: 'Commission de l’agent par placement (FCFA)',
+    isSecret: false,
+  },
+  {
+    // What starts the confirmation window: UNLOCKED (both parties paid) or
+    // COMPLETED (the mission was marked done).
+    key: 'agent.commission_release_event',
+    value: 'UNLOCKED',
+    category: ConfigCategory.AGENT,
+    label:
+      'Événement qui démarre le délai de confirmation (UNLOCKED ou COMPLETED)',
+    isSecret: false,
+  },
+  {
+    // Hours after that event before the commission can be withdrawn. A
+    // mission cancelled or a no-show in the meantime cancels it.
+    key: 'agent.commission_confirmation_hours',
+    value: '72',
+    category: ConfigCategory.AGENT,
+    label:
+      'Délai de confirmation avant que la commission soit retirable (heures)',
+    isSecret: false,
+  },
+  {
+    // Only placements the worker paid by Mobile Money earn — not wallet
+    // credit the platform itself issued.
+    key: 'agent.commission_requires_momo_worker',
+    value: 'true',
+    category: ConfigCategory.AGENT,
+    label: 'Exiger un paiement Mobile Money du travailleur',
+    isSecret: false,
+  },
+  {
+    key: 'agent.commission_requires_momo_employer',
+    value: 'true',
+    category: ConfigCategory.AGENT,
+    label: 'Exiger un paiement Mobile Money de l’employeur',
+    isSecret: false,
+  },
+  {
+    // Multi-seat offers, where the employer pays once for every seat:
+    // PER_PLACEMENT — each placed worker earns; FIRST_ONLY — only the
+    // placement that carried the employer's payment does.
+    key: 'agent.commission_multi_seat_mode',
+    value: 'PER_PLACEMENT',
+    category: ConfigCategory.AGENT,
+    label: 'Offres à plusieurs postes : commission par placement ou une seule',
+    isSecret: false,
+  },
+  {
+    // The smallest amount an agent can ask to withdraw. Each payout is a
+    // Mobile Money transfer an admin sends by hand, so tiny ones cost more
+    // than they pay.
+    key: 'agent.withdrawal_min_fcfa',
+    value: '2000',
+    category: ConfigCategory.AGENT,
+    label: 'Montant minimum d’un retrait agent (FCFA)',
+    isSecret: false,
+  },
+  {
     key: 'matching.cf_enabled',
     value: 'false',
     category: ConfigCategory.MATCHING,

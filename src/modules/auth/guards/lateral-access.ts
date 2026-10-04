@@ -68,6 +68,11 @@ export const LATERAL_ACCESS: Record<LateralRole, Record<string, AreaAccess>> = {
     'admin/feedback': 'full',
     'admin/invoices': 'full',
     'admin/contracts': 'full',
+    // Field agents. Rabotka pays them, so finance needs the whole picture;
+    // `full` keeps FINANCE level with ADMIN, as everywhere else in this map.
+    'admin/agents': 'full',
+    // Paying agents is finance's job: the queue, and paying or rejecting.
+    'admin/agent-withdrawals': 'full',
     log: 'full',
     // NOT PRESENT, deliberately: `user` (team management), and
     // `admin/oauth-apps` ("Login with Rabotka" partner applications). Anything
@@ -120,6 +125,10 @@ export const LATERAL_ACCESS: Record<LateralRole, Record<string, AreaAccess>> = {
     // Read only, and both are download-by-id — there is no listing to browse.
     'admin/contracts': 'read',
     'admin/invoices': 'read',
+    // "Is this caller really one of our agents?" is a support question.
+    // Read only: creating an agent and changing their status are decisions
+    // about who represents Rabotka, which stay with MANAGER and above.
+    'admin/agents': 'read',
   },
 };
 

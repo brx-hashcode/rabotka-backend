@@ -356,6 +356,85 @@ describe('SystemConfigService', () => {
     });
   });
 
+  describe('setMany — agent commissions', () => {
+    const AMOUNT = 'agent.commission_per_placement_fcfa';
+    const EMPLOYER_FEE = 'fees.contact_unlock_fee_employer';
+
+    beforeEach(() => {
+      mockPrisma.systemConfig.update.mockResolvedValue({});
+      // Stored: commission 400, fees 500 + 100.
+      mockPrisma.systemConfig.findMany.mockResolvedValue([
+        { key: AMOUNT, value: '400' },
+        { key: EMPLOYER_FEE, value: '500' },
+        { key: 'fees.contact_unlock_fee_worker', value: '100' },
+      ]);
+    });
+
+    it('refuses a commission that would eat the whole unlock fee', async () => {
+      await expect(
+        service.setMany({ [AMOUNT]: '600' }, 'admin-1'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.systemConfig.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses lowering a fee under the commission already set', async () => {
+      await expect(
+        service.setMany({ [EMPLOYER_FEE]: '250' }, 'admin-1'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('accepts a commission below the fees, and 0 to turn it off', async () => {
+      await service.setMany({ [AMOUNT]: '450' }, 'admin-1');
+      await service.setMany({ [AMOUNT]: '0' }, 'admin-1');
+      expect(mockPrisma.systemConfig.update).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([
+      ['agent.commission_release_event', 'PAID'],
+      ['agent.commission_multi_seat_mode', 'EVERY_SEAT'],
+      ['agent.commission_requires_momo_worker', 'yes'],
+      ['agent.commission_confirmation_hours', '-1'],
+    ])('refuses %s = %s', async (key, value) => {
+      await expect(
+        service.setMany({ [key]: value }, 'admin-1'),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('getAgentCommissionSettings', () => {
+    it('falls back to the safe defaults when nothing is stored', async () => {
+      mockRedis.mget.mockResolvedValue(Array<null>(6).fill(null));
+      mockPrisma.systemConfig.findMany.mockResolvedValue([]);
+      await expect(service.getAgentCommissionSettings()).resolves.toEqual({
+        amountFcfa: 400,
+        releaseEvent: 'UNLOCKED',
+        confirmationHours: 72,
+        requiresMomoWorker: true,
+        requiresMomoEmployer: true,
+        multiSeatMode: 'PER_PLACEMENT',
+      });
+    });
+
+    it('reads what is stored', async () => {
+      mockRedis.mget.mockResolvedValue([
+        '300',
+        'COMPLETED',
+        '0',
+        'false',
+        'true',
+        'FIRST_ONLY',
+      ]);
+      await expect(service.getAgentCommissionSettings()).resolves.toEqual({
+        amountFcfa: 300,
+        releaseEvent: 'COMPLETED',
+        confirmationHours: 0,
+        requiresMomoWorker: false,
+        requiresMomoEmployer: true,
+        multiSeatMode: 'FIRST_ONLY',
+      });
+    });
+  });
+
   describe('getReferralCredits', () => {
     function givenStored(values: Record<string, string>) {
       mockPrisma.systemConfig.findMany.mockResolvedValue(
@@ -441,7 +520,7 @@ describe('SystemConfigService', () => {
 
     it('filters by category', async () => {
       mockPrisma.systemConfig.findMany.mockResolvedValue([]);
-      await service.getAll('FEES' as any);
+      await service.getAll('FEES');
       expect(mockPrisma.systemConfig.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { category: 'FEES' },

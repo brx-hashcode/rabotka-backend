@@ -157,6 +157,41 @@ describe('AuthService', () => {
       expect(whatsAppService.sendTemplateMessage).toHaveBeenCalled();
     });
 
+    describe('on a developer machine', () => {
+      const withEnv = (env: Record<string, string>) => {
+        const configSvc = (service as any).configService;
+        (configSvc.get as jest.Mock).mockImplementation(
+          (key: string) => env[key],
+        );
+      };
+
+      it('logs the code and skips the paid WhatsApp in NODE_ENV=development', async () => {
+        withEnv({ NODE_ENV: 'development' });
+        (prisma.profile.findUnique as jest.Mock).mockResolvedValue(mockProfile);
+
+        const result = await service.sendOtp('+24200000001');
+
+        expect(result.success).toBe(true);
+        expect(whatsAppService.sendTemplateMessage).not.toHaveBeenCalled();
+      });
+
+      it('still sends on the develop server (NODE_ENV=production, IS_PROD=false)', async () => {
+        withEnv({ NODE_ENV: 'production', IS_PROD: 'false' });
+        (prisma.profile.findUnique as jest.Mock).mockResolvedValue(mockProfile);
+
+        await service.sendOtp('+24200000001');
+        expect(whatsAppService.sendTemplateMessage).toHaveBeenCalled();
+      });
+
+      it('never skips in production, whatever NODE_ENV says', async () => {
+        withEnv({ NODE_ENV: 'development', IS_PROD: 'true' });
+        (prisma.profile.findUnique as jest.Mock).mockResolvedValue(mockProfile);
+
+        await service.sendOtp('+24200000001');
+        expect(whatsAppService.sendTemplateMessage).toHaveBeenCalled();
+      });
+    });
+
     it('throws BadRequestException for invalid email/phone', async () => {
       await expect(service.sendOtp('not-valid')).rejects.toThrow(
         BadRequestException,
