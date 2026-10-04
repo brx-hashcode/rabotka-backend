@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { AgentCallOutcome, AgentLeadStatus } from '@prisma/client';
+import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 import {
   AgentLeadService,
   leadView,
@@ -360,6 +361,21 @@ describe('AgentLeadService', () => {
           },
         },
         freeForm: { buttonText: 'Voir l’offre', path: `invitations/${token}` },
+      });
+    });
+
+    it('never hands Meta an empty variable, whatever is missing', () => {
+      const vars = WHATSAPP_TEMPLATES.agentInvitation.variables({
+        workerFirstName: null,
+        agentFirstName: '  ',
+        jobTitle: undefined,
+        invitePath: 'invitations/t',
+      });
+      expect(vars).toEqual({
+        '1': 'à vous',
+        '2': 'Votre agent',
+        '3': 'une mission',
+        '4': 'invitations/t',
       });
     });
 

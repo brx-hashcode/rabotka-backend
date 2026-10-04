@@ -421,18 +421,31 @@ export function authoredTemplates(): Partial<
      * them. Copy as written by the business; the button opens the worker's
      * invitation page signed in (one-tap login code).
      *
-     * UTILITY is asked for — it follows a call the worker took — but Meta may
-     * file it MARKETING (« nouvelle opportunité » reads as an offer), as it did
-     * for `rabotka_open_app_v2`.
+     * v2, laid out like the new-application card (title, labelled line), and
+     * framed as the follow-up of the call the worker agreed to — what makes it
+     * UTILITY rather than an unsolicited offer. v1
+     * (« Je vous propose une nouvelle opportunité… ») was approved but filed
+     * MARKETING, which also made WhatsApp show it differently. Only fields that
+     * always exist: no address or pay, both optional on an offer.
      */
     agentInvitation: {
-      name: 'rabotka_agent_invitation_v1',
+      name: 'rabotka_agent_invitation_v2',
       language: 'fr',
       category: 'UTILITY',
       components: [
         {
           type: 'BODY',
-          text: 'Bonjour {{1}}, c’est {{2}}, agent Rabotka. Je vous propose une nouvelle opportunité : « {{3}} ». Cliquez sur le bouton ci-dessous pour découvrir les détails et postuler.',
+          text: [
+            '*Offre dont vous avez parlé*',
+            '',
+            'Bonjour {{1}},',
+            '',
+            'Suite à votre échange avec {{2}}, agent Rabotka, voici l’offre dont vous avez parlé :',
+            '',
+            '*Offre* : {{3}}',
+            '',
+            'Appuyez ci-dessous pour voir les détails et postuler.',
+          ].join('\n'),
           example: {
             body_text: [['Sophie', 'Jean', 'Agent de sécurité événementiel']],
           },
