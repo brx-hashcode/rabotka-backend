@@ -230,6 +230,8 @@ describe('authored templates', () => {
     // Lands on the conversation LIST, not a thread: the nudge is debounced and
     // may cover several unread messages across more than one conversation.
     'newMessageNudge',
+    // Lands on the worker's invitation from a field agent.
+    'agentInvitation',
   ] as const;
   // Deliberately button-less: this one carries whatever an admin typed, so
   // there is no single destination a CTA could point at.

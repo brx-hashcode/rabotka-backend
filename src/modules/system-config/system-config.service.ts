@@ -274,6 +274,7 @@ export class SystemConfigService implements OnModuleInit {
     'agent.commission_multi_seat_mode': AGENT_COMMISSION_MULTI_SEAT_MODES,
     'agent.commission_requires_momo_worker': ['true', 'false'],
     'agent.commission_requires_momo_employer': ['true', 'false'],
+    'agent.invite_whatsapp_enabled': ['true', 'false'],
   };
 
   async set(key: string, value: string, adminId?: string): Promise<void> {
@@ -898,6 +899,13 @@ export class SystemConfigService implements OnModuleInit {
       claimHours: int(claim, 24),
       inviteExpiryHours: int(invite, 48),
     };
+  }
+
+  /** Whether an agent's invitation is sent to the worker by WhatsApp. */
+  async isAgentInviteWhatsAppEnabled(): Promise<boolean> {
+    return (
+      (await this.get('agent.invite_whatsapp_enabled', 'false')) === 'true'
+    );
   }
 
   /** The smallest withdrawal an agent may request, in FCFA. */
