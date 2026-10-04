@@ -50,6 +50,8 @@ export const AUTHORED_KEYS: ReadonlySet<WhatsAppTemplateName> = new Set([
   // The in-app messaging nudge. Same reasoning as the broadcast one: new,
   // Cloud-only, nothing to translate from.
   'newMessageNudge',
+  // A field agent's invitation to a worker. New, Cloud-only.
+  'agentInvitation',
 ]);
 
 /**
@@ -408,6 +410,54 @@ export function authoredTemplates(): Partial<
               text: 'Voir mes messages',
               url: 'https://rabotka.work/s/{{1}}',
               example: ['https://rabotka.work/s/discussions'],
+            },
+          ],
+        },
+      ],
+    },
+
+    /**
+     * A field agent's invitation, sent to the worker after the agent called
+     * them. Copy as written by the business; the button opens the worker's
+     * invitation page signed in (one-tap login code).
+     *
+     * v2, laid out like the new-application card (title, labelled line), and
+     * framed as the follow-up of the call the worker agreed to — what makes it
+     * UTILITY rather than an unsolicited offer. v1
+     * (« Je vous propose une nouvelle opportunité… ») was approved but filed
+     * MARKETING, which also made WhatsApp show it differently. Only fields that
+     * always exist: no address or pay, both optional on an offer.
+     */
+    agentInvitation: {
+      name: 'rabotka_agent_invitation_v2',
+      language: 'fr',
+      category: 'UTILITY',
+      components: [
+        {
+          type: 'BODY',
+          text: [
+            '*Offre dont vous avez parlé*',
+            '',
+            'Bonjour {{1}},',
+            '',
+            'Suite à votre échange avec {{2}}, agent Rabotka, voici l’offre dont vous avez parlé :',
+            '',
+            '*Offre* : {{3}}',
+            '',
+            'Appuyez ci-dessous pour voir les détails et postuler.',
+          ].join('\n'),
+          example: {
+            body_text: [['Sophie', 'Jean', 'Agent de sécurité événementiel']],
+          },
+        },
+        {
+          type: 'BUTTONS',
+          buttons: [
+            {
+              type: 'URL',
+              text: 'Voir l’offre',
+              url: 'https://rabotka.work/s/{{1}}',
+              example: ['https://rabotka.work/s/invitations-example'],
             },
           ],
         },

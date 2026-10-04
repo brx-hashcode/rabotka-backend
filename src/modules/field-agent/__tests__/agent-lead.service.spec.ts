@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { AgentCallOutcome, AgentLeadStatus } from '@prisma/client';
+import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 import {
   AgentLeadService,
   leadView,
@@ -109,7 +110,11 @@ describe('leadView', () => {
 
 describe('AgentLeadService', () => {
   let prisma: any;
-  let systemConfig: { getAgentLeadSettings: jest.Mock };
+  let systemConfig: {
+    getAgentLeadSettings: jest.Mock;
+    isAgentInviteWhatsAppEnabled: jest.Mock;
+  };
+  let dispatcher: { send: jest.Mock };
   let logService: { create: jest.Mock };
   let service: AgentLeadService;
 
@@ -161,6 +166,10 @@ describe('AgentLeadService', () => {
         claimHours: 24,
         inviteExpiryHours: 48,
       }),
+      isAgentInviteWhatsAppEnabled: jest.fn().mockResolvedValue(false),
+    };
+    dispatcher = {
+      send: jest.fn().mockResolvedValue({ mode: 'TEMPLATE', sent: true }),
     };
     logService = { create: jest.fn().mockResolvedValue(undefined) };
     const config = { get: jest.fn().mockReturnValue('https://rabotka.work/') };
@@ -169,6 +178,7 @@ describe('AgentLeadService', () => {
       systemConfig as any,
       config as any,
       logService as any,
+      dispatcher as any,
     );
   });
 
@@ -321,6 +331,60 @@ describe('AgentLeadService', () => {
       expect(data.claim_expires_at.getTime()).toBeGreaterThan(
         Date.now() + 23 * HOUR,
       );
+    });
+  });
+
+  describe('invite — WhatsApp to the worker', () => {
+    it('sends nothing while the setting is off', async () => {
+      const result = await service.invite('agent-1', 'lead-1');
+      expect(result.sentToWorker).toBe(false);
+      expect(dispatcher.send).not.toHaveBeenCalled();
+    });
+
+    it('sends the template, its button opening the invitation, when on', async () => {
+      systemConfig.isAgentInviteWhatsAppEnabled.mockResolvedValue(true);
+      const result = await service.invite('agent-1', 'lead-1');
+
+      expect(result.sentToWorker).toBe(true);
+      const call = dispatcher.send.mock.calls[0][0];
+      const token = result.inviteUrl.split('/').pop();
+      expect(call).toMatchObject({
+        phone: '+242061234567',
+        profileId: 'w1',
+        template: {
+          key: 'agentInvitation',
+          params: {
+            workerFirstName: 'Awa',
+            agentFirstName: 'Jean',
+            jobTitle: 'Plombier',
+            invitePath: `invitations/${token}`,
+          },
+        },
+        freeForm: { buttonText: 'Voir l’offre', path: `invitations/${token}` },
+      });
+    });
+
+    it('never hands Meta an empty variable, whatever is missing', () => {
+      const vars = WHATSAPP_TEMPLATES.agentInvitation.variables({
+        workerFirstName: null,
+        agentFirstName: '  ',
+        jobTitle: undefined,
+        invitePath: 'invitations/t',
+      });
+      expect(vars).toEqual({
+        '1': 'à vous',
+        '2': 'Votre agent',
+        '3': 'une mission',
+        '4': 'invitations/t',
+      });
+    });
+
+    it('still issues the invitation when the send fails', async () => {
+      systemConfig.isAgentInviteWhatsAppEnabled.mockResolvedValue(true);
+      dispatcher.send.mockRejectedValue(new Error('provider down'));
+      const result = await service.invite('agent-1', 'lead-1');
+      expect(result.sentToWorker).toBe(false);
+      expect(result.inviteUrl).toContain('/invitations/');
     });
   });
 

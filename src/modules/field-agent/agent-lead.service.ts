@@ -16,6 +16,7 @@ import {
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { LogService } from '../log/log.service';
+import { NotificationDispatcher } from '../notification-dispatch/notification-dispatcher.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { toDigits } from '../whatsapp/contracts/address';
 import { jobsInZonesWhere } from './agent-zones';
@@ -137,6 +138,7 @@ export class AgentLeadService {
     private readonly systemConfig: SystemConfigService,
     private readonly config: ConfigService,
     private readonly logService: LogService,
+    private readonly dispatcher: NotificationDispatcher,
   ) {}
 
   /**
@@ -366,13 +368,27 @@ export class AgentLeadService {
       (job?.city ? ` à ${job.city}` : '') +
       `. Pour postuler, ouvrez ce lien : ${inviteUrl}`;
 
+    const sentToWorker = await this.sendToWorker({
+      workerId: lead.worker_id,
+      phone: worker?.phone ?? null,
+      workerFirstName: worker?.first_name,
+      agentFirstName: agent?.first_name,
+      jobTitle: job?.title,
+      invitePath: `invitations/${token}`,
+    });
+
     await this.logService
       .create({
         action: 'AGENT_INVITE_SENT',
         entityType: 'Agent',
         entityId: agentId,
         profileId: lead.worker_id,
-        metadata: { agentId, leadId, jobOfferId: lead.job_offer_id },
+        metadata: {
+          agentId,
+          leadId,
+          jobOfferId: lead.job_offer_id,
+          sentToWorker,
+        },
       })
       .catch(() => undefined);
 
@@ -380,12 +396,68 @@ export class AgentLeadService {
       inviteUrl,
       expiresAt,
       message,
+      /** True when Rabotka sent the invitation to the worker by WhatsApp. */
+      sentToWorker,
       whatsappUrl:
         revealed > 0 && worker?.phone
           ? `https://wa.me/${toDigits(worker.phone)}?text=${encodeURIComponent(message)}`
           : null,
       lead: await this.view(agentId, leadId),
     };
+  }
+
+  /**
+   * Sends the invitation to the worker by WhatsApp when it is switched on
+   * (`agent.invite_whatsapp_enabled`, off until Meta approves
+   * `rabotka_agent_invitation_v1`). Free-form when the worker's 24h window is
+   * open, the template otherwise; the button carries a one-tap login code to
+   * the invitation. Never fails the invitation — the agent still has the link.
+   */
+  private async sendToWorker(p: {
+    workerId: string;
+    phone: string | null;
+    workerFirstName: string | null | undefined;
+    agentFirstName: string | null | undefined;
+    jobTitle: string | null | undefined;
+    invitePath: string;
+  }): Promise<boolean> {
+    if (!p.phone) return false;
+    if (!(await this.systemConfig.isAgentInviteWhatsAppEnabled())) return false;
+    // The free-form text (inside the 24h window) mirrors the template.
+    const worker = p.workerFirstName?.trim() || 'à vous';
+    const agent = p.agentFirstName?.trim() || 'Votre agent';
+    const title = p.jobTitle?.trim() || 'une mission';
+    const body = [
+      '*Offre dont vous avez parlé*',
+      '',
+      `Bonjour ${worker},`,
+      '',
+      `Suite à votre échange avec ${agent}, agent Rabotka, voici l’offre dont vous avez parlé :`,
+      '',
+      `*Offre* : ${title}`,
+      '',
+      'Appuyez ci-dessous pour voir les détails et postuler.',
+    ].join('\n');
+    try {
+      const result = await this.dispatcher.send({
+        phone: p.phone,
+        profileId: p.workerId,
+        template: {
+          key: 'agentInvitation',
+          params: {
+            workerFirstName: p.workerFirstName,
+            agentFirstName: p.agentFirstName,
+            jobTitle: p.jobTitle,
+            invitePath: p.invitePath,
+          },
+        },
+        freeForm: { body, buttonText: 'Voir l’offre', path: p.invitePath },
+        body,
+      });
+      return result.sent;
+    } catch {
+      return false;
+    }
   }
 
   /** The agent's own pipeline, most recently touched first. */

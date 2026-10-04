@@ -498,6 +498,47 @@ export const WHATSAPP_TEMPLATES = {
     }),
   } satisfies WhatsAppTemplate<[firstName: string]>,
 
+  /**
+   * A field agent's invitation to a worker, after the agent called them.
+   * {{4}} is the invitation path; the outbound processor swaps it for a
+   * one-tap login code, so « Voir l’offre » lands on the invitation signed in.
+   */
+  agentInvitation: {
+    cloudOnly: true,
+    urlSuffixVar: '4',
+    urlSuffixMode: 'shortlink',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_AGENT_INVITATION',
+        'rabotka_agent_invitation_v2',
+      ),
+    },
+    // A template variable may never be empty or null — Meta rejects the send —
+    // so every one has a fallback, even those the schema requires.
+    variables: (p: {
+      workerFirstName: string | null | undefined;
+      agentFirstName: string | null | undefined;
+      jobTitle: string | null | undefined;
+      invitePath: string;
+    }) => ({
+      '1': freeTextVar(p.workerFirstName, 'à vous'),
+      '2': freeTextVar(p.agentFirstName, 'Votre agent'),
+      // Employer-typed: never empty, never multi-line — see `freeTextVar`.
+      '3': freeTextVar(p.jobTitle, 'une mission'),
+      '4': p.invitePath,
+    }),
+  } satisfies WhatsAppTemplate<
+    [
+      params: {
+        workerFirstName: string | null | undefined;
+        agentFirstName: string | null | undefined;
+        jobTitle: string | null | undefined;
+        invitePath: string;
+      },
+    ]
+  >,
+
   // "Voir le portfolio" — CTA button opening a worker's PUBLIC portfolio
   // (/p/<slug>) inside WhatsApp's in-app browser. Unlike the other webview
   // templates that page needs no login, so the employer lands straight on the
