@@ -44,6 +44,12 @@ export enum AdminNotificationEvent {
   PENALTY_CREATED = 'admin.notification.penalty.created',
   PENALTY_SOLVED = 'admin.notification.penalty.solved',
   PENALTY_UPDATED = 'admin.notification.penalty.updated',
+
+  // Field agents
+  /** A worker accepted an agent's invitation: an application now exists. */
+  AGENT_PLACEMENT = 'admin.notification.agent.placement',
+  /** An agent asked to be paid; it waits in Agent payouts. */
+  AGENT_WITHDRAWAL_REQUESTED = 'admin.notification.agent.withdrawal_requested',
 }
 
 export type AdminEntityType =
@@ -54,7 +60,9 @@ export type AdminEntityType =
   | 'event'
   | 'payment'
   | 'penalty'
-  | 'conversation';
+  | 'conversation'
+  | 'agent'
+  | 'agent-withdrawal';
 
 export interface AdminNotificationPayload {
   event: AdminNotificationEvent;

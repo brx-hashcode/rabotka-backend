@@ -34,6 +34,7 @@ describe('AgentInviteService', () => {
   let prisma: any;
   let applications: { create: jest.Mock };
   let logService: { create: jest.Mock };
+  let events: { emit: jest.Mock };
   let service: AgentInviteService;
 
   beforeEach(() => {
@@ -42,13 +43,20 @@ describe('AgentInviteService', () => {
         findUnique: jest.fn().mockResolvedValue(lead()),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
+      profile: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ first_name: 'Sophie', last_name: 'Test' }),
+      },
     };
     applications = { create: jest.fn().mockResolvedValue({ id: 'app-1' }) };
     logService = { create: jest.fn().mockResolvedValue(undefined) };
+    events = { emit: jest.fn() };
     service = new AgentInviteService(
       prisma,
       applications as any,
       logService as any,
+      events as any,
     );
   });
 
@@ -84,12 +92,21 @@ describe('AgentInviteService', () => {
       }),
     });
     expect(result).toEqual({ success: true, applicationId: 'app-1' });
+    expect(events.emit).toHaveBeenCalledWith(
+      'admin.notification.agent.placement',
+      expect.objectContaining({
+        entityType: 'agent',
+        entityId: 'agent-1',
+        message: 'Jean a placé Sophie Test sur « Plombier »',
+      }),
+    );
   });
 
   it('leaves the lead untouched when the application is refused', async () => {
     applications.create.mockRejectedValue(new Error('daily limit'));
     await expect(service.accept('w1', 'tok')).rejects.toThrow('daily limit');
     expect(prisma.agentLead.updateMany).not.toHaveBeenCalled();
+    expect(events.emit).not.toHaveBeenCalled();
   });
 
   it('refuses an expired or already answered invitation with 410', async () => {
