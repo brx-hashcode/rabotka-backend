@@ -688,6 +688,7 @@ model Agent {
   phone_reveals  AgentPhoneReveal[]
   applications   Application[]
   commissions    AgentCommission[]
+  withdrawals    AgentWithdrawal[]
 
   @@unique([id_document_type, id_document_number], name: "idx_agent_id_document")
   @@index([status], name: "idx_agent_status")
@@ -823,6 +824,52 @@ model AgentCommission {
   @@index([status, available_at], name: "idx_agent_commission_status_available")
   @@index([agent_id, created_at(sort: Desc)], name: "idx_agent_commission_agent_time")
   @@map("agent_commissions")
+}
+
+enum AgentWithdrawalStatus {
+  /// Asked for by the agent; the amount is locked until an admin decides.
+  REQUESTED
+  /// An admin sent the Mobile Money transfer and recorded its reference.
+  PAID
+  /// An admin refused it; the amount went back to the available balance.
+  REJECTED
+}
+
+/// Congo-Brazzaville's two Mobile Money networks.
+enum AgentMomoOperator {
+  MTN
+  AIRTEL
+}
+
+/// An agent asking to be paid what they earned. Paid by hand: an admin sends
+/// the Mobile Money transfer, then records its reference here. The money moves
+/// in the ledger (AVAILABLE → LOCKED → PAID_OUT, or back to AVAILABLE).
+///
+/// At most one REQUESTED row per agent, enforced by the partial unique index
+/// `agent_withdrawals_one_open` — raw SQL in 20261003140000_agent_withdrawals,
+/// invisible to Prisma. Do not let a generated migration drop it.
+model AgentWithdrawal {
+  id                   String                @id @default(uuid()) @db.Uuid
+  created_at           DateTime              @default(now())
+  updated_at           DateTime              @updatedAt
+  agent_id             String                @db.Uuid
+  amount               Decimal               @db.Decimal(10, 2)
+  /// E.164. Defaults to the agent's own phone.
+  momo_phone           String
+  momo_operator        AgentMomoOperator
+  status               AgentWithdrawalStatus @default(REQUESTED)
+  processed_by_user_id String?               @db.Uuid
+  processed_at         DateTime?             @db.Timestamptz
+  /// The transfer's Mobile Money reference. Unique: one transfer cannot
+  /// settle two withdrawals.
+  provider_reference   String?               @unique
+  rejection_reason     String?
+
+  agent Agent @relation(fields: [agent_id], references: [id], onDelete: Restrict)
+
+  @@index([status, created_at], name: "idx_agent_withdrawal_status_time")
+  @@index([agent_id, created_at(sort: Desc)], name: "idx_agent_withdrawal_agent_time")
+  @@map("agent_withdrawals")
 }
 
 /// Where one (job, worker) pair stands in an agent's pipeline.

@@ -374,6 +374,13 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    key: 'agent.withdrawal_min_fcfa',
+    value: '2000',
+    category: ConfigCategory.AGENT,
+    label: 'Montant minimum d’un retrait agent (FCFA)',
+    isSecret: false,
+  },
+  {
     key: 'matching.cf_enabled',
     value: 'false',
     category: ConfigCategory.MATCHING,

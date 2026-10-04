@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import { MODULE_METADATA } from '@nestjs/common/constants';
+import { AdminAgentWithdrawalController } from '../admin-agent-withdrawal.controller';
 import { AdminAgentController } from '../admin-agent.controller';
 import { AdminAgentService } from '../admin-agent.service';
 import { AgentAuthController } from '../agent-auth.controller';
@@ -11,6 +12,7 @@ import { AgentLeadService } from '../agent-lead.service';
 import { AgentPortalController } from '../agent-portal.controller';
 import { AgentPortalService } from '../agent-portal.service';
 import { AgentWalletService } from '../agent-wallet.service';
+import { AgentWithdrawalService } from '../agent-withdrawal.service';
 import { FieldAgentModule } from '../field-agent.module';
 import { AgentAuthGuard } from '../guards/agent-auth.guard';
 import { ProfileAgentInviteController } from '../profile-agent-invite.controller';
@@ -26,6 +28,7 @@ describe('FieldAgentModule', () => {
         AgentAuthController,
         AgentPortalController,
         AdminAgentController,
+        AdminAgentWithdrawalController,
         ProfileAgentInviteController,
       ]),
     );
@@ -48,6 +51,7 @@ describe('FieldAgentModule', () => {
         AgentInviteService,
         AgentCommissionService,
         AgentCommissionScheduler,
+        AgentWithdrawalService,
         AgentAuthGuard,
       ]),
     );

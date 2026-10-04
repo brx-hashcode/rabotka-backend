@@ -7,6 +7,7 @@ import { LogModule } from '../log/log.module';
 import { MailModule } from '../mail/mail.module';
 import { MatchingModule } from '../matching/matching.module';
 import { RecommendationEngineModule } from '../recommendation-engine/recommendation-engine.module';
+import { AdminAgentWithdrawalController } from './admin-agent-withdrawal.controller';
 import { AdminAgentController } from './admin-agent.controller';
 import { AdminAgentService } from './admin-agent.service';
 import { AgentAuthController } from './agent-auth.controller';
@@ -18,6 +19,7 @@ import { AgentLeadService } from './agent-lead.service';
 import { AgentPortalController } from './agent-portal.controller';
 import { AgentPortalService } from './agent-portal.service';
 import { AgentWalletService } from './agent-wallet.service';
+import { AgentWithdrawalService } from './agent-withdrawal.service';
 import { AgentStatsService } from './agent-stats.service';
 import { AgentAuthGuard } from './guards/agent-auth.guard';
 import { ProfileAgentInviteController } from './profile-agent-invite.controller';
@@ -48,6 +50,7 @@ import { ProfileAgentInviteController } from './profile-agent-invite.controller'
     AgentAuthController,
     AgentPortalController,
     AdminAgentController,
+    AdminAgentWithdrawalController,
     ProfileAgentInviteController,
   ],
   providers: [
@@ -60,6 +63,7 @@ import { ProfileAgentInviteController } from './profile-agent-invite.controller'
     AgentInviteService,
     AgentCommissionService,
     AgentCommissionScheduler,
+    AgentWithdrawalService,
     AgentAuthGuard,
   ],
 })

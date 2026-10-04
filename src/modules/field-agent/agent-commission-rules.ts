@@ -41,7 +41,7 @@ export function samePhone(
   const norm = (raw: string | null | undefined) => {
     if (!raw) return null;
     const e164 = toE164(raw);
-    return /^\+\d{8,15}$/.test(e164) ? e164 : null;
+    return /^\+[1-9]\d{7,14}$/.test(e164) ? e164 : null;
   };
   const x = norm(a);
   return x !== null && x === norm(b);

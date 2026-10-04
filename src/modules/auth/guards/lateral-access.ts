@@ -71,6 +71,8 @@ export const LATERAL_ACCESS: Record<LateralRole, Record<string, AreaAccess>> = {
     // Field agents. Rabotka pays them, so finance needs the whole picture;
     // `full` keeps FINANCE level with ADMIN, as everywhere else in this map.
     'admin/agents': 'full',
+    // Paying agents is finance's job: the queue, and paying or rejecting.
+    'admin/agent-withdrawals': 'full',
     log: 'full',
     // NOT PRESENT, deliberately: `user` (team management), and
     // `admin/oauth-apps` ("Login with Rabotka" partner applications). Anything
