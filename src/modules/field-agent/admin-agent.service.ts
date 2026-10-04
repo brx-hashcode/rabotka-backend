@@ -327,16 +327,30 @@ export class AdminAgentService {
    * filtering on a city nobody can work any more answers nothing.
    */
   async listZones() {
-    const rows = await this.prisma.agentZone.groupBy({
-      by: ['country_code', 'city'],
+    const rows = await this.prisma.agentZone.findMany({
       where: { agent: { status: { not: AgentStatus.REVOKED } } },
-      _count: { _all: true },
+      select: { country_code: true, city: true, agent_id: true },
       orderBy: [{ country_code: 'asc' }, { city: 'asc' }],
     });
-    return rows.map((r) => ({
-      countryCode: r.country_code,
-      city: r.city,
-      agents: r._count._all,
+    // `agentIds` lets the coverage map count an agent once per department
+    // even when they cover several of its cities.
+    const byZone = new Map<
+      string,
+      { countryCode: string; city: string; agentIds: string[] }
+    >();
+    for (const r of rows) {
+      const key = `${r.country_code}:${r.city}`;
+      const zone = byZone.get(key) ?? {
+        countryCode: r.country_code,
+        city: r.city,
+        agentIds: [],
+      };
+      zone.agentIds.push(r.agent_id);
+      byZone.set(key, zone);
+    }
+    return [...byZone.values()].map((z) => ({
+      ...z,
+      agents: z.agentIds.length,
     }));
   }
 

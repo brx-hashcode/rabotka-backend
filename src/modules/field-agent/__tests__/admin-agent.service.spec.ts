@@ -517,18 +517,24 @@ describe('AdminAgentService – zone filter', () => {
     ]);
   });
 
-  it('lists covered cities with agent counts, revoked agents excluded', async () => {
-    const groupBy = jest
-      .fn()
-      .mockResolvedValue([
-        { country_code: 'CG', city: 'Brazzaville', _count: { _all: 3 } },
-      ]);
-    const zones = await make({ agentZone: { groupBy } }).listZones();
+  it('lists covered cities with their agents, revoked agents excluded', async () => {
+    const findMany = jest.fn().mockResolvedValue([
+      { country_code: 'CG', city: 'Brazzaville', agent_id: 'a1' },
+      { country_code: 'CG', city: 'Brazzaville', agent_id: 'a2' },
+      { country_code: 'CG', city: 'Pointe-Noire', agent_id: 'a1' },
+    ]);
+    const zones = await make({ agentZone: { findMany } }).listZones();
 
     expect(zones).toEqual([
-      { countryCode: 'CG', city: 'Brazzaville', agents: 3 },
+      {
+        countryCode: 'CG',
+        city: 'Brazzaville',
+        agentIds: ['a1', 'a2'],
+        agents: 2,
+      },
+      { countryCode: 'CG', city: 'Pointe-Noire', agentIds: ['a1'], agents: 1 },
     ]);
-    expect(groupBy.mock.calls[0][0].where).toEqual({
+    expect(findMany.mock.calls[0][0].where).toEqual({
       agent: { status: { not: 'REVOKED' } },
     });
   });
