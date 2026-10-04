@@ -265,3 +265,19 @@ export class CancelAgentCommissionDto {
   @Length(3, 500, { message: 'Indiquez la raison (3 à 500 caractères)' })
   reason: string;
 }
+
+export class PayAgentWithdrawalDto {
+  @ApiProperty({ description: 'Reference of the Mobile Money transfer sent' })
+  @Transform(trim)
+  @IsString()
+  @Length(3, 100, { message: 'Indiquez la référence de la transaction' })
+  reference: string;
+}
+
+export class RejectAgentWithdrawalDto {
+  @ApiProperty({ description: 'Shown to the agent in the email' })
+  @Transform(trim)
+  @IsString()
+  @Length(3, 500, { message: 'Indiquez la raison (3 à 500 caractères)' })
+  reason: string;
+}

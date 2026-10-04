@@ -238,6 +238,7 @@ export class SystemConfigService implements OnModuleInit {
     'agent.phone_reveal_daily_cap',
     'agent.lead_claim_hours',
     'agent.invite_expiry_hours',
+    'agent.withdrawal_min_fcfa',
   ]);
 
   /**
@@ -897,6 +898,13 @@ export class SystemConfigService implements OnModuleInit {
       claimHours: int(claim, 24),
       inviteExpiryHours: int(invite, 48),
     };
+  }
+
+  /** The smallest withdrawal an agent may request, in FCFA. */
+  async getAgentWithdrawalMinFcfa(): Promise<number> {
+    const raw = await this.get('agent.withdrawal_min_fcfa', '2000');
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : 2000;
   }
 
   /** The rules a placement's commission is decided and released by. */

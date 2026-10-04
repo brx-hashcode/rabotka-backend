@@ -21,14 +21,22 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { AgentCommissionStatus, AgentLeadStatus } from '@prisma/client';
+import {
+  AgentCommissionStatus,
+  AgentLeadStatus,
+  AgentWithdrawalStatus,
+} from '@prisma/client';
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
 import { AgentAuthService } from './agent-auth.service';
 import { AgentCommissionService } from './agent-commission.service';
 import { AgentLeadService } from './agent-lead.service';
 import { AgentWalletService } from './agent-wallet.service';
+import { AgentWithdrawalService } from './agent-withdrawal.service';
 import { AgentPortalService } from './agent-portal.service';
-import { AgentLogCallDto } from './dto/agent-lead.dto';
+import {
+  AgentLogCallDto,
+  AgentRequestWithdrawalDto,
+} from './dto/agent-lead.dto';
 import {
   AgentAuthGuard,
   type AgentAuthenticatedRequest,
@@ -57,6 +65,7 @@ export class AgentPortalController {
     private readonly leads: AgentLeadService,
     private readonly wallet: AgentWalletService,
     private readonly commissions: AgentCommissionService,
+    private readonly withdrawals: AgentWithdrawalService,
   ) {}
 
   @Get('me')
@@ -231,6 +240,47 @@ export class AgentPortalController {
     status?: AgentCommissionStatus,
   ) {
     return this.commissions.list(req.agent.agentId, {
+      status,
+      page: Math.max(page, 1),
+      limit: clamp(limit, 1, 50),
+    });
+  }
+
+  @Post('withdrawals')
+  @ApiOperation({
+    summary: 'Ask to withdraw part of my available balance',
+    description:
+      'Paid by hand to the Mobile Money number (default: my phone). The amount is locked until an admin pays or rejects it. One open request at a time; minimum agent.withdrawal_min_fcfa.',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Under the minimum, or over the balance',
+  })
+  @ApiResponse({ status: 409, description: 'A request is already open' })
+  requestWithdrawal(
+    @Req() req: AgentAuthenticatedRequest,
+    @Body() dto: AgentRequestWithdrawalDto,
+  ) {
+    return this.withdrawals.request(req.agent.agentId, dto);
+  }
+
+  @Get('withdrawals')
+  @ApiOperation({ summary: 'My withdrawals, newest first' })
+  @ApiQuery({ name: 'status', required: false, enum: AgentWithdrawalStatus })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  listWithdrawals(
+    @Req() req: AgentAuthenticatedRequest,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query(
+      'status',
+      new ParseEnumPipe(AgentWithdrawalStatus, { optional: true }),
+    )
+    status?: AgentWithdrawalStatus,
+  ) {
+    return this.withdrawals.list({
+      agentId: req.agent.agentId,
       status,
       page: Math.max(page, 1),
       limit: clamp(limit, 1, 50),

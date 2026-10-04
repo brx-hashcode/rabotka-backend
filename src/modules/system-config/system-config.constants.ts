@@ -411,6 +411,16 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    // The smallest amount an agent can ask to withdraw. Each payout is a
+    // Mobile Money transfer an admin sends by hand, so tiny ones cost more
+    // than they pay.
+    key: 'agent.withdrawal_min_fcfa',
+    value: '2000',
+    category: ConfigCategory.AGENT,
+    label: 'Montant minimum d’un retrait agent (FCFA)',
+    isSecret: false,
+  },
+  {
     key: 'matching.cf_enabled',
     value: 'false',
     category: ConfigCategory.MATCHING,
