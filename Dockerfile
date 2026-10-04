@@ -1,9 +1,12 @@
 # Both stages use Debian slim — single base image, no Alpine/apk DNS issues
 #
-# `deps` exists so the fastembed stage below can branch off the dependency
-# layers WITHOUT depending on the source tree. Rooting it at `builder` instead
-# would re-download ~2.7GB of ONNX weights on every source change, because
-# `COPY . .` invalidates everything after it.
+# `deps` holds the dependency layers, shared by the stages below. The fastembed
+# weights no longer hang off it: they come from their own image (see the
+# fastembed stage), so no change here can trigger a ~2.7GB re-download.
+
+# Where the baked fastembed weights come from — see the fastembed stage.
+ARG FASTEMBED_MODELS_IMAGE=ghcr.io/brx-hashcode/rabotka-fastembed-models:v1
+
 FROM node:22-slim AS deps
 
 WORKDIR /app
@@ -67,29 +70,21 @@ RUN pnpm run build
 # addressed, so the registry verifies it: the truncated-tarball failure mode
 # cannot survive a pull.
 #
-# Rooted at `deps`, so this ~2.7GB layer is rebuilt only when the lockfile
-# changes — not on every commit.
-FROM deps AS fastembed
+# The weights come from a dedicated image, not from the network. fastembed's
+# download source (storage.googleapis.com/qdrant-fastembed) started answering
+# 403, and since this stage used to be rooted at `deps`, any change to
+# package.json — even the version number — re-ran the download and failed the
+# build. `rabotka-fastembed-models` holds the exact /opt/fastembed of the last
+# good image, so embeddings stay byte-identical to what is already indexed.
+# Bump FASTEMBED_MODELS_IMAGE only together with a re-index.
+FROM ${FASTEMBED_MODELS_IMAGE} AS fastembed-models
 
-ENV FASTEMBED_CACHE_DIR=/opt/fastembed
+FROM node:22-slim AS fastembed
 
-# `fastembed` resolves a model by looking for its files on disk and downloading
-# only what is missing, so this is the same code path the app would take — just
-# at build time, where a failure stops the release instead of a conversation.
-RUN mkdir -p /opt/fastembed && node -e " \
-    const { FlagEmbedding, EmbeddingModel, SparseTextEmbedding, SparseEmbeddingModel } = require('fastembed'); \
-    const cacheDir = process.env.FASTEMBED_CACHE_DIR; \
-    (async () => { \
-      await FlagEmbedding.init({ model: EmbeddingModel.BGESmallENV15, cacheDir }); \
-      await SparseTextEmbedding.init({ model: SparseEmbeddingModel.SpladePPEnV1, cacheDir }); \
-      await FlagEmbedding.init({ model: EmbeddingModel.MLE5Large, cacheDir }); \
-    })().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); }); \
-  "
+COPY --from=fastembed-models /opt/fastembed /opt/fastembed
 
-# Fail the BUILD on a partial download rather than shipping one. fastembed's
-# own `downloadFileFromGCS` returns early when the archive path merely exists,
-# with no size or checksum check, so an interrupted fetch is otherwise
-# indistinguishable from a complete one — for the lifetime of the image.
+# Fail the BUILD if the models image is incomplete rather than shipping it —
+# the same checks that used to guard the download.
 RUN set -eu; \
     for model in fast-bge-small-en-v1.5 prithivida_Splade_PP_en_v1 fast-multilingual-e5-large; do \
       test -f "/opt/fastembed/$model/tokenizer.json" || { echo "FATAL: $model has no tokenizer.json"; exit 1; }; \
