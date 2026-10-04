@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   AgentLedgerBucket,
   AgentLedgerKind,
@@ -14,6 +15,7 @@ import {
   AgentWithdrawalStatus,
   Prisma,
 } from '@prisma/client';
+import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { LogService } from '../log/log.service';
 import { LayoutService } from '../mail/layout.service';
@@ -85,6 +87,7 @@ export class AgentWithdrawalService {
     private readonly logService: LogService,
     private readonly mail: MailService,
     private readonly layout: LayoutService,
+    private readonly events: EventEmitter2,
   ) {}
 
   /**
@@ -167,6 +170,15 @@ export class AgentWithdrawalService {
         withdrawalId: withdrawal.id,
         amount: input.amount,
         momoOperator: input.momoOperator,
+      });
+      this.events.emit(AdminNotificationEvent.AGENT_WITHDRAWAL_REQUESTED, {
+        event: AdminNotificationEvent.AGENT_WITHDRAWAL_REQUESTED,
+        title: 'Demande de retrait agent',
+        message: `${withdrawal.agent.first_name} ${withdrawal.agent.last_name} demande ${input.amount.toLocaleString('fr-FR')} FCFA (${input.momoOperator})`,
+        entityType: 'agent-withdrawal',
+        entityId: withdrawal.id,
+        metadata: { agentId, amount: input.amount },
+        timestamp: new Date().toISOString(),
       });
       return toWithdrawal(withdrawal);
     } catch (err) {
@@ -321,6 +333,8 @@ export class AgentWithdrawalService {
     status?: AgentWithdrawalStatus;
     page: number;
     limit: number;
+    /** Adds which admin paid or rejected each one; never sent to agents. */
+    forAdmin?: boolean;
   }) {
     const where: Prisma.AgentWithdrawalWhereInput = {
       ...(params.agentId ? { agent_id: params.agentId } : {}),
@@ -330,7 +344,7 @@ export class AgentWithdrawalService {
       this.prisma.agentWithdrawal.count({ where }),
       this.prisma.agentWithdrawal.findMany({
         where,
-        select: WITHDRAWAL_SELECT,
+        select: { ...WITHDRAWAL_SELECT, processed_by_user_id: true },
         // The queue is worked oldest first; history reads newest first.
         orderBy: {
           created_at:
@@ -348,8 +362,36 @@ export class AgentWithdrawalService {
         _sum: { amount: true },
       }),
     ]);
+    const adminIds = params.forAdmin
+      ? [
+          ...new Set(
+            rows
+              .map((r) => r.processed_by_user_id)
+              .filter((id): id is string => !!id),
+          ),
+        ]
+      : [];
+    const admins = adminIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: adminIds } },
+          select: { id: true, first_name: true, last_name: true },
+        })
+      : [];
+    const adminName = new Map(
+      admins.map((a) => [a.id, `${a.first_name} ${a.last_name}`.trim()]),
+    );
+
     return {
-      data: rows.map(toWithdrawal),
+      data: rows.map(({ processed_by_user_id, ...row }) => ({
+        ...toWithdrawal(row),
+        ...(params.forAdmin
+          ? {
+              processedBy: processed_by_user_id
+                ? (adminName.get(processed_by_user_id) ?? null)
+                : null,
+            }
+          : {}),
+      })),
       total,
       page: params.page,
       limit: params.limit,

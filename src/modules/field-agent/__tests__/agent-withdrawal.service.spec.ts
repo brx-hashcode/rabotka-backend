@@ -67,6 +67,7 @@ describe('AgentWithdrawalService', () => {
   let systemConfig: { getAgentWithdrawalMinFcfa: jest.Mock };
   let logService: { create: jest.Mock };
   let mail: { sendMail: jest.Mock };
+  let events: { emit: jest.Mock };
   let service: AgentWithdrawalService;
 
   beforeEach(() => {
@@ -110,6 +111,7 @@ describe('AgentWithdrawalService', () => {
     };
     logService = { create: jest.fn().mockResolvedValue(undefined) };
     mail = { sendMail: jest.fn().mockResolvedValue(undefined) };
+    events = { emit: jest.fn() };
     const layout = { wrap: jest.fn((html: string) => Promise.resolve(html)) };
     service = new AgentWithdrawalService(
       prisma,
@@ -117,6 +119,7 @@ describe('AgentWithdrawalService', () => {
       logService as any,
       mail as any,
       layout as any,
+      events as any,
     );
   });
 
@@ -157,6 +160,17 @@ describe('AgentWithdrawalService', () => {
         }),
       ]);
       expect(result).toMatchObject({ amount: 2000, status: 'REQUESTED' });
+      expect(events.emit).toHaveBeenCalledWith(
+        'admin.notification.agent.withdrawal_requested',
+        expect.objectContaining({
+          entityType: 'agent-withdrawal',
+          entityId: 'wd-1',
+          // fr-FR groups thousands with a narrow no-break space.
+          message: expect.stringMatching(
+            /^Jean K demande 2\s000 FCFA \(MTN\)$/,
+          ),
+        }),
+      );
     });
 
     it('pays another number when given one', async () => {
@@ -174,6 +188,7 @@ describe('AgentWithdrawalService', () => {
     it('refuses more than the available balance', async () => {
       await expect(ask({ amount: 5000 })).rejects.toThrow(BadRequestException);
       expect(prisma.agentWithdrawal.create).not.toHaveBeenCalled();
+      expect(events.emit).not.toHaveBeenCalled();
     });
 
     it('refuses a second open request', async () => {
@@ -288,6 +303,34 @@ describe('AgentWithdrawalService', () => {
       ]);
       expect(mail.sendMail.mock.calls[0][0].html).toContain('Numéro invalide');
     });
+  });
+
+  it('names the admin who processed it for admins only', async () => {
+    prisma.agentWithdrawal.findMany.mockResolvedValue([
+      row({
+        status: AgentWithdrawalStatus.PAID,
+        provider_reference: 'MP1',
+        processed_by_user_id: 'admin-1',
+      }),
+    ]);
+    prisma.user = {
+      findMany: jest
+        .fn()
+        .mockResolvedValue([
+          { id: 'admin-1', first_name: 'Awa', last_name: 'N' },
+        ]),
+    };
+
+    const admin = await service.list({ page: 1, limit: 20, forAdmin: true });
+    expect(admin.data[0]).toMatchObject({ processedBy: 'Awa N' });
+
+    const agent = await service.list({
+      agentId: 'agent-1',
+      page: 1,
+      limit: 20,
+    });
+    expect(agent.data[0]).not.toHaveProperty('processedBy');
+    expect(agent.data[0]).not.toHaveProperty('processed_by_user_id');
   });
 
   it('works the queue oldest first, and history newest first', async () => {

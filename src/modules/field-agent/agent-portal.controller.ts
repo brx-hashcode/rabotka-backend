@@ -217,11 +217,15 @@ export class AgentPortalController {
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
   ) {
     const agentId = req.agent.agentId;
-    const [balance, entries] = await Promise.all([
+    const [balance, movements] = await Promise.all([
       this.wallet.getBalance(agentId),
-      this.wallet.listEntries(agentId, Math.max(page, 1), clamp(limit, 1, 50)),
+      this.wallet.listMovements(
+        agentId,
+        Math.max(page, 1),
+        clamp(limit, 1, 50),
+      ),
     ]);
-    return { balance, entries };
+    return { balance, movements };
   }
 
   @Get('commissions')

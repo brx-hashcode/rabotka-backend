@@ -65,6 +65,7 @@ export class AdminAgentWithdrawalController {
     @Query('agentId', new ParseUUIDPipe({ optional: true })) agentId?: string,
   ) {
     return this.withdrawals.list({
+      forAdmin: true,
       agentId,
       status,
       page: Math.max(page, 1),

@@ -336,15 +336,16 @@ export class AdminAgentController {
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
   ) {
     await this.agents.getDetail(id); // 404 for an unknown agent
-    const [balance, entries] = await Promise.all([
+    const [balance, movements] = await Promise.all([
       this.wallet.getBalance(id),
-      this.wallet.listEntries(
+      this.wallet.listMovements(
         id,
         Math.max(page, 1),
         Math.min(Math.max(limit, 1), 100),
+        { forAdmin: true },
       ),
     ]);
-    return { balance, entries };
+    return { balance, movements };
   }
 
   @Patch(':id')
