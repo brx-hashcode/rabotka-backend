@@ -371,9 +371,9 @@ export class AgentLeadService {
     const sentToWorker = await this.sendToWorker({
       workerId: lead.worker_id,
       phone: worker?.phone ?? null,
-      workerFirstName: worker?.first_name ?? '',
-      agentFirstName: agent?.first_name ?? 'votre agent',
-      jobTitle: job?.title ?? '',
+      workerFirstName: worker?.first_name,
+      agentFirstName: agent?.first_name,
+      jobTitle: job?.title,
       invitePath: `invitations/${token}`,
     });
 
@@ -416,17 +416,28 @@ export class AgentLeadService {
   private async sendToWorker(p: {
     workerId: string;
     phone: string | null;
-    workerFirstName: string;
-    agentFirstName: string;
-    jobTitle: string;
+    workerFirstName: string | null | undefined;
+    agentFirstName: string | null | undefined;
+    jobTitle: string | null | undefined;
     invitePath: string;
   }): Promise<boolean> {
     if (!p.phone) return false;
     if (!(await this.systemConfig.isAgentInviteWhatsAppEnabled())) return false;
-    const body =
-      `Bonjour ${p.workerFirstName}, c’est ${p.agentFirstName}, agent Rabotka. ` +
-      `Je vous propose une nouvelle opportunité : « ${p.jobTitle} ». ` +
-      'Cliquez sur le bouton ci-dessous pour découvrir les détails et postuler.';
+    // The free-form text (inside the 24h window) mirrors the template.
+    const worker = p.workerFirstName?.trim() || 'à vous';
+    const agent = p.agentFirstName?.trim() || 'Votre agent';
+    const title = p.jobTitle?.trim() || 'une mission';
+    const body = [
+      '*Offre dont vous avez parlé*',
+      '',
+      `Bonjour ${worker},`,
+      '',
+      `Suite à votre échange avec ${agent}, agent Rabotka, voici l’offre dont vous avez parlé :`,
+      '',
+      `*Offre* : ${title}`,
+      '',
+      'Appuyez ci-dessous pour voir les détails et postuler.',
+    ].join('\n');
     try {
       const result = await this.dispatcher.send({
         phone: p.phone,
