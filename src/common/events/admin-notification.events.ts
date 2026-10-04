@@ -62,6 +62,8 @@ export type AdminEntityType =
   | 'penalty'
   | 'conversation'
   | 'agent'
+  /** An application a field agent brought in; entityId is the application. */
+  | 'agent-placement'
   | 'agent-withdrawal';
 
 export interface AdminNotificationPayload {
