@@ -29,6 +29,12 @@ import { toE164 } from '../whatsapp/contracts/address';
 
 type Tx = Prisma.TransactionClient;
 
+/** Payout days are Brazzaville days, like the agent stats. */
+const PAYOUT_TIMEZONE = 'Africa/Brazzaville';
+
+/** The ranges the payout chart offers, in days. */
+export const PAYOUT_TIMESERIES_RANGES = [7, 30, 90, 180] as const;
+
 const WITHDRAWAL_SELECT = {
   id: true,
   created_at: true,
@@ -340,7 +346,7 @@ export class AgentWithdrawalService {
       ...(params.agentId ? { agent_id: params.agentId } : {}),
       ...(params.status ? { status: params.status } : {}),
     };
-    const [total, rows, open] = await Promise.all([
+    const [total, rows, summary] = await Promise.all([
       this.prisma.agentWithdrawal.count({ where }),
       this.prisma.agentWithdrawal.findMany({
         where,
@@ -353,14 +359,7 @@ export class AgentWithdrawalService {
         skip: (params.page - 1) * params.limit,
         take: params.limit,
       }),
-      this.prisma.agentWithdrawal.aggregate({
-        where: {
-          ...(params.agentId ? { agent_id: params.agentId } : {}),
-          status: AgentWithdrawalStatus.REQUESTED,
-        },
-        _count: { _all: true },
-        _sum: { amount: true },
-      }),
+      this.summary(params.agentId),
     ]);
     const adminIds = params.forAdmin
       ? [
@@ -395,8 +394,138 @@ export class AgentWithdrawalService {
       total,
       page: params.page,
       limit: params.limit,
-      /** What is waiting for an admin, whatever the filter. */
-      open: { count: open._count._all, amount: Number(open._sum.amount ?? 0) },
+      summary,
+    };
+  }
+
+  /**
+   * The figures above the payout queue, whatever the filter: what is waiting
+   * (and on which network, so the right account can be funded), how long the
+   * oldest has waited, what went out this month, and a count per status.
+   */
+  async summary(agentId?: string) {
+    const scope = agentId ? { agent_id: agentId } : {};
+    const monthStart = startOfBrazzavilleMonth(new Date());
+    const [byStatus, openByOperator, oldest, paidThisMonth] = await Promise.all(
+      [
+        this.prisma.agentWithdrawal.groupBy({
+          by: ['status'],
+          where: scope,
+          _count: { _all: true },
+        }),
+        this.prisma.agentWithdrawal.groupBy({
+          by: ['momo_operator'],
+          where: { ...scope, status: AgentWithdrawalStatus.REQUESTED },
+          _count: { _all: true },
+          _sum: { amount: true },
+        }),
+        this.prisma.agentWithdrawal.findFirst({
+          where: { ...scope, status: AgentWithdrawalStatus.REQUESTED },
+          orderBy: { created_at: 'asc' },
+          select: { created_at: true },
+        }),
+        this.prisma.agentWithdrawal.aggregate({
+          where: {
+            ...scope,
+            status: AgentWithdrawalStatus.PAID,
+            processed_at: { gte: monthStart },
+          },
+          _count: { _all: true },
+          _sum: { amount: true },
+        }),
+      ],
+    );
+
+    const counts = Object.fromEntries(
+      Object.values(AgentWithdrawalStatus).map((st) => [
+        st,
+        byStatus.find((g) => g.status === st)?._count._all ?? 0,
+      ]),
+    ) as Record<AgentWithdrawalStatus, number>;
+    const byOperator = Object.fromEntries(
+      Object.values(AgentMomoOperator).map((op) => {
+        const g = openByOperator.find((x) => x.momo_operator === op);
+        return [
+          op,
+          { count: g?._count._all ?? 0, amount: Number(g?._sum.amount ?? 0) },
+        ];
+      }),
+    ) as Record<AgentMomoOperator, { count: number; amount: number }>;
+
+    return {
+      counts,
+      open: {
+        count: counts.REQUESTED,
+        amount: Object.values(byOperator).reduce((a, o) => a + o.amount, 0),
+        oldestAt: oldest?.created_at ?? null,
+        byOperator,
+      },
+      paidThisMonth: {
+        count: paidThisMonth._count._all,
+        amount: Number(paidThisMonth._sum.amount ?? 0),
+      },
+    };
+  }
+
+  /**
+   * The payout queue day by day, Brazzaville days: what was still waiting at
+   * the end of each day (the backlog), and what was paid or rejected that day.
+   */
+  async timeseries(days: number) {
+    const rows = await this.prisma.$queryRaw<
+      {
+        date: string;
+        open_count: number;
+        open_amount: number;
+        paid_count: number;
+        paid_amount: number;
+        rejected_count: number;
+        rejected_amount: number;
+      }[]
+    >`
+      WITH bounds AS (
+        SELECT (now() AT TIME ZONE ${PAYOUT_TIMEZONE})::date AS last_day,
+               (now() AT TIME ZONE ${PAYOUT_TIMEZONE})::date - (${days}::int - 1) AS first_day
+      ),
+      days AS (
+        SELECT generate_series(b.first_day, b.last_day, interval '1 day')::date AS d
+        FROM bounds b
+      ),
+      w AS (
+        SELECT amount, status,
+               (created_at AT TIME ZONE 'UTC' AT TIME ZONE ${PAYOUT_TIMEZONE})::date AS requested_on,
+               (processed_at AT TIME ZONE ${PAYOUT_TIMEZONE})::date AS processed_on
+        FROM agent_withdrawals
+      )
+      SELECT to_char(days.d, 'YYYY-MM-DD') AS date,
+             COUNT(w.*) FILTER (
+               WHERE w.requested_on <= days.d
+                 AND (w.processed_on IS NULL OR w.processed_on > days.d)
+             )::int AS open_count,
+             COALESCE(SUM(w.amount) FILTER (
+               WHERE w.requested_on <= days.d
+                 AND (w.processed_on IS NULL OR w.processed_on > days.d)
+             ), 0)::float AS open_amount,
+             COUNT(w.*) FILTER (WHERE w.status = 'PAID' AND w.processed_on = days.d)::int AS paid_count,
+             COALESCE(SUM(w.amount) FILTER (WHERE w.status = 'PAID' AND w.processed_on = days.d), 0)::float AS paid_amount,
+             COUNT(w.*) FILTER (WHERE w.status = 'REJECTED' AND w.processed_on = days.d)::int AS rejected_count,
+             COALESCE(SUM(w.amount) FILTER (WHERE w.status = 'REJECTED' AND w.processed_on = days.d), 0)::float AS rejected_amount
+      FROM days
+      LEFT JOIN w ON w.requested_on <= days.d
+      GROUP BY days.d
+      ORDER BY days.d
+    `;
+    return {
+      days,
+      points: rows.map((r) => ({
+        date: r.date,
+        toPay: { count: Number(r.open_count), amount: Number(r.open_amount) },
+        paid: { count: Number(r.paid_count), amount: Number(r.paid_amount) },
+        rejected: {
+          count: Number(r.rejected_count),
+          amount: Number(r.rejected_amount),
+        },
+      })),
     };
   }
 
@@ -488,4 +617,16 @@ export function normalizeMomoPhone(raw: string): string {
     throw new BadRequestException('Numéro Mobile Money invalide.');
   }
   return e164;
+}
+
+/**
+ * The first instant of the current month in Brazzaville (UTC+1 all year, no
+ * daylight saving), as a UTC Date.
+ */
+export function startOfBrazzavilleMonth(now: Date): Date {
+  const WAT = 60 * 60 * 1000;
+  const local = new Date(now.getTime() + WAT);
+  return new Date(
+    Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), 1) - WAT,
+  );
 }

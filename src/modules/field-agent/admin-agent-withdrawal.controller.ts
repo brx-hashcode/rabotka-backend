@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   DefaultValuePipe,
@@ -27,7 +28,10 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { AgentWithdrawalService } from './agent-withdrawal.service';
+import {
+  AgentWithdrawalService,
+  PAYOUT_TIMESERIES_RANGES,
+} from './agent-withdrawal.service';
 import {
   PayAgentWithdrawalDto,
   RejectAgentWithdrawalDto,
@@ -71,6 +75,29 @@ export class AdminAgentWithdrawalController {
       page: Math.max(page, 1),
       limit: Math.min(Math.max(limit, 1), 100),
     });
+  }
+
+  @Get('timeseries')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({
+    summary: 'The payout queue per day (7, 30, 90 or 180 days)',
+    description:
+      'toPay: still waiting at the end of the day; paid / rejected: processed that day. Brazzaville days.',
+  })
+  @ApiQuery({
+    name: 'days',
+    required: false,
+    enum: [...PAYOUT_TIMESERIES_RANGES],
+  })
+  timeseries(
+    @Query('days', new DefaultValuePipe(30), ParseIntPipe) days: number,
+  ) {
+    if (!(PAYOUT_TIMESERIES_RANGES as readonly number[]).includes(days)) {
+      throw new BadRequestException(
+        `days must be one of ${PAYOUT_TIMESERIES_RANGES.join(', ')}`,
+      );
+    }
+    return this.withdrawals.timeseries(days);
   }
 
   @Post(':id/pay')

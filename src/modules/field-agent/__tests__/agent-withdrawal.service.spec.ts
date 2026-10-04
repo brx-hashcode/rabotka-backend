@@ -14,6 +14,7 @@ import {
 import {
   AgentWithdrawalService,
   normalizeMomoPhone,
+  startOfBrazzavilleMonth,
 } from '../agent-withdrawal.service';
 
 const AGENT = {
@@ -44,6 +45,18 @@ const p2002 = () =>
     code: 'P2002',
     clientVersion: 'test',
   });
+
+describe('startOfBrazzavilleMonth', () => {
+  it('starts the month at midnight UTC+1', () => {
+    expect(
+      startOfBrazzavilleMonth(new Date('2026-10-04T12:00:00Z')).toISOString(),
+    ).toBe('2026-09-30T23:00:00.000Z');
+    // 23:30 UTC on Oct 31 is already November in Brazzaville.
+    expect(
+      startOfBrazzavilleMonth(new Date('2026-10-31T23:30:00Z')).toISOString(),
+    ).toBe('2026-10-31T23:00:00.000Z');
+  });
+});
 
 describe('normalizeMomoPhone', () => {
   it('reads a typed number as E.164', () => {
@@ -99,6 +112,8 @@ describe('AgentWithdrawalService', () => {
         aggregate: jest
           .fn()
           .mockResolvedValue({ _count: { _all: 0 }, _sum: { amount: null } }),
+        groupBy: jest.fn().mockResolvedValue([]),
+        findFirst: jest.fn().mockResolvedValue(null),
       },
       agentLedgerEntry: {
         aggregate: jest.fn().mockResolvedValue({ _sum: { amount: 3000 } }),
@@ -331,6 +346,71 @@ describe('AgentWithdrawalService', () => {
     });
     expect(agent.data[0]).not.toHaveProperty('processedBy');
     expect(agent.data[0]).not.toHaveProperty('processed_by_user_id');
+  });
+
+  it('sums what waits per network, and what went out this month', async () => {
+    const oldest = new Date('2026-10-02T09:00:00Z');
+    prisma.agentWithdrawal.groupBy
+      .mockResolvedValueOnce([
+        { status: AgentWithdrawalStatus.REQUESTED, _count: { _all: 3 } },
+        { status: AgentWithdrawalStatus.PAID, _count: { _all: 5 } },
+      ])
+      .mockResolvedValueOnce([
+        {
+          momo_operator: 'MTN',
+          _count: { _all: 2 },
+          _sum: { amount: new Prisma.Decimal(3500) },
+        },
+        {
+          momo_operator: 'AIRTEL',
+          _count: { _all: 1 },
+          _sum: { amount: new Prisma.Decimal(3500) },
+        },
+      ]);
+    prisma.agentWithdrawal.findFirst.mockResolvedValue({ created_at: oldest });
+    prisma.agentWithdrawal.aggregate.mockResolvedValue({
+      _count: { _all: 4 },
+      _sum: { amount: new Prisma.Decimal(9500) },
+    });
+
+    await expect(service.summary()).resolves.toEqual({
+      counts: { REQUESTED: 3, PAID: 5, REJECTED: 0 },
+      open: {
+        count: 3,
+        amount: 7000,
+        oldestAt: oldest,
+        byOperator: {
+          MTN: { count: 2, amount: 3500 },
+          AIRTEL: { count: 1, amount: 3500 },
+        },
+      },
+      paidThisMonth: { count: 4, amount: 9500 },
+    });
+  });
+
+  it('reads the queue day by day: backlog, paid and rejected', async () => {
+    prisma.$queryRaw.mockResolvedValue([
+      {
+        date: '2026-10-03',
+        open_count: 2,
+        open_amount: 3000,
+        paid_count: 1,
+        paid_amount: 2000,
+        rejected_count: 1,
+        rejected_amount: 500,
+      },
+    ]);
+    await expect(service.timeseries(7)).resolves.toEqual({
+      days: 7,
+      points: [
+        {
+          date: '2026-10-03',
+          toPay: { count: 2, amount: 3000 },
+          paid: { count: 1, amount: 2000 },
+          rejected: { count: 1, amount: 500 },
+        },
+      ],
+    });
   });
 
   it('works the queue oldest first, and history newest first', async () => {
