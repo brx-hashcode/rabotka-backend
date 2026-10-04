@@ -3,14 +3,21 @@ import {
   ADMIN_DASHBOARD_TTL_SECONDS,
 } from '../../common/services/cache/admin-cache.service';
 import { Injectable } from '@nestjs/common';
+import { JobOfferStatus } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { TimeRange } from './dto/job-activity-query.dto';
 import { countPaidContactPairs } from '../../common/queries/paid-contacts.sql';
 
+/**
+ * One day of the admin's job-activity chart: the offers posted that day, and
+ * how many of them are in each status TODAY. There is no status history to
+ * read a "filled on day X" from — `updated_at` moves on any edit — so the
+ * honest split is by current status of that day's postings.
+ */
 export type JobActivityDataPoint = {
   date: string;
   jobCreated: number;
-  jobFilled: number;
+  byStatus: Record<JobOfferStatus, number>;
 };
 
 export type DashboardMetrics = {
@@ -190,7 +197,8 @@ export class DashboardService {
 
   async getJobActivity(range: TimeRange): Promise<JobActivityDataPoint[]> {
     return this.cache.wrap(
-      this.cache.dashboardKey('job-activity', { range }),
+      // New shape (byStatus), new key: an old cached payload must not be served.
+      this.cache.dashboardKey('job-activity-by-status', { range }),
       ADMIN_DASHBOARD_TTL_SECONDS,
       () => this.loadJobActivity(range),
     );
@@ -205,39 +213,40 @@ export class DashboardService {
     startDate.setDate(startDate.getDate() - days);
 
     const rows = await this.prisma.$queryRaw<
-      { date: Date; job_created: bigint; job_filled: bigint }[]
+      { date: Date; status: JobOfferStatus | null; n: bigint }[]
     >`
-      SELECT
-        d.date::date AS date,
-        COALESCE(created.cnt, 0) AS job_created,
-        COALESCE(filled.cnt, 0) AS job_filled
+      SELECT d.date::date AS date, j.status AS status, COUNT(j.id) AS n
       FROM generate_series(
         ${startDate}::date,
         CURRENT_DATE,
         '1 day'::interval
       ) AS d(date)
-      LEFT JOIN (
-        SELECT created_at::date AS day, COUNT(*) AS cnt
-        FROM "job_offers"
-        WHERE created_at >= ${startDate}
-          AND deleted_at IS NULL
-        GROUP BY created_at::date
-      ) AS created ON created.day = d.date
-      LEFT JOIN (
-        SELECT updated_at::date AS day, COUNT(*) AS cnt
-        FROM "job_offers"
-        WHERE status = 'FILLED'
-          AND updated_at >= ${startDate}
-          AND deleted_at IS NULL
-        GROUP BY updated_at::date
-      ) AS filled ON filled.day = d.date
+      LEFT JOIN "job_offers" j
+        ON j.created_at::date = d.date::date
+       AND j.deleted_at IS NULL
+      GROUP BY d.date, j.status
       ORDER BY d.date
     `;
 
-    return rows.map((row) => ({
-      date: new Date(row.date).toISOString().split('T')[0],
-      jobCreated: Number(row.job_created),
-      jobFilled: Number(row.job_filled),
-    }));
+    const emptyCounts = (): Record<JobOfferStatus, number> =>
+      Object.fromEntries(
+        Object.values(JobOfferStatus).map((st) => [st, 0]),
+      ) as Record<JobOfferStatus, number>;
+    const byDay = new Map<string, JobActivityDataPoint>();
+    for (const row of rows) {
+      const date = new Date(row.date).toISOString().split('T')[0];
+      let point = byDay.get(date);
+      if (!point) {
+        point = { date, jobCreated: 0, byStatus: emptyCounts() };
+        byDay.set(date, point);
+      }
+      // A day with no posting still yields one row, with a null status.
+      if (row.status) {
+        const n = Number(row.n);
+        point.byStatus[row.status] += n;
+        point.jobCreated += n;
+      }
+    }
+    return [...byDay.values()];
   }
 }
