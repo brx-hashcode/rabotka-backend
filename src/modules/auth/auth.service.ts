@@ -792,6 +792,14 @@ export class AuthService {
     this.logger.warn(`[OTP][${stage}] ${identifier} → ${otp}`);
   }
 
+  /** A developer's machine: `NODE_ENV=development`, and never production. */
+  private isLocalDevelopment(): boolean {
+    return (
+      this.configService.get<string>('NODE_ENV') === 'development' &&
+      this.configService.get<string>('IS_PROD') !== 'true'
+    );
+  }
+
   private normalize(value: string): string {
     return value.trim().toLowerCase();
   }
@@ -878,6 +886,16 @@ export class AuthService {
     otp: string,
     profileId?: string,
   ): Promise<void> {
+    // On a developer's machine every login was a paid WhatsApp template. The
+    // code is already in the terminal (logOtp), so the message is skipped.
+    // The develop server runs NODE_ENV=production, so its testers still get
+    // real codes; production never reaches this branch either way.
+    if (this.isLocalDevelopment()) {
+      this.logger.warn(
+        `[OTP] WhatsApp not sent in local development — use the code logged above for ${phone}`,
+      );
+      return;
+    }
     const sent = await this.whatsAppService.sendTemplateMessage(
       phone,
       'otp',
