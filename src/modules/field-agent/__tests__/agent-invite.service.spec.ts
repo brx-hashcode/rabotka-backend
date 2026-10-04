@@ -20,10 +20,15 @@ function lead(over: Record<string, unknown> = {}) {
       title: 'Plombier',
       description: 'Fuite',
       city: 'Brazzaville',
+      country_name: 'Congo',
       address: 'Moungali',
+      is_remote: false,
       scheduled_at: null,
       amount: 15000,
+      payment_flow: 'ONE_TIME',
       employment_type: null,
+      note: 'Apporter ses outils',
+      status: 'ACTIVE',
       category: null,
     },
     ...over,
@@ -66,7 +71,14 @@ describe('AgentInviteService', () => {
       status: AgentLeadStatus.INVITED,
       expired: false,
       agent: { firstName: 'Jean' },
-      job: { title: 'Plombier', amount: 15000 },
+      job: {
+        title: 'Plombier',
+        amount: 15000,
+        isRemote: false,
+        countryName: 'Congo',
+        paymentFlow: 'ONE_TIME',
+        status: 'ACTIVE',
+      },
     });
     expect(result.job).not.toHaveProperty('employer');
   });
