@@ -132,16 +132,32 @@ describe('DashboardService', () => {
       expect(result).toEqual([]);
     });
 
-    it('maps raw rows to date/jobCreated/jobFilled', async () => {
-      const date = new Date('2026-03-01T00:00:00Z');
+    it("splits each day's postings by their current status", async () => {
+      const day1 = new Date('2026-03-01T00:00:00Z');
+      const day2 = new Date('2026-03-02T00:00:00Z');
       prisma.$queryRaw.mockResolvedValue([
-        { date, job_created: BigInt(3), job_filled: BigInt(1) },
+        { date: day1, status: 'EXPIRED', n: BigInt(2) },
+        { date: day1, status: 'COMPLETED', n: BigInt(1) },
+        // A day with no posting comes back as one row with a null status.
+        { date: day2, status: null, n: BigInt(0) },
       ]);
       const result = await service.getJobActivity(TimeRange.THIRTY_DAYS);
-      expect(result).toHaveLength(1);
-      expect(result[0].jobCreated).toBe(3);
-      expect(result[0].jobFilled).toBe(1);
-      expect(result[0].date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+      expect(result).toHaveLength(2);
+      expect(result[0]).toMatchObject({
+        date: '2026-03-01',
+        jobCreated: 3,
+        byStatus: expect.objectContaining({
+          EXPIRED: 2,
+          COMPLETED: 1,
+          ACTIVE: 0,
+          FILLED: 0,
+        }),
+      });
+      expect(result[1].jobCreated).toBe(0);
+      expect(Object.values(result[1].byStatus).every((n) => n === 0)).toBe(
+        true,
+      );
     });
 
     it('supports all time ranges', async () => {
