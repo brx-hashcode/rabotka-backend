@@ -607,6 +607,10 @@ model User {
   phone_name      String?
   totp_secret     String?
   totp_enabled    Boolean   @default(false)
+  /// In the KYC verification group: emailed each time a profile is created,
+  /// to review its documents. Picked person by person, never implied by role;
+  /// only roles that can verify KYC may hold it (`KYC_REVIEWER_ROLES`).
+  kyc_reviewer    Boolean   @default(false)
 
   files                  File[]
   logs                   Log[]
