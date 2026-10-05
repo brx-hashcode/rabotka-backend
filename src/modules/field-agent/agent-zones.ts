@@ -1,4 +1,4 @@
-import { JobOfferStatus, Prisma } from '@prisma/client';
+import { EmploymentType, JobOfferStatus, Prisma } from '@prisma/client';
 
 /** Offers an agent can still do something about. */
 const OPEN_STATUSES: JobOfferStatus[] = [
@@ -41,51 +41,107 @@ export function jobsInZonesWhere(zones: Zone[]): Prisma.JobOfferWhereInput {
   };
 }
 
-export type PublicJobsFilter = { country?: string; city?: string; q?: string };
+/** Narrowing a job list, shared by the public feed and an agent's own feed. */
+export type JobFilters = {
+  q?: string;
+  employmentTypes?: EmploymentType[];
+  /** Category slugs. */
+  categories?: string[];
+  /** Agent feed only: the public feed never filters or reveals pay. */
+  minAmount?: number;
+  maxAmount?: number;
+};
+
+export type PublicJobsFilter = {
+  country?: string;
+  city?: string;
+} & Omit<JobFilters, 'minAmount' | 'maxAmount'>;
+
+export type JobSort = 'recent' | 'start';
+
+export function jobsOrderBy(
+  sort: JobSort = 'recent',
+): Prisma.JobOfferOrderByWithRelationInput[] {
+  return sort === 'start'
+    ? [{ scheduled_at: { sort: 'asc', nulls: 'last' } }, { created_at: 'desc' }]
+    : [{ created_at: 'desc' }];
+}
 
 /**
- * The jobs anyone may browse on the agent app's front page: every open job,
- * optionally narrowed to a country and/or city and a title search.
+ * One AND clause per active filter. Kept separate from the scope (open jobs,
+ * zones or location) so facet counts can drop exactly one filter at a time.
+ */
+export function jobFiltersWhere(f: JobFilters): Prisma.JobOfferWhereInput[] {
+  const and: Prisma.JobOfferWhereInput[] = [];
+
+  if (f.q) {
+    and.push({
+      OR: [
+        { title: { contains: f.q, mode: 'insensitive' } },
+        { reference: { contains: f.q, mode: 'insensitive' } },
+      ],
+    });
+  }
+  if (f.employmentTypes?.length) {
+    and.push({ employment_type: { in: f.employmentTypes } });
+  }
+  if (f.categories?.length) {
+    and.push({ category: { slug: { in: f.categories } } });
+  }
+  if (f.minAmount !== undefined || f.maxAmount !== undefined) {
+    and.push({
+      amount: {
+        ...(f.minAmount !== undefined ? { gte: f.minAmount } : {}),
+        ...(f.maxAmount !== undefined ? { lte: f.maxAmount } : {}),
+      },
+    });
+  }
+  return and;
+}
+
+/**
+ * The jobs anyone may browse on the agent app's front page, before filters:
+ * every open job, optionally narrowed to a country and/or city.
  *
  * Location follows the same fallback as `jobsInZonesWhere` — the offer's own
  * place, or the employer's when the offer names none.
  */
-export function publicJobsWhere(
-  filter: PublicJobsFilter,
+export function publicScopeWhere(
+  filter: Pick<PublicJobsFilter, 'country' | 'city'>,
 ): Prisma.JobOfferWhereInput {
-  const and: Prisma.JobOfferWhereInput[] = [];
   const country = filter.country?.toUpperCase();
+  let location: Prisma.JobOfferWhereInput | null = null;
 
   if (filter.city) {
     const city = { equals: filter.city, mode: 'insensitive' as const };
     const inCountry = country ? { country_code: country } : {};
-    and.push({
+    location = {
       OR: [
         { ...inCountry, city },
         { city: null, employer: { ...inCountry, city } },
       ],
-    });
+    };
   } else if (country) {
-    and.push({
+    location = {
       OR: [
         { country_code: country },
         { country_code: null, employer: { country_code: country } },
       ],
-    });
-  }
-
-  if (filter.q) {
-    and.push({
-      OR: [
-        { title: { contains: filter.q, mode: 'insensitive' } },
-        { reference: { contains: filter.q, mode: 'insensitive' } },
-      ],
-    });
+    };
   }
 
   return {
     deleted_at: null,
     status: { in: OPEN_STATUSES },
-    ...(and.length > 0 ? { AND: and } : {}),
+    ...(location ? { AND: [location] } : {}),
   };
+}
+
+/** Scope plus filters, as one where clause. */
+export function withFilters(
+  scope: Prisma.JobOfferWhereInput,
+  filters: JobFilters,
+): Prisma.JobOfferWhereInput {
+  const and = jobFiltersWhere(filters);
+  return and.length > 0 ? { AND: [scope, ...and] } : scope;
 }

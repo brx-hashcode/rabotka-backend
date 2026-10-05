@@ -34,6 +34,13 @@ import { AgentWalletService } from './agent-wallet.service';
 import { AgentWithdrawalService } from './agent-withdrawal.service';
 import { AgentPortalService } from './agent-portal.service';
 import {
+  parseAmount,
+  parseCategorySlugs,
+  parseEmploymentTypes,
+  parseSort,
+  type JobListQuery,
+} from './job-list-query';
+import {
   AgentLogCallDto,
   AgentRequestWithdrawalDto,
 } from './dto/agent-lead.dto';
@@ -79,16 +86,34 @@ export class AgentPortalController {
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
   @ApiQuery({ name: 'q', required: false, description: 'Title or reference' })
+  @ApiQuery({
+    name: 'employmentType',
+    required: false,
+    description: 'Comma list: MISSION,CDD,CDI,STAGE',
+  })
+  @ApiQuery({
+    name: 'category',
+    required: false,
+    description: 'Comma list of category slugs',
+  })
+  @ApiQuery({ name: 'minAmount', required: false })
+  @ApiQuery({ name: 'maxAmount', required: false })
+  @ApiQuery({ name: 'sort', required: false, enum: ['recent', 'start'] })
   listJobs(
     @Req() req: AgentAuthenticatedRequest,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
-    @Query('q') q?: string,
+    @Query() query: JobListQuery,
   ) {
     return this.portal.listJobs(req.agent.agentId, {
       page: Math.max(page, 1),
       limit: clamp(limit, 1, 50),
-      q: q?.trim() || undefined,
+      q: query.q?.trim() || undefined,
+      employmentTypes: parseEmploymentTypes(query.employmentType),
+      categories: parseCategorySlugs(query.category),
+      minAmount: parseAmount(query.minAmount),
+      maxAmount: parseAmount(query.maxAmount),
+      sort: parseSort(query.sort),
     });
   }
 
