@@ -8,6 +8,7 @@ import cookieParser from 'cookie-parser';
 import express from 'express';
 import * as path from 'node:path';
 import { AppModule } from './app.module';
+import { initVovaTracing } from './modules/rag/observability/tracing';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { RedisIoAdapter } from './common/adapters/redis-io.adapter';
 import { CSRF_UTILITIES } from './modules/csrf/csrf.constants';
@@ -17,6 +18,10 @@ import { securityHeaders } from './common/middleware/security-headers.middleware
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
+
+  // Before the app exists, so the OpenTelemetry context is in place by the
+  // first VoVa turn. A no-op without LANGFUSE_* keys; never throws.
+  await initVovaTracing();
 
   const app = await NestFactory.create(AppModule, {
     logger: ['error', 'warn', 'log', 'debug', 'verbose'],

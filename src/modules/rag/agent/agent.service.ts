@@ -18,6 +18,7 @@ import {
 import type { Deadline } from '../llm/deadline';
 import { JobCategoryRegistry } from '../intents/job-category.registry';
 import { FallbackChatModel } from './fallback-chat-model';
+import { traceAgentRun, vovaCallbacks } from '../observability/tracing';
 import { GuardService, isAbusive } from './guard.service';
 import { AbuseReportService } from './abuse-report.service';
 import {
@@ -77,6 +78,8 @@ export interface AnonymousAgentReply {
   origin: 'guard' | 'agent' | 'error';
   refusalId?: RefusalId;
   telemetry?: LlmCallTelemetry;
+  /** Tools the model called this turn, in order — for traces and evals. */
+  toolsCalled?: string[];
   sanitizerBlocked: string[];
 }
 
@@ -92,6 +95,8 @@ export interface AgentReply {
   refusalId?: RefusalId;
   escalated: boolean;
   telemetry?: LlmCallTelemetry;
+  /** Tools the model called this turn, in order — for traces and evals. */
+  toolsCalled?: string[];
   sanitizerBlocked: string[];
 }
 
@@ -115,6 +120,46 @@ function systemMessage(parts: SystemPromptParts): SystemMessage {
       { type: 'text', text: parts.volatile },
     ],
   });
+}
+
+/**
+ * The text of the model's final message.
+ *
+ * Content is a string or an array of parts. It used to be JSON-stringified
+ * when it was not a string — so a final message with NO parts became the
+ * two-character reply « [] », which is not blank, skipped the « rien trouvé »
+ * fallback, and was sent to the user as is. Found by the answers eval on a
+ * tax question (`vova-eval.ts`, case `legal-advice`).
+ *
+ * Only text parts count: tool-use and image parts are not something to say.
+ */
+export function replyText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((part: unknown) => {
+      if (typeof part === 'string') return part;
+      if (
+        part &&
+        typeof part === 'object' &&
+        (part as { type?: unknown }).type === 'text' &&
+        typeof (part as { text?: unknown }).text === 'string'
+      ) {
+        return (part as { text: string }).text;
+      }
+      return '';
+    })
+    .join('');
+}
+
+/** The tool names the model called during a run, in call order. */
+export function toolNamesOf(messages: BaseMessage[]): string[] {
+  const names: string[] = [];
+  for (const m of messages) {
+    const calls = (m as { tool_calls?: { name?: string }[] }).tool_calls;
+    for (const c of calls ?? []) if (c.name) names.push(c.name);
+  }
+  return names;
 }
 
 /** One raced agent run, settled rather than rejected so `Promise.race` stays tractable. */
@@ -292,23 +337,37 @@ export class VovaAgentService {
         VovaAgentService.hedgesInFlight += 1;
       }
 
-      const p = createReactAgent({
-        llm: model as never,
-        tools: tools as never,
-      })
-        // A copy of the messages per run: two graphs must never share a mutable
-        // input array. Cheap insurance against a class of bug that would only
-        // appear under concurrency.
-        .invoke(
-          { messages: [...messages] },
-          {
-            recursionLimit: this.maxIterations * 2,
-            // LangGraph checks this between graph nodes, so an expired turn —
-            // or a lost race — stops at the next step boundary instead of
-            // after another full model call.
-            signal,
-          },
-        )
+      // Each raced run is its own span in the turn's trace (provider, hedge,
+      // won/aborted/failed), with the model and tool calls nested under it by
+      // the Langfuse callback. Both are no-ops when tracing is off.
+      const p = traceAgentRun(
+        {
+          provider: spec.provider,
+          model: spec.model,
+          hedge: isHedge,
+          position: i,
+        },
+        () =>
+          createReactAgent({
+            llm: model as never,
+            tools: tools as never,
+          })
+            // A copy of the messages per run: two graphs must never share a
+            // mutable input array. Cheap insurance against a class of bug that
+            // would only appear under concurrency.
+            .invoke(
+              { messages: [...messages] },
+              {
+                recursionLimit: this.maxIterations * 2,
+                // LangGraph checks this between graph nodes, so an expired
+                // turn — or a lost race — stops at the next step boundary
+                // instead of after another full model call.
+                signal,
+                callbacks: vovaCallbacks(),
+                runName: `vova.agent.${spec.provider}`,
+              },
+            ),
+      )
         .then(
           (result): RunOutcome => ({ i, ok: true, result, telemetry }),
           (err): RunOutcome => ({ i, ok: false, err }),
@@ -782,10 +841,8 @@ export class VovaAgentService {
       );
 
       const last = result.messages.at(-1);
-      const raw =
-        typeof last?.content === 'string'
-          ? last.content
-          : JSON.stringify(last?.content ?? '');
+      const toolsCalled = toolNamesOf(result.messages);
+      const raw = replyText(last?.content);
 
       if (!raw.trim()) {
         return {
@@ -793,6 +850,7 @@ export class VovaAgentService {
           origin: 'agent',
           refusalId: 'rien_trouve_anonyme',
           telemetry,
+          toolsCalled,
           sanitizerBlocked: ['empty'],
         };
       }
@@ -814,6 +872,7 @@ export class VovaAgentService {
         text: sanitized.text,
         origin: 'agent',
         telemetry,
+        toolsCalled,
         sanitizerBlocked: sanitized.blocked,
       };
     } catch (err) {
@@ -983,10 +1042,8 @@ export class VovaAgentService {
       });
 
       const last = result.messages.at(-1);
-      const raw =
-        typeof last?.content === 'string'
-          ? last.content
-          : JSON.stringify(last?.content ?? '');
+      const toolsCalled = toolNamesOf(result.messages);
+      const raw = replyText(last?.content);
 
       if (!raw.trim()) {
         return {
@@ -996,6 +1053,7 @@ export class VovaAgentService {
           escalated: false,
           telemetry,
           destination: destinationFor(request.text, request.profileType),
+          toolsCalled,
           sanitizerBlocked: ['empty'],
         };
       }
@@ -1035,6 +1093,7 @@ export class VovaAgentService {
         origin: 'agent',
         escalated: false,
         telemetry,
+        toolsCalled,
         sanitizerBlocked: sanitized.blocked,
       };
     } catch (err) {

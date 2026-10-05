@@ -336,6 +336,12 @@ jobs:
           OPENAI_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.OPENAI_API_KEY // ""')
           GROQ_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.GROQ_API_KEY // ""')
           DEEPSEEK_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.DEEPSEEK_API_KEY // ""')
+          # VoVa tracing (Langfuse Cloud EU). Optional: both blank means no
+          # tracing at all — initVovaTracing loads nothing without them.
+          LANGFUSE_PUBLIC_KEY=$(echo "$VAULT_SECRET" | jq -r '.LANGFUSE_PUBLIC_KEY // ""')
+          LANGFUSE_SECRET_KEY=$(echo "$VAULT_SECRET" | jq -r '.LANGFUSE_SECRET_KEY // ""')
+          LANGFUSE_BASE_URL=https://cloud.langfuse.com
+          LANGFUSE_TRACING_ENVIRONMENT=develop
           # --- static values ---
           BACKEND_IMAGE=ghcr.io/${{ github.repository_owner }}/rabotka-backend:${{ needs.build-and-push.outputs.image-sha-tag }}
           NODE_ENV=production
@@ -656,6 +662,29 @@ jobs:
           else
             echo "Vova providers configured:$PRESENT"
           fi
+
+      - name: Check VoVa Langfuse tracing
+        run: |
+          set -euo pipefail
+          get() { grep -E "^$1=" /tmp/deploy.env | head -1 | cut -d= -f2-; }
+          PK=$(get LANGFUSE_PUBLIC_KEY)
+          SK=$(get LANGFUSE_SECRET_KEY)
+
+          # Optional feature: both blank is a supported state (no tracing).
+          # Values are never printed, only their shape.
+          if [ -z "$PK" ] && [ -z "$SK" ]; then
+            echo "::notice::VoVa tracing off: no LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY in Vault (secret/data/apps/rabotka-backend-develop)."
+            exit 0
+          fi
+          if [ -z "$PK" ] || [ -z "$SK" ]; then
+            echo "::warning::Only one Langfuse key in Vault (secret/data/apps/rabotka-backend-develop): tracing needs both, so it stays off."
+            exit 0
+          fi
+          # A swapped or mistyped pair would boot fine and fail every export
+          # silently, so it fails here instead.
+          case "$PK" in pk-lf-*) ;; *) echo "::error::LANGFUSE_PUBLIC_KEY in Vault does not start with pk-lf- (swapped with the secret key?)"; exit 1;; esac
+          case "$SK" in sk-lf-*) ;; *) echo "::error::LANGFUSE_SECRET_KEY in Vault does not start with sk-lf- (swapped with the public key?)"; exit 1;; esac
+          echo "VoVa tracing on: Langfuse keys present ($(get LANGFUSE_BASE_URL), environment $(get LANGFUSE_TRACING_ENVIRONMENT))."
 
       - name: Copy .env to VPS
         run: |
