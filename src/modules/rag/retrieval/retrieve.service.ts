@@ -7,6 +7,7 @@ import {
   type HelpHit,
 } from './help-docs.store';
 import { readNumber } from '../shared/config';
+import { scoreActiveTurn } from '../observability/tracing';
 
 export interface RetrievalResult {
   hits: HelpHit[];
@@ -79,6 +80,13 @@ export class HelpRetrieveService {
         this.logger.warn(
           `vova.gap score=${best.toFixed(3)} question=${JSON.stringify(question)} ` +
             `best=${hits[0]?.source ?? 'none'}`,
+        );
+        // The same signal on the turn's trace, so gaps can be listed and
+        // grouped in Langfuse rather than grepped out of the log.
+        scoreActiveTurn(
+          'retrieval_gap',
+          1,
+          `best=${hits[0]?.source ?? 'none'} score=${best.toFixed(3)}`,
         );
       }
 
