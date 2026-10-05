@@ -18,10 +18,17 @@ import { AgentLeadService } from './agent-lead.service';
 import {
   AGENT_CANDIDATE_SELECT,
   AGENT_JOB_SELECT,
+  PUBLIC_JOB_SELECT,
   toAgentCandidate,
   toAgentJob,
+  toPublicJob,
 } from './agent-selects';
-import { jobsInZonesWhere, type Zone } from './agent-zones';
+import {
+  jobsInZonesWhere,
+  publicJobsWhere,
+  type PublicJobsFilter,
+  type Zone,
+} from './agent-zones';
 
 /** Applications that hold a seat, as `accept()` counts them. */
 const SEAT_HOLDING: ApplicationStatus[] = [
@@ -102,6 +109,32 @@ export class AgentPortalService {
     const filled = await this.filledSeats(rows.map((r) => r.id));
     return {
       data: rows.map((r) => toAgentJob(r, filled.get(r.id) ?? 0)),
+      total,
+      page: params.page,
+      limit: params.limit,
+    };
+  }
+
+  /** Every open job, for the agent app's public front page. No session. */
+  async listPublicJobs(
+    params: { page: number; limit: number } & PublicJobsFilter,
+  ) {
+    const where = publicJobsWhere(params);
+
+    const [total, rows] = await Promise.all([
+      this.prisma.jobOffer.count({ where }),
+      this.prisma.jobOffer.findMany({
+        where,
+        select: PUBLIC_JOB_SELECT,
+        orderBy: { created_at: 'desc' },
+        skip: (params.page - 1) * params.limit,
+        take: params.limit,
+      }),
+    ]);
+
+    const filled = await this.filledSeats(rows.map((r) => r.id));
+    return {
+      data: rows.map((r) => toPublicJob(r, filled.get(r.id) ?? 0)),
       total,
       page: params.page,
       limit: params.limit,
