@@ -389,6 +389,14 @@ describe('AgentLeadService', () => {
   });
 
   describe('invite', () => {
+    it('returns the WhatsApp preview: template text, the link as a button', async () => {
+      const result = await service.invite('agent-1', 'lead-1');
+      expect(result.preview.url).toBe(result.inviteUrl);
+      expect(result.preview.buttonText).toBe('Voir l’offre');
+      expect(result.preview.body).toContain('Offre dont vous avez parlé');
+      expect(result.preview.body).not.toContain('http');
+    });
+
     it('issues a link, and no WhatsApp link before the number was revealed', async () => {
       const result = await service.invite('agent-1', 'lead-1');
       expect(result.inviteUrl).toMatch(

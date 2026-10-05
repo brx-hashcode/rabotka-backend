@@ -116,6 +116,34 @@ export function leadView(row: LeadRow, agentId: string, now = new Date()) {
   };
 }
 
+export const AGENT_INVITATION_BUTTON = 'Voir l’offre';
+
+/**
+ * The invitation's WhatsApp text — the body of the `agentInvitation` template,
+ * also used free-form inside the 24h window and shown to the agent as a
+ * preview. The link is the button below it, never in the text.
+ */
+export function agentInvitationBody(p: {
+  workerFirstName: string | null | undefined;
+  agentFirstName: string | null | undefined;
+  jobTitle: string | null | undefined;
+}): string {
+  const worker = p.workerFirstName?.trim() || 'à vous';
+  const agent = p.agentFirstName?.trim() || 'Votre agent';
+  const title = p.jobTitle?.trim() || 'une mission';
+  return [
+    '*Offre dont vous avez parlé*',
+    '',
+    `Bonjour ${worker},`,
+    '',
+    `Suite à votre échange avec ${agent}, agent Rabotka, voici l’offre dont vous avez parlé :`,
+    '',
+    `*Offre* : ${title}`,
+    '',
+    'Appuyez ci-dessous pour voir les détails et postuler.',
+  ].join('\n');
+}
+
 /** Outcomes that end the lead, and the status each one ends it in. */
 const CLOSING_OUTCOMES: Partial<Record<AgentCallOutcome, AgentLeadStatus>> = {
   [AgentCallOutcome.NOT_INTERESTED]: AgentLeadStatus.DECLINED,
@@ -396,6 +424,16 @@ export class AgentLeadService {
       inviteUrl,
       expiresAt,
       message,
+      /** The WhatsApp message as the worker sees it: text, then a link button. */
+      preview: {
+        body: agentInvitationBody({
+          workerFirstName: worker?.first_name,
+          agentFirstName: agent?.first_name,
+          jobTitle: job?.title,
+        }),
+        buttonText: AGENT_INVITATION_BUTTON,
+        url: inviteUrl,
+      },
       /** True when Rabotka sent the invitation to the worker by WhatsApp. */
       sentToWorker,
       whatsappUrl:
@@ -423,21 +461,7 @@ export class AgentLeadService {
   }): Promise<boolean> {
     if (!p.phone) return false;
     if (!(await this.systemConfig.isAgentInviteWhatsAppEnabled())) return false;
-    // The free-form text (inside the 24h window) mirrors the template.
-    const worker = p.workerFirstName?.trim() || 'à vous';
-    const agent = p.agentFirstName?.trim() || 'Votre agent';
-    const title = p.jobTitle?.trim() || 'une mission';
-    const body = [
-      '*Offre dont vous avez parlé*',
-      '',
-      `Bonjour ${worker},`,
-      '',
-      `Suite à votre échange avec ${agent}, agent Rabotka, voici l’offre dont vous avez parlé :`,
-      '',
-      `*Offre* : ${title}`,
-      '',
-      'Appuyez ci-dessous pour voir les détails et postuler.',
-    ].join('\n');
+    const body = agentInvitationBody(p);
     try {
       const result = await this.dispatcher.send({
         phone: p.phone,
@@ -451,7 +475,11 @@ export class AgentLeadService {
             invitePath: p.invitePath,
           },
         },
-        freeForm: { body, buttonText: 'Voir l’offre', path: p.invitePath },
+        freeForm: {
+          body,
+          buttonText: AGENT_INVITATION_BUTTON,
+          path: p.invitePath,
+        },
         body,
       });
       return result.sent;
