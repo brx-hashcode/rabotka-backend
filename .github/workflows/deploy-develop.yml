@@ -663,6 +663,29 @@ jobs:
             echo "Vova providers configured:$PRESENT"
           fi
 
+      - name: Check VoVa Langfuse tracing
+        run: |
+          set -euo pipefail
+          get() { grep -E "^$1=" /tmp/deploy.env | head -1 | cut -d= -f2-; }
+          PK=$(get LANGFUSE_PUBLIC_KEY)
+          SK=$(get LANGFUSE_SECRET_KEY)
+
+          # Optional feature: both blank is a supported state (no tracing).
+          # Values are never printed, only their shape.
+          if [ -z "$PK" ] && [ -z "$SK" ]; then
+            echo "::notice::VoVa tracing off: no LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY in Vault (secret/data/apps/rabotka-backend-develop)."
+            exit 0
+          fi
+          if [ -z "$PK" ] || [ -z "$SK" ]; then
+            echo "::warning::Only one Langfuse key in Vault (secret/data/apps/rabotka-backend-develop): tracing needs both, so it stays off."
+            exit 0
+          fi
+          # A swapped or mistyped pair would boot fine and fail every export
+          # silently, so it fails here instead.
+          case "$PK" in pk-lf-*) ;; *) echo "::error::LANGFUSE_PUBLIC_KEY in Vault does not start with pk-lf- (swapped with the secret key?)"; exit 1;; esac
+          case "$SK" in sk-lf-*) ;; *) echo "::error::LANGFUSE_SECRET_KEY in Vault does not start with sk-lf- (swapped with the public key?)"; exit 1;; esac
+          echo "VoVa tracing on: Langfuse keys present ($(get LANGFUSE_BASE_URL), environment $(get LANGFUSE_TRACING_ENVIRONMENT))."
+
       - name: Copy .env to VPS
         run: |
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o ServerAliveCountMax=10 \
