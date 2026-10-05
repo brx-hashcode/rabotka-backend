@@ -152,6 +152,27 @@ describe('UserService', () => {
       );
     });
 
+    it('drops group membership when the new role cannot verify KYC', async () => {
+      await service.updateAdmin(
+        USER_ID,
+        { ...dto, role: UserRole.MODERATOR },
+        ACTOR_ID,
+      );
+
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ kyc_reviewer: false }),
+        }),
+      );
+    });
+
+    it('keeps group membership when the new role can verify KYC', async () => {
+      await service.updateAdmin(USER_ID, dto, ACTOR_ID);
+
+      const { data } = (prisma.user.update as jest.Mock).mock.calls[0][0];
+      expect(data).not.toHaveProperty('kyc_reviewer');
+    });
+
     it('throws ConflictException when new email is already taken', async () => {
       stubUsers(prisma.user.findUnique as jest.Mock, {
         byEmail: { ...mockUser, id: 'other-user' },
@@ -160,6 +181,74 @@ describe('UserService', () => {
       await expect(service.updateAdmin(USER_ID, dto, ACTOR_ID)).rejects.toThrow(
         ConflictException,
       );
+    });
+  });
+
+  describe('setKycReviewer()', () => {
+    beforeEach(() => {
+      stubUsers(prisma.user.findUnique as jest.Mock);
+      (prisma.user.update as jest.Mock).mockResolvedValue({
+        ...mockUser,
+        kyc_reviewer: true,
+      });
+    });
+
+    it('adds an eligible, active member to the group without the "updated" email', async () => {
+      (prisma.user.findFirst as jest.Mock).mockResolvedValue({
+        role: UserRole.SUPPORT,
+        is_active: true,
+      });
+
+      await service.setKycReviewer(USER_ID, true, ACTOR_ID);
+
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { kyc_reviewer: true } }),
+      );
+      expect(notification.notifyAdminUpdated).not.toHaveBeenCalled();
+    });
+
+    it('refuses a MODERATOR, who cannot verify KYC', async () => {
+      (prisma.user.findFirst as jest.Mock).mockResolvedValue({
+        role: UserRole.MODERATOR,
+        is_active: true,
+      });
+
+      await expect(
+        service.setKycReviewer(USER_ID, true, ACTOR_ID),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses a deactivated member', async () => {
+      (prisma.user.findFirst as jest.Mock).mockResolvedValue({
+        role: UserRole.MANAGER,
+        is_active: false,
+      });
+
+      await expect(
+        service.setKycReviewer(USER_ID, true, ACTOR_ID),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('always allows removing a member, whatever their role', async () => {
+      (prisma.user.findFirst as jest.Mock).mockResolvedValue({
+        role: UserRole.MODERATOR,
+        is_active: false,
+      });
+
+      await service.setKycReviewer(USER_ID, false, ACTOR_ID);
+
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { kyc_reviewer: false } }),
+      );
+    });
+
+    it('throws NotFoundException for a missing or archived member', async () => {
+      (prisma.user.findFirst as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.setKycReviewer(USER_ID, true, ACTOR_ID),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 

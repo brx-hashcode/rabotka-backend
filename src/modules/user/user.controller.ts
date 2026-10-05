@@ -24,6 +24,7 @@ import { UserRole } from '@prisma/client';
 import { UserService } from './user.service';
 import { CreateAdminDto } from './dto/create-admin.dto';
 import { UpdateAdminDto } from './dto/update-admin.dto';
+import { SetKycReviewerDto } from './dto/set-kyc-reviewer.dto';
 import { AdminListUsersDto } from './dto/admin-list-users.dto';
 import { ArchiveService } from '../admin-archive/archive.service';
 import { BulkDeleteDto } from '../../common/dto/bulk-delete.dto';
@@ -101,6 +102,7 @@ export class UserController {
       email: user.email,
       role: user.role,
       isActive: user.is_active,
+      kycReviewer: user.kyc_reviewer,
       createdAt: user.created_at,
       updatedAt: user.updated_at,
     };
@@ -138,6 +140,52 @@ export class UserController {
       email: user.email,
       role: user.role,
       isActive: user.is_active,
+      kycReviewer: user.kyc_reviewer,
+      lastLoginAt: user.last_login_at,
+      createdAt: user.created_at,
+      updatedAt: user.updated_at,
+    };
+  }
+
+  @Patch(':id/kyc-reviewer')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Add or remove a team member from the KYC verification group',
+    description:
+      'Group members are emailed each time a profile is created, to review its KYC. ' +
+      'Only roles that can verify KYC may join.',
+  })
+  @ApiBody({ type: SetKycReviewerDto })
+  @ApiResponse({ status: 200, description: 'Membership updated' })
+  @ApiResponse({ status: 400, description: 'Role cannot verify KYC, or member inactive' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  async setKycReviewer(
+    @Req() req: AdminAuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() dto: SetKycReviewerDto,
+  ) {
+    const user = await this.userService.setKycReviewer(
+      id,
+      dto.enabled,
+      req.user.userId,
+    );
+    await this.logService.create({
+      action: dto.enabled
+        ? 'ADMIN_USER_KYC_REVIEWER_ADDED'
+        : 'ADMIN_USER_KYC_REVIEWER_REMOVED',
+      entityType: 'user',
+      entityId: id,
+      userId: req.user?.userId,
+      ...extractRequestMeta(req),
+    });
+    return {
+      id: user.id,
+      firstName: user.first_name,
+      lastName: user.last_name,
+      email: user.email,
+      role: user.role,
+      isActive: user.is_active,
+      kycReviewer: user.kyc_reviewer,
       lastLoginAt: user.last_login_at,
       createdAt: user.created_at,
       updatedAt: user.updated_at,
@@ -168,6 +216,7 @@ export class UserController {
       email: user.email,
       role: user.role,
       isActive: user.is_active,
+      kycReviewer: user.kyc_reviewer,
       lastLoginAt: user.last_login_at,
       createdAt: user.created_at,
       updatedAt: user.updated_at,
@@ -198,6 +247,7 @@ export class UserController {
       email: user.email,
       role: user.role,
       isActive: user.is_active,
+      kycReviewer: user.kyc_reviewer,
       lastLoginAt: user.last_login_at,
       createdAt: user.created_at,
       updatedAt: user.updated_at,

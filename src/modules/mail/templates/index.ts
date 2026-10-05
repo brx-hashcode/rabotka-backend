@@ -15,6 +15,7 @@ export {
 export { adminUpdatedEmail } from './admin-updated';
 export { kycApprovedEmail } from './kyc-approved';
 export { kycRejectedEmail } from './kyc-rejected';
+export { kycReviewRequestedEmail } from './kyc-review-requested';
 export { paymentRejectedEmail } from './payment-rejected';
 export { paymentSuccessEmail } from './payment-success';
 export { accountSuspendedEmail } from './account-suspended';

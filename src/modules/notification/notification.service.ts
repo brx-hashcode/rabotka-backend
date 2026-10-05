@@ -10,6 +10,7 @@ import {
   claimCompletedEmail,
   claimRejectedEmail,
   claimAssignedEmail,
+  kycReviewRequestedEmail,
   claimUnassignedEmail,
   eventCreatedEmail,
   eventUpdatedEmail,
@@ -141,6 +142,19 @@ export class NotificationService {
       to,
       subject: 'Rabotka – Une réclamation vous a été assignée',
       html: await this.layout.wrap(claimAssignedEmail(adminName, title)),
+    });
+  }
+
+  async notifyKycReviewRequested(
+    to: string,
+    params: Parameters<typeof kycReviewRequestedEmail>[0],
+  ): Promise<void> {
+    await this.mail.sendMail({
+      to,
+      subject: `Rabotka – Nouveau profil à vérifier : ${params.profileName}`,
+      html: await this.layout.wrap(kycReviewRequestedEmail(params), {
+        previewText: 'Un nouveau profil attend la vérification de son KYC.',
+      }),
     });
   }
 

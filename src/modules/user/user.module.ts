@@ -2,6 +2,7 @@ import { AdminArchiveModule } from '../admin-archive/admin-archive.module';
 import { Module } from '@nestjs/common';
 import { UserController } from './user.controller';
 import { UserService } from './user.service';
+import { KycReviewerListener } from './kyc-reviewer.listener';
 import { AuthModule } from '../auth/auth.module';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { NotificationModule } from '../notification/notification.module';
@@ -11,7 +12,7 @@ import { LogModule } from '../log/log.module';
   imports: [
     AdminArchiveModule,AuthModule, PrismaModule, NotificationModule, LogModule],
   controllers: [UserController],
-  providers: [UserService],
+  providers: [UserService, KycReviewerListener],
   exports: [UserService],
 })
 export class UserModule {}
