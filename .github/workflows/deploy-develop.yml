@@ -336,6 +336,12 @@ jobs:
           OPENAI_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.OPENAI_API_KEY // ""')
           GROQ_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.GROQ_API_KEY // ""')
           DEEPSEEK_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.DEEPSEEK_API_KEY // ""')
+          # VoVa tracing (Langfuse Cloud EU). Optional: both blank means no
+          # tracing at all — initVovaTracing loads nothing without them.
+          LANGFUSE_PUBLIC_KEY=$(echo "$VAULT_SECRET" | jq -r '.LANGFUSE_PUBLIC_KEY // ""')
+          LANGFUSE_SECRET_KEY=$(echo "$VAULT_SECRET" | jq -r '.LANGFUSE_SECRET_KEY // ""')
+          LANGFUSE_BASE_URL=https://cloud.langfuse.com
+          LANGFUSE_TRACING_ENVIRONMENT=develop
           # --- static values ---
           BACKEND_IMAGE=ghcr.io/${{ github.repository_owner }}/rabotka-backend:${{ needs.build-and-push.outputs.image-sha-tag }}
           NODE_ENV=production

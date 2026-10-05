@@ -58,6 +58,15 @@ export class FallbackChatModel extends BaseChatModel {
   }
 
   /**
+   * The provider model this run calls, as callbacks read it. Without it a
+   * trace shows every generation as "FallbackChatModel" with no model, and
+   * Langfuse cannot price it.
+   */
+  override invocationParams(): Record<string, unknown> {
+    return { model: this.spec.model, provider: this.spec.provider };
+  }
+
+  /**
    * LangGraph calls this, so **the instance that actually runs the turn is the
    * one returned here** — not the one the agent constructed.
    *

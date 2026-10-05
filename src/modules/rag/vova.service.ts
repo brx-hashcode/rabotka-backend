@@ -23,6 +23,11 @@ import { correctSalutation, isWalled } from './agent/prompts';
 import { VOVA_CONFIG_KEYS } from './vova.constants';
 import { acknowledgementReply, refusal } from './agent/refusals';
 import { welcomePlatformMessage } from '../bot/messages/welcome.messages';
+import {
+  anonymousTraceUser,
+  traceVovaTurn,
+  type TurnHandle,
+} from './observability/tracing';
 
 /**
  * What the assistant said to a stranger, and whether the signup card follows.
@@ -194,12 +199,25 @@ export class VovaService {
       try {
         reply = await withTimeout(
           () =>
-            this.agent.handleAnonymous({
-              text,
-              history,
-              correlationId,
-              deadline,
-            }),
+            traceVovaTurn(
+              'vova.turn.anonymous',
+              {
+                input: text,
+                userId: anonymousTraceUser(phone),
+                sessionId: daySession(anonymousTraceUser(phone)),
+                tags: ['anonymous'],
+              },
+              async (turn) => {
+                const r = await this.agent.handleAnonymous({
+                  text,
+                  history,
+                  correlationId,
+                  deadline,
+                });
+                recordTurn(turn, r, { turns: history.length });
+                return r;
+              },
+            ),
           timeoutMs,
           'vova-anon',
           deadline.signal,
@@ -361,20 +379,40 @@ export class VovaService {
       try {
         reply = await withTimeout(
           () =>
-            this.agent.handle({
-              profileId: profile.id,
-              profileType: profile.profile_type,
-              firstName: profile.first_name,
-              verificationStatus: profile.verification_status,
-              accountStatus: profile.status,
-              // Not loaded on the hot path: the bot's profile query is shared by
-              // every message, and a categories join on all of them buys one line
-              // of prompt context. The agent asks `etat_du_profil` when it needs it.
-              categorySlugs: [],
-              text,
-              correlationId,
-              deadline,
-            }),
+            traceVovaTurn(
+              'vova.turn',
+              {
+                input: text,
+                userId: profile.id,
+                sessionId: daySession(profile.id),
+                tags: [
+                  profile.profile_type.toLowerCase(),
+                  shadow ? 'shadow' : 'live',
+                  ...(isWalled(profile.status, profile.verification_status)
+                    ? ['walled']
+                    : []),
+                ],
+              },
+              async (turn) => {
+                const r = await this.agent.handle({
+                  profileId: profile.id,
+                  profileType: profile.profile_type,
+                  firstName: profile.first_name,
+                  verificationStatus: profile.verification_status,
+                  accountStatus: profile.status,
+                  // Not loaded on the hot path: the bot's profile query is shared by
+                  // every message, and a categories join on all of them buys one line
+                  // of prompt context. The agent asks `etat_du_profil` when it needs it.
+                  categorySlugs: [],
+                  text,
+                  correlationId,
+                  deadline,
+                });
+                recordTurn(turn, r, { escalated: r.escalated });
+                if (r.escalated) turn.score('escalated_to_support', 1);
+                return r;
+              },
+            ),
           timeoutMs,
           'vova',
           deadline.signal,
@@ -469,6 +507,40 @@ export class VovaService {
       return null;
     }
   }
+}
+
+/**
+ * A Langfuse session = one person's day of WhatsApp messages. The bot has no
+ * conversation id, and a day is how these exchanges actually group: someone
+ * asks a few things in a row, then comes back tomorrow with something else.
+ */
+function daySession(user: string): string {
+  return `${user}:${new Date().toISOString().slice(0, 10)}`;
+}
+
+/**
+ * Closes a turn trace with the reply and the same facts the `vova.reply` log
+ * line carries, plus the refusal / error signals as scores so they can be
+ * filtered and charted in Langfuse.
+ */
+function recordTurn(
+  turn: TurnHandle,
+  reply: AgentReply | AnonymousAgentReply,
+  extra: Record<string, unknown>,
+): void {
+  turn.end(reply.text, {
+    origin: reply.origin,
+    refusalId: reply.refusalId ?? null,
+    model: reply.telemetry?.model ?? null,
+    provider: reply.telemetry?.provider ?? null,
+    fallbackDepth: reply.telemetry?.fallbackDepth ?? null,
+    llmMs: reply.telemetry?.latencyMs ?? null,
+    toolsCalled: reply.toolsCalled ?? [],
+    sanitizerBlocked: reply.sanitizerBlocked,
+    ...extra,
+  });
+  if (reply.refusalId) turn.score('refused', 1, reply.refusalId);
+  if (reply.origin === 'error') turn.score('agent_error', 1);
 }
 
 function clampPercent(n: number): number {
