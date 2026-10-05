@@ -143,6 +143,26 @@ export function toPublicJob(j: PublicJobRow, filledSeats: number) {
 }
 
 /**
+ * One job's public page (`GET public/jobs/:id`): the summary plus the
+ * description. The product asked for the description to be readable before
+ * sign-in; it is free text an employer wrote, so it is served on this single
+ * detail endpoint only, never in the public list. Pay and address stay
+ * agent-only.
+ */
+export const PUBLIC_JOB_DETAIL_SELECT = {
+  ...PUBLIC_JOB_SELECT,
+  description: true,
+} as const satisfies Prisma.JobOfferSelect;
+
+export type PublicJobDetailRow = Prisma.JobOfferGetPayload<{
+  select: typeof PUBLIC_JOB_DETAIL_SELECT;
+}>;
+
+export function toPublicJobDetail(j: PublicJobDetailRow, filledSeats: number) {
+  return { ...toPublicJob(j, filledSeats), description: j.description };
+}
+
+/**
  * A suggested worker. Modelled on the employer's recommended-worker card
  * (WORKER_SELECT in mobile-recommendation.controller.ts) minus the address
  * line: no phone, no email, no street.

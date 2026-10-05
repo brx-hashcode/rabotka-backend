@@ -332,14 +332,21 @@ describe('AgentPortalService', () => {
   });
 
   describe('getPublicJob', () => {
-    it('returns the public summary of an open job', async () => {
+    it('returns the public summary of an open job, with its description', async () => {
       const job = await service.getPublicJob('job-1');
       const args = prisma.jobOffer.findFirst.mock.calls[0][0];
       expect(args.where.AND[1]).toEqual({ id: 'job-1' });
       expect(args.where.AND[0]).toMatchObject({ deleted_at: null });
-      expect(args.select).not.toHaveProperty('amount');
-      expect(job).toMatchObject({ id: 'job-1', seatsLeft: 2 });
+      for (const field of ['amount', 'payment_flow', 'address', 'employer']) {
+        expect(args.select).not.toHaveProperty(field);
+      }
+      expect(job).toMatchObject({
+        id: 'job-1',
+        seatsLeft: 2,
+        description: 'Réparer une fuite',
+      });
       expect(job).not.toHaveProperty('address');
+      expect(job).not.toHaveProperty('amount');
     });
 
     it('answers 404 for a closed or unknown job', async () => {

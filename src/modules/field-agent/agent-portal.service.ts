@@ -19,10 +19,12 @@ import { AgentLeadService } from './agent-lead.service';
 import {
   AGENT_CANDIDATE_SELECT,
   AGENT_JOB_SELECT,
+  PUBLIC_JOB_DETAIL_SELECT,
   PUBLIC_JOB_SELECT,
   toAgentCandidate,
   toAgentJob,
   toPublicJob,
+  toPublicJobDetail,
 } from './agent-selects';
 import {
   jobsInZonesWhere,
@@ -208,18 +210,19 @@ export class AgentPortalService {
   }
 
   /**
-   * One open job as anyone sees it (PUBLIC_JOB_SELECT). A closed, deleted or
+   * One open job as anyone sees it (PUBLIC_JOB_DETAIL_SELECT: the public
+   * summary plus the description). A closed, deleted or
    * unknown id is the same 404, so the endpoint reveals nothing beyond the
    * public feed.
    */
   async getPublicJob(jobOfferId: string) {
     const job = await this.prisma.jobOffer.findFirst({
       where: { AND: [publicScopeWhere({}), { id: jobOfferId }] },
-      select: PUBLIC_JOB_SELECT,
+      select: PUBLIC_JOB_DETAIL_SELECT,
     });
     if (!job) throw new NotFoundException('Offre introuvable');
     const filled = await this.filledSeats([job.id]);
-    return toPublicJob(job, filled.get(job.id) ?? 0);
+    return toPublicJobDetail(job, filled.get(job.id) ?? 0);
   }
 
   async getJob(agentId: string, jobOfferId: string) {
