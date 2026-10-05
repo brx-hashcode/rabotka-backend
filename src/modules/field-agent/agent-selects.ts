@@ -99,6 +99,50 @@ export function toAgentJob(j: AgentJobRow, filledSeats: number) {
 }
 
 /**
+ * A job as anyone sees it on the agent app's public front page, before login.
+ *
+ * Narrower than AGENT_JOB_SELECT on purpose: no `amount` or `payment_flow`
+ * (commercial terms are for signed-in agents), no `address` and no
+ * `description` (the address is a place a stranger could go, and free text is
+ * where a phone number ends up). Like every select here, no `employer`.
+ */
+export const PUBLIC_JOB_SELECT = {
+  id: true,
+  reference: true,
+  title: true,
+  employment_type: true,
+  scheduled_at: true,
+  is_remote: true,
+  country_code: true,
+  country_name: true,
+  city: true,
+  quantity: true,
+  created_at: true,
+  category: { select: { id: true, name: true, slug: true } },
+} as const satisfies Prisma.JobOfferSelect;
+
+export type PublicJobRow = Prisma.JobOfferGetPayload<{
+  select: typeof PUBLIC_JOB_SELECT;
+}>;
+
+export function toPublicJob(j: PublicJobRow, filledSeats: number) {
+  return {
+    id: j.id,
+    reference: j.reference,
+    title: j.title,
+    employmentType: j.employment_type,
+    scheduledAt: j.scheduled_at,
+    isRemote: j.is_remote,
+    countryCode: j.country_code,
+    countryName: j.country_name,
+    city: j.city,
+    seatsLeft: Math.max(j.quantity - filledSeats, 0),
+    createdAt: j.created_at,
+    category: j.category,
+  };
+}
+
+/**
  * A suggested worker. Modelled on the employer's recommended-worker card
  * (WORKER_SELECT in mobile-recommendation.controller.ts) minus the address
  * line: no phone, no email, no street.

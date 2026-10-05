@@ -40,3 +40,52 @@ export function jobsInZonesWhere(zones: Zone[]): Prisma.JobOfferWhereInput {
     ]),
   };
 }
+
+export type PublicJobsFilter = { country?: string; city?: string; q?: string };
+
+/**
+ * The jobs anyone may browse on the agent app's front page: every open job,
+ * optionally narrowed to a country and/or city and a title search.
+ *
+ * Location follows the same fallback as `jobsInZonesWhere` — the offer's own
+ * place, or the employer's when the offer names none.
+ */
+export function publicJobsWhere(
+  filter: PublicJobsFilter,
+): Prisma.JobOfferWhereInput {
+  const and: Prisma.JobOfferWhereInput[] = [];
+  const country = filter.country?.toUpperCase();
+
+  if (filter.city) {
+    const city = { equals: filter.city, mode: 'insensitive' as const };
+    const inCountry = country ? { country_code: country } : {};
+    and.push({
+      OR: [
+        { ...inCountry, city },
+        { city: null, employer: { ...inCountry, city } },
+      ],
+    });
+  } else if (country) {
+    and.push({
+      OR: [
+        { country_code: country },
+        { country_code: null, employer: { country_code: country } },
+      ],
+    });
+  }
+
+  if (filter.q) {
+    and.push({
+      OR: [
+        { title: { contains: filter.q, mode: 'insensitive' } },
+        { reference: { contains: filter.q, mode: 'insensitive' } },
+      ],
+    });
+  }
+
+  return {
+    deleted_at: null,
+    status: { in: OPEN_STATUSES },
+    ...(and.length > 0 ? { AND: and } : {}),
+  };
+}

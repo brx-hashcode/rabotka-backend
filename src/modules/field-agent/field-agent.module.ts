@@ -24,6 +24,7 @@ import { AgentWithdrawalService } from './agent-withdrawal.service';
 import { AgentStatsService } from './agent-stats.service';
 import { AgentAuthGuard } from './guards/agent-auth.guard';
 import { ProfileAgentInviteController } from './profile-agent-invite.controller';
+import { PublicJobsController } from './public-jobs.controller';
 
 /**
  * Field agents: the people who call workers on Rabotka's behalf, from their
@@ -54,6 +55,7 @@ import { ProfileAgentInviteController } from './profile-agent-invite.controller'
     AdminAgentController,
     AdminAgentWithdrawalController,
     ProfileAgentInviteController,
+    PublicJobsController,
   ],
   providers: [
     AgentAuthService,

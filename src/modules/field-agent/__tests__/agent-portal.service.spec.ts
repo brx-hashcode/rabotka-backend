@@ -8,7 +8,7 @@ import {
   VerificationStatus,
 } from '@prisma/client';
 import { AgentPortalService } from '../agent-portal.service';
-import { jobsInZonesWhere } from '../agent-zones';
+import { jobsInZonesWhere, publicJobsWhere } from '../agent-zones';
 
 const ZONE = { country_code: 'CG', city: 'Brazzaville' };
 
@@ -68,6 +68,43 @@ describe('jobsInZonesWhere', () => {
           country_code: 'CG',
           city: { equals: 'Brazzaville', mode: 'insensitive' },
         },
+      },
+    ]);
+  });
+});
+
+describe('publicJobsWhere', () => {
+  it('falls back to the employer city, scoped to the country when given', () => {
+    const where = publicJobsWhere({ country: 'cg', city: 'Brazzaville' });
+    const city = { equals: 'Brazzaville', mode: 'insensitive' };
+    expect(where.AND).toEqual([
+      {
+        OR: [
+          { country_code: 'CG', city },
+          { city: null, employer: { country_code: 'CG', city } },
+        ],
+      },
+    ]);
+  });
+
+  it('filters by country alone, falling back to the employer country', () => {
+    expect(publicJobsWhere({ country: 'CG' }).AND).toEqual([
+      {
+        OR: [
+          { country_code: 'CG' },
+          { country_code: null, employer: { country_code: 'CG' } },
+        ],
+      },
+    ]);
+  });
+
+  it('searches title or reference', () => {
+    expect(publicJobsWhere({ q: 'plomb' }).AND).toEqual([
+      {
+        OR: [
+          { title: { contains: 'plomb', mode: 'insensitive' } },
+          { reference: { contains: 'plomb', mode: 'insensitive' } },
+        ],
       },
     ]);
   });
@@ -140,6 +177,41 @@ describe('AgentPortalService', () => {
       });
       // The privacy rule, end to end: no employer in what an agent receives.
       expect(Object.keys(result.data[0])).not.toContain('employer');
+    });
+  });
+
+  describe('listPublicJobs', () => {
+    it('serves the summary only: no pay, address, description or employer', async () => {
+      const result = await service.listPublicJobs({ page: 1, limit: 20 });
+
+      const select = prisma.jobOffer.findMany.mock.calls[0][0].select;
+      for (const field of [
+        'amount',
+        'payment_flow',
+        'address',
+        'description',
+        'employer',
+        'employer_id',
+      ]) {
+        expect(select).not.toHaveProperty(field);
+      }
+      expect(result.data[0]).toMatchObject({ id: 'job-1', seatsLeft: 2 });
+      expect(Object.keys(result.data[0])).toEqual(
+        expect.not.arrayContaining(['amount', 'address', 'description']),
+      );
+      expect(prisma.agentZone.findMany).not.toHaveBeenCalled();
+    });
+
+    it('lists every open job when no filter is given', async () => {
+      await service.listPublicJobs({ page: 2, limit: 10 });
+      const args = prisma.jobOffer.findMany.mock.calls[0][0];
+      expect(args.where).toEqual({
+        deleted_at: null,
+        status: {
+          in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
+        },
+      });
+      expect(args).toMatchObject({ skip: 10, take: 10 });
     });
   });
 
