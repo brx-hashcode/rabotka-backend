@@ -1,5 +1,6 @@
 import {
   Injectable,
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -15,6 +16,7 @@ import { CreateAdminDto } from './dto/create-admin.dto';
 import { UpdateAdminDto } from './dto/update-admin.dto';
 import { AdminListUsersDto } from './dto/admin-list-users.dto';
 import { NotificationService } from '../notification/notification.service';
+import { canReviewKyc } from './kyc-reviewer';
 
 @Injectable()
 export class UserService {
@@ -91,6 +93,7 @@ export class UserService {
         email: true,
         role: true,
         is_active: true,
+        kyc_reviewer: true,
         created_at: true,
         updated_at: true,
       },
@@ -135,6 +138,8 @@ export class UserService {
         last_name: data.lastName,
         email: data.email,
         role: data.role,
+        // A role that cannot verify KYC cannot stay in the group.
+        ...(!canReviewKyc(data.role) && { kyc_reviewer: false }),
       },
       select: {
         id: true,
@@ -143,6 +148,7 @@ export class UserService {
         email: true,
         role: true,
         is_active: true,
+        kyc_reviewer: true,
         last_login_at: true,
         created_at: true,
         updated_at: true,
@@ -155,6 +161,54 @@ export class UserService {
     );
 
     return updated;
+  }
+
+  /**
+   * Adds a team member to the KYC verification group, or removes them.
+   *
+   * Its own method rather than a field on `updateAdmin`, because that one
+   * emails the member "your details were updated" on every save.
+   */
+  async setKycReviewer(id: string, enabled: boolean, actorId: string) {
+    await this.assertMayManage(actorId, id);
+
+    const user = await this.prisma.user.findFirst({
+      where: { id, deleted_at: null },
+      select: { role: true, is_active: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Utilisateur non trouvé');
+    }
+
+    if (enabled && !canReviewKyc(user.role)) {
+      throw new BadRequestException(
+        'Ce rôle ne peut pas vérifier les KYC : il ne peut pas rejoindre le groupe de vérification',
+      );
+    }
+
+    if (enabled && !user.is_active) {
+      throw new BadRequestException(
+        'Un membre désactivé ne peut pas rejoindre le groupe de vérification KYC',
+      );
+    }
+
+    return this.prisma.user.update({
+      where: { id },
+      data: { kyc_reviewer: enabled },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+        role: true,
+        is_active: true,
+        kyc_reviewer: true,
+        last_login_at: true,
+        created_at: true,
+        updated_at: true,
+      },
+    });
   }
 
   async activate(id: string, actorId: string) {
@@ -176,6 +230,7 @@ export class UserService {
         email: true,
         role: true,
         is_active: true,
+        kyc_reviewer: true,
         last_login_at: true,
         created_at: true,
         updated_at: true,
@@ -204,6 +259,7 @@ export class UserService {
         email: true,
         role: true,
         is_active: true,
+        kyc_reviewer: true,
         last_login_at: true,
         created_at: true,
         updated_at: true,
@@ -221,6 +277,7 @@ export class UserService {
         email: true,
         role: true,
         is_active: true,
+        kyc_reviewer: true,
         last_login_at: true,
         created_at: true,
         updated_at: true,
@@ -263,6 +320,7 @@ export class UserService {
       email: true,
       role: true,
       is_active: true,
+      kyc_reviewer: true,
       last_login_at: true,
       created_at: true,
       updated_at: true,
@@ -287,6 +345,7 @@ export class UserService {
         email: u.email,
         role: u.role,
         isActive: u.is_active,
+        kycReviewer: u.kyc_reviewer,
         lastLoginAt: u.last_login_at,
         createdAt: u.created_at,
         updatedAt: u.updated_at,
@@ -335,6 +394,7 @@ export class UserService {
         email: true,
         role: true,
         is_active: true,
+        kyc_reviewer: true,
         last_login_at: true,
         created_at: true,
         updated_at: true,

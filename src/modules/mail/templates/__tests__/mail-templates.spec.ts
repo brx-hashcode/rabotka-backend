@@ -3,6 +3,7 @@ import { eventUpdatedEmail } from '../event-updated';
 import { advertisementCreatedEmail } from '../advertisement-created';
 import { accountSuspendedEmail } from '../account-suspended';
 import { kycRejectedEmail } from '../kyc-rejected';
+import { kycReviewRequestedEmail } from '../kyc-review-requested';
 import { paymentRejectedEmail } from '../payment-rejected';
 import { paymentSuccessEmail } from '../payment-success';
 
@@ -187,6 +188,35 @@ describe('Mail Templates', () => {
       const html = paymentSuccessEmail('Alice', 'Paiement de service', 5000);
       expect(html).toContain('Alice');
       expect(html).toContain('Paiement de service');
+    });
+  });
+
+  describe('kycReviewRequestedEmail', () => {
+    it('names the profile and links to it', () => {
+      const html = kycReviewRequestedEmail({
+        reviewerFirstName: 'Alice',
+        profileName: 'Awa <Mboko>',
+        profileType: 'EMPLOYER',
+        city: 'Pointe-Noire',
+        reviewUrl: 'https://admin.rabotka.work/profiles/p1',
+      });
+      expect(html).toContain('Alice');
+      expect(html).toContain('Awa &lt;Mboko&gt;');
+      expect(html).toContain('Employeur · Pointe-Noire');
+      expect(html).toContain('href="https://admin.rabotka.work/profiles/p1"');
+      expect(html).toContain('Examiner le profil');
+    });
+
+    it('omits the city when the profile has none', () => {
+      const html = kycReviewRequestedEmail({
+        reviewerFirstName: 'Alice',
+        profileName: 'Awa Mboko',
+        profileType: 'WORKER',
+        city: null,
+        reviewUrl: 'https://admin.rabotka.work/profiles/p1',
+      });
+      expect(html).toContain('Travailleur');
+      expect(html).not.toContain('Travailleur ·');
     });
   });
 });
