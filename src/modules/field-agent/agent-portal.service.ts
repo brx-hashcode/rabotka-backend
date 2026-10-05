@@ -207,6 +207,21 @@ export class AgentPortalService {
     };
   }
 
+  /**
+   * One open job as anyone sees it (PUBLIC_JOB_SELECT). A closed, deleted or
+   * unknown id is the same 404, so the endpoint reveals nothing beyond the
+   * public feed.
+   */
+  async getPublicJob(jobOfferId: string) {
+    const job = await this.prisma.jobOffer.findFirst({
+      where: { AND: [publicScopeWhere({}), { id: jobOfferId }] },
+      select: PUBLIC_JOB_SELECT,
+    });
+    if (!job) throw new NotFoundException('Offre introuvable');
+    const filled = await this.filledSeats([job.id]);
+    return toPublicJob(job, filled.get(job.id) ?? 0);
+  }
+
   async getJob(agentId: string, jobOfferId: string) {
     const job = await this.findInZones(agentId, jobOfferId, AGENT_JOB_SELECT);
     const filled = await this.filledSeats([job.id]);

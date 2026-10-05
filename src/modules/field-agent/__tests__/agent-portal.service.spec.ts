@@ -331,6 +331,25 @@ describe('AgentPortalService', () => {
     });
   });
 
+  describe('getPublicJob', () => {
+    it('returns the public summary of an open job', async () => {
+      const job = await service.getPublicJob('job-1');
+      const args = prisma.jobOffer.findFirst.mock.calls[0][0];
+      expect(args.where.AND[1]).toEqual({ id: 'job-1' });
+      expect(args.where.AND[0]).toMatchObject({ deleted_at: null });
+      expect(args.select).not.toHaveProperty('amount');
+      expect(job).toMatchObject({ id: 'job-1', seatsLeft: 2 });
+      expect(job).not.toHaveProperty('address');
+    });
+
+    it('answers 404 for a closed or unknown job', async () => {
+      prisma.jobOffer.findFirst.mockResolvedValue(null);
+      await expect(service.getPublicJob('job-x')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
   describe('listJobs facets', () => {
     it('reports the pay range of the zone jobs, ignoring the pay filter', async () => {
       prisma.jobOffer.aggregate.mockResolvedValue({

@@ -2,10 +2,12 @@ import {
   Controller,
   DefaultValuePipe,
   Get,
+  Param,
   ParseIntPipe,
+  ParseUUIDPipe,
   Query,
 } from '@nestjs/common';
-import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { AgentPortalService } from './agent-portal.service';
 import {
@@ -69,5 +71,13 @@ export class PublicJobsController {
       categories: parseCategorySlugs(query.category),
       sort: parseSort(query.sort),
     });
+  }
+
+  @Get(':id')
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @ApiOperation({ summary: 'One open job (public summary)' })
+  @ApiResponse({ status: 404, description: 'Unknown, closed or deleted' })
+  getOne(@Param('id', ParseUUIDPipe) id: string) {
+    return this.portal.getPublicJob(id);
   }
 }
