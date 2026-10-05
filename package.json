@@ -32,6 +32,7 @@
     "db:seed": "prisma db seed",
     "db:seed:prod": "tsx prisma/seed-prod.ts",
     "db:seed:reco-test": "tsx prisma/seed-reco-test.ts",
+    "db:seed:agent-feed": "tsx prisma/seed-agent-feed.ts",
     "wa:test-reminders": "tsx scripts/send-test-reminders.ts",
     "wa:build-placeholders": "tsx scripts/build-placeholder-images.ts",
     "portfolio:backfill-slugs": "tsx scripts/backfill-portfolio-slugs.ts",
