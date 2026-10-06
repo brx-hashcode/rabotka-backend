@@ -261,6 +261,22 @@ describe('AgentLeadService', () => {
   });
 
   describe('revealPhone', () => {
+    it('still shows the number of a worker this agent placed', async () => {
+      onLoad({ status: AgentLeadStatus.CONFIRMED, claim_expires_at: null });
+      const result = await service.revealPhone('agent-1', 'lead-1');
+      expect(result.phone).toBe('+242061234567');
+    });
+
+    it('refuses the number of a worker another agent placed', async () => {
+      onLoad({
+        status: AgentLeadStatus.CONFIRMED,
+        claimed_by_agent_id: 'agent-2',
+      });
+      await expect(service.revealPhone('agent-1', 'lead-1')).rejects.toThrow(
+        'Prenez d’abord',
+      );
+    });
+
     it('returns the numbers and logs the reveal', async () => {
       const result = await service.revealPhone('agent-1', 'lead-1', '1.2.3.4');
       expect(result).toEqual({
@@ -448,6 +464,51 @@ describe('AgentLeadService', () => {
       });
       expect(sent.freeForm.buttonText).toBe('Voir ma candidature');
       expect(result.sentToWorker).toBe(true);
+    });
+  });
+
+  describe('listPlacements', () => {
+    it('lists the applications credited to this agent on the job, newest first', async () => {
+      prisma.application.findMany = jest.fn().mockResolvedValue([
+        {
+          id: 'app-2',
+          status: 'ACCEPTED',
+          created_at: new Date('2026-10-05T10:00:00Z'),
+          updated_at: new Date('2026-10-05T12:00:00Z'),
+          worker: {
+            id: 'w2',
+            first_name: 'Awa',
+            last_name: 'Mabiala',
+            avatar_url: null,
+            city: 'Brazzaville',
+          },
+          agent_lead: { id: 'lead-2' },
+        },
+      ]);
+      const result = await service.listPlacements('agent-1', 'job-1');
+      const query = prisma.application.findMany.mock.calls[0][0];
+      expect(query.where).toEqual({
+        job_offer_id: 'job-1',
+        agent_id: 'agent-1',
+        deleted_at: null,
+      });
+      expect(query.orderBy).toEqual({ created_at: 'desc' });
+      expect(result).toEqual([
+        expect.objectContaining({
+          applicationId: 'app-2',
+          status: 'ACCEPTED',
+          leadId: 'lead-2',
+          worker: expect.objectContaining({ firstName: 'Awa' }),
+        }),
+      ]);
+      expect(result[0].worker).not.toHaveProperty('phone');
+    });
+
+    it('rejects a job outside the zones', async () => {
+      prisma.jobOffer.count.mockResolvedValue(0);
+      await expect(service.listPlacements('agent-1', 'job-1')).rejects.toThrow(
+        'Offre introuvable',
+      );
     });
   });
 

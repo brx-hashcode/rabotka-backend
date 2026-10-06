@@ -148,6 +148,20 @@ export class AgentPortalController {
     );
   }
 
+  @Get('jobs/:id/placements')
+  @ApiOperation({
+    summary: 'The workers I placed on one job, newest first',
+    description:
+      'Every application credited to me on this job — direct placement, accepted invitation or placement by number — with its current status.',
+  })
+  @ApiResponse({ status: 404, description: 'Not found or outside my zones' })
+  listPlacements(
+    @Req() req: AgentAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.leads.listPlacements(req.agent.agentId, id);
+  }
+
   @Post('jobs/:id/worker-lookup')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

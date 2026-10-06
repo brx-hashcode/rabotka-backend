@@ -266,7 +266,7 @@ export class AgentLeadService {
    * the same day costs nothing.
    */
   async revealPhone(agentId: string, leadId: string, ipAddress?: string) {
-    const lead = await this.requireClaim(agentId, leadId);
+    const lead = await this.requireClaimOrPlacement(agentId, leadId);
     const { revealDailyCap } = await this.systemConfig.getAgentLeadSettings();
     const since = startOfBrazzavilleDay(new Date());
 
@@ -879,6 +879,41 @@ export class AgentLeadService {
     }
   }
 
+  /**
+   * The workers this agent placed on one job — every application credited to
+   * them, however it came (direct placement, accepted invitation, placement by
+   * number), newest first, with where each application stands now.
+   */
+  async listPlacements(agentId: string, jobOfferId: string) {
+    await this.requireJobInZones(agentId, jobOfferId);
+    const rows = await this.prisma.application.findMany({
+      where: { job_offer_id: jobOfferId, agent_id: agentId, deleted_at: null },
+      select: {
+        id: true,
+        status: true,
+        created_at: true,
+        updated_at: true,
+        worker: { select: LEAD_WORKER_SELECT },
+        agent_lead: { select: { id: true } },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+    return rows.map((r) => ({
+      applicationId: r.id,
+      status: r.status,
+      placedAt: r.created_at,
+      updatedAt: r.updated_at,
+      leadId: r.agent_lead?.id ?? null,
+      worker: {
+        id: r.worker.id,
+        firstName: r.worker.first_name,
+        lastName: r.worker.last_name,
+        avatarUrl: r.worker.avatar_url,
+        city: r.worker.city,
+      },
+    }));
+  }
+
   /** The agent's own pipeline, most recently touched first. */
   async listMine(
     agentId: string,
@@ -1085,6 +1120,21 @@ export class AgentLeadService {
           })
         : 0;
     if (inZones === 0) throw new NotFoundException('Offre introuvable');
+  }
+
+  /**
+   * As requireClaim, or a worker this agent placed — whom they may still need
+   * to call after the placement.
+   */
+  private async requireClaimOrPlacement(agentId: string, leadId: string) {
+    const lead = await this.loadInZones(agentId, leadId);
+    if (
+      lead.status === AgentLeadStatus.CONFIRMED &&
+      lead.claimed_by_agent_id === agentId
+    ) {
+      return lead;
+    }
+    return this.requireClaim(agentId, leadId);
   }
 
   /** The lead, only for the agent holding a live claim on it. */
