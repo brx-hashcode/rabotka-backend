@@ -82,6 +82,7 @@ describe('AdminAgentService', () => {
   let storage: { getUrl: jest.Mock; delete: jest.Mock };
   let geo: { resolveLocation: jest.Mock };
   let mail: { sendMail: jest.Mock };
+  let notifications: { notify: jest.Mock };
   let service: AdminAgentService;
 
   beforeEach(() => {
@@ -123,6 +124,7 @@ describe('AdminAgentService', () => {
     mail = { sendMail: jest.fn().mockResolvedValue({ jobId: '1' }) };
     const layout = { wrap: jest.fn().mockResolvedValue('<html/>') };
 
+    notifications = { notify: jest.fn().mockResolvedValue(null) };
     service = new AdminAgentService(
       prisma,
       files as any,
@@ -132,6 +134,7 @@ describe('AdminAgentService', () => {
       geo as any,
       mail as any,
       layout as any,
+      notifications as any,
     );
   });
 
@@ -287,6 +290,10 @@ describe('AdminAgentService', () => {
         where: { id: 'agent-1', status: { in: [AgentStatus.ACTIVE] } },
         data: { status: AgentStatus.SUSPENDED, status_reason: 'fraude' },
       });
+      expect(notifications.notify).toHaveBeenCalledWith('agent-1', {
+        type: 'ACCOUNT_SUSPENDED',
+        reason: 'fraude',
+      });
     });
 
     it('clears the reason on reactivation', async () => {
@@ -296,6 +303,9 @@ describe('AdminAgentService', () => {
           data: { status: AgentStatus.ACTIVE, status_reason: null },
         }),
       );
+      expect(notifications.notify).toHaveBeenCalledWith('agent-1', {
+        type: 'ACCOUNT_REACTIVATED',
+      });
     });
 
     it('never brings back a revoked agent', async () => {
@@ -428,6 +438,7 @@ describe('AdminAgentService – creator name', () => {
       {} as any,
       {} as any,
       {} as any,
+      { notify: jest.fn() } as any,
     );
     const detail = await service.getDetail('agent-1');
     expect(detail.createdByName).toBe('Ada Admin');
@@ -450,6 +461,7 @@ describe('AdminAgentService – document view log window', () => {
       {} as any,
       {} as any,
       {} as any,
+      { notify: jest.fn() } as any,
     );
 
     await expect(
@@ -483,6 +495,7 @@ describe('AdminAgentService – zone filter', () => {
       {} as any,
       {} as any,
       {} as any,
+      { notify: jest.fn() } as any,
     );
   }
 
@@ -557,6 +570,7 @@ describe('AdminAgentService – country filter', () => {
       {} as any,
       {} as any,
       {} as any,
+      { notify: jest.fn() } as any,
     );
     await service.list({
       page: 1,

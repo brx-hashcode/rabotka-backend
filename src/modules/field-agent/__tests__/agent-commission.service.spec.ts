@@ -69,6 +69,7 @@ describe('AgentCommissionService', () => {
   let prisma: any;
   let systemConfig: { getAgentCommissionSettings: jest.Mock };
   let logService: { create: jest.Mock };
+  let notifications: { notify: jest.Mock };
   let service: AgentCommissionService;
 
   beforeEach(() => {
@@ -101,18 +102,28 @@ describe('AgentCommissionService', () => {
         aggregate: jest.fn().mockResolvedValue({ _sum: { amount: 1000 } }),
       },
       assignment: { findMany: jest.fn().mockResolvedValue([]) },
-      jobOffer: { findMany: jest.fn().mockResolvedValue([]) },
-      profile: { findMany: jest.fn().mockResolvedValue([]) },
+      jobOffer: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findUnique: jest.fn().mockResolvedValue({ title: 'Plombier' }),
+      },
+      profile: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ first_name: 'Awa', last_name: 'Ngoma' }),
+      },
     };
     prisma.$transaction = jest.fn((fn: (tx: unknown) => unknown) => fn(prisma));
     systemConfig = {
       getAgentCommissionSettings: jest.fn().mockResolvedValue(SETTINGS),
     };
     logService = { create: jest.fn().mockResolvedValue(undefined) };
+    notifications = { notify: jest.fn().mockResolvedValue(null) };
     service = new AgentCommissionService(
       prisma,
       systemConfig as any,
       logService as any,
+      notifications as any,
     );
   });
 
@@ -144,6 +155,16 @@ describe('AgentCommissionService', () => {
           idempotency_key: 'commission:com-1:earned',
         }),
       ]);
+      expect(notifications.notify).toHaveBeenCalledWith(
+        'agent-1',
+        {
+          type: 'COMMISSION_EARNED',
+          amount: 400,
+          jobTitle: 'Plombier',
+          workerName: 'Awa Ngoma',
+        },
+        'commission:com-1:earned',
+      );
     });
 
     it('waits for the mission when the window starts at completion', async () => {
@@ -284,6 +305,11 @@ describe('AgentCommissionService', () => {
           idempotency_key: 'commission:com-1:released:available',
         }),
       ]);
+      expect(notifications.notify).toHaveBeenCalledWith(
+        'agent-1',
+        expect.objectContaining({ type: 'COMMISSION_AVAILABLE', amount: 400 }),
+        'commission:com-1:available',
+      );
     });
 
     it('leaves one still in its window alone', async () => {
@@ -325,6 +351,16 @@ describe('AgentCommissionService', () => {
           amount: -400,
         }),
       ]);
+      expect(notifications.notify).toHaveBeenCalledWith(
+        'agent-1',
+        {
+          type: 'COMMISSION_CANCELLED',
+          amount: 400,
+          jobTitle: 'Plombier',
+          reason,
+        },
+        'commission:com-1:cancelled',
+      );
     });
 
     it('moves no money when another sweep already settled it', async () => {

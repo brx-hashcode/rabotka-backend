@@ -26,6 +26,7 @@ import {
 } from '../mail/templates';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { toE164 } from '../whatsapp/contracts/address';
+import { AgentNotificationService } from './agent-notification.service';
 
 type Tx = Prisma.TransactionClient;
 
@@ -94,6 +95,7 @@ export class AgentWithdrawalService {
     private readonly mail: MailService,
     private readonly layout: LayoutService,
     private readonly events: EventEmitter2,
+    private readonly notifications: AgentNotificationService,
   ) {}
 
   /**
@@ -261,6 +263,11 @@ export class AgentWithdrawalService {
           reference: ref,
         }),
       );
+      await this.notifications.notify(
+        paid.agent.id,
+        { type: 'WITHDRAWAL_PAID', amount, reference: ref },
+        `withdrawal:${paid.id}:paid`,
+      );
       return toWithdrawal(paid);
     } catch (err) {
       if (
@@ -329,6 +336,11 @@ export class AgentWithdrawalService {
         amount,
         reason: why,
       }),
+    );
+    await this.notifications.notify(
+      rejected.agent.id,
+      { type: 'WITHDRAWAL_REJECTED', amount, reason: why },
+      `withdrawal:${rejected.id}:rejected`,
     );
     return toWithdrawal(rejected);
   }

@@ -684,19 +684,112 @@ model Agent {
   created_by_user_id String    @db.Uuid
   last_login_at      DateTime?
 
-  zones          AgentZone[]
-  kyc_documents  AgentKycDocument[]
-  ledger_entries AgentLedgerEntry[]
-  leads_claimed  AgentLead[]        @relation("AgentLeadClaimer")
-  call_logs      AgentCallLog[]
-  phone_reveals  AgentPhoneReveal[]
-  applications   Application[]
-  commissions    AgentCommission[]
-  withdrawals    AgentWithdrawal[]
+  zones              AgentZone[]
+  kyc_documents      AgentKycDocument[]
+  ledger_entries     AgentLedgerEntry[]
+  leads_claimed      AgentLead[]             @relation("AgentLeadClaimer")
+  call_logs          AgentCallLog[]
+  phone_reveals      AgentPhoneReveal[]
+  applications       Application[]
+  commissions        AgentCommission[]
+  withdrawals        AgentWithdrawal[]
+  notifications      AgentNotification[]
+  push_subscriptions AgentPushSubscription[]
 
   @@unique([id_document_type, id_document_number], name: "idx_agent_id_document")
   @@index([status], name: "idx_agent_status")
   @@map("agents")
+}
+
+/// What an agent is told about. The copy is rendered once, in French, when the
+/// row is written (agent-notification-catalog.ts).
+enum AgentNotificationType {
+  COMMISSION_EARNED
+  COMMISSION_AVAILABLE
+  COMMISSION_CANCELLED
+  WITHDRAWAL_PAID
+  WITHDRAWAL_REJECTED
+  PLACEMENT_ACCEPTED
+  PLACEMENT_STARTED
+  PLACEMENT_COMPLETED
+  PLACEMENT_ENDED
+  NEW_JOBS_IN_ZONE
+  ZONES_CHANGED
+  ACCOUNT_SUSPENDED
+  ACCOUNT_REACTIVATED
+}
+
+/// The agent app's bell. Written by AgentNotificationService, which also
+/// pushes it live (Redis → the agent's open SSE streams) and by Web Push.
+model AgentNotification {
+  id         String                @id @default(uuid()) @db.Uuid
+  created_at DateTime              @default(now())
+  agent_id   String                @db.Uuid
+  type       AgentNotificationType
+  title      String
+  body       String
+  /// In-app path the agent app opens on tap, without the host.
+  link       String?
+  metadata   Json?
+  read_at    DateTime?
+  /// One notification per business event: a retried sweep or a replayed
+  /// outbox row hits this and is skipped.
+  dedupe_key String?               @unique
+
+  agent Agent @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+
+  @@index([agent_id, created_at(sort: Desc)], name: "idx_agent_notif_agent_time")
+  @@index([agent_id, read_at], name: "idx_agent_notif_agent_unread")
+  @@map("agent_notifications")
+}
+
+/// A browser or phone the agent allowed to receive Web Push. The endpoint is
+/// the push service's URL for that installation; a 404/410 from it deletes
+/// the row.
+model AgentPushSubscription {
+  id              String    @id @default(uuid()) @db.Uuid
+  created_at      DateTime  @default(now())
+  agent_id        String    @db.Uuid
+  endpoint        String    @unique
+  p256dh          String
+  auth            String
+  user_agent      String?
+  last_success_at DateTime?
+
+  agent Agent @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+
+  @@index([agent_id], name: "idx_agent_push_agent")
+  @@map("agent_push_subscriptions")
+}
+
+/// The VAPID key pair Web Push messages are signed with, generated on first
+/// use so no environment has to be configured. VAPID_PUBLIC_KEY and
+/// VAPID_PRIVATE_KEY, when both set, take precedence. Changing the pair
+/// invalidates every subscription (the app re-subscribes on its next visit).
+model WebPushKeyPair {
+  id          String   @id
+  created_at  DateTime @default(now())
+  public_key  String
+  private_key String
+
+  @@map("web_push_key_pairs")
+}
+
+/// Changes the agent app is notified about but that happen in many code
+/// paths — a placed worker's application status, a job becoming open. Rows
+/// are written by database triggers (see the migration), so no write site
+/// can forget them, and consumed by AgentEventsConsumer.
+model AgentEventOutbox {
+  id           BigInt    @id @default(autoincrement())
+  created_at   DateTime  @default(now())
+  /// `placement_status` or `job_active`.
+  kind         String
+  entity_id    String    @db.Uuid
+  payload      Json
+  processed_at DateTime?
+
+  @@index([processed_at, id], name: "idx_agent_event_outbox_pending")
+  @@map("agent_event_outbox")
 }
 
 /// One city an agent covers. An agent sees only the jobs located in their

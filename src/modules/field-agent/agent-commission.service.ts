@@ -26,6 +26,7 @@ import {
   addHours,
   decideCommission,
 } from './agent-commission-rules';
+import { AgentNotificationService } from './agent-notification.service';
 
 /** How many placements one sweep decides, and how many it releases. */
 const SWEEP_BATCH = 200;
@@ -69,6 +70,7 @@ export class AgentCommissionService {
     private readonly prisma: PrismaService,
     private readonly systemConfig: SystemConfigService,
     private readonly logService: LogService,
+    private readonly notifications: AgentNotificationService,
   ) {}
 
   async sweep(now = new Date()) {
@@ -267,6 +269,15 @@ export class AgentCommissionService {
         commissionId: commission.id,
         amount: settings.amountFcfa,
       });
+      const names = await this.placementNames(
+        attempt.job_offer_id,
+        attempt.worker_id,
+      );
+      await this.notifications.notify(
+        agentId,
+        { type: 'COMMISSION_EARNED', amount: settings.amountFcfa, ...names },
+        `commission:${commission.id}:earned`,
+      );
       return true;
     } catch (err) {
       // Another sweep decided this placement first.
@@ -413,6 +424,15 @@ export class AgentCommissionService {
         commissionId: c.id,
         amount,
       });
+      await this.notifications.notify(
+        c.agent_id,
+        {
+          type: 'COMMISSION_AVAILABLE',
+          amount,
+          ...(await this.placementNames(c.job_offer_id, c.worker_id)),
+        },
+        `commission:${c.id}:available`,
+      );
     }
     return moved;
   }
@@ -482,6 +502,15 @@ export class AgentCommissionService {
         reason,
         ...(adminId ? { adminId } : {}),
       });
+      const { jobTitle } = await this.placementNames(
+        c.job_offer_id,
+        c.worker_id,
+      );
+      await this.notifications.notify(
+        c.agent_id,
+        { type: 'COMMISSION_CANCELLED', amount, jobTitle, reason },
+        `commission:${c.id}:cancelled`,
+      );
     }
     return moved;
   }
@@ -521,6 +550,26 @@ export class AgentCommissionService {
     return this.list(agentId, { page: 1, limit: 1, id: commissionId }).then(
       (r) => r.data[0],
     );
+  }
+
+  /** What the agent's notification names: the worker and the job. */
+  private async placementNames(jobOfferId: string, workerId: string) {
+    const [job, worker] = await Promise.all([
+      this.prisma.jobOffer.findUnique({
+        where: { id: jobOfferId },
+        select: { title: true },
+      }),
+      this.prisma.profile.findUnique({
+        where: { id: workerId },
+        select: { first_name: true, last_name: true },
+      }),
+    ]);
+    return {
+      jobTitle: job?.title ?? 'une offre',
+      workerName: worker
+        ? `${worker.first_name} ${worker.last_name}`.trim()
+        : 'Le travailleur',
+    };
   }
 
   // ── read ──────────────────────────────────────────────────────────────────
