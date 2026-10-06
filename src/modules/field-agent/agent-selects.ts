@@ -118,8 +118,30 @@ export const PUBLIC_JOB_SELECT = {
   city: true,
   quantity: true,
   created_at: true,
+  // Read for the card excerpt only; the list never sends the full text.
+  description: true,
   category: { select: { id: true, name: true, slug: true } },
 } as const satisfies Prisma.JobOfferSelect;
+
+/** Card length: about two lines. */
+export const PUBLIC_EXCERPT_LENGTH = 200;
+
+/**
+ * The start of a description for a job card: whitespace collapsed, cut at a
+ * word under `max` characters, with an ellipsis when cut. The full text is
+ * public on `GET public/jobs/:id`; the list only needs enough to read on.
+ */
+export function excerptOf(
+  text: string | null | undefined,
+  max = PUBLIC_EXCERPT_LENGTH,
+): string | null {
+  const flat = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!flat) return null;
+  if (flat.length <= max) return flat;
+  const cut = flat.slice(0, max);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > max / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:.–—-]+$/, '')}…`;
+}
 
 export type PublicJobRow = Prisma.JobOfferGetPayload<{
   select: typeof PUBLIC_JOB_SELECT;
@@ -139,6 +161,7 @@ export function toPublicJob(j: PublicJobRow, filledSeats: number) {
     seatsLeft: Math.max(j.quantity - filledSeats, 0),
     createdAt: j.created_at,
     category: j.category,
+    excerpt: excerptOf(j.description),
   };
 }
 
@@ -146,12 +169,11 @@ export function toPublicJob(j: PublicJobRow, filledSeats: number) {
  * One job's public page (`GET public/jobs/:id`): the summary plus the
  * description. The product asked for the description to be readable before
  * sign-in; it is free text an employer wrote, so it is served on this single
- * detail endpoint only, never in the public list. Pay and address stay
+ * detail endpoint only; the list carries an excerpt. Pay and address stay
  * agent-only.
  */
 export const PUBLIC_JOB_DETAIL_SELECT = {
   ...PUBLIC_JOB_SELECT,
-  description: true,
 } as const satisfies Prisma.JobOfferSelect;
 
 export type PublicJobDetailRow = Prisma.JobOfferGetPayload<{

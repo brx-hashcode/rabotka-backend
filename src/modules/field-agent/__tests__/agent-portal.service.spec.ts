@@ -9,6 +9,7 @@ import {
   VerificationStatus,
 } from '@prisma/client';
 import { AgentPortalService } from '../agent-portal.service';
+import { excerptOf } from '../agent-selects';
 import {
   jobFiltersWhere,
   jobsInZonesWhere,
@@ -250,7 +251,7 @@ describe('AgentPortalService', () => {
   });
 
   describe('listPublicJobs', () => {
-    it('serves the summary only: no pay, address, description or employer', async () => {
+    it('serves the summary only: no pay, address, full description or employer', async () => {
       const result = await service.listPublicJobs({ page: 1, limit: 20 });
 
       const select = prisma.jobOffer.findMany.mock.calls[0][0].select;
@@ -258,13 +259,16 @@ describe('AgentPortalService', () => {
         'amount',
         'payment_flow',
         'address',
-        'description',
         'employer',
         'employer_id',
       ]) {
         expect(select).not.toHaveProperty(field);
       }
-      expect(result.data[0]).toMatchObject({ id: 'job-1', seatsLeft: 2 });
+      expect(result.data[0]).toMatchObject({
+        id: 'job-1',
+        seatsLeft: 2,
+        excerpt: 'Réparer une fuite',
+      });
       expect(Object.keys(result.data[0])).toEqual(
         expect.not.arrayContaining(['amount', 'address', 'description']),
       );
@@ -494,5 +498,23 @@ describe('AgentPortalService', () => {
         expect(candidate).not.toHaveProperty(field);
       }
     });
+  });
+});
+
+describe('excerptOf', () => {
+  it('keeps a short description whole, whitespace collapsed', () => {
+    expect(excerptOf('  Réparer\n\nune   fuite ')).toBe('Réparer une fuite');
+  });
+
+  it('cuts a long one at a word, with an ellipsis', () => {
+    const text = `${'mot '.repeat(80)}fin.`;
+    const out = excerptOf(text, 50)!;
+    expect(out.length).toBeLessThanOrEqual(51);
+    expect(out.endsWith('mot…')).toBe(true);
+  });
+
+  it('is null for an empty description', () => {
+    expect(excerptOf('   ')).toBeNull();
+    expect(excerptOf(null)).toBeNull();
   });
 });
