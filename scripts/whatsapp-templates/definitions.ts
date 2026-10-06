@@ -52,6 +52,8 @@ export const AUTHORED_KEYS: ReadonlySet<WhatsAppTemplateName> = new Set([
   'newMessageNudge',
   // A field agent's invitation to a worker. New, Cloud-only.
   'agentInvitation',
+  // A field agent placed a worker directly. New, Cloud-only.
+  'agentPlacement',
 ]);
 
 /**
@@ -458,6 +460,49 @@ export function authoredTemplates(): Partial<
               text: 'Voir l’offre',
               url: 'https://rabotka.work/s/{{1}}',
               example: ['https://rabotka.work/s/invitations-example'],
+            },
+          ],
+        },
+      ],
+    },
+
+    /**
+     * A field agent placed the worker on an offer after their call: the
+     * application already exists. UTILITY for the same reason as
+     * `agentInvitation` — the static text anchors it to the call the worker
+     * agreed to and to their own application. No pay or address (optional on
+     * an offer). The button opens the worker's application, signed in.
+     */
+    agentPlacement: {
+      name: 'rabotka_agent_placement_v1',
+      language: 'fr',
+      category: 'UTILITY',
+      components: [
+        {
+          type: 'BODY',
+          text: [
+            '*Candidature enregistrée*',
+            '',
+            'Bonjour {{1}},',
+            '',
+            'Suite à votre appel avec {{2}}, agent Rabotka, votre candidature a été enregistrée :',
+            '',
+            '*Offre* : {{3}}',
+            '',
+            'Appuyez ci-dessous pour suivre votre candidature.',
+          ].join('\n'),
+          example: {
+            body_text: [['Sophie', 'Jean', 'Agent de sécurité événementiel']],
+          },
+        },
+        {
+          type: 'BUTTONS',
+          buttons: [
+            {
+              type: 'URL',
+              text: 'Voir ma candidature',
+              url: 'https://rabotka.work/s/{{1}}',
+              example: ['https://rabotka.work/s/applications-example'],
             },
           ],
         },

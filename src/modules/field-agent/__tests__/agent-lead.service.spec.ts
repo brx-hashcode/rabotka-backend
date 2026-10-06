@@ -116,6 +116,8 @@ describe('AgentLeadService', () => {
   };
   let dispatcher: { send: jest.Mock };
   let logService: { create: jest.Mock };
+  let applications: { create: jest.Mock };
+  let events: { emit: jest.Mock };
   let service: AgentLeadService;
 
   beforeEach(() => {
@@ -142,7 +144,10 @@ describe('AgentLeadService', () => {
         create: jest.fn().mockResolvedValue({}),
         count: jest.fn().mockResolvedValue(0),
       },
-      agentCallLog: { create: jest.fn().mockReturnValue('call-op') },
+      agentCallLog: {
+        create: jest.fn().mockReturnValue('call-op'),
+        findFirst: jest.fn().mockResolvedValue({ outcome: 'INTERESTED' }),
+      },
       profile: {
         findUnique: jest.fn().mockResolvedValue({
           first_name: 'Awa',
@@ -173,12 +178,16 @@ describe('AgentLeadService', () => {
     };
     logService = { create: jest.fn().mockResolvedValue(undefined) };
     const config = { get: jest.fn().mockReturnValue('https://rabotka.work/') };
+    applications = { create: jest.fn().mockResolvedValue({ id: 'app-1' }) };
+    events = { emit: jest.fn() };
     service = new AgentLeadService(
       prisma,
       systemConfig as any,
       config as any,
       logService as any,
       dispatcher as any,
+      applications as any,
+      events as any,
     );
   });
 
@@ -385,6 +394,60 @@ describe('AgentLeadService', () => {
       const result = await service.invite('agent-1', 'lead-1');
       expect(result.sentToWorker).toBe(false);
       expect(result.inviteUrl).toContain('/invitations/');
+    });
+  });
+
+  describe('place', () => {
+    it('creates the application credited to the agent and confirms the lead', async () => {
+      const result = await service.place('agent-1', 'lead-1');
+
+      expect(applications.create).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        { agentId: 'agent-1' },
+      );
+      const update = prisma.agentLead.updateMany.mock.calls.at(-1)[0];
+      expect(update.where).toMatchObject({
+        id: 'lead-1',
+        claimed_by_agent_id: 'agent-1',
+      });
+      expect(update.data).toMatchObject({
+        status: 'CONFIRMED',
+        application_id: 'app-1',
+      });
+      expect(result.applicationId).toBe('app-1');
+      expect(events.emit).toHaveBeenCalledWith(
+        'admin.notification.agent.placement',
+        expect.objectContaining({ entityId: 'app-1' }),
+      );
+    });
+
+    it('refuses without a last call « Intéressé »', async () => {
+      prisma.agentCallLog.findFirst.mockResolvedValue({ outcome: 'CALL_BACK' });
+      await expect(service.place('agent-1', 'lead-1')).rejects.toThrow(
+        'Intéressé',
+      );
+      expect(applications.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses, in the agent’s voice, when the worker already applied', async () => {
+      prisma.application.count.mockResolvedValue(1);
+      await expect(service.place('agent-1', 'lead-1')).rejects.toThrow(
+        'Ce travailleur a déjà postulé',
+      );
+      expect(applications.create).not.toHaveBeenCalled();
+    });
+
+    it('tells the worker by WhatsApp, linking their application', async () => {
+      systemConfig.isAgentInviteWhatsAppEnabled.mockResolvedValue(true);
+      const result = await service.place('agent-1', 'lead-1');
+      const sent = dispatcher.send.mock.calls[0][0];
+      expect(sent.template).toMatchObject({
+        key: 'agentPlacement',
+        params: { applicationPath: 'applications/app-1' },
+      });
+      expect(sent.freeForm.buttonText).toBe('Voir ma candidature');
+      expect(result.sentToWorker).toBe(true);
     });
   });
 

@@ -214,6 +214,25 @@ export class AgentPortalController {
     return this.leads.logCall(req.agent.agentId, id, dto.outcome, dto.note);
   }
 
+  @Post('leads/:id/place')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Place the worker on the job: create their application (claimer only)',
+    description:
+      'Requires a last call « Intéressé ». The application is created in the worker’s name and credited to the agent; the worker is told by WhatsApp.',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'No « Intéressé » call yet, or the worker already applied',
+  })
+  place(
+    @Req() req: AgentAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.leads.place(req.agent.agentId, id);
+  }
+
   @Post('leads/:id/invite')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

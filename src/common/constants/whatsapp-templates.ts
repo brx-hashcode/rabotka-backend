@@ -539,6 +539,45 @@ export const WHATSAPP_TEMPLATES = {
     ]
   >,
 
+  /**
+   * A field agent placed a worker directly: the application now exists, in
+   * the worker's name, credited to the agent. Sent so the worker learns it
+   * from Rabotka, not only from the agent's call. {{4}} is the path of the
+   * worker's application (`applications/<id>`), swapped for a one-tap login.
+   */
+  agentPlacement: {
+    cloudOnly: true,
+    urlSuffixVar: '4',
+    urlSuffixMode: 'shortlink',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_AGENT_PLACEMENT',
+        'rabotka_agent_placement_v1',
+      ),
+    },
+    variables: (p: {
+      workerFirstName: string | null | undefined;
+      agentFirstName: string | null | undefined;
+      jobTitle: string | null | undefined;
+      applicationPath: string;
+    }) => ({
+      '1': freeTextVar(p.workerFirstName, 'à vous'),
+      '2': freeTextVar(p.agentFirstName, 'Votre agent'),
+      '3': freeTextVar(p.jobTitle, 'une mission'),
+      '4': p.applicationPath,
+    }),
+  } satisfies WhatsAppTemplate<
+    [
+      params: {
+        workerFirstName: string | null | undefined;
+        agentFirstName: string | null | undefined;
+        jobTitle: string | null | undefined;
+        applicationPath: string;
+      },
+    ]
+  >,
+
   // "Voir le portfolio" — CTA button opening a worker's PUBLIC portfolio
   // (/p/<slug>) inside WhatsApp's in-app browser. Unlike the other webview
   // templates that page needs no login, so the employer lands straight on the

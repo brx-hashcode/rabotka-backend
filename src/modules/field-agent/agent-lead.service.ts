@@ -15,10 +15,13 @@ import {
 } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ApplicationService } from '../application/application.service';
 import { LogService } from '../log/log.service';
 import { NotificationDispatcher } from '../notification-dispatch/notification-dispatcher.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { toDigits } from '../whatsapp/contracts/address';
+import { notifyAgentPlacement } from './agent-placement';
 import { jobsInZonesWhere } from './agent-zones';
 
 /**
@@ -144,6 +147,30 @@ export function agentInvitationBody(p: {
   ].join('\n');
 }
 
+export const AGENT_PLACEMENT_BUTTON = 'Voir ma candidature';
+
+/** The `agentPlacement` template body, also sent free-form in the 24h window. */
+export function agentPlacementBody(p: {
+  workerFirstName: string | null | undefined;
+  agentFirstName: string | null | undefined;
+  jobTitle: string | null | undefined;
+}): string {
+  const worker = p.workerFirstName?.trim() || 'à vous';
+  const agent = p.agentFirstName?.trim() || 'Votre agent';
+  const title = p.jobTitle?.trim() || 'une mission';
+  return [
+    '*Candidature enregistrée*',
+    '',
+    `Bonjour ${worker},`,
+    '',
+    `Suite à votre appel avec ${agent}, agent Rabotka, votre candidature a été enregistrée :`,
+    '',
+    `*Offre* : ${title}`,
+    '',
+    'Appuyez ci-dessous pour suivre votre candidature.',
+  ].join('\n');
+}
+
 /** Outcomes that end the lead, and the status each one ends it in. */
 const CLOSING_OUTCOMES: Partial<Record<AgentCallOutcome, AgentLeadStatus>> = {
   [AgentCallOutcome.NOT_INTERESTED]: AgentLeadStatus.DECLINED,
@@ -167,6 +194,8 @@ export class AgentLeadService {
     private readonly config: ConfigService,
     private readonly logService: LogService,
     private readonly dispatcher: NotificationDispatcher,
+    private readonly applications: ApplicationService,
+    private readonly events: EventEmitter2,
   ) {}
 
   /**
@@ -442,6 +471,166 @@ export class AgentLeadService {
           : null,
       lead: await this.view(agentId, leadId),
     };
+  }
+
+  /**
+   * Places the worker on the job directly: the agent creates the application
+   * in the worker's name, credited to them, instead of waiting for the worker
+   * to accept an invitation.
+   *
+   * Only after the agent recorded a call that ended « Intéressé » — the trace
+   * that the worker agreed. The application goes through
+   * `ApplicationService.create`, so every check the worker would face applying
+   * alone still applies. The worker is told by WhatsApp (`agentPlacement`).
+   */
+  async place(agentId: string, leadId: string) {
+    const lead = await this.requireClaim(agentId, leadId);
+
+    const lastCall = await this.prisma.agentCallLog.findFirst({
+      where: { lead_id: leadId },
+      orderBy: { created_at: 'desc' },
+      select: { outcome: true },
+    });
+    if (lastCall?.outcome !== AgentCallOutcome.INTERESTED) {
+      throw new ConflictException(
+        'Enregistrez d’abord un appel « Intéressé » avec ce travailleur.',
+      );
+    }
+
+    // Said in the agent's voice: ApplicationService answers in the worker's.
+    const live = await this.prisma.application.count({
+      where: {
+        job_offer_id: lead.job_offer_id,
+        worker_id: lead.worker_id,
+        status: { not: ApplicationStatus.CANCELLED },
+        deleted_at: null,
+      },
+    });
+    if (live > 0) {
+      throw new ConflictException(
+        'Ce travailleur a déjà postulé à cette offre.',
+      );
+    }
+
+    const application = await this.applications.create(
+      lead.job_offer_id,
+      lead.worker_id,
+      { agentId },
+    );
+
+    await this.prisma.agentLead.updateMany({
+      where: {
+        id: leadId,
+        claimed_by_agent_id: agentId,
+        status: { in: [AgentLeadStatus.CLAIMED, AgentLeadStatus.INVITED] },
+      },
+      data: {
+        status: AgentLeadStatus.CONFIRMED,
+        application_id: application.id,
+        decided_at: new Date(),
+        invite_token: null,
+        invite_expires_at: null,
+      },
+    });
+
+    const [agent, worker, job] = await Promise.all([
+      this.prisma.agent.findUnique({
+        where: { id: agentId },
+        select: { first_name: true },
+      }),
+      this.prisma.profile.findUnique({
+        where: { id: lead.worker_id },
+        select: { first_name: true, phone: true },
+      }),
+      this.prisma.jobOffer.findUnique({
+        where: { id: lead.job_offer_id },
+        select: { title: true },
+      }),
+    ]);
+
+    const sentToWorker = await this.sendPlacementToWorker({
+      workerId: lead.worker_id,
+      phone: worker?.phone ?? null,
+      workerFirstName: worker?.first_name,
+      agentFirstName: agent?.first_name,
+      jobTitle: job?.title,
+      applicationPath: `applications/${application.id}`,
+    });
+
+    await this.logService
+      .create({
+        action: 'AGENT_PLACED',
+        entityType: 'Agent',
+        entityId: agentId,
+        profileId: lead.worker_id,
+        metadata: {
+          agentId,
+          leadId,
+          jobOfferId: lead.job_offer_id,
+          applicationId: application.id,
+          sentToWorker,
+        },
+      })
+      .catch(() => undefined);
+
+    await notifyAgentPlacement(
+      { prisma: this.prisma, events: this.events },
+      {
+        agentId,
+        agentFirstName: agent?.first_name,
+        jobTitle: job?.title ?? '',
+        workerId: lead.worker_id,
+        applicationId: application.id,
+      },
+    );
+
+    return {
+      applicationId: application.id,
+      /** True when Rabotka told the worker by WhatsApp. */
+      sentToWorker,
+      lead: await this.view(agentId, leadId),
+    };
+  }
+
+  /**
+   * Tells the worker they were placed. Same switch and same fallbacks as the
+   * invitation; returns whether WhatsApp accepted the message.
+   */
+  private async sendPlacementToWorker(p: {
+    workerId: string;
+    phone: string | null;
+    workerFirstName: string | null | undefined;
+    agentFirstName: string | null | undefined;
+    jobTitle: string | null | undefined;
+    applicationPath: string;
+  }): Promise<boolean> {
+    if (!p.phone) return false;
+    if (!(await this.systemConfig.isAgentInviteWhatsAppEnabled())) return false;
+    const body = agentPlacementBody(p);
+    try {
+      const result = await this.dispatcher.send({
+        phone: p.phone,
+        profileId: p.workerId,
+        template: {
+          key: 'agentPlacement',
+          params: {
+            workerFirstName: p.workerFirstName,
+            agentFirstName: p.agentFirstName,
+            jobTitle: p.jobTitle,
+            applicationPath: p.applicationPath,
+          },
+        },
+        freeForm: {
+          body,
+          buttonText: AGENT_PLACEMENT_BUTTON,
+          path: p.applicationPath,
+        },
+        body,
+      });
+      return result.sent;
+    } catch {
+      return false;
+    }
   }
 
   /**
