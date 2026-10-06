@@ -748,7 +748,11 @@ export class AgentLeadService {
     return this.place(agentId, lead.id, { offList: true });
   }
 
-  /** A worker profile whose WhatsApp number is this one, however it was typed. */
+  /**
+   * A worker profile whose WhatsApp number is this one, however it was typed.
+   * Workers only: an employer's number reads as unknown, so the lookup never
+   * hands an agent an employer's name or photo.
+   */
   private findWorkerByPhone(phone: string) {
     const e164 = toE164(phone);
     if (!/^\+\d{8,15}$/.test(e164)) {
@@ -756,7 +760,11 @@ export class AgentLeadService {
     }
     return this.prisma.profile.findFirst({
       // Stored numbers are E.164, but older rows may lack the "+".
-      where: { phone: { in: [e164, e164.slice(1)] }, deleted_at: null },
+      where: {
+        phone: { in: [e164, e164.slice(1)] },
+        profile_type: ProfileType.WORKER,
+        deleted_at: null,
+      },
       select: {
         id: true,
         first_name: true,
@@ -764,7 +772,6 @@ export class AgentLeadService {
         avatar_url: true,
         city: true,
         status: true,
-        profile_type: true,
         verification_status: true,
       },
     });
@@ -781,13 +788,9 @@ export class AgentLeadService {
     worker: {
       id: string;
       status: AccountStatus;
-      profile_type: ProfileType;
       verification_status: VerificationStatus;
     },
   ): Promise<string | null> {
-    if (worker.profile_type !== ProfileType.WORKER) {
-      return 'Ce numéro appartient à un compte employeur.';
-    }
     if (worker.status !== AccountStatus.ACTIVE) {
       return 'Le compte de ce travailleur n’est pas actif.';
     }
