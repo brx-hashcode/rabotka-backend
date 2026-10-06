@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   HttpException,
@@ -8,17 +9,23 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  AccountStatus,
   AgentCallOutcome,
   AgentLeadStatus,
   ApplicationStatus,
   Prisma,
+  ProfileType,
+  VerificationStatus,
 } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ApplicationService } from '../application/application.service';
 import { LogService } from '../log/log.service';
 import { NotificationDispatcher } from '../notification-dispatch/notification-dispatcher.service';
 import { SystemConfigService } from '../system-config/system-config.service';
-import { toDigits } from '../whatsapp/contracts/address';
+import { toDigits, toE164 } from '../whatsapp/contracts/address';
+import { notifyAgentPlacement } from './agent-placement';
 import { jobsInZonesWhere } from './agent-zones';
 
 /**
@@ -41,6 +48,31 @@ const LEAD_WORKER_SELECT = {
   avatar_url: true,
   city: true,
 } as const satisfies Prisma.ProfileSelect;
+
+const PLACEMENT_SELECT = {
+  id: true,
+  status: true,
+  created_at: true,
+  updated_at: true,
+  worker: { select: LEAD_WORKER_SELECT },
+  job_offer: { select: { id: true, title: true, city: true } },
+  agent_lead: { select: { id: true } },
+} as const satisfies Prisma.ApplicationSelect;
+
+/** The account page's placement filters, as application statuses. */
+export const PLACEMENT_GROUPS = {
+  active: [
+    ApplicationStatus.PENDING,
+    ApplicationStatus.VIEWED,
+    ApplicationStatus.WAITING_PAYMENT,
+    ApplicationStatus.ACCEPTED,
+    ApplicationStatus.STARTED,
+  ],
+  ended: [ApplicationStatus.END],
+  closed: [ApplicationStatus.REJECTED, ApplicationStatus.CANCELLED],
+} as const satisfies Record<string, readonly ApplicationStatus[]>;
+
+export type PlacementGroup = keyof typeof PLACEMENT_GROUPS;
 
 const LEAD_SELECT = {
   id: true,
@@ -116,6 +148,58 @@ export function leadView(row: LeadRow, agentId: string, now = new Date()) {
   };
 }
 
+export const AGENT_INVITATION_BUTTON = 'Voir l’offre';
+
+/**
+ * The invitation's WhatsApp text — the body of the `agentInvitation` template,
+ * also used free-form inside the 24h window and shown to the agent as a
+ * preview. The link is the button below it, never in the text.
+ */
+export function agentInvitationBody(p: {
+  workerFirstName: string | null | undefined;
+  agentFirstName: string | null | undefined;
+  jobTitle: string | null | undefined;
+}): string {
+  const worker = p.workerFirstName?.trim() || 'à vous';
+  const agent = p.agentFirstName?.trim() || 'Votre agent';
+  const title = p.jobTitle?.trim() || 'une mission';
+  return [
+    '*Offre dont vous avez parlé*',
+    '',
+    `Bonjour ${worker},`,
+    '',
+    `Suite à votre échange avec ${agent}, agent Rabotka, voici l’offre dont vous avez parlé :`,
+    '',
+    `*Offre* : ${title}`,
+    '',
+    'Appuyez ci-dessous pour voir les détails et postuler.',
+  ].join('\n');
+}
+
+export const AGENT_PLACEMENT_BUTTON = 'Voir ma candidature';
+
+/** The `agentPlacement` template body, also sent free-form in the 24h window. */
+export function agentPlacementBody(p: {
+  workerFirstName: string | null | undefined;
+  agentFirstName: string | null | undefined;
+  jobTitle: string | null | undefined;
+}): string {
+  const worker = p.workerFirstName?.trim() || 'à vous';
+  const agent = p.agentFirstName?.trim() || 'Votre agent';
+  const title = p.jobTitle?.trim() || 'une mission';
+  return [
+    '*Candidature enregistrée*',
+    '',
+    `Bonjour ${worker},`,
+    '',
+    `Suite à votre appel avec ${agent}, agent Rabotka, votre candidature a été enregistrée :`,
+    '',
+    `*Offre* : ${title}`,
+    '',
+    'Appuyez ci-dessous pour suivre votre candidature.',
+  ].join('\n');
+}
+
 /** Outcomes that end the lead, and the status each one ends it in. */
 const CLOSING_OUTCOMES: Partial<Record<AgentCallOutcome, AgentLeadStatus>> = {
   [AgentCallOutcome.NOT_INTERESTED]: AgentLeadStatus.DECLINED,
@@ -139,6 +223,8 @@ export class AgentLeadService {
     private readonly config: ConfigService,
     private readonly logService: LogService,
     private readonly dispatcher: NotificationDispatcher,
+    private readonly applications: ApplicationService,
+    private readonly events: EventEmitter2,
   ) {}
 
   /**
@@ -175,14 +261,7 @@ export class AgentLeadService {
     const { count } = await this.prisma.agentLead.updateMany({
       where: {
         id: leadId,
-        OR: [
-          { status: AgentLeadStatus.SUGGESTED },
-          // A lapsed claim or an expired invitation is open again.
-          { status: AgentLeadStatus.CLAIMED, claim_expires_at: { lte: now } },
-          { status: AgentLeadStatus.INVITED, invite_expires_at: { lte: now } },
-          // Already mine: claiming again just renews the lease.
-          { status: AgentLeadStatus.CLAIMED, claimed_by_agent_id: agentId },
-        ],
+        OR: openToAgentWhere(agentId, now),
       },
       data: {
         status: AgentLeadStatus.CLAIMED,
@@ -212,7 +291,7 @@ export class AgentLeadService {
    * the same day costs nothing.
    */
   async revealPhone(agentId: string, leadId: string, ipAddress?: string) {
-    const lead = await this.requireClaim(agentId, leadId);
+    const lead = await this.requireClaimOrPlacement(agentId, leadId);
     const { revealDailyCap } = await this.systemConfig.getAgentLeadSettings();
     const since = startOfBrazzavilleDay(new Date());
 
@@ -396,6 +475,16 @@ export class AgentLeadService {
       inviteUrl,
       expiresAt,
       message,
+      /** The WhatsApp message as the worker sees it: text, then a link button. */
+      preview: {
+        body: agentInvitationBody({
+          workerFirstName: worker?.first_name,
+          agentFirstName: agent?.first_name,
+          jobTitle: job?.title,
+        }),
+        buttonText: AGENT_INVITATION_BUTTON,
+        url: inviteUrl,
+      },
       /** True when Rabotka sent the invitation to the worker by WhatsApp. */
       sentToWorker,
       whatsappUrl:
@@ -404,6 +493,371 @@ export class AgentLeadService {
           : null,
       lead: await this.view(agentId, leadId),
     };
+  }
+
+  /**
+   * Places the worker on the job directly: the agent creates the application
+   * in the worker's name, credited to them, instead of waiting for the worker
+   * to accept an invitation.
+   *
+   * Only after the agent recorded a call that ended « Intéressé » — the trace
+   * that the worker agreed. The application goes through
+   * `ApplicationService.create`, so every check the worker would face applying
+   * alone still applies. The worker is told by WhatsApp (`agentPlacement`).
+   */
+  async place(
+    agentId: string,
+    leadId: string,
+    options: { offList?: boolean } = {},
+  ) {
+    const lead = await this.requireClaim(agentId, leadId);
+
+    const lastCall = await this.prisma.agentCallLog.findFirst({
+      where: { lead_id: leadId },
+      orderBy: { created_at: 'desc' },
+      select: { outcome: true },
+    });
+    if (lastCall?.outcome !== AgentCallOutcome.INTERESTED) {
+      throw new ConflictException(
+        'Enregistrez d’abord un appel « Intéressé » avec ce travailleur.',
+      );
+    }
+
+    // Said in the agent's voice: ApplicationService answers in the worker's.
+    const live = await this.prisma.application.count({
+      where: {
+        job_offer_id: lead.job_offer_id,
+        worker_id: lead.worker_id,
+        status: { not: ApplicationStatus.CANCELLED },
+        deleted_at: null,
+      },
+    });
+    if (live > 0) {
+      throw new ConflictException(
+        'Ce travailleur a déjà postulé à cette offre.',
+      );
+    }
+
+    const application = await this.applications.create(
+      lead.job_offer_id,
+      lead.worker_id,
+      { agentId },
+    );
+
+    await this.prisma.agentLead.updateMany({
+      where: {
+        id: leadId,
+        claimed_by_agent_id: agentId,
+        status: { in: [AgentLeadStatus.CLAIMED, AgentLeadStatus.INVITED] },
+      },
+      data: {
+        status: AgentLeadStatus.CONFIRMED,
+        application_id: application.id,
+        decided_at: new Date(),
+        invite_token: null,
+        invite_expires_at: null,
+      },
+    });
+
+    const [agent, worker, job] = await Promise.all([
+      this.prisma.agent.findUnique({
+        where: { id: agentId },
+        select: { first_name: true },
+      }),
+      this.prisma.profile.findUnique({
+        where: { id: lead.worker_id },
+        select: { first_name: true, phone: true },
+      }),
+      this.prisma.jobOffer.findUnique({
+        where: { id: lead.job_offer_id },
+        select: { title: true },
+      }),
+    ]);
+
+    const sentToWorker = await this.sendPlacementToWorker({
+      workerId: lead.worker_id,
+      phone: worker?.phone ?? null,
+      workerFirstName: worker?.first_name,
+      agentFirstName: agent?.first_name,
+      jobTitle: job?.title,
+      applicationPath: `applications/${application.id}`,
+    });
+
+    await this.logService
+      .create({
+        action: 'AGENT_PLACED',
+        entityType: 'Agent',
+        entityId: agentId,
+        profileId: lead.worker_id,
+        metadata: {
+          agentId,
+          leadId,
+          jobOfferId: lead.job_offer_id,
+          applicationId: application.id,
+          sentToWorker,
+          ...(options.offList ? { offList: true } : {}),
+        },
+      })
+      .catch(() => undefined);
+
+    await notifyAgentPlacement(
+      { prisma: this.prisma, events: this.events },
+      {
+        agentId,
+        agentFirstName: agent?.first_name,
+        jobTitle: job?.title ?? '',
+        workerId: lead.worker_id,
+        applicationId: application.id,
+      },
+    );
+
+    return {
+      applicationId: application.id,
+      /** True when Rabotka told the worker by WhatsApp. */
+      sentToWorker,
+      lead: await this.view(agentId, leadId),
+    };
+  }
+
+  /**
+   * A worker the agent reached outside the suggestions, found by the WhatsApp
+   * number they gave the agent — to confirm it is the right person before
+   * placing them. Only the first name, the last name's initial and the photo:
+   * the agent typed the number, they do not need more to recognise them.
+   *
+   * Each lookup is logged and counts against the same daily cap as the phone
+   * reveals, so the endpoint cannot be used to put names on a list of numbers.
+   */
+  async lookupWorker(
+    agentId: string,
+    jobOfferId: string,
+    phone: string,
+    ipAddress?: string,
+  ) {
+    await this.requireJobInZones(agentId, jobOfferId);
+    const { revealDailyCap } = await this.systemConfig.getAgentLeadSettings();
+    const today = await this.prisma.log.count({
+      where: {
+        action: 'AGENT_WORKER_LOOKUP',
+        entity_type: 'Agent',
+        entity_id: agentId,
+        created_at: { gte: startOfBrazzavilleDay(new Date()) },
+      },
+    });
+    if (today >= revealDailyCap) {
+      throw new HttpException(
+        `Limite atteinte : ${revealDailyCap} recherches par jour. Réessayez demain.`,
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    const worker = await this.findWorkerByPhone(phone);
+    await this.logService
+      .create({
+        action: 'AGENT_WORKER_LOOKUP',
+        entityType: 'Agent',
+        entityId: agentId,
+        profileId: worker?.id,
+        ipAddress,
+        metadata: { agentId, jobOfferId, found: !!worker },
+      })
+      .catch(() => undefined);
+    if (!worker) {
+      throw new NotFoundException(
+        'Aucun travailleur Rabotka avec ce numéro WhatsApp.',
+      );
+    }
+
+    return {
+      worker: {
+        id: worker.id,
+        firstName: worker.first_name,
+        lastInitial: worker.last_name.trim().charAt(0).toUpperCase(),
+        avatarUrl: worker.avatar_url,
+        city: worker.city,
+      },
+      /** Why this worker cannot be placed on this job; null when they can. */
+      blocker: await this.placementBlocker(agentId, jobOfferId, worker),
+    };
+  }
+
+  /**
+   * Places a worker the agent reached outside the suggestions. The agent
+   * confirms the worker agreed on the phone; that is recorded as an
+   * « Intéressé » call on the (job, worker) lead, which the agent takes —
+   * then the placement is the same as for a suggested worker.
+   */
+  async placeByPhone(agentId: string, jobOfferId: string, phone: string) {
+    await this.requireJobInZones(agentId, jobOfferId);
+    const worker = await this.findWorkerByPhone(phone);
+    if (!worker) {
+      throw new NotFoundException(
+        'Aucun travailleur Rabotka avec ce numéro WhatsApp.',
+      );
+    }
+    const blocker = await this.placementBlocker(agentId, jobOfferId, worker);
+    if (blocker) throw new ConflictException(blocker);
+
+    const { claimHours } = await this.systemConfig.getAgentLeadSettings();
+    const now = new Date();
+    const claim = {
+      status: AgentLeadStatus.CLAIMED,
+      claimed_by_agent_id: agentId,
+      claimed_at: now,
+      claim_expires_at: addHours(now, claimHours),
+      invite_token: null,
+      invite_expires_at: null,
+    };
+    await this.prisma.agentLead.createMany({
+      data: [{ job_offer_id: jobOfferId, worker_id: worker.id }],
+      skipDuplicates: true,
+    });
+    // Same race guard as claim(): only a lead nobody else holds is taken.
+    const { count } = await this.prisma.agentLead.updateMany({
+      where: {
+        job_offer_id: jobOfferId,
+        worker_id: worker.id,
+        OR: placeableByAgentWhere(agentId, now),
+      },
+      data: claim,
+    });
+    if (count === 0) {
+      throw new ConflictException(
+        'Ce travailleur est déjà pris en charge par un autre agent pour cette offre.',
+      );
+    }
+
+    const lead = await this.prisma.agentLead.findUniqueOrThrow({
+      where: {
+        idx_agent_lead_job_worker: {
+          job_offer_id: jobOfferId,
+          worker_id: worker.id,
+        },
+      },
+      select: { id: true },
+    });
+    await this.prisma.agentCallLog.create({
+      data: {
+        lead_id: lead.id,
+        agent_id: agentId,
+        outcome: AgentCallOutcome.INTERESTED,
+        note: 'Hors suggestions : le travailleur a accepté et donné son numéro WhatsApp.',
+      },
+    });
+
+    return this.place(agentId, lead.id, { offList: true });
+  }
+
+  /** A worker profile whose WhatsApp number is this one, however it was typed. */
+  private findWorkerByPhone(phone: string) {
+    const e164 = toE164(phone);
+    if (!/^\+\d{8,15}$/.test(e164)) {
+      throw new BadRequestException('Numéro WhatsApp invalide.');
+    }
+    return this.prisma.profile.findFirst({
+      // Stored numbers are E.164, but older rows may lack the "+".
+      where: { phone: { in: [e164, e164.slice(1)] }, deleted_at: null },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        avatar_url: true,
+        city: true,
+        status: true,
+        profile_type: true,
+        verification_status: true,
+      },
+    });
+  }
+
+  /**
+   * The reason a worker cannot be placed on the job, in the agent's words —
+   * the checks ApplicationService would fail, asked up front so the agent
+   * sees them before confirming. Null when nothing stands in the way.
+   */
+  private async placementBlocker(
+    agentId: string,
+    jobOfferId: string,
+    worker: {
+      id: string;
+      status: AccountStatus;
+      profile_type: ProfileType;
+      verification_status: VerificationStatus;
+    },
+  ): Promise<string | null> {
+    if (worker.profile_type !== ProfileType.WORKER) {
+      return 'Ce numéro appartient à un compte employeur.';
+    }
+    if (worker.status !== AccountStatus.ACTIVE) {
+      return 'Le compte de ce travailleur n’est pas actif.';
+    }
+    if (worker.verification_status !== VerificationStatus.VERIFIED) {
+      return 'L’identité de ce travailleur n’est pas encore vérifiée.';
+    }
+    const [applied, heldElsewhere] = await Promise.all([
+      this.prisma.application.count({
+        where: {
+          job_offer_id: jobOfferId,
+          worker_id: worker.id,
+          status: { not: ApplicationStatus.CANCELLED },
+          deleted_at: null,
+        },
+      }),
+      this.prisma.agentLead.count({
+        where: {
+          job_offer_id: jobOfferId,
+          worker_id: worker.id,
+          NOT: { OR: placeableByAgentWhere(agentId, new Date()) },
+          status: { in: [AgentLeadStatus.CLAIMED, AgentLeadStatus.INVITED] },
+        },
+      }),
+    ]);
+    if (applied > 0) return 'Ce travailleur a déjà postulé à cette offre.';
+    if (heldElsewhere > 0) {
+      return 'Ce travailleur est déjà pris en charge par un autre agent pour cette offre.';
+    }
+    return null;
+  }
+
+  /**
+   * Tells the worker they were placed. Same switch and same fallbacks as the
+   * invitation; returns whether WhatsApp accepted the message.
+   */
+  private async sendPlacementToWorker(p: {
+    workerId: string;
+    phone: string | null;
+    workerFirstName: string | null | undefined;
+    agentFirstName: string | null | undefined;
+    jobTitle: string | null | undefined;
+    applicationPath: string;
+  }): Promise<boolean> {
+    if (!p.phone) return false;
+    if (!(await this.systemConfig.isAgentInviteWhatsAppEnabled())) return false;
+    const body = agentPlacementBody(p);
+    try {
+      const result = await this.dispatcher.send({
+        phone: p.phone,
+        profileId: p.workerId,
+        template: {
+          key: 'agentPlacement',
+          params: {
+            workerFirstName: p.workerFirstName,
+            agentFirstName: p.agentFirstName,
+            jobTitle: p.jobTitle,
+            applicationPath: p.applicationPath,
+          },
+        },
+        freeForm: {
+          body,
+          buttonText: AGENT_PLACEMENT_BUTTON,
+          path: p.applicationPath,
+        },
+        body,
+      });
+      return result.sent;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -423,21 +877,7 @@ export class AgentLeadService {
   }): Promise<boolean> {
     if (!p.phone) return false;
     if (!(await this.systemConfig.isAgentInviteWhatsAppEnabled())) return false;
-    // The free-form text (inside the 24h window) mirrors the template.
-    const worker = p.workerFirstName?.trim() || 'à vous';
-    const agent = p.agentFirstName?.trim() || 'Votre agent';
-    const title = p.jobTitle?.trim() || 'une mission';
-    const body = [
-      '*Offre dont vous avez parlé*',
-      '',
-      `Bonjour ${worker},`,
-      '',
-      `Suite à votre échange avec ${agent}, agent Rabotka, voici l’offre dont vous avez parlé :`,
-      '',
-      `*Offre* : ${title}`,
-      '',
-      'Appuyez ci-dessous pour voir les détails et postuler.',
-    ].join('\n');
+    const body = agentInvitationBody(p);
     try {
       const result = await this.dispatcher.send({
         phone: p.phone,
@@ -451,13 +891,117 @@ export class AgentLeadService {
             invitePath: p.invitePath,
           },
         },
-        freeForm: { body, buttonText: 'Voir l’offre', path: p.invitePath },
+        freeForm: {
+          body,
+          buttonText: AGENT_INVITATION_BUTTON,
+          path: p.invitePath,
+        },
         body,
       });
       return result.sent;
     } catch {
       return false;
     }
+  }
+
+  /**
+   * The workers this agent placed on one job — every application credited to
+   * them, however it came (direct placement, accepted invitation, placement by
+   * number), newest first, with where each application stands now.
+   */
+  async listPlacements(agentId: string, jobOfferId: string) {
+    await this.requireJobInZones(agentId, jobOfferId);
+    const rows = await this.prisma.application.findMany({
+      where: { job_offer_id: jobOfferId, agent_id: agentId, deleted_at: null },
+      select: PLACEMENT_SELECT,
+      orderBy: { created_at: 'desc' },
+    });
+    return this.withCommissions(rows);
+  }
+
+  /**
+   * Every worker the agent placed, on any job — the account page's list.
+   * Not limited to the agent's current zones: a placement stays theirs when
+   * an admin moves them.
+   */
+  async listAllPlacements(
+    agentId: string,
+    params: { group?: PlacementGroup; page: number; limit: number },
+  ) {
+    const where: Prisma.ApplicationWhereInput = {
+      agent_id: agentId,
+      deleted_at: null,
+      ...(params.group
+        ? { status: { in: [...PLACEMENT_GROUPS[params.group]] } }
+        : {}),
+    };
+    const [total, rows] = await Promise.all([
+      this.prisma.application.count({ where }),
+      this.prisma.application.findMany({
+        where,
+        select: PLACEMENT_SELECT,
+        orderBy: { created_at: 'desc' },
+        skip: (params.page - 1) * params.limit,
+        take: params.limit,
+      }),
+    ]);
+    return {
+      data: await this.withCommissions(rows),
+      total,
+      page: params.page,
+      limit: params.limit,
+    };
+  }
+
+  /** Placement rows with the commission each one earned, if decided yet. */
+  private async withCommissions(
+    rows: Prisma.ApplicationGetPayload<{ select: typeof PLACEMENT_SELECT }>[],
+  ) {
+    const commissions = rows.length
+      ? await this.prisma.agentCommission.findMany({
+          where: { application_id: { in: rows.map((r) => r.id) } },
+          select: {
+            application_id: true,
+            status: true,
+            amount: true,
+            available_at: true,
+            reason: true,
+          },
+        })
+      : [];
+    const byApplication = new Map(
+      commissions.map((c) => [c.application_id, c]),
+    );
+    return rows.map((r) => {
+      const c = byApplication.get(r.id);
+      return {
+        applicationId: r.id,
+        status: r.status,
+        placedAt: r.created_at,
+        updatedAt: r.updated_at,
+        leadId: r.agent_lead?.id ?? null,
+        job: {
+          id: r.job_offer.id,
+          title: r.job_offer.title,
+          city: r.job_offer.city,
+        },
+        worker: {
+          id: r.worker.id,
+          firstName: r.worker.first_name,
+          lastName: r.worker.last_name,
+          avatarUrl: r.worker.avatar_url,
+          city: r.worker.city,
+        },
+        commission: c
+          ? {
+              status: c.status,
+              amount: Number(c.amount),
+              availableAt: c.available_at,
+              reason: c.reason,
+            }
+          : null,
+      };
+    });
   }
 
   /** The agent's own pipeline, most recently touched first. */
@@ -653,6 +1197,36 @@ export class AgentLeadService {
     return lead;
   }
 
+  /** The job, only if it is open and inside this agent's zones. */
+  private async requireJobInZones(agentId: string, jobOfferId: string) {
+    const zones = await this.prisma.agentZone.findMany({
+      where: { agent_id: agentId },
+      select: { country_code: true, city: true },
+    });
+    const inZones =
+      zones.length > 0
+        ? await this.prisma.jobOffer.count({
+            where: { AND: [{ id: jobOfferId }, jobsInZonesWhere(zones)] },
+          })
+        : 0;
+    if (inZones === 0) throw new NotFoundException('Offre introuvable');
+  }
+
+  /**
+   * As requireClaim, or a worker this agent placed — whom they may still need
+   * to call after the placement.
+   */
+  private async requireClaimOrPlacement(agentId: string, leadId: string) {
+    const lead = await this.loadInZones(agentId, leadId);
+    if (
+      lead.status === AgentLeadStatus.CONFIRMED &&
+      lead.claimed_by_agent_id === agentId
+    ) {
+      return lead;
+    }
+    return this.requireClaim(agentId, leadId);
+  }
+
   /** The lead, only for the agent holding a live claim on it. */
   private async requireClaim(agentId: string, leadId: string) {
     const lead = await this.loadInZones(agentId, leadId);
@@ -671,6 +1245,35 @@ export class AgentLeadService {
   private frontendUrl(): string {
     return (this.config.get<string>('FRONTEND_URL') ?? '').replace(/\/+$/, '');
   }
+}
+
+/** The leads this agent may take: free, lapsed, or already theirs. */
+function openToAgentWhere(
+  agentId: string,
+  now: Date,
+): Prisma.AgentLeadWhereInput[] {
+  return [
+    { status: AgentLeadStatus.SUGGESTED },
+    // A lapsed claim or an expired invitation is open again.
+    { status: AgentLeadStatus.CLAIMED, claim_expires_at: { lte: now } },
+    { status: AgentLeadStatus.INVITED, invite_expires_at: { lte: now } },
+    // Already mine: claiming again just renews the lease.
+    { status: AgentLeadStatus.CLAIMED, claimed_by_agent_id: agentId },
+  ];
+}
+
+/**
+ * For a placement, also a worker this agent already invited: placing them
+ * directly supersedes the invitation.
+ */
+function placeableByAgentWhere(
+  agentId: string,
+  now: Date,
+): Prisma.AgentLeadWhereInput[] {
+  return [
+    ...openToAgentWhere(agentId, now),
+    { status: AgentLeadStatus.INVITED, claimed_by_agent_id: agentId },
+  ];
 }
 
 function addHours(date: Date, hours: number): Date {

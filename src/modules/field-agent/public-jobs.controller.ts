@@ -2,12 +2,20 @@ import {
   Controller,
   DefaultValuePipe,
   Get,
+  Param,
   ParseIntPipe,
+  ParseUUIDPipe,
   Query,
 } from '@nestjs/common';
-import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { AgentPortalService } from './agent-portal.service';
+import {
+  parseCategorySlugs,
+  parseEmploymentTypes,
+  parseSort,
+  type JobListQuery,
+} from './job-list-query';
 
 const clamp = (n: number, min: number, max: number) =>
   Math.min(Math.max(n, min), max);
@@ -37,19 +45,39 @@ export class PublicJobsController {
   })
   @ApiQuery({ name: 'city', required: false })
   @ApiQuery({ name: 'q', required: false, description: 'Title or reference' })
+  @ApiQuery({
+    name: 'employmentType',
+    required: false,
+    description: 'Comma list: MISSION,CDD,CDI,STAGE',
+  })
+  @ApiQuery({
+    name: 'category',
+    required: false,
+    description: 'Comma list of category slugs',
+  })
+  @ApiQuery({ name: 'sort', required: false, enum: ['recent', 'start'] })
   list(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
-    @Query('country') country?: string,
-    @Query('city') city?: string,
-    @Query('q') q?: string,
+    @Query() query: JobListQuery,
   ) {
     return this.portal.listPublicJobs({
       page: Math.max(page, 1),
       limit: clamp(limit, 1, 50),
-      country: country?.trim() || undefined,
-      city: city?.trim() || undefined,
-      q: q?.trim() || undefined,
+      country: query.country?.trim() || undefined,
+      city: query.city?.trim() || undefined,
+      q: query.q?.trim() || undefined,
+      employmentTypes: parseEmploymentTypes(query.employmentType),
+      categories: parseCategorySlugs(query.category),
+      sort: parseSort(query.sort),
     });
+  }
+
+  @Get(':id')
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @ApiOperation({ summary: 'One open job (public summary)' })
+  @ApiResponse({ status: 404, description: 'Unknown, closed or deleted' })
+  getOne(@Param('id', ParseUUIDPipe) id: string) {
+    return this.portal.getPublicJob(id);
   }
 }

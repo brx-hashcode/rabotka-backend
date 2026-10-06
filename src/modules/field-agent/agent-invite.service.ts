@@ -1,10 +1,10 @@
 import { GoneException, Injectable, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AgentLeadStatus } from '@prisma/client';
-import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { ApplicationService } from '../application/application.service';
 import { LogService } from '../log/log.service';
+import { notifyAgentPlacement } from './agent-placement';
 
 /**
  * The worker's side of an agent invitation: the page behind the link the
@@ -75,7 +75,16 @@ export class AgentInviteService {
     await this.log('AGENT_INVITE_ACCEPTED', lead, profileId, {
       applicationId: application.id,
     });
-    await this.notifyPlacement(lead, profileId, application.id);
+    await notifyAgentPlacement(
+      { prisma: this.prisma, events: this.events },
+      {
+        agentId: lead.claimed_by_agent_id,
+        agentFirstName: lead.claimed_by?.first_name,
+        jobTitle: lead.job_offer.title,
+        workerId: profileId,
+        applicationId: application.id,
+      },
+    );
 
     return { success: true, applicationId: application.id };
   }
@@ -88,41 +97,6 @@ export class AgentInviteService {
     });
     await this.log('AGENT_INVITE_DECLINED', lead, profileId);
     return { success: true };
-  }
-
-  /** Tells the admins in the bell; never fails the worker's accept. */
-  private async notifyPlacement(
-    lead: {
-      claimed_by_agent_id: string | null;
-      claimed_by: { first_name: string } | null;
-      job_offer: { title: string };
-    },
-    workerId: string,
-    applicationId: string,
-  ) {
-    if (!lead.claimed_by_agent_id) return;
-    try {
-      const worker = await this.prisma.profile.findUnique({
-        where: { id: workerId },
-        select: { first_name: true, last_name: true },
-      });
-      const workerName = worker
-        ? `${worker.first_name} ${worker.last_name}`.trim()
-        : 'un travailleur';
-      this.events.emit(AdminNotificationEvent.AGENT_PLACEMENT, {
-        event: AdminNotificationEvent.AGENT_PLACEMENT,
-        title: 'Nouveau placement agent',
-        message: `${lead.claimed_by?.first_name ?? 'Un agent'} a placé ${workerName} sur « ${lead.job_offer.title} »`,
-        // The application, not the agent: that is what an admin opens next,
-        // and its detail names the agent.
-        entityType: 'agent-placement',
-        entityId: applicationId,
-        metadata: { agentId: lead.claimed_by_agent_id, workerId },
-        timestamp: new Date().toISOString(),
-      });
-    } catch {
-      // The placement is recorded; the bell is a courtesy.
-    }
   }
 
   private async find(profileId: string, token: string) {

@@ -4,7 +4,7 @@ import {
   HttpException,
   NotFoundException,
 } from '@nestjs/common';
-import { AgentCallOutcome, AgentLeadStatus } from '@prisma/client';
+import { AgentCallOutcome, AgentLeadStatus, Prisma } from '@prisma/client';
 import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 import {
   AgentLeadService,
@@ -116,6 +116,8 @@ describe('AgentLeadService', () => {
   };
   let dispatcher: { send: jest.Mock };
   let logService: { create: jest.Mock };
+  let applications: { create: jest.Mock };
+  let events: { emit: jest.Mock };
   let service: AgentLeadService;
 
   beforeEach(() => {
@@ -142,7 +144,10 @@ describe('AgentLeadService', () => {
         create: jest.fn().mockResolvedValue({}),
         count: jest.fn().mockResolvedValue(0),
       },
-      agentCallLog: { create: jest.fn().mockReturnValue('call-op') },
+      agentCallLog: {
+        create: jest.fn().mockReturnValue('call-op'),
+        findFirst: jest.fn().mockResolvedValue({ outcome: 'INTERESTED' }),
+      },
       profile: {
         findUnique: jest.fn().mockResolvedValue({
           first_name: 'Awa',
@@ -173,12 +178,16 @@ describe('AgentLeadService', () => {
     };
     logService = { create: jest.fn().mockResolvedValue(undefined) };
     const config = { get: jest.fn().mockReturnValue('https://rabotka.work/') };
+    applications = { create: jest.fn().mockResolvedValue({ id: 'app-1' }) };
+    events = { emit: jest.fn() };
     service = new AgentLeadService(
       prisma,
       systemConfig as any,
       config as any,
       logService as any,
       dispatcher as any,
+      applications as any,
+      events as any,
     );
   });
 
@@ -252,6 +261,22 @@ describe('AgentLeadService', () => {
   });
 
   describe('revealPhone', () => {
+    it('still shows the number of a worker this agent placed', async () => {
+      onLoad({ status: AgentLeadStatus.CONFIRMED, claim_expires_at: null });
+      const result = await service.revealPhone('agent-1', 'lead-1');
+      expect(result.phone).toBe('+242061234567');
+    });
+
+    it('refuses the number of a worker another agent placed', async () => {
+      onLoad({
+        status: AgentLeadStatus.CONFIRMED,
+        claimed_by_agent_id: 'agent-2',
+      });
+      await expect(service.revealPhone('agent-1', 'lead-1')).rejects.toThrow(
+        'Prenez d’abord',
+      );
+    });
+
     it('returns the numbers and logs the reveal', async () => {
       const result = await service.revealPhone('agent-1', 'lead-1', '1.2.3.4');
       expect(result).toEqual({
@@ -388,7 +413,308 @@ describe('AgentLeadService', () => {
     });
   });
 
+  describe('place', () => {
+    it('creates the application credited to the agent and confirms the lead', async () => {
+      const result = await service.place('agent-1', 'lead-1');
+
+      expect(applications.create).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        { agentId: 'agent-1' },
+      );
+      const update = prisma.agentLead.updateMany.mock.calls.at(-1)[0];
+      expect(update.where).toMatchObject({
+        id: 'lead-1',
+        claimed_by_agent_id: 'agent-1',
+      });
+      expect(update.data).toMatchObject({
+        status: 'CONFIRMED',
+        application_id: 'app-1',
+      });
+      expect(result.applicationId).toBe('app-1');
+      expect(events.emit).toHaveBeenCalledWith(
+        'admin.notification.agent.placement',
+        expect.objectContaining({ entityId: 'app-1' }),
+      );
+    });
+
+    it('refuses without a last call « Intéressé »', async () => {
+      prisma.agentCallLog.findFirst.mockResolvedValue({ outcome: 'CALL_BACK' });
+      await expect(service.place('agent-1', 'lead-1')).rejects.toThrow(
+        'Intéressé',
+      );
+      expect(applications.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses, in the agent’s voice, when the worker already applied', async () => {
+      prisma.application.count.mockResolvedValue(1);
+      await expect(service.place('agent-1', 'lead-1')).rejects.toThrow(
+        'Ce travailleur a déjà postulé',
+      );
+      expect(applications.create).not.toHaveBeenCalled();
+    });
+
+    it('tells the worker by WhatsApp, linking their application', async () => {
+      systemConfig.isAgentInviteWhatsAppEnabled.mockResolvedValue(true);
+      const result = await service.place('agent-1', 'lead-1');
+      const sent = dispatcher.send.mock.calls[0][0];
+      expect(sent.template).toMatchObject({
+        key: 'agentPlacement',
+        params: { applicationPath: 'applications/app-1' },
+      });
+      expect(sent.freeForm.buttonText).toBe('Voir ma candidature');
+      expect(result.sentToWorker).toBe(true);
+    });
+  });
+
+  describe('listPlacements', () => {
+    const placement = (over: Record<string, unknown> = {}) => ({
+      id: 'app-2',
+      status: 'ACCEPTED',
+      created_at: new Date('2026-10-05T10:00:00Z'),
+      updated_at: new Date('2026-10-05T12:00:00Z'),
+      worker: {
+        id: 'w2',
+        first_name: 'Awa',
+        last_name: 'Mabiala',
+        avatar_url: null,
+        city: 'Brazzaville',
+      },
+      job_offer: { id: 'job-1', title: 'Serveuse', city: 'Brazzaville' },
+      agent_lead: { id: 'lead-2' },
+      ...over,
+    });
+
+    beforeEach(() => {
+      prisma.application.findMany = jest.fn().mockResolvedValue([placement()]);
+      prisma.application.count = jest.fn().mockResolvedValue(1);
+      prisma.agentCommission = {
+        findMany: jest.fn().mockResolvedValue([]),
+      };
+    });
+
+    it('lists the applications credited to this agent on the job, newest first', async () => {
+      const result = await service.listPlacements('agent-1', 'job-1');
+      const query = prisma.application.findMany.mock.calls[0][0];
+      expect(query.where).toEqual({
+        job_offer_id: 'job-1',
+        agent_id: 'agent-1',
+        deleted_at: null,
+      });
+      expect(query.orderBy).toEqual({ created_at: 'desc' });
+      expect(result).toEqual([
+        expect.objectContaining({
+          applicationId: 'app-2',
+          status: 'ACCEPTED',
+          leadId: 'lead-2',
+          job: { id: 'job-1', title: 'Serveuse', city: 'Brazzaville' },
+          worker: expect.objectContaining({ firstName: 'Awa' }),
+          commission: null,
+        }),
+      ]);
+      expect(result[0].worker).not.toHaveProperty('phone');
+    });
+
+    it('rejects a job outside the zones', async () => {
+      prisma.jobOffer.count.mockResolvedValue(0);
+      await expect(service.listPlacements('agent-1', 'job-1')).rejects.toThrow(
+        'Offre introuvable',
+      );
+    });
+
+    it('lists every job, paged, with the commission each placement earned', async () => {
+      prisma.agentCommission.findMany.mockResolvedValue([
+        {
+          application_id: 'app-2',
+          status: 'PENDING',
+          amount: new Prisma.Decimal(400),
+          available_at: null,
+          reason: null,
+        },
+      ]);
+      const result = await service.listAllPlacements('agent-1', {
+        page: 2,
+        limit: 10,
+      });
+      const query = prisma.application.findMany.mock.calls[0][0];
+      expect(query.where).toEqual({ agent_id: 'agent-1', deleted_at: null });
+      expect(query.skip).toBe(10);
+      expect(prisma.jobOffer.count).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ total: 1, page: 2, limit: 10 });
+      expect(result.data[0].commission).toEqual({
+        status: 'PENDING',
+        amount: 400,
+        availableAt: null,
+        reason: null,
+      });
+    });
+
+    it('filters by group of application statuses', async () => {
+      await service.listAllPlacements('agent-1', {
+        group: 'closed',
+        page: 1,
+        limit: 20,
+      });
+      expect(prisma.application.findMany.mock.calls[0][0].where.status).toEqual(
+        { in: ['REJECTED', 'CANCELLED'] },
+      );
+    });
+  });
+
+  describe('off-list workers (by WhatsApp number)', () => {
+    const worker = (over: Record<string, unknown> = {}) => ({
+      id: 'worker-9',
+      first_name: 'Awa',
+      last_name: 'mabiala',
+      avatar_url: null,
+      city: 'Brazzaville',
+      status: 'ACTIVE',
+      profile_type: 'WORKER',
+      verification_status: 'VERIFIED',
+      ...over,
+    });
+
+    beforeEach(() => {
+      prisma.profile.findFirst = jest.fn().mockResolvedValue(worker());
+      prisma.log = { count: jest.fn().mockResolvedValue(0) };
+      prisma.agentLead.count = jest.fn().mockResolvedValue(0);
+      prisma.agentLead.findUniqueOrThrow = jest
+        .fn()
+        .mockResolvedValue({ id: 'lead-1' });
+    });
+
+    it('matches the number however it was typed', async () => {
+      await service.lookupWorker('agent-1', 'job-1', '00242 06 123 45 67');
+      expect(prisma.profile.findFirst.mock.calls[0][0].where.phone).toEqual({
+        in: ['+242061234567', '242061234567'],
+      });
+    });
+
+    it('shows a first name and initial only, and logs the lookup', async () => {
+      const result = await service.lookupWorker(
+        'agent-1',
+        'job-1',
+        '+242061234567',
+      );
+      expect(result.worker).toEqual({
+        id: 'worker-9',
+        firstName: 'Awa',
+        lastInitial: 'M',
+        avatarUrl: null,
+        city: 'Brazzaville',
+      });
+      expect(result.blocker).toBeNull();
+      expect(logService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'AGENT_WORKER_LOOKUP' }),
+      );
+    });
+
+    it('caps lookups per day', async () => {
+      prisma.log.count.mockResolvedValue(2);
+      await expect(
+        service.lookupWorker('agent-1', 'job-1', '+242061234567'),
+      ).rejects.toThrow('Limite atteinte');
+      expect(prisma.profile.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('answers not found for an unknown number', async () => {
+      prisma.profile.findFirst.mockResolvedValue(null);
+      await expect(
+        service.lookupWorker('agent-1', 'job-1', '+242061234567'),
+      ).rejects.toThrow('Aucun travailleur');
+    });
+
+    it('rejects a job outside the zones', async () => {
+      prisma.jobOffer.count.mockResolvedValue(0);
+      await expect(
+        service.lookupWorker('agent-1', 'job-1', '+242061234567'),
+      ).rejects.toThrow('Offre introuvable');
+    });
+
+    it.each([
+      [{ profile_type: 'EMPLOYER' }, 'employeur'],
+      [{ status: 'SUSPENDED' }, 'pas actif'],
+      [{ verification_status: 'PENDING' }, 'pas encore vérifiée'],
+    ])('names the blocker for %o', async (over, text) => {
+      prisma.profile.findFirst.mockResolvedValue(worker(over));
+      const result = await service.lookupWorker(
+        'agent-1',
+        'job-1',
+        '+242061234567',
+      );
+      expect(result.blocker).toContain(text);
+    });
+
+    it('places them: takes the lead, records the « Intéressé » call, applies', async () => {
+      const result = await service.placeByPhone(
+        'agent-1',
+        'job-1',
+        '+242061234567',
+      );
+      const take = prisma.agentLead.updateMany.mock.calls[0][0];
+      expect(take.where).toMatchObject({
+        job_offer_id: 'job-1',
+        worker_id: 'worker-9',
+      });
+      expect(take.data).toMatchObject({
+        status: 'CLAIMED',
+        claimed_by_agent_id: 'agent-1',
+      });
+      expect(prisma.agentCallLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          lead_id: 'lead-1',
+          outcome: 'INTERESTED',
+        }),
+      });
+      expect(applications.create).toHaveBeenCalled();
+      expect(result.applicationId).toBe('app-1');
+      expect(logService.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'AGENT_PLACED',
+          metadata: expect.objectContaining({ offList: true }),
+        }),
+      );
+    });
+
+    it('refuses a worker another agent holds on this job', async () => {
+      prisma.agentLead.count.mockResolvedValue(1);
+      await expect(
+        service.placeByPhone('agent-1', 'job-1', '+242061234567'),
+      ).rejects.toThrow('un autre agent');
+      expect(prisma.agentLead.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('refuses when another agent wins the race to the lead', async () => {
+      prisma.agentLead.updateMany.mockResolvedValueOnce({ count: 0 });
+      await expect(
+        service.placeByPhone('agent-1', 'job-1', '+242061234567'),
+      ).rejects.toThrow('un autre agent');
+      expect(applications.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses a worker who already applied', async () => {
+      prisma.application.count.mockResolvedValue(1);
+      await expect(
+        service.placeByPhone('agent-1', 'job-1', '+242061234567'),
+      ).rejects.toThrow('déjà postulé');
+    });
+
+    it('rejects a malformed number', async () => {
+      await expect(
+        service.placeByPhone('agent-1', 'job-1', 'abc'),
+      ).rejects.toThrow('Numéro WhatsApp invalide');
+    });
+  });
+
   describe('invite', () => {
+    it('returns the WhatsApp preview: template text, the link as a button', async () => {
+      const result = await service.invite('agent-1', 'lead-1');
+      expect(result.preview.url).toBe(result.inviteUrl);
+      expect(result.preview.buttonText).toBe('Voir l’offre');
+      expect(result.preview.body).toContain('Offre dont vous avez parlé');
+      expect(result.preview.body).not.toContain('http');
+    });
+
     it('issues a link, and no WhatsApp link before the number was revealed', async () => {
       const result = await service.invite('agent-1', 'lead-1');
       expect(result.inviteUrl).toMatch(

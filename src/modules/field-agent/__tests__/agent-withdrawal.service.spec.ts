@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  NotFoundException,
 } from '@nestjs/common';
 import {
   AgentLedgerBucket,
@@ -320,6 +321,62 @@ describe('AgentWithdrawalService', () => {
     });
   });
 
+  describe('cancel', () => {
+    beforeEach(() => {
+      prisma.agentWithdrawal.findFirst.mockResolvedValue({
+        id: 'wd-1',
+        amount: new Prisma.Decimal(2000),
+        status: AgentWithdrawalStatus.REQUESTED,
+      });
+    });
+
+    it('gives the amount back to the available balance, without an email', async () => {
+      await service.cancel('agent-1', 'wd-1');
+
+      expect(prisma.agentWithdrawal.findFirst.mock.calls[0][0].where).toEqual({
+        id: 'wd-1',
+        agent_id: 'agent-1',
+      });
+      expect(prisma.agentWithdrawal.updateMany.mock.calls[0][0]).toMatchObject({
+        where: { id: 'wd-1', status: AgentWithdrawalStatus.REQUESTED },
+        data: { status: AgentWithdrawalStatus.CANCELLED },
+      });
+      expect(ledgerRows()).toEqual([
+        expect.objectContaining({
+          kind: AgentLedgerKind.WITHDRAWAL_CANCELLED,
+          bucket: AgentLedgerBucket.LOCKED,
+          amount: -2000,
+          idempotency_key: 'withdrawal:wd-1:cancelled:locked',
+        }),
+        expect.objectContaining({
+          kind: AgentLedgerKind.WITHDRAWAL_CANCELLED,
+          bucket: AgentLedgerBucket.AVAILABLE,
+          amount: 2000,
+        }),
+      ]);
+      expect(logService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'AGENT_WITHDRAWAL_CANCELLED' }),
+      );
+      expect(mail.sendMail).not.toHaveBeenCalled();
+    });
+
+    it("reads another agent's request as not found", async () => {
+      prisma.agentWithdrawal.findFirst.mockResolvedValue(null);
+      await expect(service.cancel('agent-2', 'wd-1')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(prisma.agentWithdrawal.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('refuses a request an admin already decided, moving no money', async () => {
+      prisma.agentWithdrawal.updateMany.mockResolvedValue({ count: 0 });
+      await expect(service.cancel('agent-1', 'wd-1')).rejects.toThrow(
+        ConflictException,
+      );
+      expect(prisma.agentLedgerEntry.createMany).not.toHaveBeenCalled();
+    });
+  });
+
   it('names the admin who processed it for admins only', async () => {
     prisma.agentWithdrawal.findMany.mockResolvedValue([
       row({
@@ -374,7 +431,7 @@ describe('AgentWithdrawalService', () => {
     });
 
     await expect(service.summary()).resolves.toEqual({
-      counts: { REQUESTED: 3, PAID: 5, REJECTED: 0 },
+      counts: { REQUESTED: 3, PAID: 5, REJECTED: 0, CANCELLED: 0 },
       open: {
         count: 3,
         amount: 7000,

@@ -22,6 +22,7 @@ import { AgentPortalService } from './agent-portal.service';
 import { AgentWalletService } from './agent-wallet.service';
 import { AgentWithdrawalService } from './agent-withdrawal.service';
 import { AgentStatsService } from './agent-stats.service';
+import { AgentSelfStatsService } from './agent-self-stats.service';
 import { AgentAuthGuard } from './guards/agent-auth.guard';
 import { ProfileAgentInviteController } from './profile-agent-invite.controller';
 import { PublicJobsController } from './public-jobs.controller';
@@ -63,6 +64,7 @@ import { PublicJobsController } from './public-jobs.controller';
     AdminAgentService,
     AgentWalletService,
     AgentStatsService,
+    AgentSelfStatsService,
     AgentLeadService,
     AgentInviteService,
     AgentCommissionService,
