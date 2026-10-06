@@ -1,16 +1,21 @@
 /**
  * Open jobs for developing the agent app's feed (rabotka-agent "/").
  *
- *   node_modules/.bin/tsx prisma/seed-agent-feed.ts
+ *   node_modules/.bin/tsx prisma/seed-agent-feed.ts              # the 23 hand-written offers
+ *   node_modules/.bin/tsx prisma/seed-agent-feed.ts --count 300  # plus 300 generated ones
  *
  * Realistic Congo / Cameroon offers across categories, cities, contract
  * types and pay, each with a full description and address, all ACTIVE so the
  * public feed and the agent feed show them. Employers are the existing active
  * EMPLOYER profiles.
  *
- * Local databases only: it refuses to run unless DATABASE_URL points at
- * localhost. Re-running is safe — offers are matched on their title and an
- * existing one is left alone.
+ * Generated offers reuse the hand-written ones as templates, spread over the
+ * same cities with varied pay, contract type, seats and posting date. They are
+ * numbered ("… · n°42"), so the same --count always yields the same titles.
+ *
+ * Dev databases only (see seed/dev-database.ts): a local database, or the
+ * develop container (APP_ENV=develop). Re-running is safe — offers are matched
+ * on their title and an existing one is left alone.
  */
 import { config } from 'dotenv';
 import { PrismaPg } from '@prisma/adapter-pg';
@@ -22,6 +27,7 @@ import {
   PrismaClient,
   ProfileType,
 } from '@prisma/client';
+import { argValue, devDatabaseUrl } from './seed/dev-database';
 import { generateJobReference } from './seed/job-reference.util';
 
 config({ path: '.env.local' });
@@ -411,19 +417,134 @@ const JOBS: Seed[] = [
   },
 ];
 
-async function main() {
-  const url = process.env.DATABASE_URL ?? '';
-  const host = (() => {
-    try {
-      return new URL(url).hostname;
-    } catch {
-      return '';
-    }
-  })();
-  if (!['localhost', '127.0.0.1'].includes(host)) {
-    throw new Error(
-      `Refusing to seed: DATABASE_URL host is "${host || 'unset'}", not localhost.`,
+/** The cities the hand-written offers use, in their canonical spelling. */
+const CITIES: { country: 'CG' | 'CM'; city: string; areas: string[] }[] = [
+  {
+    country: 'CG',
+    city: 'Brazzaville',
+    areas: [
+      'Quartier Moungali',
+      'Quartier Poto-Poto',
+      'Quartier Bacongo',
+      'Quartier Ouenzé',
+      'Plateau des 15 ans',
+      'Quartier Mfilou',
+    ],
+  },
+  {
+    country: 'CG',
+    city: 'Pointe-Noire',
+    areas: [
+      'Quartier Tié-Tié',
+      'Centre-ville',
+      'Côte Sauvage',
+      'Quartier Loandjili',
+      'Zone portuaire',
+    ],
+  },
+  {
+    country: 'CG',
+    city: 'Dolisie',
+    areas: ['Centre-ville', 'Grand marché', 'Zone artisanale'],
+  },
+  {
+    country: 'CM',
+    city: 'Douala',
+    areas: ['Akwa', 'Bonamoussadi', 'Bonapriso', 'Deido', 'Makepe'],
+  },
+  {
+    country: 'CM',
+    city: 'Yaoundé',
+    areas: ['Bastos', 'Quartier Essos', 'Mvog-Mbi', 'Biyem-Assi'],
+  },
+];
+
+const TYPES = [
+  EmploymentType.MISSION,
+  EmploymentType.CDD,
+  EmploymentType.CDI,
+  EmploymentType.STAGE,
+];
+
+/** Same seed, same sequence: a given --count always generates the same offers. */
+function prng(seed: number) {
+  let a = seed;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+async function seedGenerated(
+  prisma: PrismaClient,
+  count: number,
+  refs: { employers: string[]; categoryId: Map<string, string> },
+): Promise<{ created: number; skipped: number }> {
+  const random = prng(42);
+  const pick = <T>(items: readonly T[]) =>
+    items[Math.floor(random() * items.length)];
+  const day = 24 * 60 * 60 * 1000;
+
+  const rows = Array.from({ length: count }, (_, i) => {
+    const template = JOBS[i % JOBS.length];
+    const place = pick(CITIES);
+    // Mostly the template's own contract type, so the description still fits.
+    const type = random() < 0.75 ? template.type : pick(TYPES);
+    const amount = Math.max(
+      500,
+      Math.round((template.amount * (0.7 + random() * 0.8)) / 500) * 500,
     );
+    const postedAgo = Math.floor(random() * 45);
+    const startIn =
+      template.startIn === null ? null : Math.floor(random() * 30) + 1;
+    return {
+      reference: generateJobReference(),
+      employer_id: refs.employers[i % refs.employers.length],
+      category_id: refs.categoryId.get(template.category) ?? null,
+      title: `${template.title} · n°${i + 1}`,
+      description: template.description,
+      employment_type: type,
+      country_code: place.country,
+      country_name: COUNTRY_NAMES[place.country],
+      city: place.city,
+      address: pick(place.areas),
+      is_remote: template.remote ?? false,
+      amount,
+      payment_flow: template.flow,
+      quantity: 1 + Math.floor(random() * 5),
+      scheduled_at:
+        startIn === null ? null : new Date(Date.now() + startIn * day),
+      status: JobOfferStatus.ACTIVE,
+      created_at: new Date(
+        Date.now() - postedAgo * day - Math.floor(random() * day),
+      ),
+    };
+  });
+
+  const existing = await prisma.jobOffer.findMany({
+    where: { title: { in: rows.map((r) => r.title) }, deleted_at: null },
+    select: { title: true },
+  });
+  const present = new Set(existing.map((e) => e.title));
+  const fresh = rows.filter((r) => !present.has(r.title));
+
+  let created = 0;
+  for (let i = 0; i < fresh.length; i += 200) {
+    const batch = await prisma.jobOffer.createMany({
+      data: fresh.slice(i, i + 200),
+    });
+    created += batch.count;
+  }
+  return { created, skipped: rows.length - fresh.length };
+}
+
+async function main() {
+  const url = devDatabaseUrl();
+  const count = Number(argValue('count') ?? 0);
+  if (!Number.isInteger(count) || count < 0) {
+    throw new Error('--count must be a whole number.');
   }
 
   const prisma = new PrismaClient({
@@ -491,6 +612,16 @@ async function main() {
     console.log(
       `[agent-feed seed] ${created} offers created, ${skipped} already present.`,
     );
+
+    if (count > 0) {
+      const generated = await seedGenerated(prisma, count, {
+        employers: employers.map((e) => e.id),
+        categoryId,
+      });
+      console.log(
+        `[agent-feed seed] ${generated.created} generated offers created, ${generated.skipped} already present.`,
+      );
+    }
   } finally {
     await prisma.$disconnect();
   }
