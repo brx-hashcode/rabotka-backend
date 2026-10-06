@@ -43,6 +43,7 @@ import {
 import {
   AgentLogCallDto,
   AgentRequestWithdrawalDto,
+  AgentWorkerPhoneDto,
 } from './dto/agent-lead.dto';
 import {
   AgentAuthGuard,
@@ -145,6 +146,48 @@ export class AgentPortalController {
       id,
       clamp(limit, 1, 50),
     );
+  }
+
+  @Post('jobs/:id/worker-lookup')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Find a worker outside the suggestions by WhatsApp number',
+    description:
+      'First name, last initial and photo, plus why they cannot be placed (null when they can). Logged; counts against agent.phone_reveal_daily_cap.',
+  })
+  @ApiResponse({ status: 404, description: 'No worker with this number' })
+  @ApiResponse({ status: 429, description: 'Daily cap reached' })
+  lookupWorker(
+    @Req() req: AgentAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AgentWorkerPhoneDto,
+  ) {
+    return this.leads.lookupWorker(
+      req.agent.agentId,
+      id,
+      dto.phone,
+      extractRequestMeta(req).ipAddress,
+    );
+  }
+
+  @Post('jobs/:id/place-by-phone')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Place a worker reached outside the suggestions',
+    description:
+      'The agent confirms the worker agreed: recorded as an « Intéressé » call on the lead, which the agent takes, then placed as leads/:id/place.',
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Not placeable: already applied, held by another agent, inactive or unverified',
+  })
+  placeByPhone(
+    @Req() req: AgentAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AgentWorkerPhoneDto,
+  ) {
+    return this.leads.placeByPhone(req.agent.agentId, id, dto.phone);
   }
 
   @Get('leads')

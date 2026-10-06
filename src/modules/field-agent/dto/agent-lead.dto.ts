@@ -40,3 +40,13 @@ export class AgentRequestWithdrawalDto {
   @MaxLength(32)
   momoPhone?: string;
 }
+
+export class AgentWorkerPhoneDto {
+  @ApiProperty({
+    description: "The worker's WhatsApp number, with its country code",
+    example: '+242061234567',
+  })
+  @IsString()
+  @MaxLength(32)
+  phone: string;
+}
