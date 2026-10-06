@@ -747,6 +747,8 @@ enum AgentLedgerKind {
   WITHDRAWAL_REQUESTED
   WITHDRAWAL_PAID
   WITHDRAWAL_REJECTED
+  /// The agent withdrew their own request before an admin decided.
+  WITHDRAWAL_CANCELLED
   /// An admin correction, always with a note in `description`.
   ADJUSTMENT
 }
@@ -837,6 +839,9 @@ enum AgentWithdrawalStatus {
   PAID
   /// An admin refused it; the amount went back to the available balance.
   REJECTED
+  /// The agent cancelled it while it was REQUESTED; the amount went back to
+  /// the available balance.
+  CANCELLED
 }
 
 /// Congo-Brazzaville's two Mobile Money networks.

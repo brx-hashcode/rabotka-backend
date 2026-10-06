@@ -4,7 +4,7 @@ import {
   HttpException,
   NotFoundException,
 } from '@nestjs/common';
-import { AgentCallOutcome, AgentLeadStatus } from '@prisma/client';
+import { AgentCallOutcome, AgentLeadStatus, Prisma } from '@prisma/client';
 import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 import {
   AgentLeadService,
@@ -468,23 +468,32 @@ describe('AgentLeadService', () => {
   });
 
   describe('listPlacements', () => {
+    const placement = (over: Record<string, unknown> = {}) => ({
+      id: 'app-2',
+      status: 'ACCEPTED',
+      created_at: new Date('2026-10-05T10:00:00Z'),
+      updated_at: new Date('2026-10-05T12:00:00Z'),
+      worker: {
+        id: 'w2',
+        first_name: 'Awa',
+        last_name: 'Mabiala',
+        avatar_url: null,
+        city: 'Brazzaville',
+      },
+      job_offer: { id: 'job-1', title: 'Serveuse', city: 'Brazzaville' },
+      agent_lead: { id: 'lead-2' },
+      ...over,
+    });
+
+    beforeEach(() => {
+      prisma.application.findMany = jest.fn().mockResolvedValue([placement()]);
+      prisma.application.count = jest.fn().mockResolvedValue(1);
+      prisma.agentCommission = {
+        findMany: jest.fn().mockResolvedValue([]),
+      };
+    });
+
     it('lists the applications credited to this agent on the job, newest first', async () => {
-      prisma.application.findMany = jest.fn().mockResolvedValue([
-        {
-          id: 'app-2',
-          status: 'ACCEPTED',
-          created_at: new Date('2026-10-05T10:00:00Z'),
-          updated_at: new Date('2026-10-05T12:00:00Z'),
-          worker: {
-            id: 'w2',
-            first_name: 'Awa',
-            last_name: 'Mabiala',
-            avatar_url: null,
-            city: 'Brazzaville',
-          },
-          agent_lead: { id: 'lead-2' },
-        },
-      ]);
       const result = await service.listPlacements('agent-1', 'job-1');
       const query = prisma.application.findMany.mock.calls[0][0];
       expect(query.where).toEqual({
@@ -498,7 +507,9 @@ describe('AgentLeadService', () => {
           applicationId: 'app-2',
           status: 'ACCEPTED',
           leadId: 'lead-2',
+          job: { id: 'job-1', title: 'Serveuse', city: 'Brazzaville' },
           worker: expect.objectContaining({ firstName: 'Awa' }),
+          commission: null,
         }),
       ]);
       expect(result[0].worker).not.toHaveProperty('phone');
@@ -508,6 +519,44 @@ describe('AgentLeadService', () => {
       prisma.jobOffer.count.mockResolvedValue(0);
       await expect(service.listPlacements('agent-1', 'job-1')).rejects.toThrow(
         'Offre introuvable',
+      );
+    });
+
+    it('lists every job, paged, with the commission each placement earned', async () => {
+      prisma.agentCommission.findMany.mockResolvedValue([
+        {
+          application_id: 'app-2',
+          status: 'PENDING',
+          amount: new Prisma.Decimal(400),
+          available_at: null,
+          reason: null,
+        },
+      ]);
+      const result = await service.listAllPlacements('agent-1', {
+        page: 2,
+        limit: 10,
+      });
+      const query = prisma.application.findMany.mock.calls[0][0];
+      expect(query.where).toEqual({ agent_id: 'agent-1', deleted_at: null });
+      expect(query.skip).toBe(10);
+      expect(prisma.jobOffer.count).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ total: 1, page: 2, limit: 10 });
+      expect(result.data[0].commission).toEqual({
+        status: 'PENDING',
+        amount: 400,
+        availableAt: null,
+        reason: null,
+      });
+    });
+
+    it('filters by group of application statuses', async () => {
+      await service.listAllPlacements('agent-1', {
+        group: 'closed',
+        page: 1,
+        limit: 20,
+      });
+      expect(prisma.application.findMany.mock.calls[0][0].where.status).toEqual(
+        { in: ['REJECTED', 'CANCELLED'] },
       );
     });
   });

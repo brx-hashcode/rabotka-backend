@@ -29,7 +29,17 @@ import {
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
 import { AgentAuthService } from './agent-auth.service';
 import { AgentCommissionService } from './agent-commission.service';
-import { AgentLeadService } from './agent-lead.service';
+import {
+  AgentLeadService,
+  PLACEMENT_GROUPS,
+  type PlacementGroup,
+} from './agent-lead.service';
+import {
+  AgentSelfStatsService,
+  SELF_STATS_RANGES,
+  type SelfStatsRange,
+} from './agent-self-stats.service';
+import { SystemConfigService } from '../system-config/system-config.service';
 import { AgentWalletService } from './agent-wallet.service';
 import { AgentWithdrawalService } from './agent-withdrawal.service';
 import { AgentPortalService } from './agent-portal.service';
@@ -74,12 +84,61 @@ export class AgentPortalController {
     private readonly wallet: AgentWalletService,
     private readonly commissions: AgentCommissionService,
     private readonly withdrawals: AgentWithdrawalService,
+    private readonly selfStats: AgentSelfStatsService,
+    private readonly systemConfig: SystemConfigService,
   ) {}
 
   @Get('me')
   @ApiOperation({ summary: 'The signed-in agent, with their zones' })
   me(@Req() req: AgentAuthenticatedRequest) {
     return this.agentAuth.getSelf(req.agent.agentId);
+  }
+
+  @Get('stats')
+  @ApiOperation({
+    summary:
+      'My figures: placements, pipeline, calls, earnings, and a daily series',
+  })
+  @ApiQuery({ name: 'days', required: false, enum: [...SELF_STATS_RANGES] })
+  stats(
+    @Req() req: AgentAuthenticatedRequest,
+    @Query('days', new DefaultValuePipe(30), ParseIntPipe) days: number,
+  ) {
+    const range: SelfStatsRange = (
+      SELF_STATS_RANGES as readonly number[]
+    ).includes(days)
+      ? (days as SelfStatsRange)
+      : 30;
+    return this.selfStats.get(req.agent.agentId, range);
+  }
+
+  @Get('placements')
+  @ApiOperation({
+    summary: 'Every worker I placed, on any job, newest first',
+    description:
+      'group: active (in progress) · ended (mission done) · closed (refused or cancelled). Each row carries its commission once decided.',
+  })
+  @ApiQuery({
+    name: 'group',
+    required: false,
+    enum: Object.keys(PLACEMENT_GROUPS),
+  })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  listAllPlacements(
+    @Req() req: AgentAuthenticatedRequest,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('group') group?: string,
+  ) {
+    return this.leads.listAllPlacements(req.agent.agentId, {
+      group:
+        group && group in PLACEMENT_GROUPS
+          ? (group as PlacementGroup)
+          : undefined,
+      page: Math.max(page, 1),
+      limit: clamp(limit, 1, 50),
+    });
   }
 
   @Get('jobs')
@@ -308,7 +367,7 @@ export class AgentPortalController {
   @ApiOperation({
     summary: 'My balance and its movements',
     description:
-      'pending: earned, in the confirmation window · available: withdrawable · locked: in a withdrawal · paidOut: transferred.',
+      'pending: earned, in the confirmation window · available: withdrawable · locked: in a withdrawal · paidOut: transferred. Also the open withdrawal, if any, and the rules the app shows (minimum withdrawal, commission and its release).',
   })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
@@ -318,15 +377,29 @@ export class AgentPortalController {
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
   ) {
     const agentId = req.agent.agentId;
-    const [balance, movements] = await Promise.all([
-      this.wallet.getBalance(agentId),
-      this.wallet.listMovements(
-        agentId,
-        Math.max(page, 1),
-        clamp(limit, 1, 50),
-      ),
-    ]);
-    return { balance, movements };
+    const [balance, movements, openWithdrawal, withdrawalMinFcfa, commission] =
+      await Promise.all([
+        this.wallet.getBalance(agentId),
+        this.wallet.listMovements(
+          agentId,
+          Math.max(page, 1),
+          clamp(limit, 1, 50),
+        ),
+        this.withdrawals.findOpen(agentId),
+        this.systemConfig.getAgentWithdrawalMinFcfa(),
+        this.systemConfig.getAgentCommissionSettings(),
+      ]);
+    return {
+      balance,
+      movements,
+      openWithdrawal,
+      rules: {
+        withdrawalMinFcfa,
+        commissionFcfa: commission.amountFcfa,
+        releaseEvent: commission.releaseEvent,
+        confirmationHours: commission.confirmationHours,
+      },
+    };
   }
 
   @Get('commissions')
@@ -367,6 +440,24 @@ export class AgentPortalController {
     @Body() dto: AgentRequestWithdrawalDto,
   ) {
     return this.withdrawals.request(req.agent.agentId, dto);
+  }
+
+  @Post('withdrawals/:id/cancel')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Cancel my withdrawal while it waits for an admin',
+    description: 'The amount goes back to my available balance.',
+  })
+  @ApiResponse({ status: 404, description: 'Not found, or not mine' })
+  @ApiResponse({
+    status: 409,
+    description: 'Already paid, rejected or cancelled',
+  })
+  cancelWithdrawal(
+    @Req() req: AgentAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.withdrawals.cancel(req.agent.agentId, id);
   }
 
   @Get('withdrawals')

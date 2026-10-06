@@ -333,6 +333,66 @@ export class AgentWithdrawalService {
     return toWithdrawal(rejected);
   }
 
+  /**
+   * The agent takes back their own request before an admin decided: the
+   * money returns to the available balance, as on a rejection. No email —
+   * the agent did it. Another agent's request reads as not found.
+   */
+  async cancel(agentId: string, withdrawalId: string) {
+    const cancelled = await this.prisma.$transaction(async (tx) => {
+      await this.lockAgent(tx, agentId);
+      const w = await tx.agentWithdrawal.findFirst({
+        where: { id: withdrawalId, agent_id: agentId },
+        select: { id: true, amount: true, status: true },
+      });
+      if (!w) throw new NotFoundException('Retrait introuvable');
+      const { count } = await tx.agentWithdrawal.updateMany({
+        where: { id: w.id, status: AgentWithdrawalStatus.REQUESTED },
+        data: {
+          status: AgentWithdrawalStatus.CANCELLED,
+          processed_at: new Date(),
+        },
+      });
+      if (count === 0) {
+        throw new ConflictException("Cette demande n'est plus en attente.");
+      }
+      const amount = Number(w.amount);
+      await this.writeLedger(tx, agentId, w.id, [
+        [
+          AgentLedgerKind.WITHDRAWAL_CANCELLED,
+          AgentLedgerBucket.LOCKED,
+          -amount,
+          'cancelled:locked',
+        ],
+        [
+          AgentLedgerKind.WITHDRAWAL_CANCELLED,
+          AgentLedgerBucket.AVAILABLE,
+          amount,
+          'cancelled:available',
+        ],
+      ]);
+      return tx.agentWithdrawal.findUniqueOrThrow({
+        where: { id: w.id },
+        select: WITHDRAWAL_SELECT,
+      });
+    });
+
+    await this.log('AGENT_WITHDRAWAL_CANCELLED', agentId, {
+      withdrawalId: cancelled.id,
+      amount: Number(cancelled.amount),
+    });
+    return toWithdrawal(cancelled);
+  }
+
+  /** The agent's request waiting for an admin, if any. */
+  async findOpen(agentId: string) {
+    const w = await this.prisma.agentWithdrawal.findFirst({
+      where: { agent_id: agentId, status: AgentWithdrawalStatus.REQUESTED },
+      select: WITHDRAWAL_SELECT,
+    });
+    return w ? toWithdrawal(w) : null;
+  }
+
   /** Withdrawals, newest first — one agent's, or every agent's for the queue. */
   async list(params: {
     agentId?: string;

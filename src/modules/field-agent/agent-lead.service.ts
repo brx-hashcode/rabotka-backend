@@ -49,6 +49,31 @@ const LEAD_WORKER_SELECT = {
   city: true,
 } as const satisfies Prisma.ProfileSelect;
 
+const PLACEMENT_SELECT = {
+  id: true,
+  status: true,
+  created_at: true,
+  updated_at: true,
+  worker: { select: LEAD_WORKER_SELECT },
+  job_offer: { select: { id: true, title: true, city: true } },
+  agent_lead: { select: { id: true } },
+} as const satisfies Prisma.ApplicationSelect;
+
+/** The account page's placement filters, as application statuses. */
+export const PLACEMENT_GROUPS = {
+  active: [
+    ApplicationStatus.PENDING,
+    ApplicationStatus.VIEWED,
+    ApplicationStatus.WAITING_PAYMENT,
+    ApplicationStatus.ACCEPTED,
+    ApplicationStatus.STARTED,
+  ],
+  ended: [ApplicationStatus.END],
+  closed: [ApplicationStatus.REJECTED, ApplicationStatus.CANCELLED],
+} as const satisfies Record<string, readonly ApplicationStatus[]>;
+
+export type PlacementGroup = keyof typeof PLACEMENT_GROUPS;
+
 const LEAD_SELECT = {
   id: true,
   status: true,
@@ -888,30 +913,95 @@ export class AgentLeadService {
     await this.requireJobInZones(agentId, jobOfferId);
     const rows = await this.prisma.application.findMany({
       where: { job_offer_id: jobOfferId, agent_id: agentId, deleted_at: null },
-      select: {
-        id: true,
-        status: true,
-        created_at: true,
-        updated_at: true,
-        worker: { select: LEAD_WORKER_SELECT },
-        agent_lead: { select: { id: true } },
-      },
+      select: PLACEMENT_SELECT,
       orderBy: { created_at: 'desc' },
     });
-    return rows.map((r) => ({
-      applicationId: r.id,
-      status: r.status,
-      placedAt: r.created_at,
-      updatedAt: r.updated_at,
-      leadId: r.agent_lead?.id ?? null,
-      worker: {
-        id: r.worker.id,
-        firstName: r.worker.first_name,
-        lastName: r.worker.last_name,
-        avatarUrl: r.worker.avatar_url,
-        city: r.worker.city,
-      },
-    }));
+    return this.withCommissions(rows);
+  }
+
+  /**
+   * Every worker the agent placed, on any job — the account page's list.
+   * Not limited to the agent's current zones: a placement stays theirs when
+   * an admin moves them.
+   */
+  async listAllPlacements(
+    agentId: string,
+    params: { group?: PlacementGroup; page: number; limit: number },
+  ) {
+    const where: Prisma.ApplicationWhereInput = {
+      agent_id: agentId,
+      deleted_at: null,
+      ...(params.group
+        ? { status: { in: [...PLACEMENT_GROUPS[params.group]] } }
+        : {}),
+    };
+    const [total, rows] = await Promise.all([
+      this.prisma.application.count({ where }),
+      this.prisma.application.findMany({
+        where,
+        select: PLACEMENT_SELECT,
+        orderBy: { created_at: 'desc' },
+        skip: (params.page - 1) * params.limit,
+        take: params.limit,
+      }),
+    ]);
+    return {
+      data: await this.withCommissions(rows),
+      total,
+      page: params.page,
+      limit: params.limit,
+    };
+  }
+
+  /** Placement rows with the commission each one earned, if decided yet. */
+  private async withCommissions(
+    rows: Prisma.ApplicationGetPayload<{ select: typeof PLACEMENT_SELECT }>[],
+  ) {
+    const commissions = rows.length
+      ? await this.prisma.agentCommission.findMany({
+          where: { application_id: { in: rows.map((r) => r.id) } },
+          select: {
+            application_id: true,
+            status: true,
+            amount: true,
+            available_at: true,
+            reason: true,
+          },
+        })
+      : [];
+    const byApplication = new Map(
+      commissions.map((c) => [c.application_id, c]),
+    );
+    return rows.map((r) => {
+      const c = byApplication.get(r.id);
+      return {
+        applicationId: r.id,
+        status: r.status,
+        placedAt: r.created_at,
+        updatedAt: r.updated_at,
+        leadId: r.agent_lead?.id ?? null,
+        job: {
+          id: r.job_offer.id,
+          title: r.job_offer.title,
+          city: r.job_offer.city,
+        },
+        worker: {
+          id: r.worker.id,
+          firstName: r.worker.first_name,
+          lastName: r.worker.last_name,
+          avatarUrl: r.worker.avatar_url,
+          city: r.worker.city,
+        },
+        commission: c
+          ? {
+              status: c.status,
+              amount: Number(c.amount),
+              availableAt: c.available_at,
+              reason: c.reason,
+            }
+          : null,
+      };
+    });
   }
 
   /** The agent's own pipeline, most recently touched first. */
