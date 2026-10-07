@@ -15,7 +15,12 @@ import { AgentAuthController } from './agent-auth.controller';
 import { AgentAuthService } from './agent-auth.service';
 import { AgentCommissionScheduler } from './agent-commission.scheduler';
 import { AgentCommissionService } from './agent-commission.service';
+import { AgentEventsConsumer } from './agent-events.consumer';
 import { AgentInviteService } from './agent-invite.service';
+import { AgentNotificationController } from './agent-notification.controller';
+import { AgentNotificationService } from './agent-notification.service';
+import { AgentNotificationStream } from './agent-notification-stream';
+import { AgentWebPushService } from './agent-web-push.service';
 import { AgentLeadService } from './agent-lead.service';
 import { AgentPortalController } from './agent-portal.controller';
 import { AgentPortalService } from './agent-portal.service';
@@ -53,6 +58,7 @@ import { PublicJobsController } from './public-jobs.controller';
   controllers: [
     AgentAuthController,
     AgentPortalController,
+    AgentNotificationController,
     AdminAgentController,
     AdminAgentWithdrawalController,
     ProfileAgentInviteController,
@@ -70,6 +76,10 @@ import { PublicJobsController } from './public-jobs.controller';
     AgentCommissionService,
     AgentCommissionScheduler,
     AgentWithdrawalService,
+    AgentNotificationStream,
+    AgentWebPushService,
+    AgentNotificationService,
+    AgentEventsConsumer,
     AgentAuthGuard,
   ],
 })

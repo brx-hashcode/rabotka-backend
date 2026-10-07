@@ -82,6 +82,7 @@ describe('AgentWithdrawalService', () => {
   let logService: { create: jest.Mock };
   let mail: { sendMail: jest.Mock };
   let events: { emit: jest.Mock };
+  let notifications: { notify: jest.Mock };
   let service: AgentWithdrawalService;
 
   beforeEach(() => {
@@ -128,6 +129,7 @@ describe('AgentWithdrawalService', () => {
     logService = { create: jest.fn().mockResolvedValue(undefined) };
     mail = { sendMail: jest.fn().mockResolvedValue(undefined) };
     events = { emit: jest.fn() };
+    notifications = { notify: jest.fn().mockResolvedValue(null) };
     const layout = { wrap: jest.fn((html: string) => Promise.resolve(html)) };
     service = new AgentWithdrawalService(
       prisma,
@@ -136,6 +138,7 @@ describe('AgentWithdrawalService', () => {
       mail as any,
       layout as any,
       events as any,
+      notifications as any,
     );
   });
 
@@ -257,6 +260,11 @@ describe('AgentWithdrawalService', () => {
           userId: 'admin-1',
         }),
       );
+      expect(notifications.notify).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ type: 'WITHDRAWAL_PAID', amount: 2000 }),
+        'withdrawal:wd-1:paid',
+      );
     });
 
     it('refuses a reference already used for another withdrawal', async () => {
@@ -318,6 +326,15 @@ describe('AgentWithdrawalService', () => {
         }),
       ]);
       expect(mail.sendMail.mock.calls[0][0].html).toContain('Numéro invalide');
+      expect(notifications.notify).toHaveBeenCalledWith(
+        expect.any(String),
+        {
+          type: 'WITHDRAWAL_REJECTED',
+          amount: 2000,
+          reason: 'Numéro invalide',
+        },
+        'withdrawal:wd-1:rejected',
+      );
     });
   });
 

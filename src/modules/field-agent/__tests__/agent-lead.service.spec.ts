@@ -590,6 +590,16 @@ describe('AgentLeadService', () => {
       });
     });
 
+    it('only ever matches a worker: an employer number reads as unknown', async () => {
+      prisma.profile.findFirst.mockResolvedValue(null);
+      await expect(
+        service.lookupWorker('agent-1', 'job-1', '+242069917686'),
+      ).rejects.toThrow('Aucun travailleur');
+      expect(prisma.profile.findFirst.mock.calls[0][0].where.profile_type).toBe(
+        'WORKER',
+      );
+    });
+
     it('shows a first name and initial only, and logs the lookup', async () => {
       const result = await service.lookupWorker(
         'agent-1',
@@ -632,7 +642,6 @@ describe('AgentLeadService', () => {
     });
 
     it.each([
-      [{ profile_type: 'EMPLOYER' }, 'employeur'],
       [{ status: 'SUSPENDED' }, 'pas actif'],
       [{ verification_status: 'PENDING' }, 'pas encore vérifiée'],
     ])('names the blocker for %o', async (over, text) => {
