@@ -396,7 +396,6 @@ Toutes sous `ConfigCategory.GENERAL`, préfixe `messaging.`, dans `system-config
 | `messaging.semantic_enabled` | `false` | la passe B arrive éteinte, allumée à L6 |
 | `messaging.semantic_budget_ms` | `2500` | au-dessus du plancher de 1 500 ms |
 | `messaging.semantic_daily_quota_per_conversation` | à fixer | un fil ne peut pas devenir une facture |
-| `messaging.moderate_after_unlock` | `false` | §3.3 — inversable si le produit tranche autrement |
 | `messaging.operator_prefixes` | vide | les préfixes congolais, sans redéploiement |
 | `messaging.held_ratio_threshold` | à fixer | au-delà, le message est retenu entier |
 | `messaging.rate_limit_per_minute` | à fixer | anti-spam |
@@ -459,7 +458,6 @@ Reprises de la Phase 2 §9, réduites à celles qui changent le plan :
 1. **Volume de messages par mise en relation** — sans elle, les garde-fous de §11 sont la réponse, et ils sont paramétrables dès L2.
 2. **Latence réelle d'une classification courte**, sur Prometheus — fige `messaging.semantic_budget_ms`.
 3. **Préfixes opérateurs congolais** — à fournir, ils vont en configuration.
-4. **§3.3 : la modération s'arrête-t-elle après déblocage ?** Proposé oui. Inversable par un booléen, coûteux à découvrir tard.
-5. **§7.3 : SUPPORT peut-il lire un fil ?** Proposé oui, journalisé. Bloque la ligne de `LATERAL_ACCESS` en L7, rien d'autre.
+4. **§7.3 : SUPPORT peut-il lire un fil ?** Proposé oui, journalisé. Bloque la ligne de `LATERAL_ACCESS` en L7, rien d'autre.
 
 Aucune ne bloque L0 ni L1.
