@@ -15,15 +15,22 @@ import { AgentAuthController } from './agent-auth.controller';
 import { AgentAuthService } from './agent-auth.service';
 import { AgentCommissionScheduler } from './agent-commission.scheduler';
 import { AgentCommissionService } from './agent-commission.service';
+import { AgentEventsConsumer } from './agent-events.consumer';
 import { AgentInviteService } from './agent-invite.service';
+import { AgentNotificationController } from './agent-notification.controller';
+import { AgentNotificationService } from './agent-notification.service';
+import { AgentNotificationStream } from './agent-notification-stream';
+import { AgentWebPushService } from './agent-web-push.service';
 import { AgentLeadService } from './agent-lead.service';
 import { AgentPortalController } from './agent-portal.controller';
 import { AgentPortalService } from './agent-portal.service';
 import { AgentWalletService } from './agent-wallet.service';
 import { AgentWithdrawalService } from './agent-withdrawal.service';
 import { AgentStatsService } from './agent-stats.service';
+import { AgentSelfStatsService } from './agent-self-stats.service';
 import { AgentAuthGuard } from './guards/agent-auth.guard';
 import { ProfileAgentInviteController } from './profile-agent-invite.controller';
+import { PublicJobsController } from './public-jobs.controller';
 
 /**
  * Field agents: the people who call workers on Rabotka's behalf, from their
@@ -51,9 +58,11 @@ import { ProfileAgentInviteController } from './profile-agent-invite.controller'
   controllers: [
     AgentAuthController,
     AgentPortalController,
+    AgentNotificationController,
     AdminAgentController,
     AdminAgentWithdrawalController,
     ProfileAgentInviteController,
+    PublicJobsController,
   ],
   providers: [
     AgentAuthService,
@@ -61,11 +70,16 @@ import { ProfileAgentInviteController } from './profile-agent-invite.controller'
     AdminAgentService,
     AgentWalletService,
     AgentStatsService,
+    AgentSelfStatsService,
     AgentLeadService,
     AgentInviteService,
     AgentCommissionService,
     AgentCommissionScheduler,
     AgentWithdrawalService,
+    AgentNotificationStream,
+    AgentWebPushService,
+    AgentNotificationService,
+    AgentEventsConsumer,
     AgentAuthGuard,
   ],
 })

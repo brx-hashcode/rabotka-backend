@@ -232,6 +232,8 @@ describe('authored templates', () => {
     'newMessageNudge',
     // Lands on the worker's invitation from a field agent.
     'agentInvitation',
+    // Lands on the application a field agent created for the worker.
+    'agentPlacement',
   ] as const;
   // Deliberately button-less: this one carries whatever an admin typed, so
   // there is no single destination a CTA could point at.

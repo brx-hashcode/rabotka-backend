@@ -29,13 +29,31 @@ import {
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
 import { AgentAuthService } from './agent-auth.service';
 import { AgentCommissionService } from './agent-commission.service';
-import { AgentLeadService } from './agent-lead.service';
+import {
+  AgentLeadService,
+  PLACEMENT_GROUPS,
+  type PlacementGroup,
+} from './agent-lead.service';
+import {
+  AgentSelfStatsService,
+  SELF_STATS_RANGES,
+  type SelfStatsRange,
+} from './agent-self-stats.service';
+import { SystemConfigService } from '../system-config/system-config.service';
 import { AgentWalletService } from './agent-wallet.service';
 import { AgentWithdrawalService } from './agent-withdrawal.service';
 import { AgentPortalService } from './agent-portal.service';
 import {
+  parseAmount,
+  parseCategorySlugs,
+  parseEmploymentTypes,
+  parseSort,
+  type JobListQuery,
+} from './job-list-query';
+import {
   AgentLogCallDto,
   AgentRequestWithdrawalDto,
+  AgentWorkerPhoneDto,
 } from './dto/agent-lead.dto';
 import {
   AgentAuthGuard,
@@ -66,6 +84,8 @@ export class AgentPortalController {
     private readonly wallet: AgentWalletService,
     private readonly commissions: AgentCommissionService,
     private readonly withdrawals: AgentWithdrawalService,
+    private readonly selfStats: AgentSelfStatsService,
+    private readonly systemConfig: SystemConfigService,
   ) {}
 
   @Get('me')
@@ -74,21 +94,86 @@ export class AgentPortalController {
     return this.agentAuth.getSelf(req.agent.agentId);
   }
 
+  @Get('stats')
+  @ApiOperation({
+    summary:
+      'My figures: placements, pipeline, calls, earnings, and a daily series',
+  })
+  @ApiQuery({ name: 'days', required: false, enum: [...SELF_STATS_RANGES] })
+  stats(
+    @Req() req: AgentAuthenticatedRequest,
+    @Query('days', new DefaultValuePipe(30), ParseIntPipe) days: number,
+  ) {
+    const range: SelfStatsRange = (
+      SELF_STATS_RANGES as readonly number[]
+    ).includes(days)
+      ? (days as SelfStatsRange)
+      : 30;
+    return this.selfStats.get(req.agent.agentId, range);
+  }
+
+  @Get('placements')
+  @ApiOperation({
+    summary: 'Every worker I placed, on any job, newest first',
+    description:
+      'group: active (in progress) · ended (mission done) · closed (refused or cancelled). Each row carries its commission once decided.',
+  })
+  @ApiQuery({
+    name: 'group',
+    required: false,
+    enum: Object.keys(PLACEMENT_GROUPS),
+  })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  listAllPlacements(
+    @Req() req: AgentAuthenticatedRequest,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('group') group?: string,
+  ) {
+    return this.leads.listAllPlacements(req.agent.agentId, {
+      group:
+        group && group in PLACEMENT_GROUPS
+          ? (group as PlacementGroup)
+          : undefined,
+      page: Math.max(page, 1),
+      limit: clamp(limit, 1, 50),
+    });
+  }
+
   @Get('jobs')
   @ApiOperation({ summary: 'Open jobs in my zones, newest first' })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
   @ApiQuery({ name: 'q', required: false, description: 'Title or reference' })
+  @ApiQuery({
+    name: 'employmentType',
+    required: false,
+    description: 'Comma list: MISSION,CDD,CDI,STAGE',
+  })
+  @ApiQuery({
+    name: 'category',
+    required: false,
+    description: 'Comma list of category slugs',
+  })
+  @ApiQuery({ name: 'minAmount', required: false })
+  @ApiQuery({ name: 'maxAmount', required: false })
+  @ApiQuery({ name: 'sort', required: false, enum: ['recent', 'start'] })
   listJobs(
     @Req() req: AgentAuthenticatedRequest,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
-    @Query('q') q?: string,
+    @Query() query: JobListQuery,
   ) {
     return this.portal.listJobs(req.agent.agentId, {
       page: Math.max(page, 1),
       limit: clamp(limit, 1, 50),
-      q: q?.trim() || undefined,
+      q: query.q?.trim() || undefined,
+      employmentTypes: parseEmploymentTypes(query.employmentType),
+      categories: parseCategorySlugs(query.category),
+      minAmount: parseAmount(query.minAmount),
+      maxAmount: parseAmount(query.maxAmount),
+      sort: parseSort(query.sort),
     });
   }
 
@@ -120,6 +205,62 @@ export class AgentPortalController {
       id,
       clamp(limit, 1, 50),
     );
+  }
+
+  @Get('jobs/:id/placements')
+  @ApiOperation({
+    summary: 'The workers I placed on one job, newest first',
+    description:
+      'Every application credited to me on this job — direct placement, accepted invitation or placement by number — with its current status.',
+  })
+  @ApiResponse({ status: 404, description: 'Not found or outside my zones' })
+  listPlacements(
+    @Req() req: AgentAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.leads.listPlacements(req.agent.agentId, id);
+  }
+
+  @Post('jobs/:id/worker-lookup')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Find a worker outside the suggestions by WhatsApp number',
+    description:
+      'First name, last initial and photo, plus why they cannot be placed (null when they can). Logged; counts against agent.phone_reveal_daily_cap.',
+  })
+  @ApiResponse({ status: 404, description: 'No worker with this number' })
+  @ApiResponse({ status: 429, description: 'Daily cap reached' })
+  lookupWorker(
+    @Req() req: AgentAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AgentWorkerPhoneDto,
+  ) {
+    return this.leads.lookupWorker(
+      req.agent.agentId,
+      id,
+      dto.phone,
+      extractRequestMeta(req).ipAddress,
+    );
+  }
+
+  @Post('jobs/:id/place-by-phone')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Place a worker reached outside the suggestions',
+    description:
+      'The agent confirms the worker agreed: recorded as an « Intéressé » call on the lead, which the agent takes, then placed as leads/:id/place.',
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Not placeable: already applied, held by another agent, inactive or unverified',
+  })
+  placeByPhone(
+    @Req() req: AgentAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AgentWorkerPhoneDto,
+  ) {
+    return this.leads.placeByPhone(req.agent.agentId, id, dto.phone);
   }
 
   @Get('leads')
@@ -189,6 +330,25 @@ export class AgentPortalController {
     return this.leads.logCall(req.agent.agentId, id, dto.outcome, dto.note);
   }
 
+  @Post('leads/:id/place')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Place the worker on the job: create their application (claimer only)',
+    description:
+      'Requires a last call « Intéressé ». The application is created in the worker’s name and credited to the agent; the worker is told by WhatsApp.',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'No « Intéressé » call yet, or the worker already applied',
+  })
+  place(
+    @Req() req: AgentAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.leads.place(req.agent.agentId, id);
+  }
+
   @Post('leads/:id/invite')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -207,7 +367,7 @@ export class AgentPortalController {
   @ApiOperation({
     summary: 'My balance and its movements',
     description:
-      'pending: earned, in the confirmation window · available: withdrawable · locked: in a withdrawal · paidOut: transferred.',
+      'pending: earned, in the confirmation window · available: withdrawable · locked: in a withdrawal · paidOut: transferred. Also the open withdrawal, if any, and the rules the app shows (minimum withdrawal, commission and its release).',
   })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
@@ -217,15 +377,29 @@ export class AgentPortalController {
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
   ) {
     const agentId = req.agent.agentId;
-    const [balance, movements] = await Promise.all([
-      this.wallet.getBalance(agentId),
-      this.wallet.listMovements(
-        agentId,
-        Math.max(page, 1),
-        clamp(limit, 1, 50),
-      ),
-    ]);
-    return { balance, movements };
+    const [balance, movements, openWithdrawal, withdrawalMinFcfa, commission] =
+      await Promise.all([
+        this.wallet.getBalance(agentId),
+        this.wallet.listMovements(
+          agentId,
+          Math.max(page, 1),
+          clamp(limit, 1, 50),
+        ),
+        this.withdrawals.findOpen(agentId),
+        this.systemConfig.getAgentWithdrawalMinFcfa(),
+        this.systemConfig.getAgentCommissionSettings(),
+      ]);
+    return {
+      balance,
+      movements,
+      openWithdrawal,
+      rules: {
+        withdrawalMinFcfa,
+        commissionFcfa: commission.amountFcfa,
+        releaseEvent: commission.releaseEvent,
+        confirmationHours: commission.confirmationHours,
+      },
+    };
   }
 
   @Get('commissions')
@@ -266,6 +440,24 @@ export class AgentPortalController {
     @Body() dto: AgentRequestWithdrawalDto,
   ) {
     return this.withdrawals.request(req.agent.agentId, dto);
+  }
+
+  @Post('withdrawals/:id/cancel')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Cancel my withdrawal while it waits for an admin',
+    description: 'The amount goes back to my available balance.',
+  })
+  @ApiResponse({ status: 404, description: 'Not found, or not mine' })
+  @ApiResponse({
+    status: 409,
+    description: 'Already paid, rejected or cancelled',
+  })
+  cancelWithdrawal(
+    @Req() req: AgentAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.withdrawals.cancel(req.agent.agentId, id);
   }
 
   @Get('withdrawals')

@@ -3,6 +3,7 @@ import {
   AccountStatus,
   AgentLeadStatus,
   ApplicationStatus,
+  EmploymentType,
   JobOfferStatus,
   Prisma,
   ProfileType,
@@ -18,10 +19,23 @@ import { AgentLeadService } from './agent-lead.service';
 import {
   AGENT_CANDIDATE_SELECT,
   AGENT_JOB_SELECT,
+  PUBLIC_JOB_DETAIL_SELECT,
+  PUBLIC_JOB_SELECT,
   toAgentCandidate,
   toAgentJob,
+  toPublicJob,
+  toPublicJobDetail,
 } from './agent-selects';
-import { jobsInZonesWhere, type Zone } from './agent-zones';
+import {
+  jobsInZonesWhere,
+  jobsOrderBy,
+  publicScopeWhere,
+  withFilters,
+  type JobFilters,
+  type JobSort,
+  type PublicJobsFilter,
+  type Zone,
+} from './agent-zones';
 
 /** Applications that hold a seat, as `accept()` counts them. */
 const SEAT_HOLDING: ApplicationStatus[] = [
@@ -51,52 +65,32 @@ export class AgentPortalService {
 
   async listJobs(
     agentId: string,
-    params: { page: number; limit: number; q?: string },
+    params: { page: number; limit: number; sort?: JobSort } & JobFilters,
   ) {
     const zones = await this.zonesOf(agentId);
-    const empty = {
-      data: [],
-      total: 0,
-      page: params.page,
-      limit: params.limit,
-    };
-    if (zones.length === 0) return empty;
+    if (zones.length === 0) {
+      return {
+        data: [],
+        total: 0,
+        page: params.page,
+        limit: params.limit,
+        facets: { employmentType: {}, category: {}, amount: null },
+      };
+    }
 
-    const where: Prisma.JobOfferWhereInput = {
-      AND: [
-        jobsInZonesWhere(zones),
-        ...(params.q
-          ? [
-              {
-                OR: [
-                  {
-                    title: {
-                      contains: params.q,
-                      mode: 'insensitive' as const,
-                    },
-                  },
-                  {
-                    reference: {
-                      contains: params.q,
-                      mode: 'insensitive' as const,
-                    },
-                  },
-                ],
-              },
-            ]
-          : []),
-      ],
-    };
+    const scope = jobsInZonesWhere(zones);
+    const where = withFilters(scope, params);
 
-    const [total, rows] = await Promise.all([
+    const [total, rows, facets] = await Promise.all([
       this.prisma.jobOffer.count({ where }),
       this.prisma.jobOffer.findMany({
         where,
         select: AGENT_JOB_SELECT,
-        orderBy: { created_at: 'desc' },
+        orderBy: jobsOrderBy(params.sort),
         skip: (params.page - 1) * params.limit,
         take: params.limit,
       }),
+      this.jobFacets(scope, params, { withAmount: true }),
     ]);
 
     const filled = await this.filledSeats(rows.map((r) => r.id));
@@ -105,7 +99,130 @@ export class AgentPortalService {
       total,
       page: params.page,
       limit: params.limit,
+      facets,
     };
+  }
+
+  /** Every open job, for the agent app's public front page. No session. */
+  async listPublicJobs(
+    params: { page: number; limit: number; sort?: JobSort } & PublicJobsFilter,
+  ) {
+    const scope = publicScopeWhere(params);
+    // Pay is never part of the public feed, not even as a filter: a range
+    // query would let anyone bisect an offer's amount.
+    const filters: JobFilters = {
+      q: params.q,
+      employmentTypes: params.employmentTypes,
+      categories: params.categories,
+    };
+    const where = withFilters(scope, filters);
+
+    const [total, rows, facets] = await Promise.all([
+      this.prisma.jobOffer.count({ where }),
+      this.prisma.jobOffer.findMany({
+        where,
+        select: PUBLIC_JOB_SELECT,
+        orderBy: jobsOrderBy(params.sort),
+        skip: (params.page - 1) * params.limit,
+        take: params.limit,
+      }),
+      this.jobFacets(scope, filters, { withAmount: false }),
+    ]);
+
+    const filled = await this.filledSeats(rows.map((r) => r.id));
+    return {
+      data: rows.map((r) => toPublicJob(r, filled.get(r.id) ?? 0)),
+      total,
+      page: params.page,
+      limit: params.limit,
+      facets,
+    };
+  }
+
+  /**
+   * Counts for the filter sidebar. Each facet is counted with every filter
+   * applied except its own, so ticking "CDD" does not zero out "Mission" —
+   * the count shows what ticking that box as well would add.
+   */
+  private async jobFacets(
+    scope: Prisma.JobOfferWhereInput,
+    filters: JobFilters,
+    { withAmount }: { withAmount: boolean },
+  ) {
+    const [types, categories, amount] = await Promise.all([
+      this.prisma.jobOffer.groupBy({
+        by: ['employment_type'],
+        where: withFilters(scope, { ...filters, employmentTypes: undefined }),
+        _count: { _all: true },
+      }),
+      this.prisma.jobOffer.groupBy({
+        by: ['category_id'],
+        where: withFilters(scope, { ...filters, categories: undefined }),
+        _count: { _all: true },
+      }),
+      withAmount
+        ? this.prisma.jobOffer.aggregate({
+            where: withFilters(scope, {
+              ...filters,
+              minAmount: undefined,
+              maxAmount: undefined,
+            }),
+            _min: { amount: true },
+            _max: { amount: true },
+          })
+        : null,
+    ]);
+
+    const categoryIds = categories
+      .map((c) => c.category_id)
+      .filter((id): id is string => id !== null);
+    const slugs = categoryIds.length
+      ? await this.prisma.jobCategory.findMany({
+          where: { id: { in: categoryIds } },
+          select: { id: true, slug: true },
+        })
+      : [];
+    const slugOf = new Map(slugs.map((c) => [c.id, c.slug]));
+
+    const category: Record<string, number> = {};
+    for (const c of categories) {
+      const slug = c.category_id ? slugOf.get(c.category_id) : undefined;
+      if (slug) category[slug] = c._count._all;
+    }
+
+    return {
+      employmentType: Object.fromEntries(
+        types.map((t) => [t.employment_type, t._count._all]),
+      ) as Partial<Record<EmploymentType, number>>,
+      category,
+      ...(withAmount
+        ? {
+            amount:
+              amount?._min.amount != null && amount._max.amount != null
+                ? {
+                    min: Number(amount._min.amount),
+                    max: Number(amount._max.amount),
+                  }
+                : null,
+          }
+        : {}),
+    };
+  }
+
+  /**
+   * One open job as anyone sees it (PUBLIC_JOB_DETAIL_SELECT: the public
+   * summary plus the description). A closed, deleted or
+   * unknown id is the same 404, so the endpoint reveals nothing beyond the
+   * public feed.
+   */
+  async getPublicJob(jobOfferId: string) {
+    const job = await this.prisma.jobOffer.findFirst({
+      where: { AND: [publicScopeWhere({}), { id: jobOfferId }] },
+      select: PUBLIC_JOB_DETAIL_SELECT,
+    });
+    if (!job) throw new NotFoundException('Offre introuvable');
+    const filled = await this.filledSeats([job.id]);
+    return toPublicJobDetail(job, filled.get(job.id) ?? 0);
   }
 
   async getJob(agentId: string, jobOfferId: string) {

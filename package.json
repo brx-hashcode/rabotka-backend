@@ -32,6 +32,8 @@
     "db:seed": "prisma db seed",
     "db:seed:prod": "tsx prisma/seed-prod.ts",
     "db:seed:reco-test": "tsx prisma/seed-reco-test.ts",
+    "db:seed:agent-feed": "tsx prisma/seed-agent-feed.ts",
+    "db:seed:agent": "tsx prisma/seed-agent.ts",
     "wa:test-reminders": "tsx scripts/send-test-reminders.ts",
     "wa:build-placeholders": "tsx scripts/build-placeholder-images.ts",
     "portfolio:backfill-slugs": "tsx scripts/backfill-portfolio-slugs.ts",
@@ -115,6 +117,7 @@
     "sharp": "^0.35.0",
     "socket.io": "^4.8.3",
     "twilio": "^5.13.1",
+    "web-push": "^3.6.7",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -129,7 +132,9 @@
     "@types/jest": "^30.0.0",
     "@types/multer": "^1.4.13",
     "@types/node": "^22.20.1",
+    "@types/pg": "^8.23.1",
     "@types/supertest": "^6.0.3",
+    "@types/web-push": "^3.6.4",
     "better-sqlite3": "^11.10.0",
     "eslint": "^9.39.5",
     "eslint-config-prettier": "^10.1.8",

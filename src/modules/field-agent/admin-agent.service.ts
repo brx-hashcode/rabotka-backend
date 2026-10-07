@@ -40,6 +40,7 @@ import type {
   CreateAgentDto,
   UpdateAgentDto,
 } from './dto/admin-agent.dto';
+import { AgentNotificationService } from './agent-notification.service';
 
 /** How long one logged identity-document view covers further views. */
 const KYC_VIEW_LOG_WINDOW_MS = 60 * 60 * 1000;
@@ -178,6 +179,7 @@ export class AdminAgentService {
     private readonly geo: GeoService,
     private readonly mail: MailService,
     private readonly layout: LayoutService,
+    private readonly notifications: AgentNotificationService,
   ) {}
 
   // ── Uploads ───────────────────────────────────────────────────────────────
@@ -397,8 +399,19 @@ export class AdminAgentService {
     const zones = dto.zones ? this.resolveZones(dto.zones) : null;
 
     try {
+      let zonesChanged = false;
       const agent = await this.prisma.$transaction(async (tx) => {
         if (zones) {
+          const before = await tx.agentZone.findMany({
+            where: { agent_id: id },
+            select: { country_code: true, city: true },
+          });
+          const key = (z: { country_code: string; city: string }) =>
+            `${z.country_code}|${z.city}`;
+          const was = new Set(before.map(key));
+          zonesChanged =
+            was.size !== new Set(zones.map(key)).size ||
+            zones.some((z) => !was.has(key(z)));
           await tx.agentZone.deleteMany({ where: { agent_id: id } });
           await tx.agentZone.createMany({
             data: zones.map((z) => ({ ...z, agent_id: id })),
@@ -410,6 +423,12 @@ export class AdminAgentService {
           select: ADMIN_AGENT_DETAIL_SELECT,
         });
       });
+      if (zones && zonesChanged) {
+        await this.notifications.notify(id, {
+          type: 'ZONES_CHANGED',
+          cities: zones.map((z) => z.city),
+        });
+      }
       return this.withCreator(agent);
     } catch (err) {
       throw this.conflictFor(err);
@@ -444,6 +463,16 @@ export class AdminAgentService {
       throw new ConflictException(
         `Action impossible : l'agent est déjà ${current.status}`,
       );
+    }
+
+    // A revoked agent can no longer sign in to read it.
+    if (rule.to === AgentStatus.SUSPENDED) {
+      await this.notifications.notify(id, {
+        type: 'ACCOUNT_SUSPENDED',
+        reason: trimmed,
+      });
+    } else if (rule.to === AgentStatus.ACTIVE) {
+      await this.notifications.notify(id, { type: 'ACCOUNT_REACTIVATED' });
     }
 
     return this.getDetail(id);
