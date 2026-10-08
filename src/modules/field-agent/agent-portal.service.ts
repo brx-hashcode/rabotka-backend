@@ -36,6 +36,7 @@ import {
   type PublicJobsFilter,
   type Zone,
 } from './agent-zones';
+import { matchingJobIds } from './job-search';
 
 /** Applications that hold a seat, as `accept()` counts them. */
 const SEAT_HOLDING: ApplicationStatus[] = [
@@ -79,7 +80,8 @@ export class AgentPortalService {
     }
 
     const scope = jobsInZonesWhere(zones);
-    const where = withFilters(scope, params);
+    const filters = await this.withTextSearch(params);
+    const where = withFilters(scope, filters);
 
     const [total, rows, facets] = await Promise.all([
       this.prisma.jobOffer.count({ where }),
@@ -90,7 +92,7 @@ export class AgentPortalService {
         skip: (params.page - 1) * params.limit,
         take: params.limit,
       }),
-      this.jobFacets(scope, params, { withAmount: true }),
+      this.jobFacets(scope, filters, { withAmount: true }),
     ]);
 
     const filled = await this.filledSeats(rows.map((r) => r.id));
@@ -110,11 +112,11 @@ export class AgentPortalService {
     const scope = publicScopeWhere(params);
     // Pay is never part of the public feed, not even as a filter: a range
     // query would let anyone bisect an offer's amount.
-    const filters: JobFilters = {
+    const filters = await this.withTextSearch({
       q: params.q,
       employmentTypes: params.employmentTypes,
       categories: params.categories,
-    };
+    });
     const where = withFilters(scope, filters);
 
     const [total, rows, facets] = await Promise.all([
@@ -137,6 +139,15 @@ export class AgentPortalService {
       limit: params.limit,
       facets,
     };
+  }
+
+  /**
+   * Resolves the search text to the matching job ids once, so the list, the
+   * count and every facet agree on it.
+   */
+  private async withTextSearch<F extends JobFilters>(filters: F): Promise<F> {
+    const ids = await matchingJobIds(this.prisma, filters.q);
+    return ids ? { ...filters, matchingIds: ids } : filters;
   }
 
   /**

@@ -134,6 +134,16 @@ describe('jobFiltersWhere', () => {
     ]);
   });
 
+  it('narrows to the resolved search ids instead of the plain substring', () => {
+    expect(jobFiltersWhere({ q: 'developer', matchingIds: ['j1'] })).toEqual([
+      { id: { in: ['j1'] } },
+    ]);
+    // A search that matched nothing still filters — to nothing.
+    expect(jobFiltersWhere({ q: 'zzz', matchingIds: [] })).toEqual([
+      { id: { in: [] } },
+    ]);
+  });
+
   it('is empty without filters, so the scope stays the whole where', () => {
     expect(jobFiltersWhere({ employmentTypes: [], categories: [] })).toEqual(
       [],
@@ -285,6 +295,29 @@ describe('AgentPortalService', () => {
         },
       });
       expect(args).toMatchObject({ skip: 10, take: 10 });
+    });
+
+    it('resolves the search text once and filters list, count and facets by it', async () => {
+      prisma.$queryRaw = jest.fn().mockResolvedValue([{ id: 'job-1' }]);
+      await service.listPublicJobs({ page: 1, limit: 20, q: 'Développeur' });
+
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      const idFilter = { id: { in: ['job-1'] } };
+      expect(
+        prisma.jobOffer.findMany.mock.calls[0][0].where.AND,
+      ).toContainEqual(idFilter);
+      expect(prisma.jobOffer.count.mock.calls[0][0].where.AND).toContainEqual(
+        idFilter,
+      );
+      for (const call of prisma.jobOffer.groupBy.mock.calls) {
+        expect(call[0].where.AND).toContainEqual(idFilter);
+      }
+    });
+
+    it('skips the search query when the text has no usable word', async () => {
+      prisma.$queryRaw = jest.fn();
+      await service.listPublicJobs({ page: 1, limit: 20, q: ' de - ' });
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
     });
 
     it('never filters or reports on pay', async () => {
