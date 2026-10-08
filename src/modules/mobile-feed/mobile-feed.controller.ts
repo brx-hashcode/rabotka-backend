@@ -36,6 +36,11 @@ import {
   Prisma,
   ProfileType,
 } from '@prisma/client';
+import {
+  allTokensMatch,
+  foldedText,
+  searchTokens,
+} from '../../common/queries/text-search';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { KycVerifiedGuard } from '../auth/guards/kyc-verified.guard';
@@ -48,21 +53,11 @@ import { EngineRolloutService } from '../recommendation-engine/engine-rollout.se
 import { InteractionEventService } from '../recommendation-engine/interaction-event.service';
 import { RecommendationEngineService } from '../recommendation-engine/recommendation-engine.service';
 
-/** Cap the AND-chain so a pathological query can't fan out into 50 ILIKEs. */
-const MAX_SEARCH_TOKENS = 6;
-
-/**
- * Lowercase + strip diacritics, so "menage" matches the "Ménage" domaine. Only
- * used for the in-JS category-name comparison; the Postgres `contains` filters on
- * title/description/address stay accent-sensitive (de-accenting those would need
- * an unaccent extension + index).
- */
-function foldAccents(value: string): string {
-  return value
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '');
-}
+/** Offers a worker can still apply to. */
+const OPEN_JOB_STATUSES = [
+  JobOfferStatus.ACTIVE,
+  JobOfferStatus.PARTIALLY_FILLED,
+];
 
 const JOB_SEARCH_SORTS = ['recent', 'soon', 'amount_desc'] as const;
 type JobSearchSort = (typeof JOB_SEARCH_SORTS)[number];
@@ -342,9 +337,7 @@ export class MobileFeedController {
     // accept() flips an offer to FILLED once accepted >= quantity, so there is no
     // need to re-derive slot availability here.
     let where: Prisma.JobOfferWhereInput = {
-      status: {
-        in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
-      },
+      status: { in: OPEN_JOB_STATUSES },
       deleted_at: null,
     };
 
@@ -370,40 +363,31 @@ export class MobileFeedController {
       where.applications = { none: { worker_id: profileId } };
     }
 
-    const term = q?.trim();
-    if (term) {
-      const tokens = term
-        .split(/\s+/)
-        .filter(Boolean)
-        .slice(0, MAX_SEARCH_TOKENS);
-
-      // Resolve domaine matches up front: one indexed query over a ~30-row table
-      // turns the category branch into `category_id IN (...)` (uses
-      // idx_job_offer_category) instead of a per-row EXISTS on job_categories.
-      const categories = await this.prisma.jobCategory.findMany({
-        select: { id: true, name: true },
+    // Forgiving text search (accents, word order, partial words, misspelt
+    // titles and trades), resolved to ids so it composes with the filters
+    // above — the city filter included, which also lives in `where.AND`.
+    const tokens = searchTokens(q);
+    if (tokens.length > 0) {
+      const match = allTokensMatch(tokens, {
+        fuzzy: foldedText(Prisma.sql`o.title`, Prisma.sql`c.name`),
+        // Long or code-like fields: as written (accents aside) only, since
+        // a "close" word somewhere in a description is noise. `reference`
+        // matches legacy RAB-* rows and lowercase input alike.
+        exact: [
+          foldedText(Prisma.sql`o.description`),
+          foldedText(Prisma.sql`o.address`),
+          foldedText(Prisma.sql`o.reference`),
+        ],
       });
-
-      // Every token must match at least one field, so "menage bacongo" needs both.
-      where.AND = tokens.map((tok) => {
-        const folded = foldAccents(tok);
-        const catIds = categories
-          .filter((c) => foldAccents(c.name).includes(folded))
-          .map((c) => c.id);
-
-        const or: Prisma.JobOfferWhereInput[] = [
-          { title: { contains: tok, mode: 'insensitive' } },
-          { description: { contains: tok, mode: 'insensitive' } },
-          { address: { contains: tok, mode: 'insensitive' } },
-          // `contains` (not findByReference) so legacy RAB-* rows and lowercase
-          // input both resolve; findByReference rejects anything not RBT-XXXXX.
-          { reference: { contains: tok, mode: 'insensitive' } },
-        ];
-        if (catIds.length > 0) {
-          or.push({ category_id: { in: catIds } });
-        }
-        return { OR: or };
-      });
+      const hits = await this.prisma.$queryRaw<{ id: string }[]>`
+        SELECT o.id
+        FROM job_offers o
+        LEFT JOIN job_categories c ON c.id = o.category_id
+        WHERE o.deleted_at IS NULL
+          AND o.status::text IN (${Prisma.join(OPEN_JOB_STATUSES)})
+          AND ${match}
+      `;
+      where.id = { in: hits.map((h) => h.id) };
     }
 
     const [rows, total] = await Promise.all([

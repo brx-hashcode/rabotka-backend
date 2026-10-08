@@ -30,6 +30,11 @@ import {
 } from '@prisma/client';
 import { withCityFilter } from '../../common/queries/city-filter';
 import { PortfolioService } from '../portfolio/portfolio.service';
+import {
+  allTokensMatch,
+  foldedText,
+  searchTokens,
+} from '../../common/queries/text-search';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { KycVerifiedGuard } from '../auth/guards/kyc-verified.guard';
@@ -461,16 +466,37 @@ export class MobileRecommendationController {
     // Structured `city` first, free-text `address` as the fallback.
     where = withCityFilter(where, city);
 
-    const term = q?.trim();
-    if (term) {
-      const tokens = term.split(/\s+/).filter(Boolean);
-      where.AND = tokens.map((tok) => ({
-        OR: [
-          { first_name: { contains: tok, mode: 'insensitive' } },
-          { last_name: { contains: tok, mode: 'insensitive' } },
-          { description: { contains: tok, mode: 'insensitive' } },
-        ],
-      }));
+    // Forgiving text search over name, trades and description, resolved to
+    // ids so it composes with the filters above — the city filter included,
+    // which also lives in `where.AND`.
+    const tokens = searchTokens(q);
+    if (tokens.length > 0) {
+      const match = allTokensMatch(tokens, {
+        // Names and trades are short: a misspelling still finds them
+        // (« Mabialla », « plombir »).
+        fuzzy: foldedText(
+          Prisma.sql`p.first_name`,
+          Prisma.sql`p.last_name`,
+          Prisma.sql`trades.names`,
+        ),
+        exact: [foldedText(Prisma.sql`p.description`)],
+      });
+      const hits = await this.prisma.$queryRaw<{ id: string }[]>`
+        SELECT p.id
+        FROM profiles p
+        LEFT JOIN LATERAL (
+          SELECT string_agg(c.name, ' ') AS names
+          FROM profile_categories pc
+          JOIN job_categories c ON c.id = pc.category_id
+          WHERE pc.profile_id = p.id
+        ) trades ON true
+        WHERE p.deleted_at IS NULL
+          AND p.profile_type = 'WORKER'
+          AND p.status = 'ACTIVE'
+          AND p.verification_status = 'VERIFIED'
+          AND ${match}
+      `;
+      where.id = { in: hits.map((h) => h.id) };
     }
 
     const [profiles, total] = await Promise.all([

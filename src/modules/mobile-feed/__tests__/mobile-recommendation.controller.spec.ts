@@ -86,6 +86,7 @@ describe('MobileRecommendationController — worker-feed tiers', () => {
       contactRecord: { groupBy: jest.fn().mockResolvedValue([]) },
       walletTransaction: { findMany: jest.fn().mockResolvedValue([]) },
       paymentRequest: { findMany: jest.fn().mockResolvedValue([]) },
+      $queryRaw: jest.fn().mockResolvedValue([]),
     };
     // Similarity off by default — the common production case.
     matching = {
@@ -350,6 +351,41 @@ describe('MobileRecommendationController — worker-feed tiers', () => {
 
       const result = await controller.workerFeed(reqFor('e1') as never);
       expect(result.map((w) => w.id)).toEqual(['w-any']);
+    });
+  });
+
+  describe('worker-search', () => {
+    const searchWhere = () =>
+      prisma.profile.findMany.mock.calls.at(-1)?.[0].where;
+
+    it('narrows to the workers the text search matched, keeping the city filter', async () => {
+      mockType(ProfileType.EMPLOYER);
+      prisma.profile.count = jest.fn().mockResolvedValue(1);
+      prisma.$queryRaw.mockResolvedValue([{ id: 'w1' }]);
+
+      await controller.workerSearch(
+        reqFor('e1') as never,
+        'Mabialla plombir',
+        undefined,
+        undefined,
+        undefined,
+        'Brazzaville',
+      );
+
+      expect(searchWhere().id).toEqual({ in: ['w1'] });
+      expect(searchWhere().AND).toHaveLength(1);
+      const values = JSON.stringify(prisma.$queryRaw.mock.calls[0].slice(1));
+      expect(values).toContain('mabialla');
+      expect(values).toContain('strict_word_similarity');
+      expect(values).toContain('trades.names');
+    });
+
+    it('runs no search query for a blank text', async () => {
+      mockType(ProfileType.EMPLOYER);
+      prisma.profile.count = jest.fn().mockResolvedValue(0);
+      await controller.workerSearch(reqFor('e1') as never, '   ');
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+      expect(searchWhere().id).toBeUndefined();
     });
   });
 });
