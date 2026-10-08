@@ -2157,6 +2157,10 @@ enum ProfileNotificationType {
   /// something that happened to this person. The only type a user can opt out
   /// of — see `Profile.marketing_opt_out_at`.
   ANNOUNCEMENT
+  /// « Des profils comme le vôtre sont recrutés »: a worker similar to this
+  /// one was just hired, and here is the one step that would raise this
+  /// profile. Anonymous, at most once a week (SimilarHireNudgeService).
+  SIMILAR_PROFILE_HIRED
 }
 
 /// The in-app feed behind the bell in rabotka-client.

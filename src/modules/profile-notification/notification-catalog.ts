@@ -34,6 +34,28 @@ export function paymentKindOf(
 export type ClaimStatusValue =
   'CREATED' | 'IN_PROGRESS' | 'COMPLETED' | 'REJECTED';
 
+/** What a nudged worker is asked to do, most useful first. */
+export type SimilarHireStep = 'PHOTO' | 'DESCRIPTION' | 'PORTFOLIO';
+
+const SIMILAR_HIRE_STEP: Record<
+  SimilarHireStep,
+  { sentence: string; link: string }
+> = {
+  PHOTO: {
+    sentence: 'Ajoutez une photo pour être proposé(e) en priorité.',
+    link: '/profile',
+  },
+  DESCRIPTION: {
+    sentence: 'Complétez votre description pour être proposé(e) en priorité.',
+    link: '/profile',
+  },
+  PORTFOLIO: {
+    sentence:
+      'Ajoutez une réalisation à votre portfolio pour être proposé(e) en priorité.',
+    link: '/profile/portfolio',
+  },
+};
+
 export type NotificationInput =
   | { type: 'PROFILE_VIEW'; sector: string | null; city: string | null }
   | { type: 'JOB_RECOMMENDATION'; jobOfferId: string; jobTitle: string }
@@ -109,6 +131,17 @@ export type NotificationInput =
       claimId: string;
       claimTitle: string;
       status: ClaimStatusValue;
+    }
+  | {
+      /**
+       * A worker similar to this one was just hired. Anonymous on purpose — a
+       * hire is private — and actionable: `step` is the one missing thing that
+       * would raise this profile, worked out per recipient.
+       */
+      type: 'SIMILAR_PROFILE_HIRED';
+      categoryName: string;
+      city: string | null;
+      step: SimilarHireStep;
     }
   | {
       /**
@@ -336,6 +369,17 @@ export function renderNotification(
         body: `Votre réclamation${quoted(input.claimTitle)} ${CLAIM_STATUS_SENTENCE[input.status]}.`,
         link: `/claims/${input.claimId}`,
       };
+
+    case 'SIMILAR_PROFILE_HIRED': {
+      const step = SIMILAR_HIRE_STEP[input.step];
+      return {
+        title: 'Des profils comme le vôtre sont recrutés',
+        body: `Un profil comme le vôtre vient d’être recruté en ${input.categoryName}${
+          input.city ? ` à ${input.city}` : ''
+        }. ${step.sentence}`,
+        link: step.link,
+      };
+    }
 
     case 'ANNOUNCEMENT':
       return {
