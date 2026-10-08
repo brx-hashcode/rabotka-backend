@@ -5,10 +5,13 @@ import { Prisma } from '@prisma/client';
  * offer. A search is split into words; each word must match somewhere, in any
  * order. Accents and case never matter, a word may be part of a longer one
  * (« dev » → « Développeur »), and in the short fields — titles, names,
- * trades — a misspelling still matches (« developer », « plombir »).
+ * trades — a misspelling or another form of the word still matches
+ * (« plombir », « developer » / « development » for « développeur »,
+ * « plomberie » for « plombier »).
  *
- * Needs the `unaccent` and `pg_trgm` extensions (migration
- * 20261008120000_fuzzy_job_search).
+ * Needs `unaccent`, `pg_trgm` and `fuzzystrmatch` plus the `search_*` root
+ * functions (migrations 20261008120000_fuzzy_job_search and
+ * 20261008130000_search_word_roots).
  */
 
 /** Cap the AND-chain so a pathological query can't fan out. */
@@ -92,6 +95,9 @@ export function allTokensMatch(
     if (t.length >= FUZZY_MIN_LENGTH) {
       ors.push(
         Prisma.sql`strict_word_similarity(${t}::text, ${fields.fuzzy}) >= ${MIN_WORD_SIMILARITY}::real`,
+        // Same word family or a typo in the stored text: « developpeur »
+        // finds « developer », « development », « devepment ».
+        Prisma.sql`search_root_in(${t}::text, ${fields.fuzzy})`,
       );
     }
     return Prisma.sql`(${Prisma.join(ors, ' OR ')})`;

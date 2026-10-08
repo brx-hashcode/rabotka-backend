@@ -44,6 +44,7 @@ describe('allTokensMatch', () => {
   it('requires every word, misspellings only for words of 4+ letters', () => {
     const sql = allTokensMatch(['developer', 'web'], { fuzzy, exact });
     expect(sql.sql.match(/strict_word_similarity/g)).toHaveLength(1);
+    expect(sql.sql.match(/search_root_in/g)).toHaveLength(1);
     expect(sql.sql).toContain(') AND (');
     expect(sql.values).toEqual(
       expect.arrayContaining(['%developer%', 'developer', '%web%']),
