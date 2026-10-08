@@ -372,11 +372,13 @@ export function renderNotification(
 
     case 'SIMILAR_PROFILE_HIRED': {
       const step = SIMILAR_HIRE_STEP[input.step];
+      // The step first: the title already gives the news, and the bell clips
+      // the body to two lines.
       return {
         title: 'Des profils comme le vôtre sont recrutés',
-        body: `Un profil comme le vôtre vient d’être recruté en ${input.categoryName}${
+        body: `${step.sentence} Un profil comme le vôtre vient d’être recruté en ${input.categoryName}${
           input.city ? ` à ${input.city}` : ''
-        }. ${step.sentence}`,
+        }.`,
         link: step.link,
       };
     }

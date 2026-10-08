@@ -193,7 +193,8 @@ describe('SIMILAR_PROFILE_HIRED', () => {
     });
     expect(r.title).toBe('Des profils comme le vôtre sont recrutés');
     expect(r.body).toContain('recruté en Manutention à Brazzaville');
-    expect(r.body).toContain('Ajoutez une photo');
+    // The step leads: the bell clips the body to two lines.
+    expect(r.body).toMatch(/^Ajoutez une photo/);
     expect(r.link).toBe('/profile');
   });
 
