@@ -35,6 +35,9 @@ import {
   seenDecay,
   SEEN_RECOVERY_HOURS,
   type ScoreTerms,
+  fitScore,
+  fitFactor,
+  withFit,
 } from './scoring';
 
 /** Which generator produced a candidate — logged so tier mix is observable. */
@@ -42,7 +45,13 @@ export type CandidateTier = 'affinity' | 'cf' | 'declared' | 'all_open';
 
 export type RankedJob = {
   id: string;
+  /** Ranking order: relevance × fit, with penalties. Not for display. */
   score: number;
+  /**
+   * How well this candidate fits — the « compatibilité » people see (see
+   * `fitScore`). Null when there is no fit evidence; then show nothing.
+   */
+  matchScore: number | null;
   tier: CandidateTier;
 };
 
@@ -246,8 +255,16 @@ export class RecommendationEngineService {
       };
 
       const relevance = computeRelevance(terms, weights);
+      const matchScore = fitScore({
+        sim: terms.sim,
+        categoryAffinity: terms.catAff,
+        categoryMatch:
+          c.categoryId && declaredCategories.length > 0
+            ? declaredCategories.includes(c.categoryId)
+            : null,
+      });
       const score = applyPenalties(
-        relevance,
+        withFit(relevance, matchScore),
         {
           negativeCategory: c.categoryId
             ? negativeCategories.has(c.categoryId)
@@ -262,7 +279,14 @@ export class RecommendationEngineService {
         DEFAULT_PENALTIES,
       );
 
-      return { id: c.id, score, tier: tierOf.get(c.id)!, candidate: c };
+      return {
+        id: c.id,
+        score,
+        matchScore,
+        gate: score / fitFactor(matchScore),
+        tier: tierOf.get(c.id)!,
+        candidate: c,
+      };
     });
 
     scored.sort((a, b) => b.score - a.score);
@@ -292,7 +316,12 @@ export class RecommendationEngineService {
       limit,
     );
 
-    return selected.map(({ id, score, tier }) => ({ id, score, tier }));
+    return selected.map(({ id, score, matchScore, tier }) => ({
+      id,
+      score,
+      matchScore,
+      tier,
+    }));
   }
 
   /**
@@ -421,8 +450,16 @@ export class RecommendationEngineService {
       };
 
       const relevance = computeRelevance(terms, weights);
+      const matchScore = fitScore({
+        sim: terms.sim,
+        categoryAffinity: terms.catAff,
+        categoryMatch:
+          categoryIds.length > 0
+            ? c.categoryIds.some((id) => categoryIds.includes(id))
+            : null,
+      });
       const score = applyPenalties(
-        relevance,
+        withFit(relevance, matchScore),
         {
           negativeCategory: c.categoryIds.some((id) =>
             negativeCategories.has(id),
@@ -436,7 +473,14 @@ export class RecommendationEngineService {
         DEFAULT_PENALTIES,
       );
 
-      return { id: c.id, score, tier: tierOf.get(c.id)!, candidate: c };
+      return {
+        id: c.id,
+        score,
+        matchScore,
+        gate: score / fitFactor(matchScore),
+        tier: tierOf.get(c.id)!,
+        candidate: c,
+      };
     });
 
     scored.sort((a, b) => b.score - a.score);
@@ -465,7 +509,12 @@ export class RecommendationEngineService {
       limit,
     );
 
-    return selected.map(({ id, score, tier }) => ({ id, score, tier }));
+    return selected.map(({ id, score, matchScore, tier }) => ({
+      id,
+      score,
+      matchScore,
+      tier,
+    }));
   }
 
   /**
@@ -663,8 +712,15 @@ export class RecommendationEngineService {
         };
 
         const relevance = computeRelevance(terms, weights);
+        const matchScore = fitScore({
+          sim: terms.sim,
+          categoryAffinity: terms.catAff,
+          categoryMatch: offer.category_id
+            ? c.categoryIds.includes(offer.category_id)
+            : null,
+        });
         const score = applyPenalties(
-          relevance,
+          withFit(relevance, matchScore),
           {
             // The worker's own rejection history against THIS offer's category.
             // Replaces the legacy Qdrant `must_not rejectedCategoryIds` payload
@@ -683,7 +739,14 @@ export class RecommendationEngineService {
           DEFAULT_PENALTIES,
         );
 
-        return { id: c.id, score, tier: tierOf.get(c.id)!, candidate: c };
+        return {
+          id: c.id,
+          score,
+          matchScore,
+          gate: score / fitFactor(matchScore),
+          tier: tierOf.get(c.id)!,
+          candidate: c,
+        };
       });
 
     scored.sort((a, b) => b.score - a.score);
@@ -705,7 +768,12 @@ export class RecommendationEngineService {
             opts.rng,
           );
 
-    return selected.map(({ id, score, tier }) => ({ id, score, tier }));
+    return selected.map(({ id, score, matchScore, tier }) => ({
+      id,
+      score,
+      matchScore,
+      tier,
+    }));
   }
 
   /** The domains this employer hires in, derived from their own offers. */

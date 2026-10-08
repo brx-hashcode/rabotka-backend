@@ -1,4 +1,5 @@
 import { MatchingService } from '../matching.service';
+import { fitFactor } from '../../recommendation-engine/scoring';
 import { INDEX_SCHEMA_VERSION } from '../../qdrant/qdrant.config';
 
 function makePrisma() {
@@ -31,6 +32,9 @@ function makeQdrant() {
     upsertDense: jest.fn().mockResolvedValue(undefined),
     searchHybrid: jest.fn().mockResolvedValue([]),
     searchHybridWithFilter: jest.fn().mockResolvedValue([]),
+    // No vector for the asker by default: re-ranking then has no similarity
+    // evidence and must not invent any.
+    similarityToPoint: jest.fn().mockResolvedValue(new Map()),
     recommendDense: jest.fn().mockResolvedValue([]),
     listPointIds: jest.fn().mockResolvedValue([]),
     deletePoints: jest.fn().mockResolvedValue(undefined),
@@ -470,26 +474,43 @@ describe('MatchingService', () => {
       systemConfig.getRecommendationMinScore.mockResolvedValue(0);
     }
 
-    it('awards a perfect score to a top hit in one of the employer domains', async () => {
+    // It used to: the top hit's rank stood in for similarity, so first place
+    // read as a 1.0 — the « 100 % » employers saw on unrelated profiles.
+    it('does not call a top hit a perfect match without similarity evidence', async () => {
       givenSingleWorker(['cat-1']);
 
       const result =
         await service.findMatchingWorkersForEmployerProfile('emp-1');
 
-      expect(result[0].score).toBeCloseTo(1, 5);
+      // Trade match only: promising, not proven.
+      expect(result[0].matchScore).toBeCloseTo(0.55, 5);
+      expect(result[0].score).toBeCloseTo(fitFactor(0.55), 5);
+    });
+
+    it('measures fit with the real similarity, not the retrieval rank', async () => {
+      givenSingleWorker(['cat-1']);
+      // Calibrated 0.80 spreads to 0.2: a weak match, even ranked first.
+      qdrant.similarityToPoint.mockResolvedValue(new Map([['w-1', 0.8]]));
+
+      const result =
+        await service.findMatchingWorkersForEmployerProfile('emp-1');
+
+      expect(result[0].matchScore).toBeCloseTo(0.75 * 0.2 + 0.25, 5);
+      expect(result[0].score).toBeLessThan(0.7);
     });
 
     // The old ceiling, now reached only by someone who genuinely does not work
     // in any of the employer's domains. This worker has no ratings and no
     // completed missions, so the quality term is dropped rather than scored,
     // and the mean divides by 0.7 instead of 0.9.
-    it('caps a mismatched worker with no history at 0.6/0.7', async () => {
+    it('caps a mismatched worker with no history at 0.6/0.7, then scales it by a poor fit', async () => {
       givenSingleWorker(['cat-other']);
 
       const result =
         await service.findMatchingWorkersForEmployerProfile('emp-1');
 
-      expect(result[0].score).toBeCloseTo(0.6 / 0.7, 5);
+      expect(result[0].matchScore).toBeCloseTo(0.15, 5);
+      expect(result[0].score).toBeCloseTo((0.6 / 0.7) * fitFactor(0.15), 5);
     });
 
     it('ranks a rated, experienced worker above an unproven one', async () => {
@@ -556,7 +577,8 @@ describe('MatchingService', () => {
       const result =
         await service.findMatchingWorkersForEmployerProfile('emp-1');
 
-      expect(result[0].score).toBeCloseTo(1, 5);
+      // Matched on the second domain: a trade match, scored as one.
+      expect(result[0].matchScore).toBeCloseTo(0.55, 5);
     });
 
     it('selects the category id it needs to compare against', async () => {

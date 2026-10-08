@@ -207,7 +207,12 @@ export type AgentCandidateRow = Prisma.ProfileGetPayload<{
   select: typeof AGENT_CANDIDATE_SELECT;
 }>;
 
-export function toAgentCandidate(p: AgentCandidateRow, score: number) {
+export function toAgentCandidate(
+  p: AgentCandidateRow,
+  score: number,
+  /** Fit for display; null when there is no fit evidence. */
+  matchScore: number | null = null,
+) {
   return {
     id: p.id,
     firstName: p.first_name,
@@ -221,5 +226,6 @@ export function toAgentCandidate(p: AgentCandidateRow, score: number) {
     verificationStatus: p.verification_status,
     categories: p.categories.map((c) => c.category.name),
     score,
+    matchScore,
   };
 }

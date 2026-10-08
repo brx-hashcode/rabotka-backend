@@ -3,7 +3,12 @@ import type { EngineRolloutService } from '../recommendation-engine/engine-rollo
 import type { RecommendationEngineService } from '../recommendation-engine/recommendation-engine.service';
 import type { MatchingService } from './matching.service';
 
-export type RankedWorkerRef = { id: string; score: number };
+export type RankedWorkerRef = {
+  id: string;
+  score: number;
+  /** Fit for display; null/absent when there is no fit evidence. */
+  matchScore?: number | null;
+};
 
 export type RankWorkersDeps = {
   matching: Pick<MatchingService, 'findMatchingWorkersForJob'>;
