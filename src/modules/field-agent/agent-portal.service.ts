@@ -315,7 +315,7 @@ export class AgentPortalService {
     );
 
     return shown.map((r) => ({
-      ...toAgentCandidate(byId.get(r.id)!, r.score),
+      ...toAgentCandidate(byId.get(r.id)!, r.score, r.matchScore ?? null),
       lead: leads.get(r.id) ?? null,
     }));
   }

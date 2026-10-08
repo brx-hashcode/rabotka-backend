@@ -17,6 +17,9 @@ import {
   diversifyByKeys,
   epsilonGreedySelect,
   applyThreshold,
+  fitScore,
+  withFit,
+  FIT_FLOOR,
   normalizeAffinity,
   clamp01,
   qualityPrior,
@@ -59,9 +62,16 @@ describe('scoring', () => {
     it('gives a cold user no weight on history-derived terms', () => {
       // With no history these carry zero information; weighting them would be
       // scoring noise.
-      expect(COLD_WEIGHTS.sim).toBe(0);
       expect(COLD_WEIGHTS.partyAff).toBe(0);
       expect(COLD_WEIGHTS.cf).toBe(0);
+    });
+
+    it('weighs similarity from the first request', () => {
+      // Profile and offer vectors exist on day one. At 0, a new employer's feed
+      // was ranked on distance and freshness alone.
+      expect(COLD_WEIGHTS.sim).toBeGreaterThan(0);
+      const total = Object.values(COLD_WEIGHTS).reduce((a, b) => a + b, 0);
+      expect(total).toBeCloseTo(1, 6);
     });
 
     it('shifts weight toward personalization as history grows', () => {
@@ -328,10 +338,13 @@ describe('scoring', () => {
     });
 
     it('ignores zero-weighted terms entirely', () => {
-      // A cold user's `sim` weight is 0, so a perfect vector match must not move
-      // their score at all.
-      const withSim = computeRelevance({ ...ZERO_TERMS, sim: 1 }, COLD_WEIGHTS);
-      expect(withSim).toBe(0);
+      // A cold user's `partyAff` weight is 0, so a perfect counterparty
+      // affinity must not move their score at all.
+      const withParty = computeRelevance(
+        { ...ZERO_TERMS, partyAff: 1 },
+        COLD_WEIGHTS,
+      );
+      expect(withParty).toBe(0);
     });
 
     it('excludes a null term from the mean instead of scoring it as zero', () => {
@@ -726,5 +739,59 @@ describe('spreadSimilarity', () => {
     // relevance threshold stops meaning anything.
     expect(spreadSimilarity(0.85)).toBe(spreadSimilarity(0.85));
     expect(spreadSimilarity(1)).toBe(1);
+  });
+});
+
+describe('fitScore', () => {
+  it('shows nothing without fit evidence', () => {
+    expect(fitScore({ sim: null, categoryMatch: null })).toBeNull();
+  });
+
+  it('never calls a trade match alone very compatible', () => {
+    expect(fitScore({ sim: null, categoryMatch: true })).toBeCloseTo(0.55, 6);
+    expect(fitScore({ sim: null, categoryMatch: false })).toBeCloseTo(0.15, 6);
+  });
+
+  it('is mostly similarity, the trade match on top', () => {
+    expect(fitScore({ sim: 1, categoryMatch: true })).toBeCloseTo(1, 6);
+    expect(fitScore({ sim: 0.2, categoryMatch: false })).toBeCloseTo(0.15, 6);
+    expect(fitScore({ sim: 0.6, categoryMatch: null })).toBeCloseTo(0.6, 6);
+  });
+
+  it('counts learned trade affinity as trade evidence', () => {
+    expect(
+      fitScore({ sim: null, categoryMatch: null, categoryAffinity: 1 }),
+    ).toBeCloseTo(0.55, 6);
+    expect(
+      fitScore({ sim: 0.4, categoryMatch: false, categoryAffinity: 0.8 }),
+    ).toBeCloseTo(0.75 * 0.4 + 0.25 * 0.8, 6);
+  });
+});
+
+describe('withFit', () => {
+  it('keeps a perfect fit and sinks an unrelated one', () => {
+    expect(withFit(1, 1)).toBeCloseTo(1, 6);
+    expect(withFit(1, 0)).toBeCloseTo(FIT_FLOOR, 6);
+  });
+
+  it('ranks a near, active, reliable but unrelated candidate below a related one', () => {
+    // The « 100 % » case: relevance maxed on proximity, freshness, quality.
+    const unrelated = withFit(1, fitScore({ sim: 0.05, categoryMatch: false }));
+    const related = withFit(0.7, fitScore({ sim: 0.8, categoryMatch: true }));
+    expect(related).toBeGreaterThan(unrelated);
+  });
+
+  it('treats unknown fit as weak, not neutral', () => {
+    expect(withFit(1, null)).toBeLessThan(withFit(1, 0.5));
+  });
+});
+
+describe('applyThreshold with a gate', () => {
+  it('judges who passes on relevance before fit, keeping the score order', () => {
+    const items = [
+      { id: 'a', score: 0.3, gate: 0.9 },
+      { id: 'b', score: 0.2, gate: 0.1 },
+    ];
+    expect(applyThreshold(items, 0.5, 0).map((i) => i.id)).toEqual(['a']);
   });
 });

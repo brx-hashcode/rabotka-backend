@@ -4,7 +4,13 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { QdrantService } from '../qdrant/qdrant.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { COLLECTIONS, INDEX_SCHEMA_VERSION } from '../qdrant/qdrant.config';
-import { qualityPrior } from '../recommendation-engine/scoring';
+import {
+  fitFactor,
+  fitScore,
+  qualityPrior,
+  spreadSimilarity,
+  withFit,
+} from '../recommendation-engine/scoring';
 import { ApplicationStatus, AssignmentStatus } from '@prisma/client';
 
 const COLLECTION_WORKERS = COLLECTIONS.WORKERS;
@@ -41,11 +47,18 @@ export { NEGATIVE_HISTORY_MULTIPLIER };
 
 interface ScoredHit {
   id: string;
+  /** Ranking order. Not for display. */
   score: number;
+  /** Fit for display (`fitScore`); absent or null = no fit evidence. */
+  matchScore?: number | null;
 }
 
 interface ScoredHitWithCategory extends ScoredHit {
   categoryId: string | null;
+  /** Relevance before fit — what the thresholds judge (see applyThreshold). */
+  gate: number;
+  /** Fit for display (`fitScore`); null when there is no fit evidence. */
+  matchScore: number | null;
 }
 
 function qdrantPayloadString(
@@ -183,12 +196,14 @@ export function weightedMean(
  * miscalibrated threshold previously did exactly that, silently, on three code
  * paths — so the floor is enforced structurally rather than by convention.
  */
-export function applyThreshold<T extends { score: number }>(
+export function applyThreshold<T extends { score: number; gate?: number }>(
   ranked: T[],
   minScore: number,
   keepAtLeast: number,
 ): T[] {
-  const passing = ranked.filter((r) => r.score >= minScore);
+  // Judged on relevance before fit when known: the thresholds were tuned on
+  // that scale, and fit is meant to reorder, not to empty the list.
+  const passing = ranked.filter((r) => (r.gate ?? r.score) >= minScore);
   return passing.length >= Math.min(keepAtLeast, ranked.length)
     ? passing
     : ranked.slice(0, Math.min(keepAtLeast, ranked.length));
@@ -205,7 +220,11 @@ function diversifyByCategory(
     const cat = item.categoryId ?? '__none__';
     const count = counts.get(cat) ?? 0;
     if (count < maxPerCategory) {
-      output.push({ id: item.id, score: item.score });
+      output.push({
+        id: item.id,
+        score: item.score,
+        matchScore: item.matchScore,
+      });
       counts.set(cat, count + 1);
       if (output.length >= targetTotal) break;
     }
@@ -497,10 +516,12 @@ export class MatchingService {
   private async reRankWorkers(
     hits: ScoredHit[],
     targetCategoryIds: readonly string[],
+    /** The point the workers are compared to: the offer, or the employer. */
+    query: { collection: string; id: string },
   ): Promise<ScoredHitWithCategory[]> {
     if (hits.length === 0) return [];
     const workerIds = hits.map((h) => h.id);
-    const [profiles, evidence] = await Promise.all([
+    const [profiles, evidence, sims] = await Promise.all([
       this.prisma.profile.findMany({
         where: { id: { in: workerIds } },
         select: {
@@ -512,6 +533,7 @@ export class MatchingService {
         },
       }),
       this.workerQualityEvidence(workerIds),
+      this.denseSimilarity(query, COLLECTION_WORKERS, workerIds),
     ]);
     const profileMap = new Map(profiles.map((p) => [p.id, p]));
     const targets = new Set(targetCategoryIds);
@@ -543,18 +565,34 @@ export class MatchingService {
         contactUnlocks: e?.unlocks ?? 0,
       });
 
-      const score = weightedMean([
-        { value: rankRelevance(rank, hits.length), weight: W_VECTOR },
+      // The real similarity when the vector store answers. Hybrid retrieval
+      // scores are fusion ranks, so the rank used to stand in for similarity —
+      // which gave the first hit 1.0 however weak the match, and the top of
+      // every feed read as a ~100 % match.
+      const sim = sims.has(hit.id) ? spreadSimilarity(sims.get(hit.id)!) : null;
+      const matchScore = fitScore({
+        sim,
+        categoryMatch: targets.size > 0 ? matchedCategoryId !== null : null,
+      });
+      const relevance = weightedMean([
+        { value: sim ?? rankRelevance(rank, hits.length), weight: W_VECTOR },
         // Omitted entirely when there is no history, rather than passed as a
         // number: `weightedMean` divides by the weights it is handed, so
         // leaving it out redistributes onto the terms that know something.
         ...(quality !== null ? [{ value: quality, weight: W_QUALITY }] : []),
         { value: matchedCategoryId !== null ? 1 : 0, weight: W_CATEGORY_EXACT },
       ]);
+      const score = withFit(relevance, matchScore);
 
       const workerCategoryId =
         matchedCategoryId ?? profile?.categories[0]?.category_id ?? null;
-      return { id: hit.id, score, categoryId: workerCategoryId };
+      return {
+        id: hit.id,
+        score,
+        matchScore,
+        gate: score / fitFactor(matchScore),
+        categoryId: workerCategoryId,
+      };
     });
 
     return ranked.sort((a, b) => b.score - a.score);
@@ -568,7 +606,7 @@ export class MatchingService {
     if (hits.length === 0) return [];
     const jobIds = hits.map((h) => h.id);
 
-    const [jobs, negativeApplications] = await Promise.all([
+    const [jobs, negativeApplications, sims] = await Promise.all([
       this.prisma.jobOffer.findMany({
         where: { id: { in: jobIds } },
         select: { id: true, created_at: true, category_id: true },
@@ -581,6 +619,11 @@ export class MatchingService {
         },
         select: { job_offer_id: true },
       }),
+      this.denseSimilarity(
+        { collection: COLLECTION_WORKERS, id: workerId },
+        COLLECTION_JOBS,
+        jobIds,
+      ),
     ]);
 
     const jobMap = new Map(jobs.map((j) => [j.id, j]));
@@ -595,29 +638,68 @@ export class MatchingService {
       const matchesWorkerCategory =
         job?.category_id != null && workerCategoryIds.includes(job.category_id);
 
-      const relevance = weightedMean([
-        { value: rankRelevance(rank, hits.length), weight: W_VECTOR },
-        {
-          // A missing job is a stale index entry; treat it as maximally old
-          // rather than neutral so it sinks instead of floating.
-          value: job ? computeRecencyFactor(job.created_at) : 0,
-          weight: W_RECENCY,
-        },
-        { value: matchesWorkerCategory ? 1 : 0, weight: W_CATEGORY_EXACT },
-      ]);
+      // Real similarity, not rank position — see `reRankWorkers`.
+      const sim = sims.has(hit.id) ? spreadSimilarity(sims.get(hit.id)!) : null;
+      const matchScore = fitScore({
+        sim,
+        categoryMatch:
+          job?.category_id != null && workerCategoryIds.length > 0
+            ? matchesWorkerCategory
+            : null,
+      });
+      const relevance = withFit(
+        weightedMean([
+          { value: sim ?? rankRelevance(rank, hits.length), weight: W_VECTOR },
+          {
+            // A missing job is a stale index entry; treat it as maximally old
+            // rather than neutral so it sinks instead of floating.
+            value: job ? computeRecencyFactor(job.created_at) : 0,
+            weight: W_RECENCY,
+          },
+          { value: matchesWorkerCategory ? 1 : 0, weight: W_CATEGORY_EXACT },
+        ]),
+        matchScore,
+      );
 
       // Multiplicative, so it actually suppresses rather than being swamped.
       const score = negativeJobIds.has(hit.id)
         ? relevance * NEGATIVE_HISTORY_MULTIPLIER
         : relevance;
 
-      return { id: hit.id, score, categoryId: job?.category_id ?? null };
+      return {
+        id: hit.id,
+        score,
+        matchScore,
+        gate: score / fitFactor(matchScore),
+        categoryId: job?.category_id ?? null,
+      };
     });
 
     return ranked.sort((a, b) => b.score - a.score);
   }
 
   // ── Compute negative category IDs for a worker ─────────────────────────────
+
+  /** True vector similarity for re-ranking; empty (no evidence) on any fault. */
+  private async denseSimilarity(
+    query: { collection: string; id: string },
+    candidateCollection: string,
+    ids: string[],
+  ): Promise<Map<string, number>> {
+    try {
+      return await this.qdrant.similarityToPoint(
+        query.collection,
+        query.id,
+        candidateCollection,
+        ids,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `dense similarity failed for ${query.collection}/${query.id}: ${String(err)}`,
+      );
+      return new Map();
+    }
+  }
 
   private async computeNegativeCategoryIds(
     profileId: string,
@@ -1054,6 +1136,7 @@ export class MatchingService {
       const reRanked = await this.reRankWorkers(
         hits,
         job.category_id ? [job.category_id] : [],
+        { collection: COLLECTION_JOBS, id: job.id },
       );
 
       // Phase 4: score threshold — floored so it can never empty the result
@@ -1237,6 +1320,7 @@ export class MatchingService {
       const reRanked = await this.reRankWorkers(
         hits,
         profile.categories.map((c) => c.category_id),
+        { collection: COLLECTIONS.EMPLOYERS, id: employerProfileId },
       );
       // Threshold is config-driven (matching.recommendation_min_score) and
       // floored so it can never empty the feed.
