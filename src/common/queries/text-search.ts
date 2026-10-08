@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import type { PrismaService } from '../services/prisma/prisma.service';
 
 /**
  * Forgiving free-text search, shared by every job and worker search the apps
@@ -77,30 +78,150 @@ export function foldedText(...parts: Prisma.Sql[]): Prisma.Sql {
   return Prisma.sql`unaccent(lower(${joined}))`;
 }
 
+/** Fields a search looks in, all folded (`foldedText`). */
+export type SearchFields = {
+  /** Short fields (titles, names, trades): forms and misspellings match. */
+  fuzzy: Prisma.Sql;
+  /** Long fields and codes: as written (accents aside) only. */
+  exact?: Prisma.Sql[];
+};
+
+/** One word, in the item's own text. */
+function textMatches(t: string, fields: SearchFields): Prisma.Sql {
+  const like = `%${t}%`;
+  const ors: Prisma.Sql[] = [
+    Prisma.sql`${fields.fuzzy} LIKE ${like}`,
+    ...(fields.exact ?? []).map((e) => Prisma.sql`${e} LIKE ${like}`),
+  ];
+  if (t.length >= FUZZY_MIN_LENGTH) {
+    ors.push(
+      Prisma.sql`strict_word_similarity(${t}::text, ${fields.fuzzy}) >= ${MIN_WORD_SIMILARITY}::real`,
+      // Same word family or a typo in the stored text: « developpeur »
+      // finds « developer », « development », « devepment ».
+      Prisma.sql`search_root_in(${t}::text, ${fields.fuzzy})`,
+    );
+  }
+  return Prisma.sql`(${Prisma.join(ors, ' OR ')})`;
+}
+
 /**
- * Every token matches: in `fuzzy` as written, inside a word, or misspelled;
- * in `exact` (long fields, codes) as written or inside a word. Both must be
- * folded expressions (`foldedText`) for accents not to matter.
+ * A word that clearly names `text`: at the start of one of its words, or a
+ * form or misspelling of one. Not inside a word — « menage » must not make
+ * « Déménageurs » its sector.
  */
-export function allTokensMatch(
+function namesText(t: string, text: Prisma.Sql): Prisma.Sql {
+  const ors: Prisma.Sql[] = [Prisma.sql`${text} ~ ${`\\m${t}`}`];
+  if (t.length >= FUZZY_MIN_LENGTH) {
+    ors.push(
+      Prisma.sql`strict_word_similarity(${t}::text, ${text}) >= ${MIN_WORD_SIMILARITY}::real`,
+      Prisma.sql`search_root_in(${t}::text, ${text})`,
+    );
+  }
+  return Prisma.sql`(${Prisma.join(ors, ' OR ')})`;
+}
+
+/**
+ * A category must hold this share of the jobs a word names to count as that
+ * word's sector — so one job filed under the wrong category does not drag
+ * the whole category into every search for its title.
+ */
+export const SECTOR_MIN_SHARE = 0.25;
+
+/**
+ * Per word, the sectors (job categories) it belongs to: the categories whose
+ * name it names, and those holding the jobs whose titles it names.
+ * « developpeur » → Informatique, so a search for it also returns the rest of
+ * Informatique — jobs and workers alike.
+ */
+export async function sectorsOf(
+  prisma: PrismaService,
   tokens: string[],
-  fields: { fuzzy: Prisma.Sql; exact?: Prisma.Sql[] },
-): Prisma.Sql {
-  const clauses = tokens.map((t) => {
-    const like = `%${t}%`;
-    const ors: Prisma.Sql[] = [
-      Prisma.sql`${fields.fuzzy} LIKE ${like}`,
-      ...(fields.exact ?? []).map((e) => Prisma.sql`${e} LIKE ${like}`),
-    ];
-    if (t.length >= FUZZY_MIN_LENGTH) {
-      ors.push(
-        Prisma.sql`strict_word_similarity(${t}::text, ${fields.fuzzy}) >= ${MIN_WORD_SIMILARITY}::real`,
-        // Same word family or a typo in the stored text: « developpeur »
-        // finds « developer », « development », « devepment ».
-        Prisma.sql`search_root_in(${t}::text, ${fields.fuzzy})`,
-      );
+): Promise<string[][]> {
+  return Promise.all(
+    tokens.map(async (t) => {
+      const rows = await prisma.$queryRaw<{ id: string }[]>`
+        WITH hits AS (
+          SELECT o.category_id AS cat
+          FROM job_offers o
+          WHERE o.deleted_at IS NULL
+            AND o.category_id IS NOT NULL
+            AND ${namesText(t, foldedText(Prisma.sql`o.title`))}
+        )
+        SELECT cat::text AS id
+        FROM hits
+        GROUP BY cat
+        HAVING count(*) >= ${SECTOR_MIN_SHARE}::real * (SELECT count(*) FROM hits)
+        UNION
+        SELECT c.id::text
+        FROM job_categories c
+        WHERE ${namesText(t, foldedText(Prisma.sql`c.name`))}
+      `;
+      return rows.map((r) => r.id);
+    }),
+  );
+}
+
+/**
+ * The where-clause of a search, and whether a row matched on its own text.
+ *
+ * `match`: every word is in the row's own text, or the row is in one of that
+ * word's sectors (`inSector` turns category ids into the row's own test).
+ * `direct`: every word is in the row's own text — those rows go first.
+ */
+export function searchClauses(
+  tokens: string[],
+  fields: SearchFields,
+  sectors: string[][],
+  inSector: (categoryIds: Prisma.Sql) => Prisma.Sql,
+): { match: Prisma.Sql; direct: Prisma.Sql } {
+  const own = tokens.map((t) => textMatches(t, fields));
+  const either = own.map((text, i) =>
+    sectors[i]?.length
+      ? Prisma.sql`(${text} OR ${inSector(Prisma.join(sectors[i]))})`
+      : text,
+  );
+  return {
+    match: Prisma.join(either, ' AND '),
+    direct: Prisma.join(own, ' AND '),
+  };
+}
+
+/** Rows of `SELECT id, <direct> AS direct`, split into [own text, sector]. */
+export function splitTiers(
+  rows: { id: string; direct: boolean }[],
+): [string[], string[]] {
+  return [
+    rows.filter((r) => r.direct).map((r) => r.id),
+    rows.filter((r) => !r.direct).map((r) => r.id),
+  ];
+}
+
+/**
+ * One page across tiers: every row of the first tier (in the caller's sort)
+ * before any of the second. `count` and `rows` apply the caller's other
+ * filters to the ids they are given.
+ */
+export async function pageByTier<T>(
+  tiers: string[][],
+  skip: number,
+  take: number,
+  fetch: {
+    count: (ids: string[]) => Promise<number>;
+    rows: (ids: string[], skip: number, take: number) => Promise<T[]>;
+  },
+): Promise<{ rows: T[]; total: number }> {
+  const counts = await Promise.all(
+    tiers.map((ids) => (ids.length ? fetch.count(ids) : Promise.resolve(0))),
+  );
+  const rows: T[] = [];
+  let offset = skip;
+  for (let i = 0; i < tiers.length && rows.length < take; i++) {
+    if (offset >= counts[i]) {
+      offset -= counts[i];
+      continue;
     }
-    return Prisma.sql`(${Prisma.join(ors, ' OR ')})`;
-  });
-  return Prisma.join(clauses, ' AND ');
+    rows.push(...(await fetch.rows(tiers[i], offset, take - rows.length)));
+    offset = 0;
+  }
+  return { rows, total: counts.reduce((a, b) => a + b, 0) };
 }

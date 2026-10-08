@@ -37,9 +37,12 @@ import {
   ProfileType,
 } from '@prisma/client';
 import {
-  allTokensMatch,
   foldedText,
+  pageByTier,
+  searchClauses,
   searchTokens,
+  sectorsOf,
+  splitTiers,
 } from '../../common/queries/text-search';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
@@ -363,43 +366,64 @@ export class MobileFeedController {
       where.applications = { none: { worker_id: profileId } };
     }
 
-    // Forgiving text search (accents, word order, partial words, misspelt
-    // titles and trades), resolved to ids so it composes with the filters
-    // above — the city filter included, which also lives in `where.AND`.
+    // Forgiving text search — accents, word order, partial words, other
+    // forms and misspellings, and the rest of the sector after the offers
+    // that say it (common/queries/text-search.ts).
+    const orderBy = this.jobSearchOrderBy(sort);
+    const find = (w: Prisma.JobOfferWhereInput, s: number, t: number) =>
+      this.prisma.jobOffer.findMany({
+        where: w,
+        select: JOB_SEARCH_SELECT,
+        orderBy,
+        skip: s,
+        take: t,
+      });
+
+    let rows: Awaited<ReturnType<typeof find>>;
+    let total: number;
     const tokens = searchTokens(q);
     if (tokens.length > 0) {
-      const match = allTokensMatch(tokens, {
-        fuzzy: foldedText(Prisma.sql`o.title`, Prisma.sql`c.name`),
-        // Long or code-like fields: as written (accents aside) only, since
-        // a "close" word somewhere in a description is noise. `reference`
-        // matches legacy RAB-* rows and lowercase input alike.
-        exact: [
-          foldedText(Prisma.sql`o.description`),
-          foldedText(Prisma.sql`o.address`),
-          foldedText(Prisma.sql`o.reference`),
-        ],
-      });
-      const hits = await this.prisma.$queryRaw<{ id: string }[]>`
-        SELECT o.id
+      const { match, direct } = searchClauses(
+        tokens,
+        {
+          // The category is not the job's own text: a word naming it reaches
+          // the job through its sector, after the jobs whose title says it.
+          fuzzy: foldedText(Prisma.sql`o.title`),
+          // Long or code-like fields: as written (accents aside) only, since
+          // a "close" word somewhere in a description is noise. `reference`
+          // matches legacy RAB-* rows and lowercase input alike.
+          exact: [
+            foldedText(Prisma.sql`o.description`),
+            foldedText(Prisma.sql`o.address`),
+            foldedText(Prisma.sql`o.reference`),
+          ],
+        },
+        await sectorsOf(this.prisma, tokens),
+        (ids) => Prisma.sql`o.category_id::text IN (${ids})`,
+      );
+      const hits = await this.prisma.$queryRaw<
+        { id: string; direct: boolean }[]
+      >`
+        SELECT o.id, ${direct} AS direct
         FROM job_offers o
-        LEFT JOIN job_categories c ON c.id = o.category_id
         WHERE o.deleted_at IS NULL
           AND o.status::text IN (${Prisma.join(OPEN_JOB_STATUSES)})
           AND ${match}
       `;
-      where.id = { in: hits.map((h) => h.id) };
+      // The offers that say it first, then the rest of their sector. By id,
+      // so the search composes with the filters above — the city filter
+      // included, which also lives in `where.AND`.
+      const within = (ids: string[]) => ({ ...where, id: { in: ids } });
+      ({ rows, total } = await pageByTier(splitTiers(hits), skip, take, {
+        count: (ids) => this.prisma.jobOffer.count({ where: within(ids) }),
+        rows: (ids, s, t) => find(within(ids), s, t),
+      }));
+    } else {
+      [rows, total] = await Promise.all([
+        find(where, skip, take),
+        this.prisma.jobOffer.count({ where }),
+      ]);
     }
-
-    const [rows, total] = await Promise.all([
-      this.prisma.jobOffer.findMany({
-        where,
-        select: JOB_SEARCH_SELECT,
-        orderBy: this.jobSearchOrderBy(sort),
-        skip,
-        take,
-      }),
-      this.prisma.jobOffer.count({ where }),
-    ]);
 
     const ids = rows.map((r) => r.id);
     const [saved, applied] = await Promise.all([

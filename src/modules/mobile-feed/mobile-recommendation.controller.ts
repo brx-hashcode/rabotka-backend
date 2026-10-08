@@ -31,9 +31,12 @@ import {
 import { withCityFilter } from '../../common/queries/city-filter';
 import { PortfolioService } from '../portfolio/portfolio.service';
 import {
-  allTokensMatch,
   foldedText,
+  pageByTier,
+  searchClauses,
   searchTokens,
+  sectorsOf,
+  splitTiers,
 } from '../../common/queries/text-search';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
@@ -466,23 +469,45 @@ export class MobileRecommendationController {
     // Structured `city` first, free-text `address` as the fallback.
     where = withCityFilter(where, city);
 
-    // Forgiving text search over name, trades and description, resolved to
-    // ids so it composes with the filters above — the city filter included,
-    // which also lives in `where.AND`.
+    const find = (w: Prisma.ProfileWhereInput, s: number, t: number) =>
+      this.prisma.profile.findMany({
+        where: w,
+        select: WORKER_SELECT,
+        skip: s,
+        take: t,
+        orderBy: [{ reliability_score: 'desc' }, { rating_avg: 'desc' }],
+      });
+
+    // Forgiving text search over name, trades and description — accents,
+    // word order, partial words, other forms and misspellings — then the
+    // rest of the sector: « developpeur » also lists the workers of
+    // Informatique (common/queries/text-search.ts).
+    let profiles: Awaited<ReturnType<typeof find>>;
+    let total: number;
     const tokens = searchTokens(q);
     if (tokens.length > 0) {
-      const match = allTokensMatch(tokens, {
-        // Names and trades are short: a misspelling still finds them
-        // (« Mabialla », « plombir »).
-        fuzzy: foldedText(
-          Prisma.sql`p.first_name`,
-          Prisma.sql`p.last_name`,
-          Prisma.sql`trades.names`,
-        ),
-        exact: [foldedText(Prisma.sql`p.description`)],
-      });
-      const hits = await this.prisma.$queryRaw<{ id: string }[]>`
-        SELECT p.id
+      const { match, direct } = searchClauses(
+        tokens,
+        {
+          // Names and trades are short: a misspelling still finds them
+          // (« Mabialla », « plombir »).
+          fuzzy: foldedText(
+            Prisma.sql`p.first_name`,
+            Prisma.sql`p.last_name`,
+            Prisma.sql`trades.names`,
+          ),
+          exact: [foldedText(Prisma.sql`p.description`)],
+        },
+        await sectorsOf(this.prisma, tokens),
+        (ids) => Prisma.sql`EXISTS (
+          SELECT 1 FROM profile_categories pc
+          WHERE pc.profile_id = p.id AND pc.category_id::text IN (${ids})
+        )`,
+      );
+      const hits = await this.prisma.$queryRaw<
+        { id: string; direct: boolean }[]
+      >`
+        SELECT p.id, ${direct} AS direct
         FROM profiles p
         LEFT JOIN LATERAL (
           SELECT string_agg(c.name, ' ') AS names
@@ -496,19 +521,24 @@ export class MobileRecommendationController {
           AND p.verification_status = 'VERIFIED'
           AND ${match}
       `;
-      where.id = { in: hits.map((h) => h.id) };
-    }
-
-    const [profiles, total] = await Promise.all([
-      this.prisma.profile.findMany({
-        where,
-        select: WORKER_SELECT,
+      // By id, so the search composes with the filters above — the city
+      // filter included, which also lives in `where.AND`.
+      const within = (ids: string[]) => ({ ...where, id: { in: ids } });
+      ({ rows: profiles, total } = await pageByTier(
+        splitTiers(hits),
         skip,
         take,
-        orderBy: [{ reliability_score: 'desc' }, { rating_avg: 'desc' }],
-      }),
-      this.prisma.profile.count({ where }),
-    ]);
+        {
+          count: (ids) => this.prisma.profile.count({ where: within(ids) }),
+          rows: (ids, s, t) => find(within(ids), s, t),
+        },
+      ));
+    } else {
+      [profiles, total] = await Promise.all([
+        find(where, skip, take),
+        this.prisma.profile.count({ where }),
+      ]);
+    }
 
     const ids = profiles.map((p) => p.id);
     const [endCounts, contactCounts] =

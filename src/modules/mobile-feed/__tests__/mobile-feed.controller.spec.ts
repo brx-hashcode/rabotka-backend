@@ -32,6 +32,16 @@ const searchRow = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+/** $queryRaw answering the sector lookups and the search itself. */
+function raw(
+  sectors: { id: string }[],
+  hits: { id: string; direct: boolean }[],
+) {
+  return jest.fn((strings: TemplateStringsArray) =>
+    Promise.resolve(strings.join('').includes('WITH hits') ? sectors : hits),
+  );
+}
+
 describe('MobileFeedController', () => {
   let controller: MobileFeedController;
   let prisma: {
@@ -310,26 +320,42 @@ describe('MobileFeedController', () => {
       });
     });
 
-    it('narrows to the jobs the text search matched, keeping the city filter', async () => {
+    it('lists the offers that say it, then their sector, keeping the city filter', async () => {
       mockType(ProfileType.WORKER);
-      prisma.$queryRaw.mockResolvedValue([{ id: 'j1' }, { id: 'j2' }]);
+      prisma.$queryRaw = raw(
+        [{ id: 'cat-menage' }],
+        [
+          { id: 'j-sector', direct: false },
+          { id: 'j-titled', direct: true },
+        ],
+      );
+      prisma.jobOffer.count.mockResolvedValue(1);
       await controller.jobSearch(reqFor('w1') as never, {
         q: 'Ménage bacongo',
         city: 'Brazzaville',
       });
 
-      expect(lastWhere().id).toEqual({ in: ['j1', 'j2'] });
+      const wheres = allWheres();
+      expect(wheres[0].id).toEqual({ in: ['j-titled'] });
+      expect(wheres[1].id).toEqual({ in: ['j-sector'] });
       // The search no longer overwrites `AND`, where the city filter lives.
-      expect(lastWhere().AND).toHaveLength(1);
-      const values = JSON.stringify(prisma.$queryRaw.mock.calls[0].slice(1));
+      expect(wheres[0].AND).toHaveLength(1);
+      const values = JSON.stringify(
+        prisma.$queryRaw.mock.calls.at(-1).slice(1),
+      );
       expect(values).toContain('%menage%');
       expect(values).toContain('%bacongo%');
+      expect(values).toContain('cat-menage');
     });
 
     it('matches nothing when the search matched nothing', async () => {
       mockType(ProfileType.WORKER);
-      await controller.jobSearch(reqFor('w1') as never, { q: 'zzzz' });
-      expect(lastWhere().id).toEqual({ in: [] });
+      prisma.$queryRaw = raw([], []);
+      const result = await controller.jobSearch(reqFor('w1') as never, {
+        q: 'zzzz',
+      });
+      expect(result).toEqual({ items: [], total: 0 });
+      expect(prisma.jobOffer.findMany).not.toHaveBeenCalled();
     });
 
     it('skips the search query for a blank or stopword-only text', async () => {
@@ -339,14 +365,16 @@ describe('MobileFeedController', () => {
       expect(lastWhere().id).toBeUndefined();
     });
 
-    it('searches title and category fuzzily, description/address/reference as written', async () => {
+    it('searches the title fuzzily, description/address/reference as written', async () => {
       mockType(ProfileType.WORKER);
+      prisma.$queryRaw = raw([], []);
       await controller.jobSearch(reqFor('w1') as never, { q: 'developer' });
-      const values = JSON.stringify(prisma.$queryRaw.mock.calls[0].slice(1));
+      const values = JSON.stringify(
+        prisma.$queryRaw.mock.calls.at(-1).slice(1),
+      );
       expect(values).toContain('strict_word_similarity');
       for (const field of [
         'o.title',
-        'c.name',
         'o.description',
         'o.address',
         'o.reference',
@@ -480,6 +508,8 @@ describe('MobileFeedController', () => {
 
     it('counts with the same where as the page query', async () => {
       mockType(ProfileType.WORKER);
+      prisma.$queryRaw = raw([], [{ id: 'j1', direct: true }]);
+      prisma.jobOffer.count.mockResolvedValue(1);
       await controller.jobSearch(reqFor('w1') as never, { q: 'menage' });
       expect(prisma.jobOffer.count).toHaveBeenCalledWith({
         where: lastWhere(),

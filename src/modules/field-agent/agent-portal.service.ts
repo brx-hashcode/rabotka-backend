@@ -9,6 +9,7 @@ import {
   ProfileType,
   VerificationStatus,
 } from '@prisma/client';
+import { pageByTier } from '../../common/queries/text-search';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { MatchingService } from '../matching/matching.service';
 import { rankWorkersForOffer } from '../matching/rank-workers-for-offer';
@@ -36,7 +37,7 @@ import {
   type PublicJobsFilter,
   type Zone,
 } from './agent-zones';
-import { matchingJobIds } from './job-search';
+import { matchingJobTiers } from './job-search';
 
 /** Applications that hold a seat, as `accept()` counts them. */
 const SEAT_HOLDING: ApplicationStatus[] = [
@@ -80,20 +81,13 @@ export class AgentPortalService {
     }
 
     const scope = jobsInZonesWhere(zones);
-    const filters = await this.withTextSearch(params);
-    const where = withFilters(scope, filters);
-
-    const [total, rows, facets] = await Promise.all([
-      this.prisma.jobOffer.count({ where }),
-      this.prisma.jobOffer.findMany({
-        where,
-        select: AGENT_JOB_SELECT,
-        orderBy: jobsOrderBy(params.sort),
-        skip: (params.page - 1) * params.limit,
-        take: params.limit,
-      }),
-      this.jobFacets(scope, filters, { withAmount: true }),
-    ]);
+    const { rows, total, filters } = await this.pageJobs(
+      scope,
+      params,
+      AGENT_JOB_SELECT,
+      params,
+    );
+    const facets = await this.jobFacets(scope, filters, { withAmount: true });
 
     const filled = await this.filledSeats(rows.map((r) => r.id));
     return {
@@ -112,24 +106,17 @@ export class AgentPortalService {
     const scope = publicScopeWhere(params);
     // Pay is never part of the public feed, not even as a filter: a range
     // query would let anyone bisect an offer's amount.
-    const filters = await this.withTextSearch({
-      q: params.q,
-      employmentTypes: params.employmentTypes,
-      categories: params.categories,
-    });
-    const where = withFilters(scope, filters);
-
-    const [total, rows, facets] = await Promise.all([
-      this.prisma.jobOffer.count({ where }),
-      this.prisma.jobOffer.findMany({
-        where,
-        select: PUBLIC_JOB_SELECT,
-        orderBy: jobsOrderBy(params.sort),
-        skip: (params.page - 1) * params.limit,
-        take: params.limit,
-      }),
-      this.jobFacets(scope, filters, { withAmount: false }),
-    ]);
+    const { rows, total, filters } = await this.pageJobs(
+      scope,
+      {
+        q: params.q,
+        employmentTypes: params.employmentTypes,
+        categories: params.categories,
+      },
+      PUBLIC_JOB_SELECT,
+      params,
+    );
+    const facets = await this.jobFacets(scope, filters, { withAmount: false });
 
     const filled = await this.filledSeats(rows.map((r) => r.id));
     return {
@@ -142,12 +129,48 @@ export class AgentPortalService {
   }
 
   /**
-   * Resolves the search text to the matching job ids once, so the list, the
-   * count and every facet agree on it.
+   * One page of jobs. With a search, the jobs that say it come first, then
+   * the rest of its sectors (`matchingJobTiers`); the returned `filters`
+   * carry both tiers' ids, so the facets count what the list shows.
    */
-  private async withTextSearch<F extends JobFilters>(filters: F): Promise<F> {
-    const ids = await matchingJobIds(this.prisma, filters.q);
-    return ids ? { ...filters, matchingIds: ids } : filters;
+  private async pageJobs<S extends Prisma.JobOfferSelect>(
+    scope: Prisma.JobOfferWhereInput,
+    filters: JobFilters,
+    select: S,
+    params: { page: number; limit: number; sort?: JobSort },
+  ): Promise<{
+    rows: Prisma.JobOfferGetPayload<{ select: S }>[];
+    total: number;
+    filters: JobFilters;
+  }> {
+    const skip = (params.page - 1) * params.limit;
+    const orderBy = jobsOrderBy(params.sort);
+    const find = (where: Prisma.JobOfferWhereInput, s: number, take: number) =>
+      this.prisma.jobOffer.findMany({
+        where,
+        select,
+        orderBy,
+        skip: s,
+        take,
+      }) as unknown as Promise<Prisma.JobOfferGetPayload<{ select: S }>[]>;
+
+    const tiers = await matchingJobTiers(this.prisma, filters.q);
+    if (!tiers) {
+      const where = withFilters(scope, filters);
+      const [total, rows] = await Promise.all([
+        this.prisma.jobOffer.count({ where }),
+        find(where, skip, params.limit),
+      ]);
+      return { rows, total, filters };
+    }
+
+    const within = (ids: string[]) =>
+      withFilters(scope, { ...filters, matchingIds: ids });
+    const { rows, total } = await pageByTier(tiers, skip, params.limit, {
+      count: (ids) => this.prisma.jobOffer.count({ where: within(ids) }),
+      rows: (ids, s, take) => find(within(ids), s, take),
+    });
+    return { rows, total, filters: { ...filters, matchingIds: tiers.flat() } };
   }
 
   /**
