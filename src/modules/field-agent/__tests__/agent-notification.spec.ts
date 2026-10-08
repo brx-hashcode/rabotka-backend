@@ -140,12 +140,14 @@ describe('AgentNotificationService.notify', () => {
 describe('AgentEventsConsumer', () => {
   function make(prisma: any) {
     const notifications = { notify: jest.fn().mockResolvedValue(null) };
+    const events = { emit: jest.fn() };
     const consumer = new AgentEventsConsumer(
       prisma,
       { get: () => undefined } as any,
       notifications as any,
+      events as any,
     );
-    return { consumer, notifications };
+    return { consumer, notifications, events };
   }
 
   /** The claim returns `rows` once, then nothing. */
@@ -251,5 +253,31 @@ describe('AgentEventsConsumer', () => {
       },
       'job:j3:a-dla',
     );
+  });
+
+  it('hands an accepted application to the listeners, not to agents', async () => {
+    const prisma = {
+      $queryRaw: outbox([
+        {
+          id: 9n,
+          kind: 'application_accepted',
+          entity_id: 'app-9',
+          payload: { workerId: 'w-9', jobOfferId: 'job-9' },
+        },
+      ]),
+      $executeRaw: jest.fn().mockResolvedValue(0),
+    };
+    const { consumer, notifications, events } = make(prisma);
+
+    consumer.wake();
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    expect(events.emit).toHaveBeenCalledWith('application.accepted', {
+      applicationId: 'app-9',
+      workerId: 'w-9',
+      jobOfferId: 'job-9',
+    });
+    expect(notifications.notify).not.toHaveBeenCalled();
   });
 });

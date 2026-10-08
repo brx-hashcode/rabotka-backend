@@ -114,7 +114,13 @@ type RecommendedWorker = {
    */
   timesContacted: { total: number; mission: number; direct: number };
   portfolioSlug: string | null;
+  /** Ranking order. Not a percentage to show — use `matchScore`. */
   score: number;
+  /**
+   * How well this worker fits the employer's trades, 0–1 (the « compatibilité »
+   * to display). Null when there is no fit evidence: show nothing.
+   */
+  matchScore: number | null;
 };
 
 @ApiTags('Mobile — Recommendations')
@@ -238,7 +244,10 @@ export class MobileRecommendationController {
     profileId: string,
     topN: number,
     contactedIds: Set<string>,
-  ): Promise<{ hits: { id: string; score: number }[]; engine: FeedEngine }> {
+  ): Promise<{
+    hits: { id: string; score: number; matchScore?: number | null }[];
+    engine: FeedEngine;
+  }> {
     // Reported separately from the tier because the two answer different
     // questions: the tier says which list the employer got, `engine` says
     // whether a ranker was ever consulted. `disabled` is the one that matters —
@@ -258,7 +267,11 @@ export class MobileRecommendationController {
         );
         if (ranked.length > 0) {
           return {
-            hits: ranked.map((r) => ({ id: r.id, score: r.score })),
+            hits: ranked.map((r) => ({
+              id: r.id,
+              score: r.score,
+              matchScore: r.matchScore,
+            })),
             engine: 'v2',
           };
         }
@@ -295,7 +308,7 @@ export class MobileRecommendationController {
     categoryIds: string[],
     contactedIds: Set<string>,
     take: number,
-  ): Promise<{ id: string; score: number }[]> {
+  ): Promise<{ id: string; score: number; matchScore?: number | null }[]> {
     const fees = await this.systemConfig.getFees();
     const rows = await this.prisma.profile.findMany({
       where: {
@@ -504,7 +517,7 @@ export class MobileRecommendationController {
   // --- helpers ---
 
   private async hydrate(
-    hits: { id: string; score: number }[],
+    hits: { id: string; score: number; matchScore?: number | null }[],
     opts: { skipEligibility?: boolean } = {},
   ): Promise<RecommendedWorker[]> {
     if (hits.length === 0) return [];
@@ -549,6 +562,7 @@ export class MobileRecommendationController {
     const contactedById = this.tallyContacts(contactCounts);
     const byId = new Map(profiles.map((p) => [p.id, p]));
     const scoreById = new Map(hits.map((h) => [h.id, h.score]));
+    const matchById = new Map(hits.map((h) => [h.id, h.matchScore ?? null]));
 
     return ids
       .map((id) => byId.get(id))
@@ -559,6 +573,7 @@ export class MobileRecommendationController {
           endById.get(p.id) ?? 0,
           scoreById.get(p.id) ?? 0,
           contactedById.get(p.id) ?? { total: 0, mission: 0, direct: 0 },
+          matchById.get(p.id) ?? null,
         ),
       );
   }
@@ -581,6 +596,7 @@ export class MobileRecommendationController {
     completedMissions: number,
     score: number,
     timesContacted: { total: number; mission: number; direct: number },
+    matchScore: number | null = null,
   ): RecommendedWorker {
     return {
       id: p.id,
@@ -601,6 +617,7 @@ export class MobileRecommendationController {
       timesContacted,
       portfolioSlug: p.portfolio_slug,
       score,
+      matchScore,
     };
   }
 

@@ -5,8 +5,13 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AgentStatus, ApplicationStatus } from '@prisma/client';
 import { Client } from 'pg';
+import {
+  APPLICATION_ACCEPTED_EVENT,
+  type ApplicationAcceptedPayload,
+} from '../../common/events/application-accepted.event';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import type { AgentNotificationInput } from './agent-notification-catalog';
 import { AgentNotificationService } from './agent-notification.service';
@@ -64,6 +69,7 @@ export class AgentEventsConsumer implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly notifications: AgentNotificationService,
+    private readonly events: EventEmitter2,
   ) {}
 
   onModuleInit(): void {
@@ -150,6 +156,11 @@ export class AgentEventsConsumer implements OnModuleInit, OnModuleDestroy {
           this.logger.error(`Placement event ${row.id} failed`, err),
         );
       }
+      // Not an agent concern: handed to whoever listens (the similar-hire
+      // nudge), so this module stays unaware of them.
+      for (const row of rows.filter((r) => r.kind === 'application_accepted')) {
+        this.emitAccepted(row);
+      }
       const jobs = rows.filter((r) => r.kind === 'job_active');
       if (jobs.length > 0) {
         await this.newJobs(jobs.map((r) => r.entity_id)).catch((err) =>
@@ -162,6 +173,21 @@ export class AgentEventsConsumer implements OnModuleInit, OnModuleDestroy {
     await this.prisma.$executeRaw`
       DELETE FROM agent_event_outbox
       WHERE processed_at < now() - make_interval(days => ${KEEP_PROCESSED_DAYS})`;
+  }
+
+  private emitAccepted(row: OutboxRow): void {
+    const workerId = row.payload.workerId;
+    const jobOfferId = row.payload.jobOfferId;
+    if (typeof workerId !== 'string' || typeof jobOfferId !== 'string') return;
+    try {
+      this.events.emit(APPLICATION_ACCEPTED_EVENT, {
+        applicationId: row.entity_id,
+        workerId,
+        jobOfferId,
+      } satisfies ApplicationAcceptedPayload);
+    } catch (err) {
+      this.logger.error(`application_accepted ${row.id} failed`, err);
+    }
   }
 
   private async placement(row: OutboxRow): Promise<void> {

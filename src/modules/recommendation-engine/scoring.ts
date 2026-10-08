@@ -80,16 +80,25 @@ export type ScoreWeights = Record<keyof ScoreTerms, number>;
  * who is on the other side. It is NOT paid for by the personalized terms:
  * matching someone to work they want stays the point.
  */
+/**
+ * `sim` is weighted from the very first request. It used to be 0 here, on the
+ * idea that similarity needs history — but the vectors are built from the
+ * profile and the offers themselves, so they exist on day one. At 0 a new
+ * employer's feed was ranked on distance, freshness and reliability alone, and
+ * the one signal saying whether a worker fits the trade was ignored exactly
+ * when there was nothing else to go on. The other terms keep their old
+ * proportions, scaled to make room.
+ */
 export const COLD_WEIGHTS: ScoreWeights = {
-  sim: 0.0,
-  catAff: 0.15,
+  sim: 0.25,
+  catAff: 0.1125,
   partyAff: 0.0,
   cf: 0.0,
-  prox: 0.35,
-  urgency: 0.14,
-  fresh: 0.13,
-  quality: 0.18,
-  payFit: 0.05,
+  prox: 0.2625,
+  urgency: 0.105,
+  fresh: 0.0975,
+  quality: 0.135,
+  payFit: 0.0375,
 };
 
 export const WARM_WEIGHTS: ScoreWeights = {
@@ -164,6 +173,83 @@ export const SIMILARITY_FLOOR = 0.75;
 export function spreadSimilarity(calibrated: number): number {
   return clamp01((calibrated - SIMILARITY_FLOOR) / (1 - SIMILARITY_FLOOR));
 }
+
+/**
+ * How well a candidate FITS what is asked — the « compatibilité » shown to
+ * people — from fit evidence only: the profile/offer similarity on its fixed
+ * absolute scale (`spreadSimilarity`) and whether the trades match.
+ *
+ * Deliberately NOT the ranking score. Ranking also weighs proximity,
+ * freshness and reliability, which say "worth showing first", not "suited to
+ * the job" — and because `computeRelevance` drops missing terms, a nearby,
+ * active, reliable but unrelated worker reached 1.0 there and was displayed as
+ * a 100 % match.
+ *
+ * - With similarity: mostly similarity, the trade match on top. With no
+ *   target trade to compare, similarity alone.
+ * - Trade evidence only: a match is promising but unproven (0.55, never
+ *   "very compatible"); a mismatch is low.
+ * - No evidence at all: null — show nothing rather than a number we made up.
+ */
+export function fitScore(evidence: {
+  sim: number | null;
+  /** null when the target has no trade to compare against. */
+  categoryMatch: boolean | null;
+  /**
+   * Learned engagement with the candidate's category (0–1), when there is
+   * any. Counts as trade evidence alongside the exact match: someone who keeps
+   * acting on this trade fits it, declared or not.
+   */
+  categoryAffinity?: number | null;
+}): number | null {
+  const { sim, categoryMatch, categoryAffinity } = evidence;
+  const affinity =
+    categoryAffinity != null && Number.isFinite(categoryAffinity)
+      ? clamp01(categoryAffinity)
+      : null;
+  const category =
+    categoryMatch === true
+      ? 1
+      : affinity !== null
+        ? affinity
+        : categoryMatch === false
+          ? 0
+          : null;
+
+  if (sim != null && Number.isFinite(sim)) {
+    const s = clamp01(sim);
+    if (category === null) return s;
+    return clamp01(FIT_SIM_WEIGHT * s + (1 - FIT_SIM_WEIGHT) * category);
+  }
+  if (category === null) return null;
+  return (
+    FIT_CATEGORY_ONLY_MISMATCH +
+    (FIT_CATEGORY_ONLY_MATCH - FIT_CATEGORY_ONLY_MISMATCH) * category
+  );
+}
+
+export const FIT_SIM_WEIGHT = 0.75;
+export const FIT_CATEGORY_ONLY_MATCH = 0.55;
+export const FIT_CATEGORY_ONLY_MISMATCH = 0.15;
+
+/**
+ * Folds fit into the ranking score: the usual relevance, scaled by how well
+ * the candidate fits. A perfect fit keeps its relevance; an unrelated one
+ * keeps about a third, however near, fresh or reliable. Unknown fit is
+ * treated as weak, not neutral — no evidence of fit is not a reason to rank
+ * someone first.
+ */
+export function withFit(relevance: number, fit: number | null): number {
+  return clamp01(relevance) * fitFactor(fit);
+}
+
+/** The multiplier `withFit` applies: FIT_FLOOR (no fit) … 1 (perfect fit). */
+export function fitFactor(fit: number | null): number {
+  return FIT_FLOOR + (1 - FIT_FLOOR) * clamp01(fit ?? FIT_UNKNOWN);
+}
+
+export const FIT_FLOOR = 0.35;
+export const FIT_UNKNOWN = 0.2;
 
 export const clamp01 = (n: number): number =>
   Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0;
@@ -605,12 +691,15 @@ export function epsilonGreedySelect<T extends { score: number }>(
  * A relevance threshold must not be able to empty a feed. That already happened
  * once, silently, on three separate code paths, so the floor is structural.
  */
-export function applyThreshold<T extends { score: number }>(
+export function applyThreshold<T extends { score: number; gate?: number }>(
   ranked: T[],
   minScore: number,
   keepAtLeast: number,
 ): T[] {
-  const passing = ranked.filter((r) => r.score >= minScore);
+  // `gate` when present: the relevance before fit was folded in. The
+  // thresholds were tuned on that scale, and fit is meant to reorder who is
+  // shown, not to empty the list — so who passes is judged as before.
+  const passing = ranked.filter((r) => (r.gate ?? r.score) >= minScore);
   const floor = Math.min(Math.max(0, keepAtLeast), ranked.length);
   return passing.length >= floor ? passing : ranked.slice(0, floor);
 }

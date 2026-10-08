@@ -60,6 +60,12 @@ const SAMPLES: NotificationInput[] = [
     claimTitle: 'Paiement',
     status: 'COMPLETED',
   },
+  {
+    type: 'SIMILAR_PROFILE_HIRED',
+    categoryName: 'Manutention',
+    city: 'Brazzaville',
+    step: 'PORTFOLIO',
+  },
 ];
 
 describe('renderNotification', () => {
@@ -174,5 +180,32 @@ describe('personName', () => {
     expect(personName('Awa', 'kouassi', 'X')).toBe('Awa K.');
     expect(personName('Awa', '', 'X')).toBe('Awa');
     expect(personName('  ', 'K', 'Un travailleur')).toBe('Un travailleur');
+  });
+});
+
+describe('SIMILAR_PROFILE_HIRED', () => {
+  it('names the trade and the area, never the person, and gives one step', () => {
+    const r = renderNotification({
+      type: 'SIMILAR_PROFILE_HIRED',
+      categoryName: 'Manutention',
+      city: 'Brazzaville',
+      step: 'PHOTO',
+    });
+    expect(r.title).toBe('Des profils comme le vôtre sont recrutés');
+    expect(r.body).toContain('recruté en Manutention à Brazzaville');
+    // The step leads: the bell clips the body to two lines.
+    expect(r.body).toMatch(/^Ajoutez une photo/);
+    expect(r.link).toBe('/profile');
+  });
+
+  it('links the portfolio step to the portfolio', () => {
+    expect(
+      renderNotification({
+        type: 'SIMILAR_PROFILE_HIRED',
+        categoryName: 'Couture',
+        city: null,
+        step: 'PORTFOLIO',
+      }),
+    ).toMatchObject({ link: '/profile/portfolio' });
   });
 });

@@ -533,6 +533,45 @@ export class QdrantService implements OnModuleInit {
     }));
   }
 
+  /**
+   * Calibrated dense similarity between one stored point (`queryId` in
+   * `queryCollection`) and each of `candidateIds` in `candidateCollection`.
+   *
+   * The comparison a ranking stage needs when candidates came from hybrid or
+   * SQL retrieval, whose scores are fusion ranks, not similarities. Missing
+   * entries mean "no evidence" — the asker was never indexed, or a candidate
+   * was not returned — never zero; callers must not default them to 0.
+   */
+  async similarityToPoint(
+    queryCollection: string,
+    queryId: string,
+    candidateCollection: string,
+    candidateIds: string[],
+  ): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (candidateIds.length === 0) return out;
+    this.assertPrefix(queryCollection);
+    const points = await this.client.retrieve(queryCollection, {
+      ids: [queryId],
+      with_vector: ['dense'],
+      with_payload: false,
+    });
+    const raw = points[0] as unknown as
+      { vector?: { dense?: unknown } } | undefined;
+    const dense = raw?.vector?.dense;
+    if (!Array.isArray(dense) || dense.length === 0) return out;
+
+    const hits = await this.searchDenseWithFilter(
+      candidateCollection,
+      dense as number[],
+      // `has_id` must sit under `must`; Qdrant rejects it at the top level.
+      { must: [{ has_id: candidateIds }] },
+      candidateIds.length,
+    );
+    for (const hit of hits) out.set(String(hit.id), hit.score);
+    return out;
+  }
+
   private assertPrefix(collectionName: string): void {
     if (!collectionName.startsWith(QDRANT_COLLECTION_PREFIX)) {
       throw new Error(

@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { RecommendationEngineService } from '../recommendation-engine.service';
+import { fitFactor } from '../scoring';
 import type { Candidate } from '../candidate-sources';
 import { EMPTY_FEATURES, type UserFeatures } from '../user-feature.service';
 
@@ -221,7 +222,8 @@ describe('RecommendationEngineService', () => {
       deps.sources.employerQuality.mockResolvedValue(new Map([['e1', 1]]));
 
       const [r] = await recommend(1);
-      expect(r.score).toBeCloseTo(1, 2);
+      // Maxed relevance, scaled by the fit factor of a trade affinity alone.
+      expect(r.score).toBeCloseTo(fitFactor(0.55), 2);
     });
 
     it('keeps every score inside [0,1]', async () => {
@@ -846,7 +848,10 @@ describe('RecommendationEngineService.recommendWorkersForEmployer', () => {
       deps.sources.workerQuality.mockResolvedValue(new Map([['w1', 1]]));
 
       const [r] = await recommend(1);
-      expect(r.score).toBeCloseTo(1, 6);
+      // Relevance is maxed on the applicable terms; what remains is the fit
+      // factor — a trade affinity with no measured similarity.
+      expect(r.matchScore).toBeCloseTo(0.55, 6);
+      expect(r.score).toBeCloseTo(fitFactor(0.55), 6);
     });
 
     it('ranks a worker in a high-affinity trade above one in a cold trade', async () => {

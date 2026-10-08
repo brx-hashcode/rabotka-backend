@@ -8,6 +8,7 @@ import { ProfileNotificationsGateway } from './profile-notifications.gateway';
 import { ProfileNotificationController } from './profile-notification.controller';
 import { AdminProfileNotificationController } from './admin-profile-notification.controller';
 import { ProfileNotificationListener } from './profile-notification.listener';
+import { SimilarHireNudgeService } from './similar-hire-nudge.service';
 
 /**
  * The per-profile in-app feed. Deliberately free of WhatsApp — the reminder
@@ -24,6 +25,7 @@ import { ProfileNotificationListener } from './profile-notification.listener';
     ProfileNotificationService,
     ProfileNotificationsGateway,
     ProfileNotificationListener,
+    SimilarHireNudgeService,
   ],
   exports: [ProfileNotificationService],
 })
