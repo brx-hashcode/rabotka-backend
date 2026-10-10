@@ -9,6 +9,7 @@ import {
 import {
   AGENT_CANDIDATE_SELECT,
   AGENT_JOB_SELECT,
+  PUBLIC_JOB_SELECT,
   AGENT_SELF_SELECT,
 } from '../agent-selects';
 
@@ -78,8 +79,13 @@ describe('agent selects', () => {
   it('never selects the employer of a job', () => {
     expect(keysDeep(AGENT_JOB_SELECT)).not.toContain('employer');
     expect(keysDeep(AGENT_JOB_SELECT)).not.toContain('employer_id');
-    // Employer free text — where a phone number ends up.
-    expect(keysDeep(AGENT_JOB_SELECT)).not.toContain('note');
+  });
+
+  it('gives signed-in agents the note, never the public page', () => {
+    // The note (« Note complémentaire ») reaches workers too, and an agent
+    // pitching the job needs it. The public page is read by anyone.
+    expect(keysDeep(AGENT_JOB_SELECT)).toContain('note');
+    expect(keysDeep(PUBLIC_JOB_SELECT)).not.toContain('note');
   });
 
   it('never selects a worker contact detail', () => {

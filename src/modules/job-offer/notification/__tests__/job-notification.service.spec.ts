@@ -183,8 +183,6 @@ describe('JobNotificationService', () => {
           minScore: 0.55,
           // The threshold must be allowed to return nothing here.
           keepAtLeast: 0,
-          explore: false,
-          strictCategory: true,
         }),
       );
       expect(matching.findMatchingWorkersForJob).not.toHaveBeenCalled();
