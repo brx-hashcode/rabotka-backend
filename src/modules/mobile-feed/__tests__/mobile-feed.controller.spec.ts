@@ -32,6 +32,16 @@ const searchRow = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+/** $queryRaw answering the sector lookups and the search itself. */
+function raw(
+  sectors: { id: string }[],
+  hits: { id: string; direct: boolean }[],
+) {
+  return jest.fn((strings: TemplateStringsArray) =>
+    Promise.resolve(strings.join('').includes('WITH hits') ? sectors : hits),
+  );
+}
+
 describe('MobileFeedController', () => {
   let controller: MobileFeedController;
   let prisma: {
@@ -75,6 +85,7 @@ describe('MobileFeedController', () => {
         count: jest.fn().mockResolvedValue(0),
       },
       jobCategory: { findMany: jest.fn().mockResolvedValue([]) },
+      $queryRaw: jest.fn().mockResolvedValue([]),
       profileCategory: { findMany: jest.fn().mockResolvedValue([]) },
       savedJob: { findMany: jest.fn().mockResolvedValue([]) },
       application: { findMany: jest.fn().mockResolvedValue([]) },
@@ -309,50 +320,67 @@ describe('MobileFeedController', () => {
       });
     });
 
-    it('ANDs each token and ORs it across title/description/address/reference', async () => {
+    it('lists the offers that say it, then their sector, keeping the city filter', async () => {
       mockType(ProfileType.WORKER);
+      prisma.$queryRaw = raw(
+        [{ id: 'cat-menage' }],
+        [
+          { id: 'j-sector', direct: false },
+          { id: 'j-titled', direct: true },
+        ],
+      );
+      prisma.jobOffer.count.mockResolvedValue(1);
       await controller.jobSearch(reqFor('w1') as never, {
-        q: 'menage bacongo',
+        q: 'Ménage bacongo',
+        city: 'Brazzaville',
       });
 
-      const and = lastWhere().AND;
-      expect(and).toHaveLength(2);
-      expect(and[0].OR).toEqual([
-        { title: { contains: 'menage', mode: 'insensitive' } },
-        { description: { contains: 'menage', mode: 'insensitive' } },
-        { address: { contains: 'menage', mode: 'insensitive' } },
-        { reference: { contains: 'menage', mode: 'insensitive' } },
-      ]);
+      const wheres = allWheres();
+      expect(wheres[0].id).toEqual({ in: ['j-titled'] });
+      expect(wheres[1].id).toEqual({ in: ['j-sector'] });
+      // The search no longer overwrites `AND`, where the city filter lives.
+      expect(wheres[0].AND).toHaveLength(1);
+      const values = JSON.stringify(
+        prisma.$queryRaw.mock.calls.at(-1).slice(1),
+      );
+      expect(values).toContain('%menage%');
+      expect(values).toContain('%bacongo%');
+      expect(values).toContain('cat-menage');
     });
 
-    it('caps the token chain at 6', async () => {
+    it('matches nothing when the search matched nothing', async () => {
       mockType(ProfileType.WORKER);
-      await controller.jobSearch(reqFor('w1') as never, {
-        q: 'a b c d e f g h',
+      prisma.$queryRaw = raw([], []);
+      const result = await controller.jobSearch(reqFor('w1') as never, {
+        q: 'zzzz',
       });
-      expect(lastWhere().AND).toHaveLength(6);
+      expect(result).toEqual({ items: [], total: 0 });
+      expect(prisma.jobOffer.findMany).not.toHaveBeenCalled();
     });
 
-    it('adds a category_id branch for a domaine match, ignoring accents', async () => {
+    it('skips the search query for a blank or stopword-only text', async () => {
       mockType(ProfileType.WORKER);
-      prisma.jobCategory.findMany.mockResolvedValue([
-        { id: 'c1', name: 'Ménage' },
-        { id: 'c2', name: 'Plomberie' },
-      ]);
-
-      await controller.jobSearch(reqFor('w1') as never, { q: 'menage' });
-
-      expect(lastWhere().AND[0].OR).toContainEqual({
-        category_id: { in: ['c1'] },
-      });
+      await controller.jobSearch(reqFor('w1') as never, { q: '  de la ' });
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+      expect(lastWhere().id).toBeUndefined();
     });
 
-    it('matches a lowercase legacy reference through the reference branch', async () => {
+    it('searches the title fuzzily, description/address/reference as written', async () => {
       mockType(ProfileType.WORKER);
-      await controller.jobSearch(reqFor('w1') as never, { q: 'rab-7k3x9' });
-      expect(lastWhere().AND[0].OR).toContainEqual({
-        reference: { contains: 'rab-7k3x9', mode: 'insensitive' },
-      });
+      prisma.$queryRaw = raw([], []);
+      await controller.jobSearch(reqFor('w1') as never, { q: 'developer' });
+      const values = JSON.stringify(
+        prisma.$queryRaw.mock.calls.at(-1).slice(1),
+      );
+      expect(values).toContain('strict_word_similarity');
+      for (const field of [
+        'o.title',
+        'o.description',
+        'o.address',
+        'o.reference',
+      ]) {
+        expect(values).toContain(field);
+      }
     });
 
     it('falls back to pageSize 15 when it is 0 or garbage', async () => {
@@ -480,6 +508,8 @@ describe('MobileFeedController', () => {
 
     it('counts with the same where as the page query', async () => {
       mockType(ProfileType.WORKER);
+      prisma.$queryRaw = raw([], [{ id: 'j1', direct: true }]);
+      prisma.jobOffer.count.mockResolvedValue(1);
       await controller.jobSearch(reqFor('w1') as never, { q: 'menage' });
       expect(prisma.jobOffer.count).toHaveBeenCalledWith({
         where: lastWhere(),

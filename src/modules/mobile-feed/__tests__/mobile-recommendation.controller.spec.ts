@@ -21,6 +21,16 @@ const workerRow = (id: string, over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+/** $queryRaw answering the sector lookups and the search itself. */
+function raw(
+  sectors: { id: string }[],
+  hits: { id: string; direct: boolean }[],
+) {
+  return jest.fn((strings: TemplateStringsArray) =>
+    Promise.resolve(strings.join('').includes('WITH hits') ? sectors : hits),
+  );
+}
+
 describe('MobileRecommendationController — worker-feed tiers', () => {
   let controller: MobileRecommendationController;
   let prisma: {
@@ -86,6 +96,7 @@ describe('MobileRecommendationController — worker-feed tiers', () => {
       contactRecord: { groupBy: jest.fn().mockResolvedValue([]) },
       walletTransaction: { findMany: jest.fn().mockResolvedValue([]) },
       paymentRequest: { findMany: jest.fn().mockResolvedValue([]) },
+      $queryRaw: jest.fn().mockResolvedValue([]),
     };
     // Similarity off by default — the common production case.
     matching = {
@@ -350,6 +361,55 @@ describe('MobileRecommendationController — worker-feed tiers', () => {
 
       const result = await controller.workerFeed(reqFor('e1') as never);
       expect(result.map((w) => w.id)).toEqual(['w-any']);
+    });
+  });
+
+  describe('worker-search', () => {
+    const searchWhere = () =>
+      prisma.profile.findMany.mock.calls.at(-1)?.[0].where;
+
+    it('lists the workers who say it, then their trade, keeping the city filter', async () => {
+      mockType(ProfileType.EMPLOYER);
+      prisma.profile.count = jest.fn().mockResolvedValue(1);
+      prisma.$queryRaw = raw(
+        [{ id: 'cat-plomberie' }],
+        [
+          { id: 'w-sector', direct: false },
+          { id: 'w1', direct: true },
+        ],
+      );
+
+      await controller.workerSearch(
+        reqFor('e1') as never,
+        'Mabialla plombir',
+        undefined,
+        undefined,
+        undefined,
+        'Brazzaville',
+      );
+
+      // The workers who say it, then the rest of their trade.
+      const wheres = prisma.profile.findMany.mock.calls.map(
+        (c: any[]) => c[0].where,
+      );
+      expect(wheres[0].id).toEqual({ in: ['w1'] });
+      expect(wheres[1].id).toEqual({ in: ['w-sector'] });
+      expect(wheres[0].AND).toHaveLength(1);
+      const values = JSON.stringify(
+        prisma.$queryRaw.mock.calls.at(-1).slice(1),
+      );
+      expect(values).toContain('cat-plomberie');
+      expect(values).toContain('mabialla');
+      expect(values).toContain('strict_word_similarity');
+      expect(values).toContain('trades.names');
+    });
+
+    it('runs no search query for a blank text', async () => {
+      mockType(ProfileType.EMPLOYER);
+      prisma.profile.count = jest.fn().mockResolvedValue(0);
+      await controller.workerSearch(reqFor('e1') as never, '   ');
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+      expect(searchWhere().id).toBeUndefined();
     });
   });
 });

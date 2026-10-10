@@ -23,6 +23,16 @@ import {
   parseSort,
 } from '../job-list-query';
 
+/** $queryRaw answering the sector lookups and the search itself. */
+function raw(
+  sectors: { id: string }[],
+  hits: { id: string; direct: boolean }[],
+) {
+  return jest.fn((strings: TemplateStringsArray) =>
+    Promise.resolve(strings.join('').includes('WITH hits') ? sectors : hits),
+  );
+}
+
 const ZONE = { country_code: 'CG', city: 'Brazzaville' };
 
 const JOB_ROW = {
@@ -131,6 +141,16 @@ describe('jobFiltersWhere', () => {
       { employment_type: { in: [EmploymentType.CDD] } },
       { category: { slug: { in: ['plomberie'] } } },
       { amount: { gte: 5000 } },
+    ]);
+  });
+
+  it('narrows to the resolved search ids instead of the plain substring', () => {
+    expect(jobFiltersWhere({ q: 'developer', matchingIds: ['j1'] })).toEqual([
+      { id: { in: ['j1'] } },
+    ]);
+    // A search that matched nothing still filters — to nothing.
+    expect(jobFiltersWhere({ q: 'zzz', matchingIds: [] })).toEqual([
+      { id: { in: [] } },
     ]);
   });
 
@@ -285,6 +305,35 @@ describe('AgentPortalService', () => {
         },
       });
       expect(args).toMatchObject({ skip: 10, take: 10 });
+    });
+
+    it('lists the jobs that say it before the rest of their sector', async () => {
+      prisma.$queryRaw = raw(
+        [{ id: 'cat-it' }],
+        [
+          { id: 'sector-job', direct: false },
+          { id: 'titled-job', direct: true },
+        ],
+      );
+      await service.listPublicJobs({ page: 1, limit: 20, q: 'Développeur' });
+
+      const pages = prisma.jobOffer.findMany.mock.calls.map(
+        (c: any[]) => c[0].where.AND,
+      );
+      expect(pages[0]).toContainEqual({ id: { in: ['titled-job'] } });
+      expect(pages[1]).toContainEqual({ id: { in: ['sector-job'] } });
+      // The facets count what the list shows: both tiers.
+      for (const call of prisma.jobOffer.groupBy.mock.calls) {
+        expect(call[0].where.AND).toContainEqual({
+          id: { in: ['titled-job', 'sector-job'] },
+        });
+      }
+    });
+
+    it('skips the search query when the text has no usable word', async () => {
+      prisma.$queryRaw = jest.fn();
+      await service.listPublicJobs({ page: 1, limit: 20, q: ' de - ' });
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
     });
 
     it('never filters or reports on pay', async () => {

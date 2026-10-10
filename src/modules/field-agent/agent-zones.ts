@@ -1,7 +1,7 @@
 import { EmploymentType, JobOfferStatus, Prisma } from '@prisma/client';
 
 /** Offers an agent can still do something about. */
-const OPEN_STATUSES: JobOfferStatus[] = [
+export const OPEN_STATUSES: JobOfferStatus[] = [
   JobOfferStatus.ACTIVE,
   JobOfferStatus.PARTIALLY_FILLED,
 ];
@@ -44,6 +44,12 @@ export function jobsInZonesWhere(zones: Zone[]): Prisma.JobOfferWhereInput {
 /** Narrowing a job list, shared by the public feed and an agent's own feed. */
 export type JobFilters = {
   q?: string;
+  /**
+   * Jobs matching `q`, resolved beforehand by `matchingJobIds` (accents,
+   * partial words and misspellings). When set it replaces `q`'s plain
+   * substring match.
+   */
+  matchingIds?: string[];
   employmentTypes?: EmploymentType[];
   /** Category slugs. */
   categories?: string[];
@@ -74,7 +80,9 @@ export function jobsOrderBy(
 export function jobFiltersWhere(f: JobFilters): Prisma.JobOfferWhereInput[] {
   const and: Prisma.JobOfferWhereInput[] = [];
 
-  if (f.q) {
+  if (f.matchingIds) {
+    and.push({ id: { in: f.matchingIds } });
+  } else if (f.q) {
     and.push({
       OR: [
         { title: { contains: f.q, mode: 'insensitive' } },
