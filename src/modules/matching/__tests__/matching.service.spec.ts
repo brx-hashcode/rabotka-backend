@@ -1,6 +1,15 @@
 import { MatchingService } from '../matching.service';
 import { fitFactor } from '../../recommendation-engine/scoring';
 import { INDEX_SCHEMA_VERSION } from '../../qdrant/qdrant.config';
+import { jobCategories } from '../job-categories';
+
+// The offer's trades: its own category, else whatever the test says its title
+// names (`guessed`).
+let guessed: string[] = [];
+jest.mock('../job-categories', () => ({ jobCategories: jest.fn() }));
+const jobCategoriesMock = jobCategories as jest.MockedFunction<
+  typeof jobCategories
+>;
 
 function makePrisma() {
   return {
@@ -67,6 +76,10 @@ describe('MatchingService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    guessed = [];
+    jobCategoriesMock.mockImplementation((_prisma, offer) =>
+      Promise.resolve(offer.category_id ? [offer.category_id] : guessed),
+    );
     prisma = makePrisma();
     qdrant = makeQdrant();
     systemConfig = makeSystemConfig(true);
@@ -343,20 +356,40 @@ describe('MatchingService', () => {
       );
     });
 
-    it('still applies the country filter when the offer has no category', async () => {
+    it('takes an uncategorised offer to the trades its title names, in its country', async () => {
+      guessed = ['cat-repair'];
       prisma.jobOffer.findUnique.mockResolvedValue(
-        job({ category_id: null, category: null }),
+        job({
+          category_id: null,
+          category: null,
+          title: 'Réparation télévision',
+        }),
       );
 
       await service.findMatchingWorkersForJob('jo-1');
 
-      // Previously this branch used unfiltered searchHybrid, so an
-      // uncategorised offer could reach the whole world.
       expect(qdrant.searchHybrid).not.toHaveBeenCalled();
+      expect(filterOf().must).toContainEqual({
+        key: 'categoryIds',
+        match: { any: ['cat-repair'] },
+      });
       expect(filterOf().must).toContainEqual({
         key: 'countryCode',
         match: { any: ['CG', ''] },
       });
+    });
+
+    it('suggests no one when the trade cannot be told', async () => {
+      // A text search over every worker in the country returned whoever sat
+      // closest — nursing students for a TV repair — and the floored
+      // threshold could never drop them.
+      prisma.jobOffer.findUnique.mockResolvedValue(
+        job({ category_id: null, category: null, title: 'Urgent' }),
+      );
+
+      expect(await service.findMatchingWorkersForJob('jo-1')).toEqual([]);
+      expect(qdrant.searchHybrid).not.toHaveBeenCalled();
+      expect(qdrant.searchHybridWithFilter).not.toHaveBeenCalled();
     });
   });
 

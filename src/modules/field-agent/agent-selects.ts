@@ -48,8 +48,10 @@ export function toAgentSelf(a: AgentSelfRow) {
 /**
  * A job as an agent sees it. The site `address` is included — it is where the
  * work happens, which a worker needs to hear before saying yes, and workers see
- * it on the offer anyway. `note` is not: it is the employer's free text, and
- * free text is where a phone number ends up.
+ * it on the offer anyway. So is the employer's `note` (« Note complémentaire »,
+ * e.g. what to bring): workers see it too, and an agent pitching the job needs
+ * it. Like the description it is for signed-in agents only — the public select
+ * below carries neither.
  */
 export const AGENT_JOB_SELECT = {
   id: true,
@@ -65,6 +67,7 @@ export const AGENT_JOB_SELECT = {
   country_code: true,
   country_name: true,
   city: true,
+  note: true,
   quantity: true,
   status: true,
   created_at: true,
@@ -90,6 +93,7 @@ export function toAgentJob(j: AgentJobRow, filledSeats: number) {
     countryCode: j.country_code,
     countryName: j.country_name,
     city: j.city,
+    note: j.note?.trim() || null,
     quantity: j.quantity,
     seatsLeft: Math.max(j.quantity - filledSeats, 0),
     status: j.status,

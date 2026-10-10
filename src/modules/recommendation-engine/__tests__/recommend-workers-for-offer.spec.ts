@@ -2,6 +2,17 @@ import { Logger } from '@nestjs/common';
 import { RecommendationEngineService } from '../recommendation-engine.service';
 import { EMPTY_FEATURES, type UserFeatures } from '../user-feature.service';
 import { COLLECTIONS } from '../../qdrant/qdrant.config';
+import { jobCategories } from '../../matching/job-categories';
+
+// The offer's trades: its own category, else whatever the test says the title
+// names (`guessed`).
+let guessed: string[] = [];
+jest.mock('../../matching/job-categories', () => ({
+  jobCategories: jest.fn(),
+}));
+const jobCategoriesMock = jobCategories as jest.MockedFunction<
+  typeof jobCategories
+>;
 
 jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
 
@@ -72,6 +83,10 @@ describe('recommendWorkersForJobOffer', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    guessed = [];
+    jobCategoriesMock.mockImplementation((_prisma, offer) =>
+      Promise.resolve(offer.category_id ? [offer.category_id] : guessed),
+    );
     deps = makeDeps();
     service = new RecommendationEngineService(
       deps.prisma as never,
@@ -81,11 +96,9 @@ describe('recommendWorkersForJobOffer', () => {
     );
   });
 
-  /** Notification settings: no exploration, category-strict, empty allowed. */
+  /** Notification settings: empty allowed. */
   const notify = (limit = 10, over: Record<string, unknown> = {}) =>
     service.recommendWorkersForJobOffer(OFFER_ID, limit, {
-      explore: false,
-      strictCategory: true,
       keepAtLeast: 0,
       ...over,
     });
@@ -204,7 +217,6 @@ describe('recommendWorkersForJobOffer', () => {
       withWorkers('w1', 'w2');
 
       const ranked = await service.recommendWorkersForJobOffer(OFFER_ID, 10, {
-        explore: false,
         minScore: 0.99,
       });
 
@@ -228,15 +240,47 @@ describe('recommendWorkersForJobOffer', () => {
       expect(deps.sources.workersFromAll).not.toHaveBeenCalled();
     });
 
-    it('widens for an uncategorised offer, which has nothing to be strict about', async () => {
+    it('takes an uncategorised offer to the trades its title names', async () => {
       deps.prisma.jobOffer.findUnique.mockResolvedValue(
-        offerRow({ category_id: null }),
+        offerRow({ category_id: null, title: 'Réparation télévision' }),
       );
-      deps.sources.workersFromAll.mockResolvedValue([worker('w1')]);
+      guessed = ['cat-repair'];
+      deps.sources.workersFromCategories.mockResolvedValue([
+        worker('fixer', { categoryIds: ['cat-repair'] }),
+      ]);
 
-      await notify();
+      const ranked = await notify();
 
-      expect(deps.sources.workersFromAll).toHaveBeenCalled();
+      expect(deps.sources.workersFromCategories).toHaveBeenCalledWith(
+        ['cat-repair'],
+        expect.anything(),
+        10,
+      );
+      expect(ranked.map((r) => r.id)).toEqual(['fixer']);
+      expect(deps.sources.workersFromAll).not.toHaveBeenCalled();
+    });
+
+    it('suggests no one when the trade cannot be told', async () => {
+      // Nursing students for a TV repair was the bug: no suggestion beats an
+      // unrelated one, for the agent calling and the worker messaged alike.
+      deps.prisma.jobOffer.findUnique.mockResolvedValue(
+        offerRow({ category_id: null, title: 'Je cherche quelqu’un' }),
+      );
+      deps.sources.workersFromAll.mockResolvedValue([worker('anyone')]);
+
+      expect(await notify()).toEqual([]);
+      expect(deps.sources.workersFromCategories).not.toHaveBeenCalled();
+      expect(deps.sources.workersFromAll).not.toHaveBeenCalled();
+    });
+
+    it('never draws on the employer’s past hires', async () => {
+      withWorkers('w1');
+      deps.sources.workersFromAffinities.mockResolvedValue([worker('aide')]);
+
+      const ranked = await notify();
+
+      expect(deps.sources.workersFromAffinities).not.toHaveBeenCalled();
+      expect(ranked.map((r) => r.id)).toEqual(['w1']);
     });
 
     it('excludes workers who already applied', async () => {
@@ -333,8 +377,33 @@ describe('recommendWorkersForJobOffer', () => {
     });
   });
 
-  it('is deterministic when exploration is off', async () => {
-    // No rng injected: with `explore: false` nothing random may be consulted.
+  it('judges candidates on the job, not on what the employer liked before', async () => {
+    // Same trade, same everything — except w2 also works in a category this
+    // employer has hired in a lot. For THIS job that is no reason to rank w2
+    // higher.
+    deps.sources.workersFromCategories.mockResolvedValue([
+      worker('w1', { categoryIds: ['cat-a'] }),
+      worker('w2', { categoryIds: ['cat-a', 'cat-liked'] }),
+    ]);
+    deps.featureService.get.mockResolvedValue(
+      features({
+        positiveCount: 50,
+        categoryAffinity: { 'cat-liked': 1 },
+        counterpartyAffinity: { w2: 1 },
+      }),
+    );
+
+    const ranked = await notify();
+
+    const score = (id: string) => ranked.find((r) => r.id === id)!.score;
+    expect(score('w1')).toBe(score('w2'));
+    expect(ranked.find((r) => r.id === 'w2')!.matchScore).toBe(
+      ranked.find((r) => r.id === 'w1')!.matchScore,
+    );
+  });
+
+  it('is deterministic', async () => {
+    // Offers never explore: nothing random may be consulted.
     withWorkers('w1', 'w2', 'w3');
 
     const a = await notify();

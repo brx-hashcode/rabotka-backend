@@ -4,6 +4,7 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { QdrantService } from '../qdrant/qdrant.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { COLLECTIONS, INDEX_SCHEMA_VERSION } from '../qdrant/qdrant.config';
+import { jobCategories } from './job-categories';
 import {
   fitFactor,
   fitScore,
@@ -1088,56 +1089,37 @@ export class MatchingService {
         job.country_code ?? job.employer?.country_code,
       );
 
-      // Phase 2: filter workers to those who have this job's category
-      let hits: ScoredHit[];
-      if (job.category_id) {
-        const filter = {
-          must: [
-            {
-              key: 'categoryIds',
-              match: { any: [job.category_id] },
-            },
-            {
-              must_not: [
-                {
-                  key: 'rejectedCategoryIds',
-                  match: { any: [job.category_id] },
-                },
-              ],
-            },
-            ...countryClause,
-          ],
-        };
-        const results = await this.qdrant.searchHybridWithFilter(
-          COLLECTION_WORKERS,
-          text,
-          filter,
-          topN * 2, // fetch more before re-ranking
-        );
-        hits = mapSearchHitsToScoredIds(results, 'profileId');
-      } else if (countryClause.length > 0) {
-        const results = await this.qdrant.searchHybridWithFilter(
-          COLLECTION_WORKERS,
-          text,
-          { must: countryClause },
-          topN * 2,
-        );
-        hits = mapSearchHitsToScoredIds(results, 'profileId');
-      } else {
-        const results = await this.qdrant.searchHybrid(
-          COLLECTION_WORKERS,
-          text,
-          topN * 2,
-        );
-        hits = mapSearchHitsToScoredIds(results, 'profileId');
-      }
+      // Phase 2: only workers of the job's trades — its category, or the
+      // trades its title names when it has none. No trade, no one: a text
+      // search over every worker in the country returned whoever happened to
+      // sit closest (nursing students for a TV repair), and the floored
+      // threshold below could never drop them.
+      const categories = await jobCategories(this.prisma, job);
+      if (categories.length === 0) return [];
+      const filter = {
+        must: [
+          { key: 'categoryIds', match: { any: categories } },
+          {
+            must_not: [
+              { key: 'rejectedCategoryIds', match: { any: categories } },
+            ],
+          },
+          ...countryClause,
+        ],
+      };
+      const results = await this.qdrant.searchHybridWithFilter(
+        COLLECTION_WORKERS,
+        text,
+        filter,
+        topN * 2, // fetch more before re-ranking
+      );
+      const hits = mapSearchHitsToScoredIds(results, 'profileId');
 
       // Phase 3: re-rank
-      const reRanked = await this.reRankWorkers(
-        hits,
-        job.category_id ? [job.category_id] : [],
-        { collection: COLLECTION_JOBS, id: job.id },
-      );
+      const reRanked = await this.reRankWorkers(hits, categories, {
+        collection: COLLECTION_JOBS,
+        id: job.id,
+      });
 
       // Phase 4: score threshold — floored so it can never empty the result
       const minScore = await this.systemConfig.getRecommendationMinScore();

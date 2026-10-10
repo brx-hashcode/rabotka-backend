@@ -14,6 +14,7 @@ import {
   type WorkerCandidate,
 } from './candidate-sources';
 import { InteractionKind } from '@prisma/client';
+import { jobCategories } from '../matching/job-categories';
 import { COLLECTIONS } from '../qdrant/qdrant.config';
 import {
   EMPTY_FEATURES,
@@ -68,16 +69,14 @@ const SOURCE_WEIGHTS: Record<CandidateTier, number> = {
 /**
  * Source weights for the offer-side fan-out, deliberately not `SOURCE_WEIGHTS`.
  *
- * Inverted relative to the feed: an offer names a concrete category, and
- * "workers who declared exactly this trade" is stronger evidence than "trades
- * this employer has engaged with before". The feed has no such anchor, which is
- * why affinity leads there.
+ * An offer draws on its own trades only (`declared`); the other tiers are
+ * kept at 0 so the shape matches the feed's table.
  */
 const OFFER_SOURCE_WEIGHTS: Record<CandidateTier, number> = {
   declared: 1.0,
-  affinity: 0.7,
+  affinity: 0,
   cf: 0,
-  all_open: 0.2,
+  all_open: 0,
 };
 
 const MAX_PER_CATEGORY = 3;
@@ -518,23 +517,22 @@ export class RecommendationEngineService {
   }
 
   /**
-   * Ranked workers to tell about one specific job offer.
+   * Ranked workers to tell about one specific job offer — the agent app's
+   * suggested workers and the WhatsApp job fan-out (`rankWorkersForOffer`).
    *
-   * Distinct from `recommendWorkersForEmployer`, which ranks against an
-   * employer's whole history and knows nothing about a particular offer — no
-   * offer category to anchor on, no offer location to measure from. This is the
-   * direction a push notification needs, and the differences from the feed are
-   * deliberate rather than incidental:
+   * Judged on the JOB, never on who posted it. Distinct from
+   * `recommendWorkersForEmployer`, which ranks against an employer's whole
+   * history on purpose; here that history would suggest the home aides an
+   * employer once hired for their TV repair.
    *
-   * - `declared` outranks `affinity` as a source, because the offer names a
-   *   concrete category and that is stronger evidence than what the employer
-   *   happened to hire for last month.
-   * - `strictCategory` refuses the "any eligible worker" tier. On a feed an
-   *   irrelevant profile costs a scroll; here it costs a real WhatsApp message
-   *   and an hour of that worker's notification quota.
+   * - Candidates are the workers of the offer's trades: its category, or the
+   *   trades its title names when it has none (`jobCategories`). No trade, no
+   *   candidates.
+   * - No employer category or worker affinity in the score, and cold weights.
    * - `keepAtLeast: 0` lets the threshold return nothing. For a feed that would
    *   be a bug; here, "nobody is a good enough match" is the correct answer and
    *   messaging the least-bad of a bad set is not.
+   * - No exploration: an exploratory pick costs a real message, not a scroll.
    */
   async recommendWorkersForJobOffer(
     jobOfferId: string,
@@ -543,17 +541,14 @@ export class RecommendationEngineService {
       exclude?: Set<string>;
       minScore?: number;
       keepAtLeast?: number;
-      explore?: boolean;
-      strictCategory?: boolean;
       requireVerified?: boolean;
-      rng?: () => number;
     } = {},
   ): Promise<RankedWorker[]> {
     const offer = await this.prisma.jobOffer.findUnique({
       where: { id: jobOfferId },
       select: {
         id: true,
-        employer_id: true,
+        title: true,
         category_id: true,
         is_remote: true,
         latitude: true,
@@ -564,7 +559,12 @@ export class RecommendationEngineService {
     });
     if (!offer) return [];
 
-    const employerFeatures = await this.features.get(offer.employer_id);
+    // The offer's own trade — or, when the employer left it blank, the trades
+    // its title names. Nothing to go on means no one to suggest: an unrelated
+    // worker is worse than none, for the agent calling and the person
+    // messaged alike.
+    const categories = await jobCategories(this.prisma, offer);
+    if (categories.length === 0) return [];
     const fees = await this.systemConfig.getFees();
 
     // Someone who already applied does not need telling the job exists.
@@ -587,37 +587,13 @@ export class RecommendationEngineService {
     const add = (tier: CandidateTier, list: WorkerCandidate[]) => {
       if (list.length > 0) pools.set(tier, list);
     };
-    const gathered = () =>
-      new Set([...pools.values()].flatMap((l) => l.map((c) => c.id))).size;
-
-    if (offer.category_id) {
-      add(
-        'declared',
-        await this.sources.workersFromCategories(
-          [offer.category_id],
-          queryOpts,
-          limit,
-        ),
-      );
-    }
-    if (gathered() < limit) {
-      add(
-        'affinity',
-        await this.sources.workersFromAffinities(
-          employerFeatures,
-          queryOpts,
-          limit,
-        ),
-      );
-    }
-    // An uncategorised offer has nothing to be strict about, so the broad tier
-    // is the only thing standing between it and an empty fan-out.
-    if (
-      gathered() < limit &&
-      (!opts.strictCategory || offer.category_id == null)
-    ) {
-      add('all_open', await this.sources.workersFromAll(queryOpts, limit));
-    }
+    // Only workers of the job's trades. Not the employer's past hires
+    // (`affinity`) and not anyone at all (`all_open`): these are the people
+    // told about THIS job, so it is the job that picks them.
+    add(
+      'declared',
+      await this.sources.workersFromCategories(categories, queryOpts, limit),
+    );
     if (pools.size === 0) return [];
 
     const fused = rrfFuse(
@@ -668,7 +644,9 @@ export class RecommendationEngineService {
       ),
     ]);
 
-    const weights = interpolateWeights(employerFeatures.positiveCount);
+    // The cold profile: what the employer has hired before is their history,
+    // not this job's, so it does not warm the weights either.
+    const weights = interpolateWeights(0);
     const offerPlace = toPlace(offer);
 
     // One clock for the whole pass — see `recommendJobsForWorker`.
@@ -683,11 +661,10 @@ export class RecommendationEngineService {
 
         const terms: ScoreTerms = {
           sim: simScores.get(c.id) ?? null,
-          catAff: bestCategoryAffinity(
-            c.categoryIds,
-            employerFeatures.categoryAffinity,
-          ),
-          partyAff: employerFeatures.counterpartyAffinity[c.id] ?? null,
+          // No employer history here (category or worker affinity): the
+          // candidates are judged against the job, not against who posted it.
+          catAff: null,
+          partyAff: null,
           cf:
             pools.size > 1 ? clamp01((f.sources - 1) / (pools.size - 1)) : null,
           prox: offer.is_remote
@@ -714,10 +691,7 @@ export class RecommendationEngineService {
         const relevance = computeRelevance(terms, weights);
         const matchScore = fitScore({
           sim: terms.sim,
-          categoryAffinity: terms.catAff,
-          categoryMatch: offer.category_id
-            ? c.categoryIds.includes(offer.category_id)
-            : null,
+          categoryMatch: c.categoryIds.some((id) => categories.includes(id)),
         });
         const score = applyPenalties(
           withFit(relevance, matchScore),
@@ -725,9 +699,9 @@ export class RecommendationEngineService {
             // The worker's own rejection history against THIS offer's category.
             // Replaces the legacy Qdrant `must_not rejectedCategoryIds` payload
             // filter, as a graded penalty rather than a hard exclusion.
-            negativeCategory:
-              offer.category_id != null &&
-              features.negativeCategoryIds.includes(offer.category_id),
+            negativeCategory: categories.some((id) =>
+              features.negativeCategoryIds.includes(id),
+            ),
             // Notification fatigue: prefer people who have not just been
             // messaged, so the hard cooldown rarely has to fire.
             seenDecay: seenDecay(
@@ -758,17 +732,7 @@ export class RecommendationEngineService {
     // No exploration and no diversification here. Every candidate was retrieved
     // for the same offer, so a category cap would drop good matches for no
     // spread; and an exploratory pick costs a real message rather than a scroll.
-    const selected =
-      opts.explore === false
-        ? kept.slice(0, limit)
-        : epsilonGreedySelect(
-            kept,
-            limit,
-            await this.exploreEpsilon(employerFeatures.positiveCount),
-            opts.rng,
-          );
-
-    return selected.map(({ id, score, matchScore, tier }) => ({
+    return kept.slice(0, limit).map(({ id, score, matchScore, tier }) => ({
       id,
       score,
       matchScore,
