@@ -56,8 +56,6 @@ export async function rankWorkersForOffer(
         {
           minScore: opts.minScore,
           keepAtLeast: 0,
-          explore: false,
-          strictCategory: true,
           requireVerified: await opts.requireVerified(),
         },
       );

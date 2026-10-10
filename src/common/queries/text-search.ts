@@ -109,7 +109,7 @@ function textMatches(t: string, fields: SearchFields): Prisma.Sql {
  * form or misspelling of one. Not inside a word — « menage » must not make
  * « Déménageurs » its sector.
  */
-function namesText(t: string, text: Prisma.Sql): Prisma.Sql {
+export function namesText(t: string, text: Prisma.Sql): Prisma.Sql {
   const ors: Prisma.Sql[] = [Prisma.sql`${text} ~ ${`\\m${t}`}`];
   if (t.length >= FUZZY_MIN_LENGTH) {
     ors.push(
