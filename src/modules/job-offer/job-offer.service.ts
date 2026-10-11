@@ -50,6 +50,7 @@ import {
 } from './utils/job-reference.util';
 import { closesOnFill, isDatedMission } from './utils/employment-type.util';
 import { TERMINAL_JOB_OFFER_STATUSES } from './utils/job-offer-status.util';
+import { offerNotificationLinks } from './utils/offer-notification-links';
 import { isEmployerCoveredAtJobLevel } from '../contact-unlock/employer-coverage';
 import {
   AccountStatus,
@@ -1133,6 +1134,34 @@ export class JobOfferService {
     return ids;
   }
 
+  /**
+   * Bell notifications that lead to these offers or their applications keep
+   * their text but lose their link: the page behind it is gone, and tapping
+   * one used to land on a 404. Both sides — the employer's « nouvelle
+   * candidature », the worker's « candidature acceptée », a recommendation.
+   */
+  private async unlinkOfferNotifications(
+    db: Prisma.TransactionClient,
+    offerIds: string[],
+  ): Promise<void> {
+    if (offerIds.length === 0) return;
+    const applications = await db.application.findMany({
+      where: { job_offer_id: { in: offerIds } },
+      select: { id: true },
+    });
+    await db.profileNotification.updateMany({
+      where: {
+        link: {
+          in: offerNotificationLinks(
+            offerIds,
+            applications.map((a) => a.id),
+          ),
+        },
+      },
+      data: { link: null },
+    });
+  }
+
   /** Tells each closed applicant (bell + WhatsApp). Fire-and-forget. */
   private notifyClosedApplicants(ids: string[], context: string): void {
     for (const appId of ids) {
@@ -1786,6 +1815,7 @@ export class JobOfferService {
       where: { id },
       data: { deleted_at: new Date() },
     });
+    await this.unlinkOfferNotifications(this.prisma, [id]);
     await this.cache.invalidate('jobs');
 
     // Remove from vector index — fire-and-forget, non-fatal
@@ -1865,6 +1895,7 @@ export class JobOfferService {
         ApplicationStatus.VIEWED,
       ]);
       const now = new Date();
+      await this.unlinkOfferNotifications(tx, [id]);
       // Its applications go with it — every one is closed by now (anything
       // engaged refused the delete above). Soft, like the offer, so neither
       // side keeps listing a candidature whose offer page no longer exists.
@@ -1899,6 +1930,7 @@ export class JobOfferService {
       where: { id: { in: ids }, deleted_at: null },
       data: { deleted_at: new Date() },
     });
+    await this.unlinkOfferNotifications(this.prisma, ids);
     await this.cache.invalidate('jobs');
     // Remove each from the vector index so archived offers stop being matched.
     for (const id of ids) {

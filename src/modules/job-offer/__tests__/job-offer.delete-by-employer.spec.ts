@@ -34,6 +34,9 @@ describe('JobOfferService.deleteByEmployer', () => {
         count: jest.fn().mockResolvedValue(opts.engagedAssignments ?? 0),
       },
       jobOffer: { update: jest.fn().mockResolvedValue({}) },
+      profileNotification: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
     };
     const prisma = {
       jobOffer: {
@@ -126,6 +129,20 @@ describe('JobOfferService.deleteByEmployer', () => {
     expect(tx.jobOffer.update).toHaveBeenCalledWith({
       where: { id: OFFER_ID },
       data: { deleted_at: expect.any(Date) },
+    });
+    // Bell notifications that led to it, or to its applications, are
+    // unlinked rather than left pointing at a 404.
+    expect(tx.profileNotification.updateMany).toHaveBeenCalledWith({
+      where: {
+        link: {
+          in: expect.arrayContaining([
+            `/missions/${OFFER_ID}`,
+            '/candidatures/app-1',
+            '/applications/app-2',
+          ]),
+        },
+      },
+      data: { link: null },
     });
     // Its applications go with it, so no list keeps showing them.
     expect(tx.application.updateMany).toHaveBeenCalledWith({
