@@ -1042,6 +1042,29 @@ describe('ApplicationService', () => {
       expect(Array.isArray(result)).toBe(true);
     });
 
+    it('never lists an application whose offer was deleted', async () => {
+      (prisma.application.findMany as jest.Mock).mockResolvedValue([]);
+      await service.findByEmployer(EMPLOYER_ID);
+      const { where } = (prisma.application.findMany as jest.Mock).mock
+        .calls[0][0];
+      expect(where).toMatchObject({
+        deleted_at: null,
+        job_offer: { deleted_at: null, employer_id: EMPLOYER_ID },
+      });
+    });
+
+    it("hides them from the worker's list too", async () => {
+      (prisma.application.findMany as jest.Mock).mockResolvedValue([]);
+      await service.findByWorker(WORKER_ID);
+      const { where } = (prisma.application.findMany as jest.Mock).mock
+        .calls[0][0];
+      expect(where).toMatchObject({
+        worker_id: WORKER_ID,
+        deleted_at: null,
+        job_offer: { deleted_at: null },
+      });
+    });
+
     it('filters by status for employer', async () => {
       (prisma.application.findMany as jest.Mock).mockResolvedValue([]);
       await service.findByEmployer(EMPLOYER_ID, {

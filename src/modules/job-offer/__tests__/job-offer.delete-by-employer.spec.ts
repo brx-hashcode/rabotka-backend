@@ -127,6 +127,11 @@ describe('JobOfferService.deleteByEmployer', () => {
       where: { id: OFFER_ID },
       data: { deleted_at: expect.any(Date) },
     });
+    // Its applications go with it, so no list keeps showing them.
+    expect(tx.application.updateMany).toHaveBeenCalledWith({
+      where: { job_offer_id: OFFER_ID, deleted_at: null },
+      data: { deleted_at: expect.any(Date) },
+    });
     expect(
       botNotification.sendApplicationRejectedToWorker.mock.calls.map(
         (c) => c[0],
@@ -140,7 +145,11 @@ describe('JobOfferService.deleteByEmployer', () => {
 
     await service.deleteByEmployer(OFFER_ID, EMPLOYER_ID);
 
-    expect(tx.application.updateMany).not.toHaveBeenCalled();
+    // Only the soft delete of its (closed) applications, no rejection.
+    expect(tx.application.updateMany).toHaveBeenCalledTimes(1);
+    expect(tx.application.updateMany.mock.calls[0][0].data).toEqual({
+      deleted_at: expect.any(Date),
+    });
     expect(tx.jobOffer.update).toHaveBeenCalled();
     expect(
       botNotification.sendApplicationRejectedToWorker,

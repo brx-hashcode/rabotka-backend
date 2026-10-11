@@ -23,7 +23,10 @@ const applicationRow = () => ({
  */
 describe('MobileApplicationController — pre-acceptance quote', () => {
   let controller: MobileApplicationController;
-  let prisma: { profile: { findUnique: jest.Mock } };
+  let prisma: {
+    profile: { findUnique: jest.Mock };
+    jobOffer: { count: jest.Mock };
+  };
   let applicationService: { findById: jest.Mock };
   let contactUnlock: { getByApplicationId: jest.Mock };
   let systemConfig: { getContactUnlockFees: jest.Mock };
@@ -38,6 +41,8 @@ describe('MobileApplicationController — pre-acceptance quote', () => {
           .mockResolvedValueOnce({ profile_type: ProfileType.EMPLOYER })
           .mockResolvedValue({ portfolio_slug: 'awa-m' }),
       },
+      // The offer is live.
+      jobOffer: { count: jest.fn().mockResolvedValue(1) },
     };
     applicationService = {
       findById: jest.fn().mockResolvedValue(applicationRow()),
@@ -60,6 +65,14 @@ describe('MobileApplicationController — pre-acceptance quote', () => {
       wallet as never,
       {} as never,
     );
+  });
+
+  it('treats an application whose offer was deleted as gone', async () => {
+    prisma.jobOffer.count.mockResolvedValue(0);
+
+    await expect(
+      controller.getDetail(reqFor(EMPLOYER_ID) as never, APPLICATION_ID),
+    ).rejects.toThrow('Candidature introuvable');
   });
 
   it('quotes the fee and balance while no unlock attempt exists', async () => {
@@ -113,6 +126,8 @@ describe('MobileApplicationController — payMobile double-charge guard', () => 
           .mockResolvedValueOnce({ profile_type: ProfileType.EMPLOYER })
           .mockResolvedValue({ portfolio_slug: 'awa-m' }),
       },
+      // The offer is live.
+      jobOffer: { count: jest.fn().mockResolvedValue(1) },
     };
     const applicationService = {
       findById: jest.fn().mockResolvedValue(applicationRow()),

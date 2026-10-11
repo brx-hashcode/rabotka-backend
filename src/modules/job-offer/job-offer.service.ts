@@ -1864,9 +1864,17 @@ export class JobOfferService {
         ApplicationStatus.PENDING,
         ApplicationStatus.VIEWED,
       ]);
+      const now = new Date();
+      // Its applications go with it — every one is closed by now (anything
+      // engaged refused the delete above). Soft, like the offer, so neither
+      // side keeps listing a candidature whose offer page no longer exists.
+      await tx.application.updateMany({
+        where: { job_offer_id: id, deleted_at: null },
+        data: { deleted_at: now },
+      });
       await tx.jobOffer.update({
         where: { id },
-        data: { deleted_at: new Date() },
+        data: { deleted_at: now },
       });
       return ids;
     });

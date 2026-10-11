@@ -272,6 +272,14 @@ export class MobileApplicationController {
         "Vous n'êtes pas l'employeur de cette offre",
       );
     }
+    // The offer was deleted: the application went with it, as it did from
+    // the lists. Checked after ownership so a 404 says nothing to a stranger.
+    const offerLive = await this.prisma.jobOffer.count({
+      where: { id: application.job_offer.id, deleted_at: null },
+    });
+    if (offerLive === 0) {
+      throw new NotFoundException('Candidature introuvable');
+    }
 
     // Public portfolio slug so the employer can open the candidate's profile.
     const workerProfile = await this.prisma.profile.findUnique({
