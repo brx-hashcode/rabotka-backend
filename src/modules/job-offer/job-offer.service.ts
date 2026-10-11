@@ -216,6 +216,12 @@ export type AdminJobOfferListItem = {
   applicationsCount: number;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Set when the offer was deleted (by its employer) or archived (by an
+   * admin). `status` is left as it was, so this is the only field that says
+   * the offer is gone.
+   */
+  deletedAt: string | null;
   vectorIndexedAt: string | null;
 
   /**
@@ -1517,6 +1523,7 @@ export class JobOfferService {
       applicationsCount: o._count.applications,
       createdAt: o.created_at.toISOString(),
       updatedAt: o.updated_at.toISOString(),
+      deletedAt: o.deleted_at?.toISOString() ?? null,
       vectorIndexedAt: o.vector_indexed_at?.toISOString() ?? null,
       employerUnlockPaid: o.employer_unlock_paid,
       ...(aggregates.get(o.id) ?? emptyJobOfferAggregates()),
@@ -1778,6 +1785,7 @@ export class JobOfferService {
       applicationsCount: offer._count.applications,
       createdAt: offer.created_at.toISOString(),
       updatedAt: offer.updated_at.toISOString(),
+      deletedAt: offer.deleted_at?.toISOString() ?? null,
       vectorIndexedAt: offer.vector_indexed_at?.toISOString() ?? null,
       employerUnlockPaid: offer.employer_unlock_paid,
       ...(aggregates.get(offer.id) ?? emptyJobOfferAggregates()),
@@ -1921,6 +1929,38 @@ export class JobOfferService {
           err,
         ),
       );
+  }
+
+  /**
+   * When each of these offers was deleted, for the archived ones. Read before a
+   * restore clears it — see {@link restoreApplicationsDeletedWith}.
+   */
+  async archivedAt(ids: string[]): Promise<{ id: string; deletedAt: Date }[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.prisma.jobOffer.findMany({
+      where: { id: { in: ids }, deleted_at: { not: null } },
+      select: { id: true, deleted_at: true },
+    });
+    return rows.map((r) => ({ id: r.id, deletedAt: r.deleted_at! }));
+  }
+
+  /**
+   * After restoring offers, brings back the applications that were deleted
+   * WITH them — {@link deleteByEmployer} stamps both with the same instant.
+   * An application deleted on its own, at another time, stays deleted.
+   */
+  async restoreApplicationsDeletedWith(
+    offers: { id: string; deletedAt: Date }[],
+  ): Promise<number> {
+    let restored = 0;
+    for (const offer of offers) {
+      const { count } = await this.prisma.application.updateMany({
+        where: { job_offer_id: offer.id, deleted_at: offer.deletedAt },
+        data: { deleted_at: null },
+      });
+      restored += count;
+    }
+    return restored;
   }
 
   /** Archive many offers at once (admin bulk delete). Returns the count archived. */
