@@ -680,6 +680,93 @@ describe('ApplicationService', () => {
       expect(call?.[0].data.cancelled_by).toBe('WORKER');
     });
 
+    it('records what the worker walked away from', async () => {
+      await service.cancel(APPLICATION_ID, WORKER_ID);
+
+      const call = (prisma.application.update as jest.Mock).mock.calls.find(
+        ([arg]) => arg?.data?.status === ApplicationStatus.CANCELLED,
+      );
+      expect(call?.[0].data.cancelled_from_status).toBe(
+        ApplicationStatus.ACCEPTED,
+      );
+    });
+
+    describe('repeated-cancellation suspension', () => {
+      /** Counted cancellations in the window, this one included. */
+      function withCountedCancellations(n: number) {
+        (prisma.application.count as jest.Mock).mockImplementation(
+          ({ where }: { where: Record<string, unknown> }) =>
+            Promise.resolve(where.cancelled_from_status ? n : 0),
+        );
+        const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+        (prisma.profile as unknown as Record<string, unknown>).updateMany =
+          updateMany;
+        const config = testingModule.get(SystemConfigService);
+        const fees = (config.getFees as jest.Mock).getMockImplementation();
+        (config.getFees as jest.Mock).mockImplementation(async () => ({
+          ...(await fees?.()),
+          cancellationSuspensionCount: 3,
+          cancellationSuspensionWindowDays: 30,
+        }));
+        return { updateMany, events: testingModule.get(EventEmitter2) };
+      }
+
+      it('suspends at the threshold and tells the person', async () => {
+        const { updateMany, events } = withCountedCancellations(3);
+
+        const result = await service.cancel(APPLICATION_ID, WORKER_ID);
+
+        expect(result.suspended).toBe(true);
+        expect(updateMany).toHaveBeenCalledWith({
+          where: { id: WORKER_ID, status: 'ACTIVE' },
+          data: expect.objectContaining({
+            status: 'SUSPENDED',
+            suspension_source: 'REPEATED_CANCELLATIONS',
+            suspension_reason: '3 missions annulées en 30 jours',
+          }),
+        });
+        expect(events.emit).toHaveBeenCalledWith('profile.auto_suspended', {
+          profileId: WORKER_ID,
+          reason: '3 missions annulées en 30 jours',
+        });
+      });
+
+      it('does not suspend one short of it', async () => {
+        const { updateMany } = withCountedCancellations(2);
+
+        const result = await service.cancel(APPLICATION_ID, WORKER_ID);
+
+        expect(result.suspended).toBe(false);
+        expect(updateMany).not.toHaveBeenCalled();
+      });
+
+      it('never counts withdrawing a pending application', async () => {
+        const { updateMany } = withCountedCancellations(10);
+        (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+          ...mockApplication,
+          status: ApplicationStatus.PENDING,
+        });
+
+        const result = await service.cancel(APPLICATION_ID, WORKER_ID);
+
+        expect(result.suspended).toBe(false);
+        expect(updateMany).not.toHaveBeenCalled();
+      });
+
+      it('leaves an account that is already suspended alone', async () => {
+        const { updateMany, events } = withCountedCancellations(3);
+        updateMany.mockResolvedValue({ count: 0 });
+
+        const result = await service.cancel(APPLICATION_ID, WORKER_ID);
+
+        expect(result.suspended).toBe(false);
+        expect(events.emit).not.toHaveBeenCalledWith(
+          'profile.auto_suspended',
+          expect.anything(),
+        );
+      });
+    });
+
     it('cancels > 4h before: no penalty applied', async () => {
       // scheduled_at is 5h from now — no penalty
       const result = await service.cancel(APPLICATION_ID, WORKER_ID);

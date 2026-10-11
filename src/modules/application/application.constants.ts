@@ -93,3 +93,44 @@ export function reapplyDecision(
   // "fix" it to bar: it would bar the ghost-cancel victims for good.
   return 'ALLOW';
 }
+
+/**
+ * Statuses from which a worker's cancellation counts toward the
+ * repeated-cancellation suspension: they had committed — accepted, paying for
+ * the contact, or hired on an ongoing engagement — and walked away. Withdrawing
+ * an application nobody had answered yet costs the employer nothing.
+ */
+export const SUSPENSION_COUNTED_CANCEL_STATUSES: readonly ApplicationStatus[] =
+  [
+    ApplicationStatus.ACCEPTED,
+    ApplicationStatus.WAITING_PAYMENT,
+    ApplicationStatus.END,
+  ];
+
+export function countsTowardSuspension(fromStatus: ApplicationStatus): boolean {
+  return SUSPENSION_COUNTED_CANCEL_STATUSES.includes(fromStatus);
+}
+
+/**
+ * Where a worker stands against the repeated-cancellation rule, given how
+ * many counted cancellations they already have in the window. Pure, so the
+ * preview and the cancel itself cannot disagree.
+ */
+export function cancellationSuspensionOutlook(args: {
+  /** Counted cancellations already in the window, this one excluded. */
+  priorInWindow: number;
+  /** Whether THIS cancellation would count. */
+  counts: boolean;
+  threshold: number;
+}): { afterThis: number; wouldSuspend: boolean; remaining: number | null } {
+  const threshold = Number.isFinite(args.threshold) ? args.threshold : 0;
+  const afterThis = args.priorInWindow + (args.counts ? 1 : 0);
+  if (threshold <= 0) {
+    return { afterThis, wouldSuspend: false, remaining: null };
+  }
+  return {
+    afterThis,
+    wouldSuspend: args.counts && afterThis >= threshold,
+    remaining: Math.max(0, threshold - afterThis),
+  };
+}

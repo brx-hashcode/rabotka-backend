@@ -109,6 +109,20 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    key: 'fees.cancellation_suspension_count',
+    value: '3',
+    category: ConfigCategory.FEES,
+    label: 'Annulations de missions avant suspension du compte',
+    isSecret: false,
+  },
+  {
+    key: 'fees.cancellation_suspension_window_days',
+    value: '30',
+    category: ConfigCategory.FEES,
+    label: 'Période de comptage des annulations (jours)',
+    isSecret: false,
+  },
+  {
     key: 'fees.penalty_hard_block_days',
     value: '3',
     category: ConfigCategory.FEES,
@@ -293,6 +307,20 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     value: '0.3',
     category: ConfigCategory.MATCHING,
     label: 'Score minimum pour le fil de profils recommandés (employeur)',
+    isSecret: false,
+  },
+  {
+    key: 'matching.pair_cancel_penalty',
+    value: '0.25',
+    category: ConfigCategory.MATCHING,
+    label: 'Baisse de compatibilité par annulation (candidat ↔ recruteur, 0–1)',
+    isSecret: false,
+  },
+  {
+    key: 'matching.pair_cancel_decay_days',
+    value: '180',
+    category: ConfigCategory.MATCHING,
+    label: 'Durée d’effet d’une annulation sur la compatibilité (jours)',
     isSecret: false,
   },
   {

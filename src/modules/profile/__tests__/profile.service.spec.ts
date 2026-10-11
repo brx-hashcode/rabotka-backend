@@ -1374,6 +1374,8 @@ describe('ProfileService', () => {
           status: 'SUSPENDED',
           suspension_reason: REASON,
           suspended_at: expect.any(Date),
+          // So paying a penalty can never lift what an admin decided.
+          suspension_source: 'ADMIN',
         },
       });
     });
@@ -1392,8 +1394,28 @@ describe('ProfileService', () => {
           status: 'ACTIVE',
           suspension_reason: null,
           suspended_at: null,
+          suspension_source: null,
         },
       });
+    });
+
+    it('tells the person about an automatic suspension, like an admin one', async () => {
+      // Repeated cancellations suspend from ApplicationService, which emits
+      // an event rather than importing this service.
+      prisma.profile.findUnique.mockResolvedValue({
+        ...baseProfile,
+        phone: '+242000001',
+      });
+      await service.onAutoSuspended({
+        profileId: 'p-1',
+        reason: '3 missions annulées en 30 jours',
+      });
+      expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+        '+242000001',
+        'accountSuspended',
+        expect.objectContaining({ reason: '3 missions annulées en 30 jours' }),
+        'p-1',
+      );
     });
 
     it('refuses to suspend without a reason', async () => {

@@ -37,7 +37,11 @@ import {
   accountActivatedFreeForm,
   accountSuspendedFreeForm,
 } from '../bot/messages/notifications.messages';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
+import {
+  PROFILE_AUTO_SUSPENDED_EVENT,
+  type ProfileAutoSuspendedPayload,
+} from '../../common/events/profile-auto-suspended.event';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import Redis from 'ioredis';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -77,6 +81,7 @@ import {
   ProfileType,
   ReferralSource,
   ReferralStatus,
+  SuspensionSource,
   VerificationStatus,
 } from '@prisma/client';
 import { randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
@@ -1216,10 +1221,18 @@ export class ProfileService {
         // The stored reason describes the CURRENT suspension. Leaving it behind
         // on reactivation would show a stale motive next to an active account.
         ...(becomingSuspended
-          ? { suspension_reason: trimmedReason, suspended_at: new Date() }
+          ? {
+              suspension_reason: trimmedReason,
+              suspended_at: new Date(),
+              suspension_source: SuspensionSource.ADMIN,
+            }
           : {}),
         ...(leavingSuspended
-          ? { suspension_reason: null, suspended_at: null }
+          ? {
+              suspension_reason: null,
+              suspended_at: null,
+              suspension_source: null,
+            }
           : {}),
       },
     });
@@ -1278,63 +1291,94 @@ export class ProfileService {
     }
 
     if (becomingSuspended) {
-      try {
-        if (profile.email) {
-          await this.mailService.sendMail({
-            to: profile.email,
-            subject: 'Votre compte a été suspendu',
-            html: await this.layoutService.wrap(
-              accountSuspendedEmail(
-                profile.first_name,
-                trimmedReason ?? undefined,
-              ),
-            ),
-          });
-        }
-      } catch {
-        this.logger.warn(
-          `Failed to send suspension email for profile ${profileId}`,
-        );
-      }
-
-      // WhatsApp as well as email. Both fields are required on a profile, so
-      // this is not about reachability — it is about which channel is read.
-      // WhatsApp is where this user base actually is; an email announcing a
-      // suspension can sit unopened for days.
-      try {
-        if (profile.phone) {
-          // Minted here, not by the outbound processor: this send goes
-          // straight to the provider and never enters the queue, so nothing
-          // else would fill the CTA's variable. A null code degrades to the
-          // bare path — the button then lands on the login screen instead of
-          // deep-linking, which beats a dead link.
-          const loginCode = await this.whatsAppLoginLink
-            .mint(profileId, SUSPENDED_CTA_PATH)
-            .catch(() => null);
-
-          await this.notifyWhatsApp({
-            phone: profile.phone,
-            profileId,
-            key: 'accountSuspended',
-            params: {
-              firstName: profile.first_name,
-              reason: trimmedReason,
-              loginCode,
-            },
-            freeForm: accountSuspendedFreeForm({
-              firstName: profile.first_name,
-              reason: trimmedReason || 'Non précisé',
-            }),
-          });
-        }
-      } catch {
-        this.logger.warn(
-          `Failed to send suspension WhatsApp message for profile ${profileId}`,
-        );
-      }
+      await this.notifySuspended(profile, trimmedReason);
     }
 
     return this.getProfileDetailForAdmin(profileId);
+  }
+
+  /**
+   * A rule suspended this account (repeated cancellations, …): tell the person
+   * exactly as an admin suspension does. Never throws — the suspension is
+   * already committed.
+   */
+  @OnEvent(PROFILE_AUTO_SUSPENDED_EVENT, { async: true })
+  async onAutoSuspended(payload: ProfileAutoSuspendedPayload): Promise<void> {
+    try {
+      const profile = await this.prisma.profile.findUnique({
+        where: { id: payload.profileId },
+        select: { id: true, phone: true, email: true, first_name: true },
+      });
+      if (profile) await this.notifySuspended(profile, payload.reason);
+    } catch {
+      this.logger.warn(
+        `Failed to notify automatic suspension for profile ${payload.profileId}`,
+      );
+    }
+  }
+
+  /** E-mail and WhatsApp the person that their account was suspended, and why. */
+  private async notifySuspended(
+    profile: {
+      id: string;
+      phone: string | null;
+      email: string | null;
+      first_name: string;
+    },
+    reason: string | null,
+  ): Promise<void> {
+    const profileId = profile.id;
+    try {
+      if (profile.email) {
+        await this.mailService.sendMail({
+          to: profile.email,
+          subject: 'Votre compte a été suspendu',
+          html: await this.layoutService.wrap(
+            accountSuspendedEmail(profile.first_name, reason ?? undefined),
+          ),
+        });
+      }
+    } catch {
+      this.logger.warn(
+        `Failed to send suspension email for profile ${profileId}`,
+      );
+    }
+
+    // WhatsApp as well as email. Both fields are required on a profile, so
+    // this is not about reachability — it is about which channel is read.
+    // WhatsApp is where this user base actually is; an email announcing a
+    // suspension can sit unopened for days.
+    try {
+      if (profile.phone) {
+        // Minted here, not by the outbound processor: this send goes
+        // straight to the provider and never enters the queue, so nothing
+        // else would fill the CTA's variable. A null code degrades to the
+        // bare path — the button then lands on the login screen instead of
+        // deep-linking, which beats a dead link.
+        const loginCode = await this.whatsAppLoginLink
+          .mint(profileId, SUSPENDED_CTA_PATH)
+          .catch(() => null);
+
+        await this.notifyWhatsApp({
+          phone: profile.phone,
+          profileId,
+          key: 'accountSuspended',
+          params: {
+            firstName: profile.first_name,
+            reason,
+            loginCode,
+          },
+          freeForm: accountSuspendedFreeForm({
+            firstName: profile.first_name,
+            reason: reason || 'Non précisé',
+          }),
+        });
+      }
+    } catch {
+      this.logger.warn(
+        `Failed to send suspension WhatsApp message for profile ${profileId}`,
+      );
+    }
   }
 
   async updateProfileByAdmin(

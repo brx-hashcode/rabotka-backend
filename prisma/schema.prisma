@@ -94,6 +94,15 @@ enum AccountStatus {
   BANNED
 }
 
+/// What put an account in SUSPENDED, so each way out lifts only its own kind:
+/// paying the penalties reactivates an UNPAID_PENALTIES suspension, never one
+/// an admin or repeated cancellations imposed.
+enum SuspensionSource {
+  ADMIN
+  UNPAID_PENALTIES
+  REPEATED_CANCELLATIONS
+}
+
 enum DocumentType {
   IDENTITY_CARD
   PASSPORT
@@ -482,6 +491,9 @@ model Profile {
   /// always describes the CURRENT suspension rather than the last one ever.
   suspension_reason                 String?            @db.Text
   suspended_at                      DateTime?
+  /// Why it is suspended, as a kind — see SuspensionSource. NULL for
+  /// suspensions that predate the column, and whenever not SUSPENDED.
+  suspension_source                 SuspensionSource?
   read_and_approved_policies        Boolean            @default(false)
   first_login                       Boolean            @default(true)
   /// First time the account became usable. Distinct from `last_login_at`:
@@ -1385,6 +1397,11 @@ model Application {
   cancelled_by        ApplicationCancelledBy?
   penalty_applied     Boolean                 @default(false)
   penalty_amount      Decimal?                @db.Decimal(10, 2)
+  /// The status a WORKER cancellation left. Decides whether it counts toward
+  /// the repeated-cancellation suspension: walking away from a mission they
+  /// were accepted on does, withdrawing an application still pending does not.
+  /// NULL for every other cancellation, and for those before the column.
+  cancelled_from_status ApplicationStatus?
 
   /// Set when an employer accepts. `updated_at` is overwritten by every later
   /// transition, so it can't stand in for the decision moment.
@@ -1426,6 +1443,9 @@ model Application {
   @@index([status], name: "idx_application_status")
   @@index([job_offer_id, status], name: "idx_application_job_offer_status")
   @@index([deleted_at], name: "idx_application_deleted_at")
+  /// A worker's recent cancellations: the suspension count and the
+  /// candidate↔employer compatibility penalty both read this.
+  @@index([worker_id, cancelled_by, cancelled_at], name: "idx_application_worker_cancellations")
   @@map("applications")
 }
 

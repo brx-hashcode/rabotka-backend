@@ -224,6 +224,8 @@ export class SystemConfigService implements OnModuleInit {
     'fees.employer_late_cancel_score_deduction',
     'fees.billing_block_threshold',
     'fees.penalty_suspension_threshold',
+    'fees.cancellation_suspension_count',
+    'fees.cancellation_suspension_window_days',
     'fees.penalty_hard_block_days',
     'fees.penalty_max_notifications',
     'fees.penalty_notification_interval_hours',
@@ -235,6 +237,7 @@ export class SystemConfigService implements OnModuleInit {
     'fees.welcome_credit_worker',
     'fees.welcome_credit_employer',
     'matching.max_notification_workers',
+    'matching.pair_cancel_decay_days',
     'agent.phone_reveal_daily_cap',
     'agent.lead_claim_hours',
     'agent.invite_expiry_hours',
@@ -250,6 +253,7 @@ export class SystemConfigService implements OnModuleInit {
   private static readonly UNIT_INTERVAL_KEYS = new Set([
     'matching.min_notification_score',
     'matching.recommendation_min_score',
+    'matching.pair_cancel_penalty',
     'agent.candidate_min_score',
   ]);
 
@@ -778,6 +782,8 @@ export class SystemConfigService implements OnModuleInit {
       ratingDelta3,
       ratingDelta4,
       ratingDelta5,
+      cancelSuspensionCount,
+      cancelSuspensionWindowDays,
     ] = await this.mgetBatch([
       { key: 'fees.late_cancellation_penalty_fcfa', fallback: '5000' },
       { key: 'fees.late_cancellation_score_deduction', fallback: '5' },
@@ -794,6 +800,8 @@ export class SystemConfigService implements OnModuleInit {
       { key: 'fees.rating_score_delta_3', fallback: '0' },
       { key: 'fees.rating_score_delta_4', fallback: '1' },
       { key: 'fees.rating_score_delta_5', fallback: '3' },
+      { key: 'fees.cancellation_suspension_count', fallback: '3' },
+      { key: 'fees.cancellation_suspension_window_days', fallback: '30' },
     ]);
     return {
       lateCancellationPenaltyFcfa: Number(penalty),
@@ -819,6 +827,8 @@ export class SystemConfigService implements OnModuleInit {
         4: Number(ratingDelta4),
         5: Number(ratingDelta5),
       } as Record<number, number>,
+      cancellationSuspensionCount: Number(cancelSuspensionCount),
+      cancellationSuspensionWindowDays: Number(cancelSuspensionWindowDays),
     };
   }
 
@@ -953,6 +963,26 @@ export class SystemConfigService implements OnModuleInit {
     const val = await this.get('matching.recommendation_min_score', '0.3');
     const n = Number(val);
     return Number.isFinite(n) ? n : 0.3;
+  }
+
+  /**
+   * How much one worker cancellation lowers that worker's compatibility with
+   * that employer (`strength`, 0–1), and over how many days it fades out.
+   */
+  async getPairCancellationPenalty(): Promise<{
+    strength: number;
+    decayDays: number;
+  }> {
+    const [strength, decayDays] = await this.mgetBatch([
+      { key: 'matching.pair_cancel_penalty', fallback: '0.25' },
+      { key: 'matching.pair_cancel_decay_days', fallback: '180' },
+    ]);
+    const s = Number(strength);
+    const d = Number(decayDays);
+    return {
+      strength: Number.isFinite(s) ? Math.min(1, Math.max(0, s)) : 0.25,
+      decayDays: Number.isFinite(d) && d > 0 ? d : 180,
+    };
   }
 
   async getWelcomeCredits() {

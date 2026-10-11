@@ -1008,3 +1008,76 @@ describe('RecommendationEngineService.recommendWorkersForEmployer', () => {
     });
   });
 });
+
+/**
+ * A worker's cancellation on one employer lowers that pair's compatibility,
+ * both the number shown and the order, in both feeds — and nobody else's.
+ */
+describe('RecommendationEngineService — worker cancellations on a pair', () => {
+  let service: RecommendationEngineService;
+  let deps: ReturnType<typeof makeDeps>;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    deps = makeDeps();
+    // The worker w1 cancelled on employer e1 just now.
+    Object.assign(deps.prisma, {
+      application: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            worker_id: 'w1',
+            cancelled_at: new Date(),
+            job_offer: { employer_id: 'e1' },
+          },
+        ]),
+      },
+    });
+    Object.assign(deps.systemConfig, {
+      getPairCancellationPenalty: jest
+        .fn()
+        .mockResolvedValue({ strength: 0.5, decayDays: 180 }),
+    });
+    service = new RecommendationEngineService(
+      deps.prisma as never,
+      deps.sources as never,
+      deps.featureService as never,
+      deps.systemConfig as never,
+    );
+  });
+
+  it('sinks and marks down the offers of an employer the worker let down', async () => {
+    deps.prisma.profileCategory.findMany.mockResolvedValue([
+      { category_id: 'cat-a' },
+    ]);
+    deps.sources.fromAffinities.mockResolvedValue([
+      candidate('let-down', { employerId: 'e1' }),
+      candidate('other', { employerId: 'e2' }),
+    ]);
+
+    const out = await service.recommendJobsForWorker('w1', 2, { rng: exploit });
+
+    expect(out.map((r) => r.id)).toEqual(['other', 'let-down']);
+    const byId = new Map(out.map((r) => [r.id, r]));
+    expect(byId.get('let-down')!.matchScore!).toBeCloseTo(
+      byId.get('other')!.matchScore! * 0.5,
+    );
+  });
+
+  it('sinks and marks down that worker in the employer feed', async () => {
+    deps.sources.workersFromAffinities.mockResolvedValue([
+      worker('w1'),
+      worker('w2'),
+    ]);
+
+    const out = await service.recommendWorkersForEmployer('e1', 2, {
+      categoryIds: ['cat-a'],
+      rng: exploit,
+    });
+
+    expect(out.map((r) => r.id)).toEqual(['w2', 'w1']);
+    const byId = new Map(out.map((r) => [r.id, r]));
+    expect(byId.get('w1')!.matchScore!).toBeCloseTo(
+      byId.get('w2')!.matchScore! * 0.5,
+    );
+  });
+});
