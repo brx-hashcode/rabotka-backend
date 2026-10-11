@@ -562,9 +562,17 @@ export class ApplicationService {
     status?: ApplicationStatus;
     statusIn?: readonly ApplicationStatus[];
   }): Prisma.ApplicationWhereInput {
-    const where: Prisma.ApplicationWhereInput = {};
+    // Neither side lists an application whose offer was deleted: the offer
+    // page behind it 404s, and its waiting candidates were closed and told
+    // when it went.
+    const where: Prisma.ApplicationWhereInput = {
+      deleted_at: null,
+      job_offer: {
+        deleted_at: null,
+        ...(args.employerId ? { employer_id: args.employerId } : {}),
+      },
+    };
     if (args.workerId) where.worker_id = args.workerId;
-    if (args.employerId) where.job_offer = { employer_id: args.employerId };
     if (args.status) {
       where.status = args.status;
     } else if (args.statusIn && args.statusIn.length > 0) {
@@ -2341,6 +2349,8 @@ export class ApplicationService {
     const where: Prisma.ApplicationWhereInput = {
       worker_id: workerId,
       deleted_at: null,
+      // An admin can archive an offer with hires on it; its missions go too.
+      job_offer: { deleted_at: null },
       status: {
         in: [
           ApplicationStatus.ACCEPTED,
@@ -2369,7 +2379,12 @@ export class ApplicationService {
     applicationId: string,
   ): Promise<WorkerMissionCard> {
     const application = await this.prisma.application.findFirst({
-      where: { id: applicationId, worker_id: workerId, deleted_at: null },
+      where: {
+        id: applicationId,
+        worker_id: workerId,
+        deleted_at: null,
+        job_offer: { deleted_at: null },
+      },
       select: WORKER_MISSION_SELECT,
     });
     if (!application) {
