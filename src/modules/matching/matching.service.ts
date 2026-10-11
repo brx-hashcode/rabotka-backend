@@ -11,7 +11,12 @@ import {
   qualityPrior,
   spreadSimilarity,
   withFit,
+  withPairCancellation,
 } from '../recommendation-engine/scoring';
+import {
+  loadPairCancellationFactors,
+  pairKey,
+} from '../recommendation-engine/pair-cancellation';
 import { ApplicationStatus, AssignmentStatus } from '@prisma/client';
 
 const COLLECTION_WORKERS = COLLECTIONS.WORKERS;
@@ -519,10 +524,12 @@ export class MatchingService {
     targetCategoryIds: readonly string[],
     /** The point the workers are compared to: the offer, or the employer. */
     query: { collection: string; id: string },
+    /** Whose cancellations count against each worker — see the v2 engine. */
+    employerId: string,
   ): Promise<ScoredHitWithCategory[]> {
     if (hits.length === 0) return [];
     const workerIds = hits.map((h) => h.id);
-    const [profiles, evidence, sims] = await Promise.all([
+    const [profiles, evidence, sims, pairFactors] = await Promise.all([
       this.prisma.profile.findMany({
         where: { id: { in: workerIds } },
         select: {
@@ -535,6 +542,10 @@ export class MatchingService {
       }),
       this.workerQualityEvidence(workerIds),
       this.denseSimilarity(query, COLLECTION_WORKERS, workerIds),
+      loadPairCancellationFactors(this.prisma, this.systemConfig, {
+        workerIds,
+        employerIds: [employerId],
+      }),
     ]);
     const profileMap = new Map(profiles.map((p) => [p.id, p]));
     const targets = new Set(targetCategoryIds);
@@ -571,10 +582,11 @@ export class MatchingService {
       // which gave the first hit 1.0 however weak the match, and the top of
       // every feed read as a ~100 % match.
       const sim = sims.has(hit.id) ? spreadSimilarity(sims.get(hit.id)!) : null;
-      const matchScore = fitScore({
+      const fit = fitScore({
         sim,
         categoryMatch: targets.size > 0 ? matchedCategoryId !== null : null,
       });
+      const pair = pairFactors.get(pairKey(hit.id, employerId)) ?? 1;
       const relevance = weightedMean([
         { value: sim ?? rankRelevance(rank, hits.length), weight: W_VECTOR },
         // Omitted entirely when there is no history, rather than passed as a
@@ -583,15 +595,15 @@ export class MatchingService {
         ...(quality !== null ? [{ value: quality, weight: W_QUALITY }] : []),
         { value: matchedCategoryId !== null ? 1 : 0, weight: W_CATEGORY_EXACT },
       ]);
-      const score = withFit(relevance, matchScore);
+      const score = withFit(relevance, fit) * pair;
 
       const workerCategoryId =
         matchedCategoryId ?? profile?.categories[0]?.category_id ?? null;
       return {
         id: hit.id,
         score,
-        matchScore,
-        gate: score / fitFactor(matchScore),
+        matchScore: withPairCancellation(fit, pair),
+        gate: score / fitFactor(fit),
         categoryId: workerCategoryId,
       };
     });
@@ -607,10 +619,15 @@ export class MatchingService {
     if (hits.length === 0) return [];
     const jobIds = hits.map((h) => h.id);
 
-    const [jobs, negativeApplications, sims] = await Promise.all([
+    const [jobs, negativeApplications, sims, pairFactors] = await Promise.all([
       this.prisma.jobOffer.findMany({
         where: { id: { in: jobIds } },
-        select: { id: true, created_at: true, category_id: true },
+        select: {
+          id: true,
+          created_at: true,
+          category_id: true,
+          employer_id: true,
+        },
       }),
       this.prisma.application.findMany({
         where: {
@@ -625,6 +642,10 @@ export class MatchingService {
         COLLECTION_JOBS,
         jobIds,
       ),
+      // Every pair this worker cancelled on; filtered per job below.
+      loadPairCancellationFactors(this.prisma, this.systemConfig, {
+        workerIds: [workerId],
+      }),
     ]);
 
     const jobMap = new Map(jobs.map((j) => [j.id, j]));
@@ -641,13 +662,16 @@ export class MatchingService {
 
       // Real similarity, not rank position — see `reRankWorkers`.
       const sim = sims.has(hit.id) ? spreadSimilarity(sims.get(hit.id)!) : null;
-      const matchScore = fitScore({
+      const fit = fitScore({
         sim,
         categoryMatch:
           job?.category_id != null && workerCategoryIds.length > 0
             ? matchesWorkerCategory
             : null,
       });
+      const pair = job
+        ? (pairFactors.get(pairKey(workerId, job.employer_id)) ?? 1)
+        : 1;
       const relevance = withFit(
         weightedMean([
           { value: sim ?? rankRelevance(rank, hits.length), weight: W_VECTOR },
@@ -659,19 +683,20 @@ export class MatchingService {
           },
           { value: matchesWorkerCategory ? 1 : 0, weight: W_CATEGORY_EXACT },
         ]),
-        matchScore,
+        fit,
       );
 
       // Multiplicative, so it actually suppresses rather than being swamped.
-      const score = negativeJobIds.has(hit.id)
-        ? relevance * NEGATIVE_HISTORY_MULTIPLIER
-        : relevance;
+      const score =
+        (negativeJobIds.has(hit.id)
+          ? relevance * NEGATIVE_HISTORY_MULTIPLIER
+          : relevance) * pair;
 
       return {
         id: hit.id,
         score,
-        matchScore,
-        gate: score / fitFactor(matchScore),
+        matchScore: withPairCancellation(fit, pair),
+        gate: score / fitFactor(fit),
         categoryId: job?.category_id ?? null,
       };
     });
@@ -1076,6 +1101,7 @@ export class MatchingService {
         country_code: true,
         city: true,
         category_id: true,
+        employer_id: true,
         category: { select: { name: true, description: true } },
         employer: { select: { country_code: true, city: true } },
       },
@@ -1116,10 +1142,12 @@ export class MatchingService {
       const hits = mapSearchHitsToScoredIds(results, 'profileId');
 
       // Phase 3: re-rank
-      const reRanked = await this.reRankWorkers(hits, categories, {
-        collection: COLLECTION_JOBS,
-        id: job.id,
-      });
+      const reRanked = await this.reRankWorkers(
+        hits,
+        categories,
+        { collection: COLLECTION_JOBS, id: job.id },
+        job.employer_id,
+      );
 
       // Phase 4: score threshold — floored so it can never empty the result
       const minScore = await this.systemConfig.getRecommendationMinScore();
@@ -1303,6 +1331,7 @@ export class MatchingService {
         hits,
         profile.categories.map((c) => c.category_id),
         { collection: COLLECTIONS.EMPLOYERS, id: employerProfileId },
+        employerProfileId,
       );
       // Threshold is config-driven (matching.recommendation_min_score) and
       // floored so it can never empty the feed.

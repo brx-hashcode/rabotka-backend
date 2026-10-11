@@ -39,7 +39,9 @@ import {
   fitScore,
   fitFactor,
   withFit,
+  withPairCancellation,
 } from './scoring';
+import { loadPairCancellationFactors, pairKey } from './pair-cancellation';
 
 /** Which generator produced a candidate — logged so tier mix is observable. */
 export type CandidateTier = 'affinity' | 'cf' | 'declared' | 'all_open';
@@ -184,31 +186,38 @@ export class RecommendationEngineService {
     }
 
     const candidateIds = fused.map((f) => f.id);
-    const [worker, quality, lastSeen, unsaved, simScores] = await Promise.all([
-      this.prisma.profile.findUnique({
-        where: { id: workerId },
-        select: {
-          latitude: true,
-          longitude: true,
-          country_code: true,
-          city: true,
-        },
-      }),
-      this.sources.employerQuality([
-        ...new Set(candidateIds.map((id) => byId.get(id)?.employerId ?? '')),
-      ]),
-      this.sources.lastSeenAt(workerId, candidateIds),
-      this.sources.unsavedOfferIds(workerId, candidateIds),
-      // The worker's own vector carries their portfolio; the jobs' carry their
-      // text. Empty when embeddings are off or Qdrant is unreachable, which
-      // leaves `sim` null rather than zero.
-      this.similarityFor(
-        COLLECTIONS.WORKERS,
-        workerId,
-        COLLECTIONS.JOBS,
-        candidateIds,
-      ),
-    ]);
+    const candidateEmployerIds = [
+      ...new Set(candidateIds.map((id) => byId.get(id)?.employerId ?? '')),
+    ];
+    const [worker, quality, lastSeen, unsaved, simScores, pairFactors] =
+      await Promise.all([
+        this.prisma.profile.findUnique({
+          where: { id: workerId },
+          select: {
+            latitude: true,
+            longitude: true,
+            country_code: true,
+            city: true,
+          },
+        }),
+        this.sources.employerQuality(candidateEmployerIds),
+        this.sources.lastSeenAt(workerId, candidateIds),
+        this.sources.unsavedOfferIds(workerId, candidateIds),
+        // The worker's own vector carries their portfolio; the jobs' carry their
+        // text. Empty when embeddings are off or Qdrant is unreachable, which
+        // leaves `sim` null rather than zero.
+        this.similarityFor(
+          COLLECTIONS.WORKERS,
+          workerId,
+          COLLECTIONS.JOBS,
+          candidateIds,
+        ),
+        // This worker's cancellations on each of these employers.
+        loadPairCancellationFactors(this.prisma, this.systemConfig, {
+          workerIds: [workerId],
+          employerIds: candidateEmployerIds,
+        }),
+      ]);
 
     const weights = interpolateWeights(features.positiveCount);
     const negativeCategories = new Set(features.negativeCategoryIds);
@@ -254,7 +263,7 @@ export class RecommendationEngineService {
       };
 
       const relevance = computeRelevance(terms, weights);
-      const matchScore = fitScore({
+      const fit = fitScore({
         sim: terms.sim,
         categoryAffinity: terms.catAff,
         categoryMatch:
@@ -262,8 +271,9 @@ export class RecommendationEngineService {
             ? declaredCategories.includes(c.categoryId)
             : null,
       });
+      const pair = pairFactors.get(pairKey(workerId, c.employerId));
       const score = applyPenalties(
-        withFit(relevance, matchScore),
+        withFit(relevance, fit),
         {
           negativeCategory: c.categoryId
             ? negativeCategories.has(c.categoryId)
@@ -274,6 +284,7 @@ export class RecommendationEngineService {
             now,
           ),
           unsaved: unsaved.has(c.id),
+          pairCancellation: pair,
         },
         DEFAULT_PENALTIES,
       );
@@ -281,8 +292,9 @@ export class RecommendationEngineService {
       return {
         id: c.id,
         score,
-        matchScore,
-        gate: score / fitFactor(matchScore),
+        // Shown as the compatibility, so the cancellation is visible too.
+        matchScore: withPairCancellation(fit, pair ?? 1),
+        gate: score / fitFactor(fit),
         tier: tierOf.get(c.id)!,
         candidate: c,
       };
@@ -392,7 +404,7 @@ export class RecommendationEngineService {
     }
 
     const candidateIds = fused.map((f) => f.id);
-    const [employer, quality, lastActive, lastSeen, simScores] =
+    const [employer, quality, lastActive, lastSeen, simScores, pairFactors] =
       await Promise.all([
         this.prisma.profile.findUnique({
           where: { id: employerId },
@@ -420,6 +432,11 @@ export class RecommendationEngineService {
           COLLECTIONS.WORKERS,
           candidateIds,
         ),
+        // Which of these workers cancelled on this employer.
+        loadPairCancellationFactors(this.prisma, this.systemConfig, {
+          workerIds: candidateIds,
+          employerIds: [employerId],
+        }),
       ]);
 
     const weights = interpolateWeights(features.positiveCount);
@@ -449,7 +466,7 @@ export class RecommendationEngineService {
       };
 
       const relevance = computeRelevance(terms, weights);
-      const matchScore = fitScore({
+      const fit = fitScore({
         sim: terms.sim,
         categoryAffinity: terms.catAff,
         categoryMatch:
@@ -457,8 +474,9 @@ export class RecommendationEngineService {
             ? c.categoryIds.some((id) => categoryIds.includes(id))
             : null,
       });
+      const pair = pairFactors.get(pairKey(c.id, employerId));
       const score = applyPenalties(
-        withFit(relevance, matchScore),
+        withFit(relevance, fit),
         {
           negativeCategory: c.categoryIds.some((id) =>
             negativeCategories.has(id),
@@ -468,6 +486,7 @@ export class RecommendationEngineService {
             SEEN_RECOVERY_HOURS,
             now,
           ),
+          pairCancellation: pair,
         },
         DEFAULT_PENALTIES,
       );
@@ -475,8 +494,8 @@ export class RecommendationEngineService {
       return {
         id: c.id,
         score,
-        matchScore,
-        gate: score / fitFactor(matchScore),
+        matchScore: withPairCancellation(fit, pair ?? 1),
+        gate: score / fitFactor(fit),
         tier: tierOf.get(c.id)!,
         candidate: c,
       };
@@ -555,6 +574,7 @@ export class RecommendationEngineService {
         longitude: true,
         country_code: true,
         city: true,
+        employer_id: true,
       },
     });
     if (!offer) return [];
@@ -622,6 +642,7 @@ export class RecommendationEngineService {
       blocked,
       workerFeatures,
       simScores,
+      pairFactors,
     ] = await Promise.all([
       this.sources.workerQuality(candidateIds),
       this.sources.lastActiveAt(candidateIds),
@@ -642,6 +663,12 @@ export class RecommendationEngineService {
         COLLECTIONS.WORKERS,
         candidateIds,
       ),
+      // Not the employer's taste — this is judged on the job — but a worker
+      // who walked out on this employer is a worse bet for their next offer.
+      loadPairCancellationFactors(this.prisma, this.systemConfig, {
+        workerIds: candidateIds,
+        employerIds: [offer.employer_id],
+      }),
     ]);
 
     // The cold profile: what the employer has hired before is their history,
@@ -689,13 +716,15 @@ export class RecommendationEngineService {
         };
 
         const relevance = computeRelevance(terms, weights);
-        const matchScore = fitScore({
+        const fit = fitScore({
           sim: terms.sim,
           categoryMatch: c.categoryIds.some((id) => categories.includes(id)),
         });
+        const pair = pairFactors.get(pairKey(c.id, offer.employer_id));
         const score = applyPenalties(
-          withFit(relevance, matchScore),
+          withFit(relevance, fit),
           {
+            pairCancellation: pair,
             // The worker's own rejection history against THIS offer's category.
             // Replaces the legacy Qdrant `must_not rejectedCategoryIds` payload
             // filter, as a graded penalty rather than a hard exclusion.
@@ -716,8 +745,8 @@ export class RecommendationEngineService {
         return {
           id: c.id,
           score,
-          matchScore,
-          gate: score / fitFactor(matchScore),
+          matchScore: withPairCancellation(fit, pair ?? 1),
+          gate: score / fitFactor(fit),
           tier: tierOf.get(c.id)!,
           candidate: c,
         };

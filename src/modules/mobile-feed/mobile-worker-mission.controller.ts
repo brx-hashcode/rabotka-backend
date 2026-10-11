@@ -257,7 +257,7 @@ export class MobileWorkerMissionController {
   @ApiOperation({
     summary: '[Mobile/WORKER] Would cancelling this now incur a penalty?',
     description:
-      'Lets the UI warn before the worker commits. Cancelling within the configured threshold of the start time costs a penalty and a reliability-score deduction, so this must be shown up front — the WhatsApp flow has always warned first.',
+      "Lets the UI warn before the worker commits. Cancelling within the configured threshold of the start time costs a penalty and a reliability-score deduction, so this must be shown up front — the WhatsApp flow has always warned first. Also reports the repeated-cancellation outlook: whether this cancellation counts, how many counted cancellations are already in the window, and whether this one would suspend the account. Every cancellation lowers the worker's compatibility with this employer (affectsCompatibility).",
   })
   @ApiResponse({ status: 200, description: 'Penalty preview' })
   async cancellationPreview(
@@ -266,15 +266,20 @@ export class MobileWorkerMissionController {
   ) {
     const profileId = req.user.profileId;
     await this.assertWorker(profileId);
-    const [wouldPenalize, fees] = await Promise.all([
+    const [wouldPenalize, fees, suspension] = await Promise.all([
       this.applicationService.wouldPenalizeCancellation(id, profileId),
       this.systemConfig.getFees(),
+      this.applicationService.cancellationSuspensionPreview(id, profileId),
     ]);
     return {
       wouldPenalize,
       penaltyFcfa: fees.lateCancellationPenaltyFcfa,
       thresholdHours: fees.cancellationThresholdHours,
       scoreDeduction: fees.lateCancellationScoreDeduction,
+      // Any cancellation, early or late, lowers this worker's compatibility
+      // with this employer.
+      affectsCompatibility: true,
+      ...suspension,
     };
   }
 
@@ -305,6 +310,7 @@ export class MobileWorkerMissionController {
       success: true,
       penaltyApplied: result.penaltyApplied,
       penaltyAmount: result.penaltyAmount,
+      suspended: result.suspended,
     };
   }
 
