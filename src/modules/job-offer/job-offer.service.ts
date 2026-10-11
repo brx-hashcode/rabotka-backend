@@ -78,6 +78,25 @@ const EMPLOYER_DELETABLE_JOB_OFFER_STATUSES: JobOfferStatus[] = [
 ];
 
 /**
+ * Applications that commit the employer to a worker: a contact unlock in
+ * flight, a hire, a started or finished mission. Any one of them blocks an
+ * employer delete. Candidates still waiting (PENDING / VIEWED) do not — they
+ * are closed with the offer and told so.
+ */
+const EMPLOYER_DELETE_BLOCKING_APPLICATION_STATUSES: ApplicationStatus[] = [
+  ApplicationStatus.WAITING_PAYMENT,
+  ApplicationStatus.ACCEPTED,
+  ApplicationStatus.STARTED,
+  ApplicationStatus.END,
+];
+
+/** Assignments that mean a worker was actually engaged on the offer. */
+const EMPLOYER_DELETE_BLOCKING_ASSIGNMENT_STATUSES: AssignmentStatus[] = [
+  AssignmentStatus.CONFIRMED,
+  AssignmentStatus.COMPLETED,
+];
+
+/**
  * Keyset cursor for the open-slots feed. Carries every column the query orders
  * by, so paging can resume at an exact position instead of guessing from an id.
  */
@@ -1048,39 +1067,49 @@ export class JobOfferService {
   ): Promise<void> {
     if (!TERMINAL_JOB_OFFER_STATUSES.includes(status)) return;
 
-    const leftovers = await this.prisma.application.findMany({
-      where: {
-        job_offer_id: jobOfferId,
-        status: {
-          in: [
-            ApplicationStatus.PENDING,
-            ApplicationStatus.VIEWED,
-            ApplicationStatus.WAITING_PAYMENT,
-          ],
-        },
-      },
+    const ids = await this.rejectWaitingApplicants(this.prisma, jobOfferId, [
+      ApplicationStatus.PENDING,
+      ApplicationStatus.VIEWED,
+      ApplicationStatus.WAITING_PAYMENT,
+    ]);
+    this.notifyClosedApplicants(ids, 'closeApplicantsIfTerminal');
+  }
+
+  /**
+   * Rejects an offer's applicants still in `statuses` as an automatic close
+   * (not an employer decision — see RejectionSource) and returns their ids.
+   * Takes the client so a caller can run it inside its own transaction.
+   */
+  private async rejectWaitingApplicants(
+    db: Prisma.TransactionClient,
+    jobOfferId: string,
+    statuses: ApplicationStatus[],
+  ): Promise<string[]> {
+    const leftovers = await db.application.findMany({
+      where: { job_offer_id: jobOfferId, status: { in: statuses } },
       select: { id: true },
     });
-    if (leftovers.length === 0) return;
+    if (leftovers.length === 0) return [];
 
     const ids = leftovers.map((a) => a.id);
-    await this.prisma.application.updateMany({
+    await db.application.updateMany({
       where: { id: { in: ids } },
       data: {
         status: ApplicationStatus.REJECTED,
         rejected_at: new Date(),
-        // Offer closed, not an employer decision — see RejectionSource.
         rejection_source: RejectionSource.AUTO_FILL,
       },
     });
+    return ids;
+  }
+
+  /** Tells each closed applicant (bell + WhatsApp). Fire-and-forget. */
+  private notifyClosedApplicants(ids: string[], context: string): void {
     for (const appId of ids) {
       this.botNotification
         .sendApplicationRejectedToWorker(appId)
         .catch((err: unknown) =>
-          this.logger.warn(
-            `[closeApplicantsIfTerminal] notify failed for ${appId}:`,
-            err,
-          ),
+          this.logger.warn(`[${context}] notify failed for ${appId}:`, err),
         );
     }
   }
@@ -1751,10 +1780,12 @@ export class JobOfferService {
 
   /**
    * Employer-facing delete. An employer may remove one of their own offers only
-   * while it carries no engagement: ACTIVE or EXPIRED status, no live applications
-   * (candidates) and no assignments. This keeps started / filled / completed
-   * offers intact. Soft delete (reversible, preserves history) mirroring
-   * {@link deleteJobOfferByAdmin}.
+   * while nobody is engaged on it: ACTIVE or EXPIRED status, no application in
+   * {@link EMPLOYER_DELETE_BLOCKING_APPLICATION_STATUSES} and no confirmed or
+   * completed assignment. Candidates still waiting are closed with the offer
+   * (automatic rejection) and notified; rejected / cancelled ones, and
+   * cancelled assignments, no longer stand in the way. Soft delete (reversible,
+   * preserves history) mirroring {@link deleteJobOfferByAdmin}.
    */
   async deleteByEmployer(id: string, actorProfileId: string): Promise<void> {
     const offer = await this.prisma.jobOffer.findFirst({
@@ -1775,29 +1806,42 @@ export class JobOfferService {
       );
     }
 
-    const [liveApplications, assignments] = await Promise.all([
-      this.prisma.application.count({
-        where: {
-          job_offer_id: id,
-          deleted_at: null,
-          status: {
-            notIn: [ApplicationStatus.REJECTED, ApplicationStatus.CANCELLED],
+    // Checked inside the transaction so an accept landing between the check
+    // and the delete cannot leave a hired worker on a deleted offer.
+    const closedIds = await this.prisma.$transaction(async (tx) => {
+      const [engagedApplications, engagedAssignments] = await Promise.all([
+        tx.application.count({
+          where: {
+            job_offer_id: id,
+            deleted_at: null,
+            status: { in: EMPLOYER_DELETE_BLOCKING_APPLICATION_STATUSES },
           },
-        },
-      }),
-      this.prisma.assignment.count({ where: { job_offer_id: id } }),
-    ]);
-    if (liveApplications > 0 || assignments > 0) {
-      throw new BadRequestException(
-        'Impossible de supprimer : cette offre a déjà des candidats.',
-      );
-    }
+        }),
+        tx.assignment.count({
+          where: {
+            job_offer_id: id,
+            status: { in: EMPLOYER_DELETE_BLOCKING_ASSIGNMENT_STATUSES },
+          },
+        }),
+      ]);
+      if (engagedApplications > 0 || engagedAssignments > 0) {
+        throw new BadRequestException(
+          'Impossible de supprimer : un candidat est déjà engagé sur cette offre.',
+        );
+      }
 
-    await this.prisma.jobOffer.update({
-      where: { id },
-      data: { deleted_at: new Date() },
+      const ids = await this.rejectWaitingApplicants(tx, id, [
+        ApplicationStatus.PENDING,
+        ApplicationStatus.VIEWED,
+      ]);
+      await tx.jobOffer.update({
+        where: { id },
+        data: { deleted_at: new Date() },
+      });
+      return ids;
     });
     await this.cache.invalidate('jobs');
+    this.notifyClosedApplicants(closedIds, 'deleteByEmployer');
 
     // Remove from vector index — fire-and-forget, non-fatal
     void this.matchingService

@@ -739,12 +739,12 @@ export class MobileFeedController {
   @ApiOperation({
     summary: '[Mobile/EMPLOYER] Delete one of my job offers',
     description:
-      'Soft-deletes a job offer owned by the authenticated employer. Only allowed while the offer is still ACTIVE with no candidates (no live applications) and no assignments.',
+      'Soft-deletes a job offer owned by the authenticated employer. Allowed while the offer is ACTIVE or EXPIRED and no worker is engaged on it (no WAITING_PAYMENT / ACCEPTED / STARTED / END application, no confirmed or completed assignment). Candidates still waiting (PENDING / VIEWED) are closed with it and notified.',
   })
   @ApiResponse({ status: 200, description: 'Job offer deleted' })
   @ApiResponse({
     status: 400,
-    description: 'Offer has candidates or is engaged',
+    description: 'A worker is engaged on the offer, or it is in progress',
   })
   @ApiResponse({ status: 403, description: 'Not an EMPLOYER / not the owner' })
   @ApiResponse({ status: 404, description: 'Job offer not found' })
