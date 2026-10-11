@@ -1,3 +1,4 @@
+import { joinFrench } from '../../job-offer/utils/job-offer-changes.util';
 import {
   Injectable,
   Logger,
@@ -681,6 +682,54 @@ export class BotNotificationService {
     } catch (err) {
       this.logger.warn(
         `Failed to send employer-cancellation notice to worker: ${String(applicationId)}`,
+        err,
+      );
+    }
+  }
+
+  /**
+   * Tells a candidate the employer changed the pay, date or place of an offer
+   * they are on, so they can withdraw before committing to terms they did not
+   * apply for. Bell always; WhatsApp free-form, so only inside the 24h window —
+   * same trade-off as {@link sendCancellationToWorker}.
+   */
+  async sendJobOfferUpdatedToWorker(
+    applicationId: string,
+    changes: string[],
+  ): Promise<void> {
+    try {
+      const app = await this.prisma.application.findUnique({
+        where: { id: applicationId },
+        select: {
+          worker_id: true,
+          job_offer: { select: { title: true, employer_id: true } },
+          worker: { select: { phone: true, first_name: true } },
+        },
+      });
+      if (!app?.job_offer) return;
+
+      notifyProfile(this.events, {
+        recipientId: app.worker_id,
+        actorId: app.job_offer.employer_id,
+        input: {
+          type: 'JOB_OFFER_UPDATED',
+          applicationId,
+          jobTitle: app.job_offer.title,
+          changes,
+        },
+      });
+      if (!app.worker?.phone) return;
+
+      await this.whatsApp.sendTextMessage(
+        app.worker.phone,
+        [
+          `*${app.worker.first_name}*, l'employeur a modifié ${joinFrench(changes)} de l'offre « ${app.job_offer.title} ».`,
+          'Ouvrez Rabotka pour vérifier qu’elle vous convient toujours.',
+        ].join('\n\n'),
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Failed to send offer-updated notice to worker: ${String(applicationId)}`,
         err,
       );
     }

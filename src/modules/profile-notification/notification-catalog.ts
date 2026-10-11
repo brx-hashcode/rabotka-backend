@@ -1,4 +1,5 @@
 import { PaymentRequestType } from '@prisma/client';
+import { joinFrench } from '../job-offer/utils/job-offer-changes.util';
 
 /**
  * What each notification says and where it opens — the one place the copy
@@ -73,6 +74,13 @@ export type NotificationInput =
       automatic: boolean;
     }
   | { type: 'HIRE_CANCELLED'; jobTitle: string }
+  | {
+      type: 'JOB_OFFER_UPDATED';
+      applicationId: string;
+      jobTitle: string;
+      /** What changed, as labels from `describeJobOfferChanges`. */
+      changes: string[];
+    }
   | {
       type: 'MISSION_RATED';
       score: number;
@@ -281,6 +289,13 @@ export function renderNotification(
         title: 'Mission annulée',
         body: `L’employeur a annulé la mission${quoted(input.jobTitle)}.`,
         link: '/mes-candidatures',
+      };
+
+    case 'JOB_OFFER_UPDATED':
+      return {
+        title: 'Offre modifiée',
+        body: `L’employeur a modifié ${joinFrench(input.changes)} de l’offre${quoted(input.jobTitle)}. Vérifiez qu’elle vous convient toujours.`,
+        link: `/applications/${input.applicationId}`,
       };
 
     case 'MISSION_RATED': {

@@ -19,6 +19,12 @@ const SAMPLES: NotificationInput[] = [
   { type: 'APPLICATION_REJECTED', jobTitle: 'Plombier', automatic: false },
   { type: 'HIRE_CANCELLED', jobTitle: 'Plombier' },
   {
+    type: 'JOB_OFFER_UPDATED',
+    applicationId: 'a-1',
+    jobTitle: 'Plombier',
+    changes: ['la date', 'le lieu'],
+  },
+  {
     type: 'MISSION_RATED',
     score: 4,
     jobTitle: 'Plombier',

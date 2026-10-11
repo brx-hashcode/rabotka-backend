@@ -2135,6 +2135,8 @@ enum ProfileNotificationType {
   APPLICATION_REJECTED
   HIRE_CANCELLED
   MISSION_RATED
+  /// The employer changed the pay, date or place of an offer the worker is on.
+  JOB_OFFER_UPDATED
   // Employer
   NEW_APPLICATION
   APPLICATION_CANCELLED

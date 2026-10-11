@@ -197,6 +197,30 @@ describe('BotNotificationService', () => {
       });
     });
 
+    it('tells a candidate what changed on an offer they are on', async () => {
+      deps.prisma.application.findUnique.mockResolvedValue({
+        worker_id: 'worker-1',
+        job_offer: { title: 'Plombier', employer_id: 'emp-1' },
+        worker: { phone: '+242001', first_name: 'Bob' },
+      });
+
+      await service.sendJobOfferUpdatedToWorker('app-1', [
+        'la date',
+        'le lieu',
+      ]);
+
+      const [payload] = inAppNotifications(events.emit, 'JOB_OFFER_UPDATED');
+      expect(payload).toMatchObject({
+        recipientId: 'worker-1',
+        actorId: 'emp-1',
+        input: { applicationId: 'app-1', changes: ['la date', 'le lieu'] },
+      });
+      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalledWith(
+        '+242001',
+        expect.stringContaining('la date et le lieu'),
+      );
+    });
+
     it('tells both parties about an unlock, each deduplicated', async () => {
       deps.prisma.contactUnlockAttempt.findUnique.mockResolvedValue({
         id: 'attempt-1',
