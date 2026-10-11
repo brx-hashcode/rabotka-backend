@@ -77,6 +77,9 @@ describe('JobOfferService (extended)', () => {
       contactUnlockAttempt: { findMany: jest.fn().mockResolvedValue([]) },
       penalty: { findMany: jest.fn().mockResolvedValue([]) },
       rating: { findMany: jest.fn().mockResolvedValue([]) },
+      profileNotification: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
     };
 
     const mockMailService = {
@@ -632,6 +635,35 @@ describe('JobOfferService (extended)', () => {
       expect(prisma.jobOffer.update).toHaveBeenCalledWith({
         where: { id: OFFER_ID },
         data: { deleted_at: expect.any(Date) },
+      });
+    });
+
+    it('unlinks the bell notifications that led to it', async () => {
+      (prisma.jobOffer.findFirst as jest.Mock).mockResolvedValue({
+        id: OFFER_ID,
+      });
+      (prisma.application.findMany as jest.Mock).mockResolvedValue([
+        { id: 'app-1' },
+      ]);
+
+      await service.deleteJobOfferByAdmin(OFFER_ID);
+
+      expect(
+        (
+          prisma as unknown as {
+            profileNotification: { updateMany: jest.Mock };
+          }
+        ).profileNotification.updateMany,
+      ).toHaveBeenCalledWith({
+        where: {
+          link: {
+            in: expect.arrayContaining([
+              `/offres/${OFFER_ID}`,
+              '/applications/app-1/paiement',
+            ]),
+          },
+        },
+        data: { link: null },
       });
     });
 
