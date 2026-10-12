@@ -281,7 +281,7 @@ export class MobileWorkerMissionController {
       // deduction if late, plus the any-cancellation one if committed.
       totalScoreDeduction: cancellationScoreDeduction({
         late: wouldPenalize,
-        committed: suspension.countsTowardSuspension,
+        committed: suspension.committed,
         lateDeduction: fees.lateCancellationScoreDeduction,
         anyDeduction: Number(fees.cancellationScoreDeduction),
       }),

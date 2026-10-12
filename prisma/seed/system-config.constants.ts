@@ -122,7 +122,7 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     key: 'fees.cancellation_suspension_count',
     value: '3',
     category: ConfigCategory.FEES,
-    label: 'Annulations de missions avant suspension du compte',
+    label: 'Annulations (missions ou candidatures) avant suspension du compte',
     isSecret: false,
   },
   {

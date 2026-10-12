@@ -125,13 +125,13 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
   },
   {
     // Suspension for walking away repeatedly, independent of penalties: a
-    // worker who cancels this many committed missions (accepted or awaiting
-    // payment) within the window below is suspended until an admin lifts it.
-    // Early or late makes no difference — the employer was let down either way.
+    // worker who cancels this many times within the window below — a mission
+    // they were accepted on, or an application still waiting for an answer —
+    // is suspended until an admin lifts it. Early or late makes no difference.
     key: 'fees.cancellation_suspension_count',
     value: '3',
     category: ConfigCategory.FEES,
-    label: 'Annulations de missions avant suspension du compte',
+    label: 'Annulations (missions ou candidatures) avant suspension du compte',
     isSecret: false,
   },
   {

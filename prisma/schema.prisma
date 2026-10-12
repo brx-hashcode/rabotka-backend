@@ -1397,9 +1397,9 @@ model Application {
   cancelled_by        ApplicationCancelledBy?
   penalty_applied     Boolean                 @default(false)
   penalty_amount      Decimal?                @db.Decimal(10, 2)
-  /// The status a WORKER cancellation left. Decides whether it counts toward
-  /// the repeated-cancellation suspension: walking away from a mission they
-  /// were accepted on does, withdrawing an application still pending does not.
+  /// The status a WORKER cancellation left. Every one counts toward the
+  /// repeated-cancellation suspension; only one from an accepted / paying /
+  /// hired status also costs reliability points (COMMITTED_CANCEL_STATUSES).
   /// NULL for every other cancellation, and for those before the column.
   cancelled_from_status ApplicationStatus?
 

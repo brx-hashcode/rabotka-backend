@@ -4,8 +4,9 @@ import { SUSPENSION_COUNTED_CANCEL_STATUSES } from './application.constants';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * A worker's committed cancellations — walking away from a mission they were
- * accepted on, paying for, or hired on — within the last `windowDays`. The
+ * A worker's own cancellations within the last `windowDays` — a mission they
+ * were accepted on, or an application still waiting for an answer (see
+ * SUSPENSION_COUNTED_CANCEL_STATUSES). The
  * number the repeated-cancellation suspension is judged on, shared by the
  * cancel itself, its preview and the admin profile so they cannot disagree.
  */
