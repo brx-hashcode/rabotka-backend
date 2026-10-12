@@ -318,6 +318,144 @@ describe('CandidateSourceService', () => {
     });
   });
 
+  describe('geography at retrieval', () => {
+    const brazzaville = { countryCode: 'CG', city: 'Brazzaville' };
+    const where = (call = 0) =>
+      prisma.jobOffer.findMany.mock.calls[call][0].where;
+    const country = {
+      OR: [
+        { is_remote: true },
+        { country_code: 'CG' },
+        { country_code: null, employer: { country_code: 'CG' } },
+        { country_code: null, employer: { country_code: null } },
+      ],
+    };
+    const city = {
+      OR: [
+        { city: { equals: 'Brazzaville', mode: 'insensitive' } },
+        {
+          city: null,
+          employer: { city: { equals: 'Brazzaville', mode: 'insensitive' } },
+        },
+      ],
+    };
+
+    it('leaves the query unrestricted when the country is unknown', async () => {
+      await service.fromAllOpen('w1', 10, { countryCode: null, city: 'X' });
+      expect(prisma.jobOffer.findMany).toHaveBeenCalledTimes(1);
+      expect(where().AND).toBeUndefined();
+    });
+
+    it('keeps on-site offers to the country, remote ones anywhere', async () => {
+      await service.fromAllOpen('w1', 10, { countryCode: 'CG', city: null });
+      expect(prisma.jobOffer.findMany).toHaveBeenCalledTimes(1);
+      expect(where().AND).toEqual([expect.anything(), country]);
+    });
+
+    it('asks for the same city first, then the rest of the country', async () => {
+      prisma.jobOffer.findMany
+        .mockResolvedValueOnce([row('local')])
+        .mockResolvedValueOnce([row('elsewhere')]);
+
+      const out = await service.fromAllOpen('w1', 10, brazzaville);
+
+      expect(out.map((c) => c.id)).toEqual(['local', 'elsewhere']);
+      expect(where(0).AND).toEqual([expect.anything(), country, city]);
+      expect(where(1).AND).toEqual([
+        expect.anything(),
+        country,
+        { id: { notIn: ['local'] } },
+      ]);
+      // The second query only tops the pool up.
+      expect(prisma.jobOffer.findMany.mock.calls[1][0].take).toBe(39);
+    });
+
+    it('skips the country query when the city alone fills the pool', async () => {
+      prisma.jobOffer.findMany.mockResolvedValueOnce(
+        Array.from({ length: 4 }, (_, i) => row(`o${i}`)),
+      );
+      await service.fromDeclaredCategories('w1', ['cat-a'], 1, brazzaville);
+      expect(prisma.jobOffer.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the base filters under the geographic ones', async () => {
+      await service.fromDeclaredCategories('w1', ['cat-a'], 10, brazzaville);
+      expect(where().AND[0]).toEqual(
+        expect.objectContaining({
+          category_id: { in: ['cat-a'] },
+          applications: { none: { worker_id: 'w1' } },
+          deleted_at: null,
+        }),
+      );
+    });
+
+    it('does not let the affinity OR replace the geographic one', async () => {
+      await service.fromAffinities(
+        'w1',
+        features({ categoryAffinity: { 'cat-a': 1 } }),
+        10,
+        brazzaville,
+      );
+      expect(where().AND[0].OR).toEqual([{ category_id: { in: ['cat-a'] } }]);
+      expect(where().AND[1]).toEqual(country);
+    });
+
+    it('restricts collaborative filtering and hydration to the country', async () => {
+      const warm = features({ categoryAffinity: { 'cat-a': 1 } });
+      prisma.application.findMany.mockResolvedValue([{ worker_id: 'peer' }]);
+      prisma.application.groupBy.mockResolvedValue([
+        { job_offer_id: 'o1', _count: { _all: 3 } },
+      ]);
+      await service.fromCollaborativeFiltering('w1', warm, 10, brazzaville);
+      expect(
+        prisma.application.groupBy.mock.calls[0][0].where.job_offer.AND,
+      ).toEqual([country]);
+      expect(where().AND).toEqual([country]);
+
+      await service.hydrateOpen(['o1'], 'w1', brazzaville);
+      expect(where(1).AND).toEqual([country]);
+    });
+
+    it("keeps workers to the employer's country, unknown kept, city first", async () => {
+      const opts = {
+        reliabilityMin: 50,
+        exclude: new Set(['w-contacted']),
+        near: brazzaville,
+      };
+      prisma.profile.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      await service.workersFromAll(opts, 10);
+
+      const calls = prisma.profile.findMany.mock.calls;
+      const workerCountry = {
+        OR: [{ country_code: 'CG' }, { country_code: null }],
+      };
+      expect(calls[0][0].where.AND).toEqual([
+        expect.objectContaining({ id: { notIn: ['w-contacted'] } }),
+        workerCountry,
+        { city: { equals: 'Brazzaville', mode: 'insensitive' } },
+      ]);
+      expect(calls[1][0].where.AND).toEqual([
+        expect.anything(),
+        workerCountry,
+        { id: { notIn: [] } },
+      ]);
+    });
+
+    it('leaves workers unrestricted without a place', async () => {
+      await service.workersFromAll(
+        { reliabilityMin: 50, exclude: new Set(), near: null },
+        10,
+      );
+      expect(prisma.profile.findMany).toHaveBeenCalledTimes(1);
+      expect(
+        prisma.profile.findMany.mock.calls[0][0].where.AND,
+      ).toBeUndefined();
+    });
+  });
+
   describe('employerQuality', () => {
     it('returns an empty map for an empty batch without querying', async () => {
       expect((await service.employerQuality([])).size).toBe(0);

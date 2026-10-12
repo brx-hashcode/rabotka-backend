@@ -158,11 +158,15 @@ export class RecommendationEngineService {
     const features = await this.features.get(workerId);
 
     const declaredCategories = await this.workerCategoryIds(workerId);
+    // Loaded before retrieval, not after: the pool itself is kept to where the
+    // worker can actually work.
+    const workerPlace = toPlace(await this.placeOf(workerId));
     const pools = await this.gatherCandidates(
       workerId,
       features,
       declaredCategories,
       limit,
+      workerPlace,
     );
     if (pools.size === 0) return [];
 
@@ -189,17 +193,8 @@ export class RecommendationEngineService {
     const candidateEmployerIds = [
       ...new Set(candidateIds.map((id) => byId.get(id)?.employerId ?? '')),
     ];
-    const [worker, quality, lastSeen, unsaved, simScores, pairFactors] =
+    const [quality, lastSeen, unsaved, simScores, pairFactors] =
       await Promise.all([
-        this.prisma.profile.findUnique({
-          where: { id: workerId },
-          select: {
-            latitude: true,
-            longitude: true,
-            country_code: true,
-            city: true,
-          },
-        }),
         this.sources.employerQuality(candidateEmployerIds),
         this.sources.lastSeenAt(workerId, candidateIds),
         this.sources.unsavedOfferIds(workerId, candidateIds),
@@ -221,7 +216,6 @@ export class RecommendationEngineService {
 
     const weights = interpolateWeights(features.positiveCount);
     const negativeCategories = new Set(features.negativeCategoryIds);
-    const workerPlace = toPlace(worker);
 
     // `sim` stays null until the vector tier lands. Deriving it from fused rank
     // would be dishonest: within a tier the order is `created_at desc`, so the
@@ -358,7 +352,12 @@ export class RecommendationEngineService {
     const features = await this.features.get(employerId);
 
     const fees = await this.systemConfig.getFees();
-    const queryOpts = { reliabilityMin: fees.reliabilityScoreMin, exclude };
+    const employerPlace = toPlace(await this.placeOf(employerId));
+    const queryOpts = {
+      reliabilityMin: fees.reliabilityScoreMin,
+      exclude,
+      near: employerPlace,
+    };
 
     const categoryIds =
       opts.categoryIds ?? (await this.employerCategoryIds(employerId));
@@ -404,17 +403,8 @@ export class RecommendationEngineService {
     }
 
     const candidateIds = fused.map((f) => f.id);
-    const [employer, quality, lastActive, lastSeen, simScores, pairFactors] =
+    const [quality, lastActive, lastSeen, simScores, pairFactors] =
       await Promise.all([
-        this.prisma.profile.findUnique({
-          where: { id: employerId },
-          select: {
-            latitude: true,
-            longitude: true,
-            country_code: true,
-            city: true,
-          },
-        }),
         this.sources.workerQuality(candidateIds),
         this.sources.lastActiveAt(candidateIds),
         // Which of these workers this employer has already been shown. Without it
@@ -441,7 +431,6 @@ export class RecommendationEngineService {
 
     const weights = interpolateWeights(features.positiveCount);
     const negativeCategories = new Set(features.negativeCategoryIds);
-    const employerPlace = toPlace(employer);
 
     // One clock for the whole pass — see `recommendJobsForWorker`.
     const now = Date.now();
@@ -575,6 +564,7 @@ export class RecommendationEngineService {
         country_code: true,
         city: true,
         employer_id: true,
+        employer: { select: { country_code: true, city: true } },
       },
     });
     if (!offer) return [];
@@ -601,6 +591,15 @@ export class RecommendationEngineService {
       reliabilityMin: fees.reliabilityScoreMin,
       exclude,
       requireVerified: opts.requireVerified,
+      // Where the work is done — the offer's place, else its employer's. A
+      // remote job can be done from anywhere, so it is told to anyone.
+      near: offer.is_remote
+        ? null
+        : {
+            countryCode:
+              offer.country_code ?? offer.employer?.country_code ?? null,
+            city: offer.city ?? offer.employer?.city ?? null,
+          },
     };
 
     const pools = new Map<CandidateTier, WorkerCandidate[]>();
@@ -785,6 +784,19 @@ export class RecommendationEngineService {
       .filter((id): id is string => id !== null);
   }
 
+  /** Where a profile is, as `toPlace` reads it. */
+  private placeOf(profileId: string) {
+    return this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: {
+        latitude: true,
+        longitude: true,
+        country_code: true,
+        city: true,
+      },
+    });
+  }
+
   /** The employer-side mirror of `proximityTerm`; same fallback, same reasons. */
   private workerProximity(
     employerPlace: WorkerPlace,
@@ -817,6 +829,7 @@ export class RecommendationEngineService {
     features: UserFeatures,
     declaredCategories: string[],
     limit: number,
+    place: WorkerPlace,
   ): Promise<Map<CandidateTier, Candidate[]>> {
     const pools = new Map<CandidateTier, Candidate[]>();
     const add = (tier: CandidateTier, list: Candidate[]) => {
@@ -824,10 +837,15 @@ export class RecommendationEngineService {
     };
 
     const [affinity, cf] = await Promise.all([
-      this.sources.fromAffinities(workerId, features, limit),
+      this.sources.fromAffinities(workerId, features, limit, place),
       this.cfEnabled().then((on) =>
         on
-          ? this.sources.fromCollaborativeFiltering(workerId, features, limit)
+          ? this.sources.fromCollaborativeFiltering(
+              workerId,
+              features,
+              limit,
+              place,
+            )
           : [],
       ),
     ]);
@@ -844,11 +862,12 @@ export class RecommendationEngineService {
           workerId,
           declaredCategories,
           limit,
+          place,
         ),
       );
     }
     if (gathered() < limit) {
-      add('all_open', await this.sources.fromAllOpen(workerId, limit));
+      add('all_open', await this.sources.fromAllOpen(workerId, limit, place));
     }
     return pools;
   }

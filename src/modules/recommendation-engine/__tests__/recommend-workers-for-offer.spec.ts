@@ -304,6 +304,43 @@ describe('recommendWorkersForJobOffer', () => {
       expect(opts.requireVerified).toBe(false);
     });
 
+    it("keeps candidates to where the job is done, the offer's place first", async () => {
+      withWorkers('w1');
+
+      await notify();
+
+      const [, opts] = deps.sources.workersFromCategories.mock.calls[0];
+      expect(opts.near).toEqual({ countryCode: 'CG', city: 'Brazzaville' });
+    });
+
+    it("falls back to the employer's place when the offer names none", async () => {
+      deps.prisma.jobOffer.findUnique.mockResolvedValue(
+        offerRow({
+          country_code: null,
+          city: null,
+          employer: { country_code: 'CM', city: 'Douala' },
+        }),
+      );
+      withWorkers('w1');
+
+      await notify();
+
+      const [, opts] = deps.sources.workersFromCategories.mock.calls[0];
+      expect(opts.near).toEqual({ countryCode: 'CM', city: 'Douala' });
+    });
+
+    it('tells anyone about a remote job', async () => {
+      deps.prisma.jobOffer.findUnique.mockResolvedValue(
+        offerRow({ is_remote: true }),
+      );
+      withWorkers('w1');
+
+      await notify();
+
+      const [, opts] = deps.sources.workersFromCategories.mock.calls[0];
+      expect(opts.near).toBeNull();
+    });
+
     it('drops hard-blocked workers after fusion', async () => {
       withWorkers('ok', 'blocked');
       deps.sources.hardBlockedWorkerIds.mockResolvedValue(new Set(['blocked']));
