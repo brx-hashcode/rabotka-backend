@@ -59,6 +59,8 @@ describe('ProfileController', () => {
   let walletService: ReturnType<typeof makeWalletService>;
   let whatsApp: { sendTemplateMessage: jest.Mock };
   let contactedProfiles: { listContacts: jest.Mock };
+  // The signup token store: one token, verified for the DTO's number.
+  let redis: { get: jest.Mock; del: jest.Mock };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -67,6 +69,10 @@ describe('ProfileController', () => {
     walletService = makeWalletService();
     whatsApp = { sendTemplateMessage: jest.fn().mockResolvedValue(true) };
     contactedProfiles = { listContacts: jest.fn().mockResolvedValue([]) };
+    redis = {
+      get: jest.fn().mockResolvedValue('+242000001'),
+      del: jest.fn().mockResolvedValue(2),
+    };
     controller = new ProfileController(
       profileService as any,
       mailService as any,
@@ -76,6 +82,7 @@ describe('ProfileController', () => {
       makeConfigService() as any,
       whatsApp as any,
       contactedProfiles as any,
+      redis as any,
     );
   });
 
@@ -91,9 +98,31 @@ describe('ProfileController', () => {
       profileType: 'WORKER' as any,
       kycDocumentUrl: 'https://cdn/id.jpg',
       kycSelfieUrl: 'https://cdn/selfie.jpg',
+      signupToken: 'verified-token',
     };
 
     const mockRes = () => ({ cookie: jest.fn() }) as any;
+
+    it('refuses without a token from the signup verification', async () => {
+      redis.get.mockResolvedValue(null);
+      await expect(
+        controller.createProfile(dto as any, mockRes()),
+      ).rejects.toThrow(ForbiddenException);
+      expect(profileService.createProfile).not.toHaveBeenCalled();
+    });
+
+    it("refuses a token verified for someone else's number", async () => {
+      redis.get.mockResolvedValue('+242999999');
+      await expect(
+        controller.createProfile(dto as any, mockRes()),
+      ).rejects.toThrow(ForbiddenException);
+      expect(profileService.createProfile).not.toHaveBeenCalled();
+    });
+
+    it('spends the token once the profile exists', async () => {
+      await controller.createProfile(dto as any, mockRes());
+      expect(redis.del).toHaveBeenCalledTimes(1);
+    });
 
     it('creates a profile and sends welcome email', async () => {
       const result = await controller.createProfile(dto as any, mockRes());
@@ -158,9 +187,23 @@ describe('ProfileController', () => {
       ({
         originalname: 'id.jpg',
         mimetype: 'image/jpeg',
-        buffer: Buffer.from('data'),
-        size: 4,
+        // A real JPEG header: the bytes are checked against the type.
+        buffer: Buffer.from([
+          0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1,
+        ]),
+        size: 12,
       }) as Express.Multer.File;
+
+    it('refuses a file whose bytes are not what its type claims', async () => {
+      const disguised = {
+        ...makeFile(),
+        buffer: Buffer.from('<html><script>alert(1)</script></html>'),
+      } as Express.Multer.File;
+      await expect(controller.uploadKyc(disguised)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(profileService.uploadKycFile).not.toHaveBeenCalled();
+    });
 
     it('returns the url from the service', async () => {
       profileService.uploadKycFile.mockResolvedValue({

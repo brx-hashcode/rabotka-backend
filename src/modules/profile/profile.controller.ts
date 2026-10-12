@@ -11,9 +11,20 @@ import {
   Res,
   Query,
   BadRequestException,
+  ForbiddenException,
+  Inject,
   Param,
   Logger,
 } from '@nestjs/common';
+import type Redis from 'ioredis';
+import { Throttle } from '@nestjs/throttler';
+import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+import { sniffFileType } from '../../common/utils/file-signature.util';
+import {
+  consumeSignupToken,
+  phoneForSignupToken,
+} from '../auth/signup-token';
+import { SignupUploadGuard } from '../auth/guards/signup-upload.guard';
 import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -72,6 +83,7 @@ export class ProfileController {
     private readonly configService: ConfigService,
     private readonly whatsApp: WhatsAppService,
     private readonly contactedProfiles: ContactedProfilesService,
+    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
   ) {}
 
   @Get('contacts')
@@ -128,7 +140,21 @@ export class ProfileController {
     @Body() createProfileDto: CreateProfileDto,
     @Res({ passthrough: true }) res: Response,
   ) {
+    // The number must have been verified by WhatsApp code, by this caller,
+    // within the hour — or anyone could register someone else's number.
+    const verifiedPhone = await phoneForSignupToken(
+      this.redis,
+      createProfileDto.signupToken,
+    );
+    if (!verifiedPhone || verifiedPhone !== createProfileDto.phone) {
+      throw new ForbiddenException(
+        'Vérifiez votre numéro de téléphone avant de créer votre compte.',
+      );
+    }
+
     const result = await this.profileService.createProfile(createProfileDto);
+    // Spent: one verified number, one account.
+    await consumeSignupToken(this.redis, createProfileDto.signupToken);
 
     // Email is optional at signup, and most workers have none. `sendMail` would
     // drop this on its own, but rendering the welcome template is wasted work
@@ -502,6 +528,9 @@ export class ProfileController {
   }
 
   @Post('kyc-upload')
+  // Token checked before the body is read; see SignupUploadGuard.
+  @UseGuards(SignupUploadGuard)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @UseInterceptors(
     FileInterceptor('file', {
       limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
@@ -568,6 +597,13 @@ export class ProfileController {
   ): Promise<{ url: string; key: string }> {
     if (!file) {
       throw new BadRequestException('Le fichier KYC est requis');
+    }
+    // The declared type is a header anyone can set: the bytes must agree.
+    // An HTML page or a script renamed photo.png stops here.
+    if (sniffFileType(file.buffer) !== file.mimetype) {
+      throw new BadRequestException(
+        'Fichier non reconnu : envoyez une photo (JPG, PNG, WEBP) ou un PDF.',
+      );
     }
 
     return this.profileService.uploadKycFile(file);
