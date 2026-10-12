@@ -1,3 +1,4 @@
+import { resolvesToPrivateAddress } from '../../common/utils/private-address.util';
 import { Injectable, Logger } from '@nestjs/common';
 import { OAuthAppStatus } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
@@ -64,6 +65,7 @@ export class IdentityCheckWebhookService {
             webhook_url: true,
             status: true,
             deleted_at: true,
+            is_sandbox: true,
           },
         },
       },
@@ -85,6 +87,15 @@ export class IdentityCheckWebhookService {
 
     let failure: string | null = null;
     try {
+      // Re-checked at every send: the name may have been re-pointed at an
+      // internal address since it was registered (DNS rebinding). A sandbox
+      // app may target the developer's own machine.
+      if (
+        !app.is_sandbox &&
+        (await resolvesToPrivateAddress(new URL(app.webhook_url).hostname))
+      ) {
+        throw new Error('destination refusée : adresse interne');
+      }
       const res = await fetch(app.webhook_url, {
         method: 'POST',
         headers: {

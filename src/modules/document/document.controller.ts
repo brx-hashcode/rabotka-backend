@@ -1,3 +1,4 @@
+import { Public } from '../auth/decorators/public.decorator';
 import {
   Controller,
   Get,
@@ -249,6 +250,7 @@ export class DocumentController {
 export class PublicDocumentController {
   constructor(private readonly prisma: PrismaService) {}
 
+  @Public()
   @Get('policy')
   @ApiOperation({
     summary: 'Get the active POLICY document (no authentication required)',

@@ -1,3 +1,4 @@
+import { Public } from '../auth/decorators/public.decorator';
 import { Controller, Get, Param } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { GeoService } from './geo.service';
@@ -15,6 +16,7 @@ import { GeoService } from './geo.service';
 export class GeoPublicController {
   constructor(private readonly geo: GeoService) {}
 
+  @Public()
   @Get('countries')
   @ApiOperation({
     summary: 'Every country, sorted by French name',
@@ -39,6 +41,7 @@ export class GeoPublicController {
     return this.geo.listCountries();
   }
 
+  @Public()
   @Get('countries/:code/cities')
   @ApiOperation({ summary: 'Cities of a country, sorted' })
   @ApiParam({ name: 'code', example: 'CG', description: 'ISO 3166-1 alpha-2' })

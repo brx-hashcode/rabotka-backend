@@ -1,3 +1,4 @@
+import { Public } from '../auth/decorators/public.decorator';
 import {
   Controller,
   Post,
@@ -18,6 +19,7 @@ export class PaymentWebhookController {
     private readonly configService: ConfigService,
   ) {}
 
+  @Public()
   @Post('penalties/:profileId')
   @HttpCode(HttpStatus.OK)
   async penaltySuccess(

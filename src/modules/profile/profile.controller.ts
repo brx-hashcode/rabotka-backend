@@ -1,3 +1,4 @@
+import { Public } from '../auth/decorators/public.decorator';
 import {
   Controller,
   Post,
@@ -101,6 +102,7 @@ export class ProfileController {
     return this.contactedProfiles.listContacts(req.user.profileId);
   }
 
+  @Public()
   @Post()
   @ApiOperation({
     summary: 'Create a new profile with pre-uploaded KYC documents',

@@ -25,6 +25,15 @@ import {
 } from '../guards/partner-client-auth.guard';
 import { IdentityCheckWebhookService } from '../identity-check-webhook.service';
 import { WEBHOOK_JWS_TYPE } from '../identity-check.constants';
+import { resolvesToPrivateAddress } from '../../../common/utils/private-address.util';
+
+// The partner's host is fictitious: answer the DNS check here instead of the
+// network. `isPrivateAddress` stays real — URL validation uses it.
+jest.mock('../../../common/utils/private-address.util', () => ({
+  ...jest.requireActual('../../../common/utils/private-address.util'),
+  resolvesToPrivateAddress: jest.fn(),
+}));
+const resolvesPrivate = resolvesToPrivateAddress as jest.Mock;
 
 const configWith = (values: Record<string, string>) =>
   ({ get: (key: string) => values[key] }) as unknown as ConfigService;
@@ -191,6 +200,34 @@ describe('IdentityCheckWebhookService', () => {
   beforeEach(() => {
     fetchMock.mockReset();
     global.fetch = fetchMock;
+    resolvesPrivate.mockReset().mockResolvedValue(false);
+  });
+
+  it('sends nothing to a name that resolves to an internal address', async () => {
+    const { service, prisma } = await setup();
+    resolvesPrivate.mockResolvedValue(true);
+
+    await expect(service.deliver('check-1')).rejects.toThrow(/adresse interne/);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(prisma.identityCheck.update.mock.calls[0][0].data).toMatchObject({
+      webhook_last_error: 'destination refusée : adresse interne',
+    });
+  });
+
+  it("lets a sandbox app reach the developer's own machine", async () => {
+    const { service } = await setup({
+      app: {
+        ...baseApp,
+        is_sandbox: true,
+        webhook_url: 'http://localhost:4000/hook',
+      },
+    });
+    fetchMock.mockResolvedValue({ ok: true, status: 200 });
+
+    await service.deliver('check-1');
+
+    expect(resolvesPrivate).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalled();
   });
 
   it('posts a JWS that verifies against the published JWKS', async () => {
@@ -452,6 +489,13 @@ describe('validateWebhookUrl', () => {
     ['ftp://partner.example/hook', false],
     ['https://user:pass@partner.example/hook', false],
     ['https://partner.example/hook#frag', false],
+    // Internal addresses, for a production app (SSRF).
+    ['https://localhost/hook', false],
+    ['https://127.0.0.1/hook', false],
+    ['https://10.0.0.5/hook', false],
+    ['https://192.168.1.20/hook', false],
+    ['https://169.254.169.254/latest/meta-data', false],
+    ['https://[::1]/hook', false],
     ['not a url', false],
     [`https://partner.example/${'a'.repeat(2100)}`, false],
   ])('refuses %s (sandbox=%s)', (url, sandbox) => {

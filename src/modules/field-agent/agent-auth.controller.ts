@@ -1,3 +1,4 @@
+import { Public } from '../auth/decorators/public.decorator';
 import {
   Body,
   Controller,
@@ -37,6 +38,7 @@ import { AgentAuthGuard } from './guards/agent-auth.guard';
 export class AgentAuthController {
   constructor(private readonly agentAuth: AgentAuthService) {}
 
+  @Public()
   @Post('send-otp')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
@@ -51,6 +53,7 @@ export class AgentAuthController {
     return this.agentAuth.sendOtp(dto.email);
   }
 
+  @Public()
   @Post('resend-otp')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
@@ -61,6 +64,7 @@ export class AgentAuthController {
     return this.agentAuth.resendOtp(dto.email);
   }
 
+  @Public()
   @Post('verify-otp')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
@@ -79,6 +83,7 @@ export class AgentAuthController {
     );
   }
 
+  @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 30, ttl: 60_000 } })

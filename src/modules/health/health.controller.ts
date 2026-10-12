@@ -1,3 +1,4 @@
+import { Public } from '../auth/decorators/public.decorator';
 import { Controller, Get } from '@nestjs/common';
 import { HealthCheck, HealthCheckService } from '@nestjs/terminus';
 import { MemoryHealthIndicator, DiskHealthIndicator } from '@nestjs/terminus';
@@ -18,6 +19,7 @@ export class HealthController {
     private readonly healthService: HealthService,
   ) {}
 
+  @Public()
   @Get()
   @HealthCheck()
   @ApiOperation({
