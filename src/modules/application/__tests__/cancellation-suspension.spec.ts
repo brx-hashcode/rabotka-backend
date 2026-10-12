@@ -3,6 +3,7 @@ import {
   cancellationScoreDeduction,
   cancellationSuspensionOutlook,
   countsTowardSuspension,
+  isCommittedCancellation,
 } from '../application.constants';
 
 describe('countsTowardSuspension', () => {
@@ -15,9 +16,26 @@ describe('countsTowardSuspension', () => {
   });
 
   it.each([ApplicationStatus.PENDING, ApplicationStatus.VIEWED])(
-    'does not count withdrawing a %s application',
+    'counts withdrawing a %s application too',
     (status) => {
-      expect(countsTowardSuspension(status)).toBe(false);
+      expect(countsTowardSuspension(status)).toBe(true);
+    },
+  );
+});
+
+describe('isCommittedCancellation', () => {
+  it.each([
+    ApplicationStatus.ACCEPTED,
+    ApplicationStatus.WAITING_PAYMENT,
+    ApplicationStatus.END,
+  ])('is committed from %s — it costs reliability points', (status) => {
+    expect(isCommittedCancellation(status)).toBe(true);
+  });
+
+  it.each([ApplicationStatus.PENDING, ApplicationStatus.VIEWED])(
+    'a %s withdrawal is not — it costs no points',
+    (status) => {
+      expect(isCommittedCancellation(status)).toBe(false);
     },
   );
 });

@@ -1451,12 +1451,12 @@ describe('ProfileService', () => {
       });
       await service.onAutoSuspended({
         profileId: 'p-1',
-        reason: '3 missions annulées en 30 jours',
+        reason: '3 annulations en 30 jours',
       });
       expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+242000001',
         'accountSuspended',
-        expect.objectContaining({ reason: '3 missions annulées en 30 jours' }),
+        expect.objectContaining({ reason: '3 annulations en 30 jours' }),
         'p-1',
       );
     });

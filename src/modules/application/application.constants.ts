@@ -95,16 +95,35 @@ export function reapplyDecision(
 }
 
 /**
+ * Statuses in which the worker had committed — accepted, paying for the
+ * contact, or hired on an ongoing engagement. Walking away from one of these
+ * is what costs reliability points (see cancellationScoreDeduction).
+ */
+export const COMMITTED_CANCEL_STATUSES: readonly ApplicationStatus[] = [
+  ApplicationStatus.ACCEPTED,
+  ApplicationStatus.WAITING_PAYMENT,
+  ApplicationStatus.END,
+];
+
+export function isCommittedCancellation(
+  fromStatus: ApplicationStatus,
+): boolean {
+  return COMMITTED_CANCEL_STATUSES.includes(fromStatus);
+}
+
+/**
  * Statuses from which a worker's cancellation counts toward the
- * repeated-cancellation suspension: they had committed — accepted, paying for
- * the contact, or hired on an ongoing engagement — and walked away. Withdrawing
- * an application nobody had answered yet costs the employer nothing.
+ * repeated-cancellation suspension: every one they make themselves — the
+ * committed ones, and withdrawing an application still waiting for an answer
+ * too. Someone who keeps applying and pulling out is the pattern this rule
+ * is for, whether or not the employer had answered yet. Withdrawals cost no
+ * reliability points; only committed cancellations do.
  */
 export const SUSPENSION_COUNTED_CANCEL_STATUSES: readonly ApplicationStatus[] =
   [
-    ApplicationStatus.ACCEPTED,
-    ApplicationStatus.WAITING_PAYMENT,
-    ApplicationStatus.END,
+    ApplicationStatus.PENDING,
+    ApplicationStatus.VIEWED,
+    ...COMMITTED_CANCEL_STATUSES,
   ];
 
 export function countsTowardSuspension(fromStatus: ApplicationStatus): boolean {
@@ -138,7 +157,7 @@ export function cancellationSuspensionOutlook(args: {
 /**
  * Reliability points a worker cancellation costs: the late-cancellation
  * deduction when it is late, plus `fees.cancellation_score_deduction` for
- * walking away from any committed mission (see countsTowardSuspension),
+ * walking away from any committed mission (see isCommittedCancellation),
  * early or late. Pure, so the cancel and its preview agree.
  */
 export function cancellationScoreDeduction(args: {

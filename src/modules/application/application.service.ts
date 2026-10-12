@@ -61,6 +61,7 @@ import {
   cancellationScoreDeduction,
   cancellationSuspensionOutlook,
   countsTowardSuspension,
+  isCommittedCancellation,
   reapplyDecision,
 } from './application.constants';
 import { countCountedCancellations } from './cancellation-counter';
@@ -1173,7 +1174,7 @@ export class ApplicationService {
     // committed), in one write.
     const scoreDeduction = cancellationScoreDeduction({
       late: applyPenalty,
-      committed: countsTowardSuspension(application.status),
+      committed: isCommittedCancellation(application.status),
       lateDeduction: fees.lateCancellationScoreDeduction,
       anyDeduction: Number(fees.cancellationScoreDeduction),
     });
@@ -1418,8 +1419,9 @@ export class ApplicationService {
   }
 
   /**
-   * Suspends a worker who keeps walking away from missions: at
-   * `fees.cancellation_suspension_count` committed cancellations within
+   * Suspends a worker who keeps walking away: at
+   * `fees.cancellation_suspension_count` of their own cancellations (missions
+   * or pending applications) within
    * `fees.cancellation_suspension_window_days`, early or late alike. Only an
    * admin lifts it — paying a penalty does not (see SuspensionSource).
    *
@@ -1442,7 +1444,7 @@ export class ApplicationService {
     const count = await this.countCountedCancellations(workerId, windowDays);
     if (count < threshold) return false;
 
-    const reason = `${count} missions annulées en ${windowDays} jours`;
+    const reason = `${count} annulations en ${windowDays} jours`;
     // Only an ACTIVE account: one already suspended (say, for unpaid
     // penalties a moment ago) keeps the reason it was given.
     const { count: changed } = await this.prisma.profile.updateMany({
@@ -1480,6 +1482,8 @@ export class ApplicationService {
     workerId: string,
   ): Promise<{
     countsTowardSuspension: boolean;
+    /** It was an accepted mission: it costs reliability points too. */
+    committed: boolean;
     cancellationsInWindow: number;
     suspensionThreshold: number;
     windowDays: number;
@@ -1508,6 +1512,8 @@ export class ApplicationService {
     });
     return {
       countsTowardSuspension: counts,
+      committed:
+        app?.worker_id === workerId && isCommittedCancellation(app.status),
       cancellationsInWindow: prior,
       suspensionThreshold: threshold,
       windowDays,

@@ -740,12 +740,12 @@ describe('ApplicationService', () => {
           data: expect.objectContaining({
             status: 'SUSPENDED',
             suspension_source: 'REPEATED_CANCELLATIONS',
-            suspension_reason: '3 missions annulées en 30 jours',
+            suspension_reason: '3 annulations en 30 jours',
           }),
         });
         expect(events.emit).toHaveBeenCalledWith('profile.auto_suspended', {
           profileId: WORKER_ID,
-          reason: '3 missions annulées en 30 jours',
+          reason: '3 annulations en 30 jours',
         });
       });
 
@@ -758,8 +758,8 @@ describe('ApplicationService', () => {
         expect(updateMany).not.toHaveBeenCalled();
       });
 
-      it('never counts withdrawing a pending application', async () => {
-        const { updateMany } = withCountedCancellations(10);
+      it('counts withdrawing a pending application too', async () => {
+        const { updateMany } = withCountedCancellations(3);
         (prisma.application.findUnique as jest.Mock).mockResolvedValue({
           ...mockApplication,
           status: ApplicationStatus.PENDING,
@@ -767,8 +767,32 @@ describe('ApplicationService', () => {
 
         const result = await service.cancel(APPLICATION_ID, WORKER_ID);
 
-        expect(result.suspended).toBe(false);
-        expect(updateMany).not.toHaveBeenCalled();
+        expect(result.suspended).toBe(true);
+        expect(updateMany).toHaveBeenCalled();
+      });
+
+      it('charges no reliability points for a pending withdrawal', async () => {
+        withCountedCancellations(0);
+        const config = testingModule.get(SystemConfigService);
+        const fees = (config.getFees as jest.Mock).getMockImplementation();
+        (config.getFees as jest.Mock).mockImplementation(async () => ({
+          ...(await fees?.()),
+          cancellationScoreDeduction: 3,
+        }));
+        (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+          ...mockApplication,
+          status: ApplicationStatus.PENDING,
+        });
+
+        await service.cancel(APPLICATION_ID, WORKER_ID);
+
+        expect(prisma.profile.update).not.toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              reliability_score: expect.any(Number),
+            }),
+          }),
+        );
       });
 
       it('leaves an account that is already suspended alone', async () => {
