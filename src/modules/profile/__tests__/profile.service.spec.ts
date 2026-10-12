@@ -455,6 +455,49 @@ describe('ProfileService', () => {
       expect(result.kycDocuments).toBeDefined();
     });
 
+    it("shows a worker's committed cancellations against the suspension threshold", async () => {
+      (service as any).systemConfig = {
+        getFees: jest.fn().mockResolvedValue({
+          cancellationSuspensionCount: 3,
+          cancellationSuspensionWindowDays: 30,
+        }),
+      };
+      prisma.profile.findUnique.mockResolvedValueOnce({
+        ...(await prisma.profile.findUnique()),
+        profile_type: 'WORKER',
+      });
+      prisma.application.count.mockResolvedValue(1);
+
+      const result = await service.getProfileDetailForAdmin('p-1');
+
+      expect(result.cancellations).toEqual({
+        inWindow: 1,
+        threshold: 3,
+        windowDays: 30,
+      });
+      expect(prisma.application.count.mock.calls[0][0].where).toMatchObject({
+        worker_id: 'p-1',
+        cancelled_by: 'WORKER',
+      });
+    });
+
+    it('has no cancellation counter for an employer', async () => {
+      (service as any).systemConfig = {
+        getFees: jest.fn().mockResolvedValue({
+          cancellationSuspensionCount: 3,
+          cancellationSuspensionWindowDays: 30,
+        }),
+      };
+      prisma.profile.findUnique.mockResolvedValueOnce({
+        ...(await prisma.profile.findUnique()),
+        profile_type: 'EMPLOYER',
+      });
+
+      const result = await service.getProfileDetailForAdmin('p-1');
+
+      expect(result.cancellations).toBeNull();
+    });
+
     it('throws NotFoundException when not found', async () => {
       prisma.profile.findUnique.mockResolvedValueOnce(null);
       await expect(service.getProfileDetailForAdmin('missing')).rejects.toThrow(
