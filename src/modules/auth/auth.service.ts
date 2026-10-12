@@ -1,3 +1,4 @@
+import { mayLogSecretsLocally } from './local-dev-secrets';
 import {
   Injectable,
   Inject,
@@ -775,7 +776,9 @@ export class AuthService {
   }
 
   /**
-   * Prints a live OTP to the logs — outside production only.
+   * Prints a live OTP to the logs — on a developer's machine only (see
+   * `mayLogSecretsLocally`: it fails closed, so an environment missing
+   * `NODE_ENV` or `IS_PROD` logs nothing).
    *
    * This existed unconditionally, which meant every code Rabotka has ever sent
    * is sitting in the production log stream next to the phone number it was
@@ -784,20 +787,16 @@ export class AuthService {
    *
    * Kept for local development because the alternative is waiting on a real
    * WhatsApp delivery for every login while working offline, and that is a real
-   * cost. `IS_PROD` is the same flag the Redis key prefix keys off, so there is
-   * one answer to "is this production" rather than two.
+   * cost.
    */
   private logOtp(stage: 'send' | 'resend', identifier: string, otp: string) {
-    if (this.configService.get<string>('IS_PROD') === 'true') return;
+    if (!mayLogSecretsLocally(this.configService)) return;
     this.logger.warn(`[OTP][${stage}] ${identifier} → ${otp}`);
   }
 
   /** A developer's machine: `NODE_ENV=development`, and never production. */
   private isLocalDevelopment(): boolean {
-    return (
-      this.configService.get<string>('NODE_ENV') === 'development' &&
-      this.configService.get<string>('IS_PROD') !== 'true'
-    );
+    return mayLogSecretsLocally(this.configService);
   }
 
   private normalize(value: string): string {
