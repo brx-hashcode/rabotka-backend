@@ -246,4 +246,18 @@ export class CreateProfileDto extends LocationDto {
   @IsOptional()
   @IsEnum(ReferralSource)
   referralSource?: ReferralSource;
+
+  /**
+   * From POST /auth/signup/verify-otp: proves the caller controls `phone`.
+   * Must have been issued for that same number; spent once the profile
+   * exists.
+   */
+  @ApiProperty({
+    description:
+      'Token returned by POST /auth/signup/verify-otp for this phone number.',
+  })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(128)
+  signupToken: string;
 }

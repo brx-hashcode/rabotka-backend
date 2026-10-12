@@ -40,6 +40,8 @@ import {
   VerifyAdminOtpDto,
   UpdateAdminMeDto,
   WhatsAppSessionDto,
+  SignupSendOtpDto,
+  SignupVerifyOtpDto,
 } from './dto';
 import { QrGateway } from '../ws-notifications/qr.gateway';
 import { WsNotificationsGateway } from '../ws-notifications/ws-notifications.gateway';
@@ -63,6 +65,43 @@ export class AuthController {
   /** The admin session cookie: same attributes, the admin lifetime. */
   private setAdminAuthCookie(res: Response, token: string): void {
     setAuthCookie(res, this.configService, token, { kind: 'admin' });
+  }
+
+  @Post('signup/send-otp')
+  @HttpCode(HttpStatus.OK)
+  // Each call sends a paid WhatsApp template to the number given; the
+  // per-number cap lives in otp-store, this one is per caller.
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({
+    summary:
+      'Signup step 1: send a WhatsApp code to the number being registered',
+    description:
+      'Refused (409) when an account already exists for the number. The code proves the number belongs to whoever signs up; see signup/verify-otp.',
+  })
+  @ApiBody({ type: SignupSendOtpDto })
+  @ApiResponse({ status: 200, description: 'Code sent' })
+  @ApiResponse({
+    status: 409,
+    description: 'An account already uses this number',
+  })
+  @ApiResponse({ status: 429, description: 'Too many codes for this number' })
+  async sendSignupOtp(@Body() dto: SignupSendOtpDto) {
+    return this.authService.sendSignupOtp(dto.phone);
+  }
+
+  @Post('signup/verify-otp')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Signup step 2: verify the code, get a signup token',
+    description:
+      'Returns a single-use `signupToken`, valid one hour, required by POST /profile/kyc-upload (header `X-Signup-Token`) and POST /profile (`signupToken`).',
+  })
+  @ApiBody({ type: SignupVerifyOtpDto })
+  @ApiResponse({ status: 200, description: '{ signupToken, expiresIn }' })
+  @ApiResponse({ status: 400, description: 'Wrong or expired code' })
+  async verifySignupOtp(@Body() dto: SignupVerifyOtpDto) {
+    return this.authService.verifySignupOtp(dto.phone, dto.code);
   }
 
   @Post('send-otp')
