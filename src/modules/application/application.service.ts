@@ -57,12 +57,13 @@ import { MatchingService } from '../matching/matching.service';
 import {
   RELIABILITY_SCORE_MAX,
   SELF_CANCELLED_MESSAGE,
-  SUSPENSION_COUNTED_CANCEL_STATUSES,
   cancellationPatch,
+  cancellationScoreDeduction,
   cancellationSuspensionOutlook,
   countsTowardSuspension,
   reapplyDecision,
 } from './application.constants';
+import { countCountedCancellations } from './cancellation-counter';
 import {
   PROFILE_AUTO_SUSPENDED_EVENT,
   type ProfileAutoSuspendedPayload,
@@ -1168,6 +1169,14 @@ export class ApplicationService {
     const penaltyAmount: number | null = applyPenalty
       ? fees.lateCancellationPenaltyFcfa
       : null;
+    // Late deduction (if late) + the any-cancellation deduction (if they had
+    // committed), in one write.
+    const scoreDeduction = cancellationScoreDeduction({
+      late: applyPenalty,
+      committed: countsTowardSuspension(application.status),
+      lateDeduction: fees.lateCancellationScoreDeduction,
+      anyDeduction: Number(fees.cancellationScoreDeduction),
+    });
 
     await this.prisma.$transaction(async (tx) => {
       // Lock and re-check the application status inside the transaction to
@@ -1246,7 +1255,9 @@ export class ApplicationService {
           },
           update: {},
         });
+      }
 
+      if (scoreDeduction > 0) {
         const profile = await tx.profile.findUnique({
           where: { id: workerId },
           select: { reliability_score: true },
@@ -1254,15 +1265,15 @@ export class ApplicationService {
         const currentScore = profile?.reliability_score ?? 100;
         const newScore = Math.max(
           fees.reliabilityScoreMin,
-          Math.min(
-            RELIABILITY_SCORE_MAX,
-            currentScore - fees.lateCancellationScoreDeduction,
-          ),
+          Math.min(RELIABILITY_SCORE_MAX, currentScore - scoreDeduction),
         );
         await tx.profile.update({
           where: { id: workerId },
           data: { reliability_score: newScore },
         });
+      }
+
+      if (applyPenalty) {
         await this.syncBillingStatus(workerId, tx);
       }
 
@@ -1403,16 +1414,7 @@ export class ApplicationService {
     workerId: string,
     windowDays: number,
   ): Promise<number> {
-    return this.prisma.application.count({
-      where: {
-        worker_id: workerId,
-        cancelled_by: ApplicationCancelledBy.WORKER,
-        cancelled_from_status: { in: [...SUSPENSION_COUNTED_CANCEL_STATUSES] },
-        cancelled_at: {
-          gte: new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000),
-        },
-      },
-    });
+    return countCountedCancellations(this.prisma, workerId, windowDays);
   }
 
   /**
@@ -1525,9 +1527,11 @@ export class ApplicationService {
       include: { job_offer: true },
     });
     if (app?.worker_id !== workerId) return false;
+    // The same statuses `cancel()` penalises. PENDING used to be here too, so
+    // a worker withdrawing an unanswered application late was warned about a
+    // penalty that was never charged.
     if (
       app.status !== ApplicationStatus.ACCEPTED &&
-      app.status !== ApplicationStatus.PENDING &&
       app.status !== ('WAITING_PAYMENT' as ApplicationStatus)
     )
       return false;

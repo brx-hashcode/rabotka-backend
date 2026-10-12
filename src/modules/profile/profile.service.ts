@@ -1,3 +1,4 @@
+import { countCountedCancellations } from '../application/cancellation-counter';
 import {
   AdminCacheService,
   ADMIN_LIST_TTL_SECONDS,
@@ -317,6 +318,16 @@ export type AdminProfileDetailResponse = AdminProfileListItem & {
   verificationImages: AdminVerificationImageItem[];
   referredBy: AdminProfileReferredBy | null;
   referralsMadeCount: number;
+  /**
+   * Where a worker stands against the repeated-cancellation suspension:
+   * committed cancellations in the current window, out of the threshold.
+   * Null for an employer, or when the rule is switched off.
+   */
+  cancellations: {
+    inWindow: number;
+    threshold: number;
+    windowDays: number;
+  } | null;
 };
 
 type PrismaTransactionClient = Parameters<
@@ -899,6 +910,10 @@ export class ProfileService {
     const unpaidPenaltiesCount = await this.prisma.penalty.count({
       where: { profile_id: id, paid_at: null },
     });
+    const cancellations = await this.cancellationStanding(
+      id,
+      profile.profile_type,
+    );
 
     const verifierIds = new Set<string>();
     if (profile.verified_by) verifierIds.add(profile.verified_by);
@@ -974,6 +989,7 @@ export class ProfileService {
       applicationsCount: profile._count.applications,
       penaltiesCount: profile._count.penalties,
       unpaidPenaltiesCount,
+      cancellations,
       referralsMadeCount: profile._count.referrals_made,
       referredBy: profile.referral_received
         ? {
@@ -1176,6 +1192,27 @@ export class ProfileService {
     }
 
     return this.getProfileDetailForAdmin(profileId);
+  }
+
+  /** See `AdminProfileDetailResponse.cancellations`. */
+  private async cancellationStanding(
+    profileId: string,
+    profileType: ProfileType,
+  ): Promise<AdminProfileDetailResponse['cancellations']> {
+    if (profileType !== ProfileType.WORKER || !this.systemConfig) return null;
+    const fees = await this.systemConfig.getFees();
+    const threshold = Number(fees.cancellationSuspensionCount);
+    const windowDays = Number(fees.cancellationSuspensionWindowDays);
+    if (!(threshold > 0) || !(windowDays > 0)) return null;
+    return {
+      inWindow: await countCountedCancellations(
+        this.prisma,
+        profileId,
+        windowDays,
+      ),
+      threshold,
+      windowDays,
+    };
   }
 
   async updateProfileStatusByAdmin(

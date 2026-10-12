@@ -270,6 +270,8 @@ export class SystemConfigService implements OnModuleInit {
     AGENT_COMMISSION_AMOUNT_KEY,
     // 0 = withdrawable as soon as the release event happens.
     'agent.commission_confirmation_hours',
+    // 0 = only late cancellations cost reliability points.
+    'fees.cancellation_score_deduction',
   ]);
 
   /** Keys whose value is one of a fixed set; anything else is refused. */
@@ -784,6 +786,7 @@ export class SystemConfigService implements OnModuleInit {
       ratingDelta5,
       cancelSuspensionCount,
       cancelSuspensionWindowDays,
+      cancelScoreDeduction,
     ] = await this.mgetBatch([
       { key: 'fees.late_cancellation_penalty_fcfa', fallback: '5000' },
       { key: 'fees.late_cancellation_score_deduction', fallback: '5' },
@@ -802,6 +805,7 @@ export class SystemConfigService implements OnModuleInit {
       { key: 'fees.rating_score_delta_5', fallback: '3' },
       { key: 'fees.cancellation_suspension_count', fallback: '3' },
       { key: 'fees.cancellation_suspension_window_days', fallback: '30' },
+      { key: 'fees.cancellation_score_deduction', fallback: '0' },
     ]);
     return {
       lateCancellationPenaltyFcfa: Number(penalty),
@@ -829,6 +833,7 @@ export class SystemConfigService implements OnModuleInit {
       } as Record<number, number>,
       cancellationSuspensionCount: Number(cancelSuspensionCount),
       cancellationSuspensionWindowDays: Number(cancelSuspensionWindowDays),
+      cancellationScoreDeduction: Number(cancelScoreDeduction),
     };
   }
 

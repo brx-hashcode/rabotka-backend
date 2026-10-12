@@ -1,3 +1,4 @@
+import { cancellationScoreDeduction } from '../application/application.constants';
 import {
   BadRequestException,
   Body,
@@ -276,6 +277,14 @@ export class MobileWorkerMissionController {
       penaltyFcfa: fees.lateCancellationPenaltyFcfa,
       thresholdHours: fees.cancellationThresholdHours,
       scoreDeduction: fees.lateCancellationScoreDeduction,
+      // What THIS cancellation would cost in reliability points: the late
+      // deduction if late, plus the any-cancellation one if committed.
+      totalScoreDeduction: cancellationScoreDeduction({
+        late: wouldPenalize,
+        committed: suspension.countsTowardSuspension,
+        lateDeduction: fees.lateCancellationScoreDeduction,
+        anyDeduction: Number(fees.cancellationScoreDeduction),
+      }),
       // Any cancellation, early or late, lowers this worker's compatibility
       // with this employer.
       affectsCompatibility: true,

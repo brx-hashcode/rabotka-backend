@@ -134,3 +134,22 @@ export function cancellationSuspensionOutlook(args: {
     remaining: Math.max(0, threshold - afterThis),
   };
 }
+
+/**
+ * Reliability points a worker cancellation costs: the late-cancellation
+ * deduction when it is late, plus `fees.cancellation_score_deduction` for
+ * walking away from any committed mission (see countsTowardSuspension),
+ * early or late. Pure, so the cancel and its preview agree.
+ */
+export function cancellationScoreDeduction(args: {
+  late: boolean;
+  committed: boolean;
+  lateDeduction: number;
+  anyDeduction: number;
+}): number {
+  const safe = (n: number) => (Number.isFinite(n) && n > 0 ? n : 0);
+  return (
+    (args.late ? safe(args.lateDeduction) : 0) +
+    (args.committed ? safe(args.anyDeduction) : 0)
+  );
+}

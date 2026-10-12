@@ -109,6 +109,16 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    // Reliability points lost for walking away from ANY committed mission
+    // (accepted, paying, hired), early or late — on top of the late deduction
+    // when it is late. 0 = only late cancellations cost points, as before.
+    key: 'fees.cancellation_score_deduction',
+    value: '0',
+    category: ConfigCategory.FEES,
+    label: 'Points de fiabilité perdus pour toute annulation de mission',
+    isSecret: false,
+  },
+  {
     key: 'fees.cancellation_suspension_count',
     value: '3',
     category: ConfigCategory.FEES,

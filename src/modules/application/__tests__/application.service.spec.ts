@@ -691,6 +691,24 @@ describe('ApplicationService', () => {
       );
     });
 
+    it('takes the any-cancellation points off an early cancellation', async () => {
+      const config = testingModule.get(SystemConfigService);
+      const fees = (config.getFees as jest.Mock).getMockImplementation();
+      (config.getFees as jest.Mock).mockImplementation(async () => ({
+        ...(await fees?.()),
+        cancellationScoreDeduction: 3,
+      }));
+
+      const result = await service.cancel(APPLICATION_ID, WORKER_ID);
+
+      // 5h ahead: not late, no penalty — but the points still go.
+      expect(result.penaltyApplied).toBe(false);
+      expect(prisma.profile.update).toHaveBeenCalledWith({
+        where: { id: WORKER_ID },
+        data: { reliability_score: 97 },
+      });
+    });
+
     describe('repeated-cancellation suspension', () => {
       /** Counted cancellations in the window, this one included. */
       function withCountedCancellations(n: number) {

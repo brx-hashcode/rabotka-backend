@@ -1,5 +1,6 @@
 import { ApplicationStatus } from '@prisma/client';
 import {
+  cancellationScoreDeduction,
   cancellationSuspensionOutlook,
   countsTowardSuspension,
 } from '../application.constants';
@@ -60,5 +61,46 @@ describe('cancellationSuspensionOutlook', () => {
         threshold: Number.NaN,
       }),
     ).toEqual({ afterThis: 10, wouldSuspend: false, remaining: null });
+  });
+});
+
+describe('cancellationScoreDeduction', () => {
+  const base = { lateDeduction: 5, anyDeduction: 3 };
+
+  it('adds both for a late cancellation of a committed mission', () => {
+    expect(
+      cancellationScoreDeduction({ ...base, late: true, committed: true }),
+    ).toBe(8);
+  });
+
+  it('charges the any-cancellation points for an early one', () => {
+    expect(
+      cancellationScoreDeduction({ ...base, late: false, committed: true }),
+    ).toBe(3);
+  });
+
+  it('costs nothing to withdraw a pending application early', () => {
+    expect(
+      cancellationScoreDeduction({ ...base, late: false, committed: false }),
+    ).toBe(0);
+  });
+
+  it('treats an unset or negative setting as off', () => {
+    expect(
+      cancellationScoreDeduction({
+        late: false,
+        committed: true,
+        lateDeduction: 5,
+        anyDeduction: Number.NaN,
+      }),
+    ).toBe(0);
+    expect(
+      cancellationScoreDeduction({
+        late: false,
+        committed: true,
+        lateDeduction: 5,
+        anyDeduction: -2,
+      }),
+    ).toBe(0);
   });
 });

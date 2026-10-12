@@ -340,6 +340,17 @@ describe('ApplicationService (extended)', () => {
       ).toBe(false);
     });
 
+    it('returns false for a pending application, which cancel() never penalises', async () => {
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        ...mockApplication,
+        status: ApplicationStatus.PENDING,
+        job_offer: { ...mockJobOffer, scheduled_at: hoursFromNow(2) },
+      });
+      expect(
+        await service.wouldPenalizeCancellation(APPLICATION_ID, WORKER_ID),
+      ).toBe(false);
+    });
+
     it('returns true when ACCEPTED and < 4h before', async () => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue({
         ...mockApplication,
