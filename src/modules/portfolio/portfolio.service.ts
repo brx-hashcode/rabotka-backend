@@ -52,7 +52,12 @@ export interface PublicPortfolioView {
   ratingAvg: number | null;
   ratingCount: number;
   description: string;
-  address: string;
+  /**
+   * « City, Country » — never the street address. This page is public and
+   * indexed, and a worker's address is often their home; reaching them is
+   * what an employer pays a contact unlock for.
+   */
+  location: string | null;
   completedMissionsCount: number;
   /**
    * How many times an employer PAID to reach this worker, split by route.
@@ -289,7 +294,8 @@ export class PortfolioService {
         rating_avg: true,
         rating_count: true,
         description: true,
-        address: true,
+        city: true,
+        country_name: true,
         profile_type: true,
         portfolio_items: {
           orderBy: { created_at: 'desc' },
@@ -327,13 +333,19 @@ export class PortfolioService {
     return {
       slug,
       firstName: profile.first_name,
-      lastName: profile.last_name,
+      // The initial only: the page is public and indexed by search engines.
+      // Same key, so a client built before this keeps rendering « Sara N. ».
+      lastName: lastNameInitial(profile.last_name),
       avatarUrl: profile.avatar_url,
       reliabilityScore: profile.reliability_score,
       ratingAvg: profile.rating_avg,
       ratingCount: profile.rating_count,
       description: profile.description,
-      address: profile.address,
+      location:
+        [profile.city, profile.country_name]
+          .map((part) => part?.trim())
+          .filter(Boolean)
+          .join(', ') || null,
       completedMissionsCount,
       timesContacted,
       portfolio: profile.portfolio_items.map((item) => this.toItemView(item)),
@@ -457,4 +469,10 @@ export class PortfolioService {
       })),
     };
   }
+}
+
+/** « NKEMBO » → « N. », « » → « ». */
+export function lastNameInitial(lastName: string | null | undefined): string {
+  const initial = lastName?.trim().charAt(0);
+  return initial ? `${initial.toUpperCase()}.` : '';
 }
