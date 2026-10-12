@@ -709,6 +709,22 @@ describe('ApplicationService', () => {
       });
     });
 
+    it('lets a worker withdraw an application the employer has only viewed', async () => {
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        ...mockApplication,
+        status: ApplicationStatus.VIEWED,
+      });
+
+      await service.cancel(APPLICATION_ID, WORKER_ID);
+
+      const call = (prisma.application.update as jest.Mock).mock.calls.find(
+        ([arg]) => arg?.data?.status === ApplicationStatus.CANCELLED,
+      );
+      expect(call?.[0].data.cancelled_from_status).toBe(
+        ApplicationStatus.VIEWED,
+      );
+    });
+
     describe('repeated-cancellation suspension', () => {
       /** Counted cancellations in the window, this one included. */
       function withCountedCancellations(n: number) {

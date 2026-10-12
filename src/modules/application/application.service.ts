@@ -1126,9 +1126,13 @@ export class ApplicationService {
       application.status === ApplicationStatus.END &&
       closesOnFill(application.job_offer.employment_type);
 
+    // VIEWED is still an application waiting for an answer — the employer
+    // only opened it. It used to be refused here while the app offered the
+    // button, so withdrawing a viewed application failed with an error.
     if (
       application.status !== ApplicationStatus.ACCEPTED &&
       application.status !== ApplicationStatus.PENDING &&
+      application.status !== ApplicationStatus.VIEWED &&
       application.status !== ('WAITING_PAYMENT' as ApplicationStatus) &&
       !isReversibleHire
     ) {
