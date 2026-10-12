@@ -138,6 +138,34 @@ describe('RecommendationEngineService', () => {
       expect(out.map((r) => r.id).sort()).toEqual(['o1', 'o2', 'o3']);
     });
 
+    it("passes the worker's place to every tier", async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        latitude: null,
+        longitude: null,
+        country_code: 'CG',
+        city: 'Pointe-Noire',
+      });
+      deps.featureService.get.mockResolvedValue(
+        features({ categoryAffinity: { 'cat-a': 1 } }),
+      );
+      deps.systemConfig.get.mockResolvedValue('true');
+
+      await recommend(5);
+
+      const place = expect.objectContaining({
+        countryCode: 'CG',
+        city: 'Pointe-Noire',
+      });
+      for (const source of [
+        deps.sources.fromAffinities,
+        deps.sources.fromCollaborativeFiltering,
+        deps.sources.fromAllOpen,
+      ]) {
+        expect(source).toHaveBeenCalled();
+        expect(source.mock.calls[0].at(-1)).toEqual(place);
+      }
+    });
+
     it('falls all the way through to open offers so a cold user still gets a feed', async () => {
       deps.sources.fromAllOpen.mockResolvedValue([candidate('o1')]);
 
@@ -788,7 +816,29 @@ describe('RecommendationEngineService.recommendWorkersForEmployer', () => {
       });
 
       expect(deps.sources.workersFromAll).toHaveBeenCalledWith(
-        { reliabilityMin: 50, exclude },
+        expect.objectContaining({ reliabilityMin: 50, exclude }),
+        5,
+      );
+    });
+
+    it("keeps candidates to the employer's country, city first", async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        latitude: null,
+        longitude: null,
+        country_code: 'CG',
+        city: 'Brazzaville',
+      });
+      deps.sources.workersFromAll.mockResolvedValue([worker('w1')]);
+
+      await recommend(5);
+
+      expect(deps.sources.workersFromAll).toHaveBeenCalledWith(
+        expect.objectContaining({
+          near: expect.objectContaining({
+            countryCode: 'CG',
+            city: 'Brazzaville',
+          }),
+        }),
         5,
       );
     });

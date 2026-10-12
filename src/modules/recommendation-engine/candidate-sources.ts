@@ -120,6 +120,12 @@ export type WorkerQueryOptions = {
    * to take deliberately rather than as a side effect of changing ranker.
    */
   requireVerified?: boolean;
+  /**
+   * Where the hire happens. Restricts candidates to that country, same city
+   * first. Null or absent means no restriction — a remote job, or an asker
+   * whose country is unknown.
+   */
+  near?: RetrievalPlace | null;
 };
 
 const WORKER_SELECT = {
@@ -164,6 +170,98 @@ const OPEN_OFFER_WHERE: Prisma.JobOfferWhereInput = {
   status: { in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED] },
   deleted_at: null,
 };
+
+/**
+ * Where the asking side is, as declared. Retrieval uses it to keep the pool
+ * local; exact coordinates are left to the proximity score.
+ */
+export type RetrievalPlace = {
+  countryCode: string | null;
+  city: string | null;
+};
+
+/** A geographic restriction: the country to stay in, the city to try first. */
+type GeoFilter<W> = { country: W; city: W | null };
+
+const sameText = (value: string) => ({
+  equals: value,
+  mode: Prisma.QueryMode.insensitive,
+});
+
+/**
+ * Offers someone in `place` can take: remote ones, and on-site ones in their
+ * country — the offer's own, or its employer's when the offer names none.
+ *
+ * An offer whose country is unknown on both sides is kept: missing data is
+ * not evidence that it is elsewhere, and dropping it would hide offers whose
+ * only fault is an incomplete profile.
+ *
+ * Applied at retrieval, not left to the proximity score: distance weighs a
+ * tenth of the score for a seasoned user, and the pool is the N newest offers,
+ * so offers abroad were filling the pool and pushing local ones out of it.
+ */
+function offerGeo(
+  place: RetrievalPlace | null | undefined,
+): GeoFilter<Prisma.JobOfferWhereInput> | null {
+  if (!place?.countryCode) return null;
+  const country = place.countryCode;
+  return {
+    country: {
+      OR: [
+        { is_remote: true },
+        { country_code: country },
+        { country_code: null, employer: { country_code: country } },
+        { country_code: null, employer: { country_code: null } },
+      ],
+    },
+    city: place.city
+      ? {
+          OR: [
+            { city: sameText(place.city) },
+            { city: null, employer: { city: sameText(place.city) } },
+          ],
+        }
+      : null,
+  };
+}
+
+/** Workers someone in `place` can hire. Unknown country is kept, as above. */
+function workerGeo(
+  place: RetrievalPlace | null | undefined,
+): GeoFilter<Prisma.ProfileWhereInput> | null {
+  if (!place?.countryCode) return null;
+  return {
+    country: {
+      OR: [{ country_code: place.countryCode }, { country_code: null }],
+    },
+    city: place.city ? { city: sameText(place.city) } : null,
+  };
+}
+
+/**
+ * Runs a retrieval query restricted to the country, same city first.
+ *
+ * The query orders by something unrelated to place (recency, reliability), so
+ * a single country-wide query would let a busy distant city crowd out the
+ * user's own. Two queries — the city, then the rest of the country — put
+ * local results first in the list, and lists are fused by rank downstream.
+ */
+async function nearFirst<W, R extends { id: string }>(
+  geo: GeoFilter<W> | null,
+  take: number,
+  notIn: (ids: string[]) => W,
+  run: (extra: W[], take: number) => Promise<R[]>,
+): Promise<R[]> {
+  if (!geo) return run([], take);
+  if (!geo.city) return run([geo.country], take);
+  const near = await run([geo.country, geo.city], take);
+  if (near.length >= take) return near;
+  const rest = await run(
+    [geo.country, notIn(near.map((r) => r.id))],
+    take - near.length,
+  );
+  return [...near, ...rest];
+}
 
 const CANDIDATE_SELECT = {
   id: true,
@@ -312,6 +410,7 @@ export class CandidateSourceService {
     workerId: string,
     features: UserFeatures,
     limit: number,
+    place: RetrievalPlace | null = null,
   ): Promise<Candidate[]> {
     const categoryIds = topKeys(features.categoryAffinity, MAX_AFFINITY_KEYS);
     const employerIds = topKeys(
@@ -324,8 +423,8 @@ export class CandidateSourceService {
     if (categoryIds.length > 0) or.push({ category_id: { in: categoryIds } });
     if (employerIds.length > 0) or.push({ employer_id: { in: employerIds } });
 
-    const rows = await this.prisma.jobOffer.findMany({
-      where: {
+    const rows = await this.newestOpenNearFirst(
+      {
         ...OPEN_OFFER_WHERE,
         OR: or,
         // Never resurface something they already acted on.
@@ -334,10 +433,9 @@ export class CandidateSourceService {
           ? { category_id: { notIn: features.negativeCategoryIds } }
           : {}),
       },
-      orderBy: { created_at: 'desc' },
-      take: limit * POOL_FACTOR,
-      select: CANDIDATE_SELECT,
-    });
+      place,
+      limit * POOL_FACTOR,
+    );
     return rows.map(toCandidate);
   }
 
@@ -355,8 +453,10 @@ export class CandidateSourceService {
     workerId: string,
     features: UserFeatures,
     limit: number,
+    place: RetrievalPlace | null = null,
   ): Promise<Candidate[]> {
     const seedCategories = topKeys(features.categoryAffinity, 5);
+    const geo = offerGeo(place);
     if (seedCategories.length === 0) return [];
 
     try {
@@ -383,6 +483,7 @@ export class CandidateSourceService {
             category_id: {
               notIn: [...seedCategories, ...features.negativeCategoryIds],
             },
+            ...(geo ? { AND: [geo.country] } : {}),
           },
         },
         _count: { _all: true },
@@ -400,6 +501,7 @@ export class CandidateSourceService {
           id: { in: ids },
           ...OPEN_OFFER_WHERE,
           applications: { none: { worker_id: workerId } },
+          ...(geo ? { AND: [geo.country] } : {}),
         },
         select: CANDIDATE_SELECT,
       });
@@ -417,50 +519,63 @@ export class CandidateSourceService {
   }
 
   /**
-   * The worker's declared domains, newest first. No behaviour required, so this
-   * still works for a brand-new profile that has never interacted.
+   * The worker's declared domains, their city first, newest first. No
+   * behaviour required, so this still works for a brand-new profile that has
+   * never interacted.
    */
   async fromDeclaredCategories(
     workerId: string,
     categoryIds: string[],
     limit: number,
+    place: RetrievalPlace | null = null,
   ): Promise<Candidate[]> {
     if (categoryIds.length === 0) return [];
-    const rows = await this.prisma.jobOffer.findMany({
-      where: {
+    const rows = await this.newestOpenNearFirst(
+      {
         ...OPEN_OFFER_WHERE,
         category_id: { in: categoryIds },
         applications: { none: { worker_id: workerId } },
       },
-      orderBy: { created_at: 'desc' },
-      take: limit * POOL_FACTOR,
-      select: CANDIDATE_SELECT,
-    });
+      place,
+      limit * POOL_FACTOR,
+    );
     return rows.map(toCandidate);
   }
 
-  /** Last resort: any open offer. Guarantees the feed is never empty. */
-  async fromAllOpen(workerId: string, limit: number): Promise<Candidate[]> {
-    const rows = await this.prisma.jobOffer.findMany({
-      where: {
+  /**
+   * Last resort: any open offer the worker can take, their city first.
+   * Guarantees the feed is never empty while there is anything nearby.
+   */
+  async fromAllOpen(
+    workerId: string,
+    limit: number,
+    place: RetrievalPlace | null = null,
+  ): Promise<Candidate[]> {
+    const rows = await this.newestOpenNearFirst(
+      {
         ...OPEN_OFFER_WHERE,
         applications: { none: { worker_id: workerId } },
       },
-      orderBy: { created_at: 'desc' },
-      take: limit * POOL_FACTOR,
-      select: CANDIDATE_SELECT,
-    });
+      place,
+      limit * POOL_FACTOR,
+    );
     return rows.map(toCandidate);
   }
 
   /** Hydrates ids returned by a vector search, dropping anything now closed. */
-  async hydrateOpen(ids: string[], workerId: string): Promise<Candidate[]> {
+  async hydrateOpen(
+    ids: string[],
+    workerId: string,
+    place: RetrievalPlace | null = null,
+  ): Promise<Candidate[]> {
     if (ids.length === 0) return [];
+    const geo = offerGeo(place);
     const rows = await this.prisma.jobOffer.findMany({
       where: {
         id: { in: ids },
         ...OPEN_OFFER_WHERE,
         applications: { none: { worker_id: workerId } },
+        ...(geo ? { AND: [geo.country] } : {}),
       },
       select: CANDIDATE_SELECT,
     });
@@ -469,6 +584,26 @@ export class CandidateSourceService {
       .map((id) => byId.get(id))
       .filter((r): r is CandidateRow => r !== undefined)
       .map(toCandidate);
+  }
+
+  /** Newest open offers matching `where`, kept to `place` — see `nearFirst`. */
+  private newestOpenNearFirst(
+    where: Prisma.JobOfferWhereInput,
+    place: RetrievalPlace | null,
+    take: number,
+  ): Promise<CandidateRow[]> {
+    return nearFirst(
+      offerGeo(place),
+      take,
+      (ids) => ({ id: { notIn: ids } }),
+      (extra, n) =>
+        this.prisma.jobOffer.findMany({
+          where: extra.length > 0 ? { AND: [where, ...extra] } : where,
+          orderBy: { created_at: 'desc' },
+          take: n,
+          select: CANDIDATE_SELECT,
+        }),
+    );
   }
 
   /**
@@ -547,6 +682,7 @@ export class CandidateSourceService {
         categories: { some: { category_id: { in: categoryIds } } },
       },
       limit,
+      opts.near,
     );
   }
 
@@ -563,6 +699,7 @@ export class CandidateSourceService {
         categories: { some: { category_id: { in: categoryIds } } },
       },
       limit,
+      opts.near,
     );
   }
 
@@ -571,19 +708,28 @@ export class CandidateSourceService {
     opts: WorkerQueryOptions,
     limit: number,
   ): Promise<WorkerCandidate[]> {
-    return this.queryWorkers(eligibleWorkerWhere(opts), limit);
+    return this.queryWorkers(eligibleWorkerWhere(opts), limit, opts.near);
   }
 
+  /** Workers matching `where`, kept to `near` — see `nearFirst`. */
   private async queryWorkers(
     where: Prisma.ProfileWhereInput,
     limit: number,
+    near: RetrievalPlace | null | undefined,
   ): Promise<WorkerCandidate[]> {
-    const rows = await this.prisma.profile.findMany({
-      where,
-      orderBy: [{ reliability_score: 'desc' }, { rating_avg: 'desc' }],
-      take: limit * POOL_FACTOR,
-      select: WORKER_SELECT,
-    });
+    const rows = await nearFirst(
+      workerGeo(near),
+      limit * POOL_FACTOR,
+      // `where` may already exclude ids; AND keeps both exclusions.
+      (ids) => ({ id: { notIn: ids } }),
+      (extra, n) =>
+        this.prisma.profile.findMany({
+          where: extra.length > 0 ? { AND: [where, ...extra] } : where,
+          orderBy: [{ reliability_score: 'desc' }, { rating_avg: 'desc' }],
+          take: n,
+          select: WORKER_SELECT,
+        }),
+    );
     return rows.map(toWorkerCandidate);
   }
 
