@@ -1,3 +1,4 @@
+import { Public } from './decorators/public.decorator';
 import {
   Controller,
   Get,
@@ -67,6 +68,7 @@ export class AuthController {
     setAuthCookie(res, this.configService, token, { kind: 'admin' });
   }
 
+  @Public()
   @Post('signup/send-otp')
   @HttpCode(HttpStatus.OK)
   // Each call sends a paid WhatsApp template to the number given; the
@@ -89,6 +91,7 @@ export class AuthController {
     return this.authService.sendSignupOtp(dto.phone);
   }
 
+  @Public()
   @Post('signup/verify-otp')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
@@ -104,6 +107,7 @@ export class AuthController {
     return this.authService.verifySignupOtp(dto.phone, dto.code);
   }
 
+  @Public()
   @Post('send-otp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -138,6 +142,7 @@ export class AuthController {
     };
   }
 
+  @Public()
   @Post('resend-otp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -176,6 +181,7 @@ export class AuthController {
     };
   }
 
+  @Public()
   @Post('verify-otp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -210,6 +216,7 @@ export class AuthController {
     return { success: true };
   }
 
+  @Public()
   @Post('whatsapp/session')
   @HttpCode(HttpStatus.NO_CONTENT)
   // Tighter than the global 100/min: this endpoint turns a guessable-in-theory
@@ -264,6 +271,7 @@ export class AuthController {
   // Cookie-less: tokens are returned in the response body. These paths are
   // CSRF-exempt (see CsrfModule.skipCsrfProtection).
 
+  @Public()
   @Post('mobile/send-otp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -282,6 +290,7 @@ export class AuthController {
     return this.sendOtp(sendOtpDto);
   }
 
+  @Public()
   @Post('mobile/resend-otp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -297,6 +306,7 @@ export class AuthController {
     return this.resendOtp(sendOtpDto);
   }
 
+  @Public()
   @Post('mobile/verify-otp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -326,6 +336,7 @@ export class AuthController {
     );
   }
 
+  @Public()
   @Post('mobile/refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -368,6 +379,7 @@ export class AuthController {
     return { success: true };
   }
 
+  @Public()
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -403,6 +415,7 @@ export class AuthController {
     res.clearCookie(cookieName, { path: '/' });
   }
 
+  @Public()
   @Post('admin/send-otp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -435,6 +448,7 @@ export class AuthController {
     };
   }
 
+  @Public()
   @Post('admin/resend-otp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -471,6 +485,7 @@ export class AuthController {
     };
   }
 
+  @Public()
   @Post('admin/verify-otp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -573,6 +588,7 @@ export class AuthController {
     );
   }
 
+  @Public()
   @Post('admin/logout')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -600,6 +616,7 @@ export class AuthController {
     return { success: true };
   }
 
+  @Public()
   @Post('admin/qr/init')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Initialize a QR login session' })
@@ -612,6 +629,7 @@ export class AuthController {
     return this.authService.initQrSession();
   }
 
+  @Public()
   @Get('admin/qr/poll/:sessionId')
   @ApiOperation({ summary: 'Poll QR session status' })
   async pollQrSession(
@@ -620,6 +638,7 @@ export class AuthController {
     return this.authService.pollQrSession(sessionId);
   }
 
+  @Public()
   @Post('admin/qr/confirm')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -676,6 +695,7 @@ export class AuthController {
     return this.authService.generatePhonePairingOtp(req.user.userId, phoneName);
   }
 
+  @Public()
   @Post('admin/phone/pair/verify')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Verify phone pairing OTP from phone (public)' })
@@ -698,6 +718,7 @@ export class AuthController {
     return { success: true };
   }
 
+  @Public()
   @Post('admin/qr/consume')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -770,6 +791,7 @@ export class AuthController {
     return this.authService.disableTotp(req.user.userId, code);
   }
 
+  @Public()
   @Post('admin/totp/login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

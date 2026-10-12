@@ -1,3 +1,4 @@
+import { Public } from '../auth/decorators/public.decorator';
 import { Controller, Get, Inject, Req, Res } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
@@ -11,6 +12,7 @@ export class CsrfController {
     @Inject(CSRF_UTILITIES) private readonly csrfUtilities: DoubleCsrfUtilities,
   ) {}
 
+  @Public()
   @Get()
   @ApiOperation({
     summary: 'Generate a CSRF token',

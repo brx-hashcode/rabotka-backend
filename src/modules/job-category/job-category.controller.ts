@@ -1,3 +1,4 @@
+import { Public } from '../auth/decorators/public.decorator';
 import {
   Controller,
   Get,
@@ -33,6 +34,7 @@ import { extractRequestMeta } from '../../common/utils/request-meta.util';
 export class JobCategoryController {
   constructor(private readonly jobCategoryService: JobCategoryService) {}
 
+  @Public()
   @Get()
   @ApiOperation({ summary: 'List all job categories (public)' })
   @ApiResponse({ status: 200 })

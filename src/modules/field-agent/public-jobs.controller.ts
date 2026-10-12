@@ -1,3 +1,4 @@
+import { Public } from '../auth/decorators/public.decorator';
 import {
   Controller,
   DefaultValuePipe,
@@ -33,6 +34,7 @@ const clamp = (n: number, min: number, max: number) =>
 export class PublicJobsController {
   constructor(private readonly portal: AgentPortalService) {}
 
+  @Public()
   @Get()
   @Throttle({ default: { limit: 60, ttl: 60_000 } })
   @ApiOperation({ summary: 'Open jobs, newest first (public summary)' })
@@ -73,6 +75,7 @@ export class PublicJobsController {
     });
   }
 
+  @Public()
   @Get(':id')
   @Throttle({ default: { limit: 60, ttl: 60_000 } })
   @ApiOperation({ summary: 'One open job (public summary)' })

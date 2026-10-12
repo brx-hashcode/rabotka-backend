@@ -1,3 +1,4 @@
+import { Public } from '../auth/decorators/public.decorator';
 import { Controller, Get, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { SystemConfigService } from './system-config.service';
@@ -7,6 +8,7 @@ import { SystemConfigService } from './system-config.service';
 export class SystemConfigPublicController {
   constructor(private readonly systemConfigService: SystemConfigService) {}
 
+  @Public()
   @Get('contact')
   @ApiOperation({ summary: 'Get public contact information' })
   @ApiResponse({ status: 200, description: 'Contact info' })
@@ -14,6 +16,7 @@ export class SystemConfigPublicController {
     return this.systemConfigService.getContactInfo();
   }
 
+  @Public()
   @Get('application-terms')
   @ApiOperation({
     summary: 'Terms a worker commits to when applying',
@@ -40,6 +43,7 @@ export class SystemConfigPublicController {
     };
   }
 
+  @Public()
   @Get('welcome-credits')
   @ApiOperation({
     summary: 'Get welcome credit amount for a given profile type',
