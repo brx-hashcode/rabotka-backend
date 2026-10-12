@@ -114,6 +114,34 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    // Reliability points lost for walking away from ANY committed mission
+    // (accepted, paying, hired), early or late — on top of the late deduction
+    // when it is late. 0 = only late cancellations cost points, as before.
+    key: 'fees.cancellation_score_deduction',
+    value: '0',
+    category: ConfigCategory.FEES,
+    label: 'Points de fiabilité perdus pour toute annulation de mission',
+    isSecret: false,
+  },
+  {
+    // Suspension for walking away repeatedly, independent of penalties: a
+    // worker who cancels this many times within the window below — a mission
+    // they were accepted on, or an application still waiting for an answer —
+    // is suspended until an admin lifts it. Early or late makes no difference.
+    key: 'fees.cancellation_suspension_count',
+    value: '3',
+    category: ConfigCategory.FEES,
+    label: 'Annulations (missions ou candidatures) avant suspension du compte',
+    isSecret: false,
+  },
+  {
+    key: 'fees.cancellation_suspension_window_days',
+    value: '30',
+    category: ConfigCategory.FEES,
+    label: 'Période de comptage des annulations (jours)',
+    isSecret: false,
+  },
+  {
     // The hard block: one penalty left unpaid this long stops the account from
     // applying, publishing, or unlocking a contact, and drops it out of the
     // recommendation fan-out. Quoted verbatim in the message the user gets, so
@@ -315,6 +343,23 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     value: '0.3',
     category: ConfigCategory.MATCHING,
     label: 'Score minimum pour le fil de profils recommandés (employeur)',
+    isSecret: false,
+  },
+  {
+    // A worker's cancellation lowers their compatibility with THAT employer,
+    // both ways, whatever the timing. Each cancellation multiplies the pair's
+    // score by (1 − this), fading back to nothing over the decay below.
+    key: 'matching.pair_cancel_penalty',
+    value: '0.25',
+    category: ConfigCategory.MATCHING,
+    label: 'Baisse de compatibilité par annulation (candidat ↔ recruteur, 0–1)',
+    isSecret: false,
+  },
+  {
+    key: 'matching.pair_cancel_decay_days',
+    value: '180',
+    category: ConfigCategory.MATCHING,
+    label: 'Durée d’effet d’une annulation sur la compatibilité (jours)',
     isSecret: false,
   },
   {

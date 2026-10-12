@@ -49,6 +49,7 @@ import {
   Prisma,
   RatingDirection,
   RejectionSource,
+  SuspensionSource,
 } from '@prisma/client';
 import { ContractService } from '../contract/contract.service';
 import { SystemConfigService } from '../system-config/system-config.service';
@@ -57,8 +58,17 @@ import {
   RELIABILITY_SCORE_MAX,
   SELF_CANCELLED_MESSAGE,
   cancellationPatch,
+  cancellationScoreDeduction,
+  cancellationSuspensionOutlook,
+  countsTowardSuspension,
+  isCommittedCancellation,
   reapplyDecision,
 } from './application.constants';
+import { countCountedCancellations } from './cancellation-counter';
+import {
+  PROFILE_AUTO_SUSPENDED_EVENT,
+  type ProfileAutoSuspendedPayload,
+} from '../../common/events/profile-auto-suspended.event';
 
 /**
  * Statuses that count as a worker's "active" candidature — i.e. the worker
@@ -554,9 +564,17 @@ export class ApplicationService {
     status?: ApplicationStatus;
     statusIn?: readonly ApplicationStatus[];
   }): Prisma.ApplicationWhereInput {
-    const where: Prisma.ApplicationWhereInput = {};
+    // Neither side lists an application whose offer was deleted: the offer
+    // page behind it 404s, and its waiting candidates were closed and told
+    // when it went.
+    const where: Prisma.ApplicationWhereInput = {
+      deleted_at: null,
+      job_offer: {
+        deleted_at: null,
+        ...(args.employerId ? { employer_id: args.employerId } : {}),
+      },
+    };
     if (args.workerId) where.worker_id = args.workerId;
-    if (args.employerId) where.job_offer = { employer_id: args.employerId };
     if (args.status) {
       where.status = args.status;
     } else if (args.statusIn && args.statusIn.length > 0) {
@@ -1082,6 +1100,8 @@ export class ApplicationService {
     application: ApplicationWithOffer;
     penaltyApplied: boolean;
     penaltyAmount: number | null;
+    /** This cancellation crossed the repeated-cancellation threshold. */
+    suspended: boolean;
   }> {
     const application = await this.prisma.application.findUnique({
       where: { id: applicationId },
@@ -1106,9 +1126,13 @@ export class ApplicationService {
       application.status === ApplicationStatus.END &&
       closesOnFill(application.job_offer.employment_type);
 
+    // VIEWED is still an application waiting for an answer — the employer
+    // only opened it. It used to be refused here while the app offered the
+    // button, so withdrawing a viewed application failed with an error.
     if (
       application.status !== ApplicationStatus.ACCEPTED &&
       application.status !== ApplicationStatus.PENDING &&
+      application.status !== ApplicationStatus.VIEWED &&
       application.status !== ('WAITING_PAYMENT' as ApplicationStatus) &&
       !isReversibleHire
     ) {
@@ -1150,6 +1174,14 @@ export class ApplicationService {
     const penaltyAmount: number | null = applyPenalty
       ? fees.lateCancellationPenaltyFcfa
       : null;
+    // Late deduction (if late) + the any-cancellation deduction (if they had
+    // committed), in one write.
+    const scoreDeduction = cancellationScoreDeduction({
+      late: applyPenalty,
+      committed: isCommittedCancellation(application.status),
+      lateDeduction: fees.lateCancellationScoreDeduction,
+      anyDeduction: Number(fees.cancellationScoreDeduction),
+    });
 
     await this.prisma.$transaction(async (tx) => {
       // Lock and re-check the application status inside the transaction to
@@ -1228,7 +1260,9 @@ export class ApplicationService {
           },
           update: {},
         });
+      }
 
+      if (scoreDeduction > 0) {
         const profile = await tx.profile.findUnique({
           where: { id: workerId },
           select: { reliability_score: true },
@@ -1236,15 +1270,15 @@ export class ApplicationService {
         const currentScore = profile?.reliability_score ?? 100;
         const newScore = Math.max(
           fees.reliabilityScoreMin,
-          Math.min(
-            RELIABILITY_SCORE_MAX,
-            currentScore - fees.lateCancellationScoreDeduction,
-          ),
+          Math.min(RELIABILITY_SCORE_MAX, currentScore - scoreDeduction),
         );
         await tx.profile.update({
           where: { id: workerId },
           data: { reliability_score: newScore },
         });
+      }
+
+      if (applyPenalty) {
         await this.syncBillingStatus(workerId, tx);
       }
 
@@ -1259,6 +1293,9 @@ export class ApplicationService {
           }),
           penalty_applied: penaltyApplied,
           penalty_amount: penaltyAmount,
+          // What they walked away from — decides whether it counts toward
+          // the repeated-cancellation suspension.
+          cancelled_from_status: application.status,
         },
       });
     });
@@ -1297,6 +1334,8 @@ export class ApplicationService {
             // "why is this account suspended?" for automatic suspensions too.
             suspension_reason: `${unpaidCount} pénalités impayées (total : ${total.toLocaleString('fr-FR')} FCFA)`,
             suspended_at: new Date(),
+            // The one kind that paying the penalties lifts.
+            suspension_source: SuspensionSource.UNPAID_PENALTIES,
           },
         });
         await this.botNotification.sendMessage(
@@ -1305,6 +1344,12 @@ export class ApplicationService {
         );
       }
     }
+
+    const suspended = await this.suspendIfRepeatedCancellations(
+      workerId,
+      application.status,
+      fees,
+    );
 
     const updated = await this.findById(applicationId);
     if (!updated)
@@ -1362,10 +1407,127 @@ export class ApplicationService {
       application: updated,
       penaltyApplied,
       penaltyAmount,
+      suspended,
+    };
+  }
+
+  /**
+   * The worker's committed cancellations (see
+   * SUSPENSION_COUNTED_CANCEL_STATUSES) within the last `windowDays`.
+   */
+  private countCountedCancellations(
+    workerId: string,
+    windowDays: number,
+  ): Promise<number> {
+    return countCountedCancellations(this.prisma, workerId, windowDays);
+  }
+
+  /**
+   * Suspends a worker who keeps walking away: at
+   * `fees.cancellation_suspension_count` of their own cancellations (missions
+   * or pending applications) within
+   * `fees.cancellation_suspension_window_days`, early or late alike. Only an
+   * admin lifts it — paying a penalty does not (see SuspensionSource).
+   *
+   * Runs after the cancellation committed, so the count includes it. Returns
+   * whether this call suspended the account.
+   */
+  private async suspendIfRepeatedCancellations(
+    workerId: string,
+    fromStatus: ApplicationStatus,
+    fees: {
+      cancellationSuspensionCount?: number;
+      cancellationSuspensionWindowDays?: number;
+    },
+  ): Promise<boolean> {
+    const threshold = Number(fees.cancellationSuspensionCount);
+    const windowDays = Number(fees.cancellationSuspensionWindowDays);
+    if (!countsTowardSuspension(fromStatus)) return false;
+    if (!(threshold > 0) || !(windowDays > 0)) return false;
+
+    const count = await this.countCountedCancellations(workerId, windowDays);
+    if (count < threshold) return false;
+
+    const reason = `${count} annulations en ${windowDays} jours`;
+    // Only an ACTIVE account: one already suspended (say, for unpaid
+    // penalties a moment ago) keeps the reason it was given.
+    const { count: changed } = await this.prisma.profile.updateMany({
+      where: { id: workerId, status: AccountStatus.ACTIVE },
+      data: {
+        status: AccountStatus.SUSPENDED,
+        suspension_reason: reason,
+        suspended_at: new Date(),
+        suspension_source: SuspensionSource.REPEATED_CANCELLATIONS,
+      },
+    });
+    if (changed === 0) return false;
+
+    this.eventEmitter.emit(PROFILE_AUTO_SUSPENDED_EVENT, {
+      profileId: workerId,
+      reason,
+    } satisfies ProfileAutoSuspendedPayload);
+    this.eventEmitter.emit(AdminNotificationEvent.PROFILE_STATUS_CHANGED, {
+      event: AdminNotificationEvent.PROFILE_STATUS_CHANGED,
+      title: 'Compte suspendu automatiquement',
+      message: `Compte suspendu : ${reason}`,
+      entityType: 'profile',
+      entityId: String(workerId),
+      timestamp: new Date().toISOString(),
+    });
+    return true;
+  }
+
+  /**
+   * Where cancelling this application would leave the worker against the
+   * repeated-cancellation rule — for the warning shown before they confirm.
+   */
+  async cancellationSuspensionPreview(
+    applicationId: string,
+    workerId: string,
+  ): Promise<{
+    countsTowardSuspension: boolean;
+    /** It was an accepted mission: it costs reliability points too. */
+    committed: boolean;
+    cancellationsInWindow: number;
+    suspensionThreshold: number;
+    windowDays: number;
+    wouldSuspend: boolean;
+    remainingBeforeSuspension: number | null;
+  }> {
+    const [app, fees] = await Promise.all([
+      this.prisma.application.findUnique({
+        where: { id: applicationId },
+        select: { worker_id: true, status: true },
+      }),
+      this.systemConfigService.getFees(),
+    ]);
+    const threshold = Number(fees.cancellationSuspensionCount) || 0;
+    const windowDays = Number(fees.cancellationSuspensionWindowDays) || 0;
+    const counts =
+      app?.worker_id === workerId && countsTowardSuspension(app.status);
+    const prior =
+      threshold > 0 && windowDays > 0
+        ? await this.countCountedCancellations(workerId, windowDays)
+        : 0;
+    const outlook = cancellationSuspensionOutlook({
+      priorInWindow: prior,
+      counts,
+      threshold,
+    });
+    return {
+      countsTowardSuspension: counts,
+      committed:
+        app?.worker_id === workerId && isCommittedCancellation(app.status),
+      cancellationsInWindow: prior,
+      suspensionThreshold: threshold,
+      windowDays,
+      wouldSuspend: outlook.wouldSuspend,
+      remainingBeforeSuspension: outlook.remaining,
     };
   }
 
   /** Returns whether cancellation would incur a penalty (worker cancelled < 4h before) */
+
   async wouldPenalizeCancellation(
     applicationId: string,
     workerId: string,
@@ -1375,9 +1537,11 @@ export class ApplicationService {
       include: { job_offer: true },
     });
     if (app?.worker_id !== workerId) return false;
+    // The same statuses `cancel()` penalises. PENDING used to be here too, so
+    // a worker withdrawing an unanswered application late was warned about a
+    // penalty that was never charged.
     if (
       app.status !== ApplicationStatus.ACCEPTED &&
-      app.status !== ApplicationStatus.PENDING &&
       app.status !== ('WAITING_PAYMENT' as ApplicationStatus)
     )
       return false;
@@ -2199,6 +2363,8 @@ export class ApplicationService {
     const where: Prisma.ApplicationWhereInput = {
       worker_id: workerId,
       deleted_at: null,
+      // An admin can archive an offer with hires on it; its missions go too.
+      job_offer: { deleted_at: null },
       status: {
         in: [
           ApplicationStatus.ACCEPTED,
@@ -2227,7 +2393,12 @@ export class ApplicationService {
     applicationId: string,
   ): Promise<WorkerMissionCard> {
     const application = await this.prisma.application.findFirst({
-      where: { id: applicationId, worker_id: workerId, deleted_at: null },
+      where: {
+        id: applicationId,
+        worker_id: workerId,
+        deleted_at: null,
+        job_offer: { deleted_at: null },
+      },
       select: WORKER_MISSION_SELECT,
     });
     if (!application) {

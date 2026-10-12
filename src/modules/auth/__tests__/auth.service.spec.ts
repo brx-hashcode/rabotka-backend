@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   BadRequestException,
+  ConflictException,
   HttpException,
   NotFoundException,
   UnauthorizedException,
@@ -130,6 +131,60 @@ describe('AuthService', () => {
     mailService = module.get(MailService);
     whatsAppService = module.get(WhatsAppService);
     whatsAppLoginLink = module.get(WhatsAppLoginLinkService);
+  });
+
+  describe('signup verification', () => {
+    it('sends a WhatsApp code to a number with no account', async () => {
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(null);
+
+      const result = await service.sendSignupOtp(' +24200000009 ');
+
+      expect(result.success).toBe(true);
+      expect(redis.set).toHaveBeenCalledWith(
+        expect.stringContaining('signup:otp:+24200000009'),
+        expect.any(String),
+        'EX',
+        300,
+      );
+      expect(whatsAppService.sendTemplateMessage).toHaveBeenCalled();
+    });
+
+    it('refuses a number that already has an account', async () => {
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(mockProfile);
+
+      await expect(service.sendSignupOtp('+24200000001')).rejects.toThrow(
+        ConflictException,
+      );
+      expect(whatsAppService.sendTemplateMessage).not.toHaveBeenCalled();
+    });
+
+    it('refuses something that is not a phone number', async () => {
+      await expect(service.sendSignupOtp('hello')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('hands back a signup token for the right code', async () => {
+      redis.eval.mockResolvedValue(1);
+
+      const result = await service.verifySignupOtp('+24200000009', '123456');
+
+      expect(result.signupToken).toMatch(/^[A-Za-z0-9_-]{40,}$/);
+      expect(result.expiresIn).toBe(3600);
+      // Stored hashed, never the token itself, bound to the number.
+      const [key, phone] = redis.set.mock.calls.at(-1)!;
+      expect(key).toContain('signup:token:');
+      expect(key).not.toContain(result.signupToken);
+      expect(phone).toBe('+24200000009');
+    });
+
+    it('refuses a wrong or expired code', async () => {
+      redis.eval.mockResolvedValue(0);
+
+      await expect(
+        service.verifySignupOtp('+24200000009', '000000'),
+      ).rejects.toThrow(BadRequestException);
+    });
   });
 
   describe('sendOtp()', () => {

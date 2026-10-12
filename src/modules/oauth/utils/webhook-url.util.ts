@@ -1,3 +1,5 @@
+import { isIP } from 'node:net';
+import { isPrivateAddress } from '../../../common/utils/private-address.util';
 import { WEBHOOK_URL_MAX_LENGTH } from '../oauth.constants';
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
@@ -33,6 +35,16 @@ export function validateWebhookUrl(
   }
   if (url.hash) {
     return "l'URL ne doit pas contenir de fragment (#).";
+  }
+
+  // A production app's webhook must reach the internet, not our own network:
+  // the payload is a person's KYC result, and the request leaves from inside
+  // our infrastructure (SSRF). Names are re-checked by DNS at send time.
+  const host = url.hostname.replace(/^\[|\]$/g, '');
+  const internal =
+    LOCAL_HOSTS.has(url.hostname) || (isIP(host) && isPrivateAddress(host));
+  if (internal && !isSandbox) {
+    return "l'URL doit viser une adresse publique, pas un réseau interne.";
   }
 
   if (url.protocol === 'https:') return null;

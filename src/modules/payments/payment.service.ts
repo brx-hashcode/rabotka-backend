@@ -5,6 +5,8 @@ import {
   PaymentMethod,
   PaymentType,
   PaymentRequestType,
+  AccountStatus,
+  SuspensionSource,
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -261,15 +263,40 @@ export class PaymentService {
       ? `${penaltyProfile.first_name} ${penaltyProfile.last_name}`
       : profileId;
 
-    if (remaining === 0) {
-      const updatedProfile = await this.prisma.profile.update({
-        where: { id: profileId },
-        data: { status: 'ACTIVE' },
-        select: { phone: true },
-      });
+    // Paying the penalties lifts a suspension FOR unpaid penalties, and only
+    // that. This used to set ACTIVE unconditionally, which also reactivated a
+    // banned account, an admin suspension, or one for repeated cancellations
+    // the moment the worker paid an unrelated fine. Suspensions from before
+    // `suspension_source` existed are recognised by the reason the penalty
+    // path has always written.
+    const reactivated =
+      remaining === 0
+        ? (
+            await this.prisma.profile.updateMany({
+              where: {
+                id: profileId,
+                status: AccountStatus.SUSPENDED,
+                OR: [
+                  { suspension_source: SuspensionSource.UNPAID_PENALTIES },
+                  {
+                    suspension_source: null,
+                    suspension_reason: { contains: 'pénalités impayées' },
+                  },
+                ],
+              },
+              data: {
+                status: AccountStatus.ACTIVE,
+                suspension_reason: null,
+                suspended_at: null,
+                suspension_source: null,
+              },
+            })
+          ).count > 0
+        : false;
 
+    if (reactivated && penaltyProfile?.phone) {
       await this.botNotification.sendMessage(
-        updatedProfile.phone,
+        penaltyProfile.phone,
         `✅ Pénalités réglées — Compte réactivé !\n\nVos pénalités ont été payées avec succès.\nVotre compte Rabotka est de nouveau actif.\n\nVous pouvez maintenant explorer toutes les fonctionnalités.\nTapez n'importe quoi pour commencer.`,
       );
     }
@@ -291,6 +318,5 @@ export class PaymentService {
       entityId: String(profileId),
       timestamp: new Date().toISOString(),
     });
-
   }
 }

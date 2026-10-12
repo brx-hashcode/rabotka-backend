@@ -1,8 +1,11 @@
+import { issueSignupToken, SIGNUP_TOKEN_TTL_SECONDS } from './signup-token';
+import { mayLogSecretsLocally } from './local-dev-secrets';
 import {
   Injectable,
   Inject,
   Logger,
   BadRequestException,
+  ConflictException,
   UnauthorizedException,
   NotFoundException,
   HttpException,
@@ -57,6 +60,11 @@ const OTP_ATTEMPTS_KEY_PREFIX = `${REDIS_KEY_PREFIX}otp-attempts:`;
 const ADMIN_OTP_ATTEMPTS_KEY_PREFIX = `${REDIS_KEY_PREFIX}admin:otp-attempts:`;
 const OTP_SENDS_KEY_PREFIX = `${REDIS_KEY_PREFIX}otp-sends:`;
 const ADMIN_OTP_SENDS_KEY_PREFIX = `${REDIS_KEY_PREFIX}admin:otp-sends:`;
+// Signup has its own codes: a number with no account yet must never be able
+// to consume (or exhaust) a login code, and the other way round.
+const SIGNUP_OTP_KEY_PREFIX = `${REDIS_KEY_PREFIX}signup:otp:`;
+const SIGNUP_OTP_ATTEMPTS_KEY_PREFIX = `${REDIS_KEY_PREFIX}signup:otp-attempts:`;
+const SIGNUP_OTP_SENDS_KEY_PREFIX = `${REDIS_KEY_PREFIX}signup:otp-sends:`;
 
 const TOTP_MAX_ATTEMPTS = 5;
 const TOTP_ATTEMPTS_PREFIX = `${REDIS_KEY_PREFIX}admin:totp:attempts:`;
@@ -151,6 +159,61 @@ export class AuthService {
           err,
         ),
       );
+  }
+
+  /**
+   * Step one of signup: a WhatsApp code to the number being registered, so
+   * nobody can create an account on a number they do not hold. Refused when an
+   * account already exists — the login says the same, so this reveals nothing
+   * new. Same send cap as the login code (otp-store), on its own counter.
+   */
+  async sendSignupOtp(phone: string): Promise<{ success: boolean }> {
+    const normalized = this.normalize(phone);
+    if (!this.isPhone(normalized)) {
+      throw new BadRequestException('Numéro de téléphone invalide');
+    }
+    if (await this.findProfileByPhone(normalized)) {
+      throw new ConflictException(
+        'Un compte existe déjà avec ce numéro. Connectez-vous.',
+      );
+    }
+
+    await this.assertCanSendOtp(SIGNUP_OTP_SENDS_KEY_PREFIX, normalized);
+
+    const otp = this.generateOtp();
+    this.logOtp('send', normalized, otp);
+    await this.storeOtp(
+      `${SIGNUP_OTP_KEY_PREFIX}${normalized}`,
+      `${SIGNUP_OTP_ATTEMPTS_KEY_PREFIX}${normalized}`,
+      otp,
+    );
+    await this.sendOtpByWhatsApp(normalized, otp);
+
+    return { success: true };
+  }
+
+  /**
+   * Step two: the code checks out, so the number is theirs. Returns the
+   * signup token the KYC upload and the profile creation require (see
+   * signup-token.ts). Same attempt limit as the login code.
+   */
+  async verifySignupOtp(
+    phone: string,
+    code: string,
+  ): Promise<{ signupToken: string; expiresIn: number }> {
+    const normalized = this.normalize(phone);
+    const matched = await this.consumeOtp(
+      `${SIGNUP_OTP_KEY_PREFIX}${normalized}`,
+      `${SIGNUP_OTP_ATTEMPTS_KEY_PREFIX}${normalized}`,
+      code.trim(),
+    );
+    if (!matched) {
+      throw new BadRequestException('Code incorrect ou expiré');
+    }
+    return {
+      signupToken: await issueSignupToken(this.redis, normalized),
+      expiresIn: SIGNUP_TOKEN_TTL_SECONDS,
+    };
   }
 
   async sendOtp(emailOrPhone: string): Promise<{ success: boolean }> {
@@ -775,7 +838,9 @@ export class AuthService {
   }
 
   /**
-   * Prints a live OTP to the logs — outside production only.
+   * Prints a live OTP to the logs — on a developer's machine only (see
+   * `mayLogSecretsLocally`: it fails closed, so an environment missing
+   * `NODE_ENV` or `IS_PROD` logs nothing).
    *
    * This existed unconditionally, which meant every code Rabotka has ever sent
    * is sitting in the production log stream next to the phone number it was
@@ -784,20 +849,16 @@ export class AuthService {
    *
    * Kept for local development because the alternative is waiting on a real
    * WhatsApp delivery for every login while working offline, and that is a real
-   * cost. `IS_PROD` is the same flag the Redis key prefix keys off, so there is
-   * one answer to "is this production" rather than two.
+   * cost.
    */
   private logOtp(stage: 'send' | 'resend', identifier: string, otp: string) {
-    if (this.configService.get<string>('IS_PROD') === 'true') return;
+    if (!mayLogSecretsLocally(this.configService)) return;
     this.logger.warn(`[OTP][${stage}] ${identifier} → ${otp}`);
   }
 
   /** A developer's machine: `NODE_ENV=development`, and never production. */
   private isLocalDevelopment(): boolean {
-    return (
-      this.configService.get<string>('NODE_ENV') === 'development' &&
-      this.configService.get<string>('IS_PROD') !== 'true'
-    );
+    return mayLogSecretsLocally(this.configService);
   }
 
   private normalize(value: string): string {

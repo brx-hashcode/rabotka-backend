@@ -141,14 +141,18 @@ export class AdminJobOfferController {
   @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Bulk restore archived rows (admin only)',
-    description: 'Clears deleted_at. Only rows that are currently archived are affected.',
+    description: 'Clears deleted_at. Only rows that are currently archived are affected. Applications deleted together with an offer (same instant) are restored with it.',
   })
   @ApiResponse({ status: 201, description: 'Rows restored' })
   async bulkRestore(
     @Body() dto: BulkDeleteDto,
     @Req() req: AdminAuthenticatedRequest,
   ): Promise<{ count: number }> {
+    // Read before the restore clears it: it is how the applications deleted
+    // together with each offer are told apart from ones deleted on their own.
+    const archived = await this.jobOfferService.archivedAt(dto.ids);
     const result = await this.archiveService.restore('jobs', dto.ids);
+    await this.jobOfferService.restoreApplicationsDeletedWith(archived);
     await this.logService.create({
       action: 'JOB_OFFER_BULK_RESTORED',
       entityType: 'JobOffer',

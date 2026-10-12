@@ -680,6 +680,151 @@ describe('ApplicationService', () => {
       expect(call?.[0].data.cancelled_by).toBe('WORKER');
     });
 
+    it('records what the worker walked away from', async () => {
+      await service.cancel(APPLICATION_ID, WORKER_ID);
+
+      const call = (prisma.application.update as jest.Mock).mock.calls.find(
+        ([arg]) => arg?.data?.status === ApplicationStatus.CANCELLED,
+      );
+      expect(call?.[0].data.cancelled_from_status).toBe(
+        ApplicationStatus.ACCEPTED,
+      );
+    });
+
+    it('takes the any-cancellation points off an early cancellation', async () => {
+      const config = testingModule.get(SystemConfigService);
+      const fees = (config.getFees as jest.Mock).getMockImplementation();
+      (config.getFees as jest.Mock).mockImplementation(async () => ({
+        ...(await fees?.()),
+        cancellationScoreDeduction: 3,
+      }));
+
+      const result = await service.cancel(APPLICATION_ID, WORKER_ID);
+
+      // 5h ahead: not late, no penalty — but the points still go.
+      expect(result.penaltyApplied).toBe(false);
+      expect(prisma.profile.update).toHaveBeenCalledWith({
+        where: { id: WORKER_ID },
+        data: { reliability_score: 97 },
+      });
+    });
+
+    it('lets a worker withdraw an application the employer has only viewed', async () => {
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        ...mockApplication,
+        status: ApplicationStatus.VIEWED,
+      });
+
+      await service.cancel(APPLICATION_ID, WORKER_ID);
+
+      const call = (prisma.application.update as jest.Mock).mock.calls.find(
+        ([arg]) => arg?.data?.status === ApplicationStatus.CANCELLED,
+      );
+      expect(call?.[0].data.cancelled_from_status).toBe(
+        ApplicationStatus.VIEWED,
+      );
+    });
+
+    describe('repeated-cancellation suspension', () => {
+      /** Counted cancellations in the window, this one included. */
+      function withCountedCancellations(n: number) {
+        (prisma.application.count as jest.Mock).mockImplementation(
+          ({ where }: { where: Record<string, unknown> }) =>
+            Promise.resolve(where.cancelled_from_status ? n : 0),
+        );
+        const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+        (prisma.profile as unknown as Record<string, unknown>).updateMany =
+          updateMany;
+        const config = testingModule.get(SystemConfigService);
+        const fees = (config.getFees as jest.Mock).getMockImplementation();
+        (config.getFees as jest.Mock).mockImplementation(async () => ({
+          ...(await fees?.()),
+          cancellationSuspensionCount: 3,
+          cancellationSuspensionWindowDays: 30,
+        }));
+        return { updateMany, events: testingModule.get(EventEmitter2) };
+      }
+
+      it('suspends at the threshold and tells the person', async () => {
+        const { updateMany, events } = withCountedCancellations(3);
+
+        const result = await service.cancel(APPLICATION_ID, WORKER_ID);
+
+        expect(result.suspended).toBe(true);
+        expect(updateMany).toHaveBeenCalledWith({
+          where: { id: WORKER_ID, status: 'ACTIVE' },
+          data: expect.objectContaining({
+            status: 'SUSPENDED',
+            suspension_source: 'REPEATED_CANCELLATIONS',
+            suspension_reason: '3 annulations en 30 jours',
+          }),
+        });
+        expect(events.emit).toHaveBeenCalledWith('profile.auto_suspended', {
+          profileId: WORKER_ID,
+          reason: '3 annulations en 30 jours',
+        });
+      });
+
+      it('does not suspend one short of it', async () => {
+        const { updateMany } = withCountedCancellations(2);
+
+        const result = await service.cancel(APPLICATION_ID, WORKER_ID);
+
+        expect(result.suspended).toBe(false);
+        expect(updateMany).not.toHaveBeenCalled();
+      });
+
+      it('counts withdrawing a pending application too', async () => {
+        const { updateMany } = withCountedCancellations(3);
+        (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+          ...mockApplication,
+          status: ApplicationStatus.PENDING,
+        });
+
+        const result = await service.cancel(APPLICATION_ID, WORKER_ID);
+
+        expect(result.suspended).toBe(true);
+        expect(updateMany).toHaveBeenCalled();
+      });
+
+      it('charges no reliability points for a pending withdrawal', async () => {
+        withCountedCancellations(0);
+        const config = testingModule.get(SystemConfigService);
+        const fees = (config.getFees as jest.Mock).getMockImplementation();
+        (config.getFees as jest.Mock).mockImplementation(async () => ({
+          ...(await fees?.()),
+          cancellationScoreDeduction: 3,
+        }));
+        (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+          ...mockApplication,
+          status: ApplicationStatus.PENDING,
+        });
+
+        await service.cancel(APPLICATION_ID, WORKER_ID);
+
+        expect(prisma.profile.update).not.toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              reliability_score: expect.any(Number),
+            }),
+          }),
+        );
+      });
+
+      it('leaves an account that is already suspended alone', async () => {
+        const { updateMany, events } = withCountedCancellations(3);
+        updateMany.mockResolvedValue({ count: 0 });
+
+        const result = await service.cancel(APPLICATION_ID, WORKER_ID);
+
+        expect(result.suspended).toBe(false);
+        expect(events.emit).not.toHaveBeenCalledWith(
+          'profile.auto_suspended',
+          expect.anything(),
+        );
+      });
+    });
+
     it('cancels > 4h before: no penalty applied', async () => {
       // scheduled_at is 5h from now — no penalty
       const result = await service.cancel(APPLICATION_ID, WORKER_ID);
@@ -953,6 +1098,29 @@ describe('ApplicationService', () => {
       ]);
       const result = await service.findByEmployer(EMPLOYER_ID);
       expect(Array.isArray(result)).toBe(true);
+    });
+
+    it('never lists an application whose offer was deleted', async () => {
+      (prisma.application.findMany as jest.Mock).mockResolvedValue([]);
+      await service.findByEmployer(EMPLOYER_ID);
+      const { where } = (prisma.application.findMany as jest.Mock).mock
+        .calls[0][0];
+      expect(where).toMatchObject({
+        deleted_at: null,
+        job_offer: { deleted_at: null, employer_id: EMPLOYER_ID },
+      });
+    });
+
+    it("hides them from the worker's list too", async () => {
+      (prisma.application.findMany as jest.Mock).mockResolvedValue([]);
+      await service.findByWorker(WORKER_ID);
+      const { where } = (prisma.application.findMany as jest.Mock).mock
+        .calls[0][0];
+      expect(where).toMatchObject({
+        worker_id: WORKER_ID,
+        deleted_at: null,
+        job_offer: { deleted_at: null },
+      });
     });
 
     it('filters by status for employer', async () => {

@@ -1,3 +1,4 @@
+import { Public } from '../auth/decorators/public.decorator';
 import { Controller, Get, Post, Body, Param } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
@@ -17,6 +18,7 @@ export class PaymentRequestPublicController {
    * Deliberately not under `pay/` — `pay/:token` would swallow it on any
    * reordering of this file.
    */
+  @Public()
   @Get('payment-gateways')
   @ApiOperation({
     summary: 'List payment gateways and the operators each one accepts',
@@ -27,12 +29,14 @@ export class PaymentRequestPublicController {
     return this.service.listGateways();
   }
 
+  @Public()
   @Get('pay/:token')
   @ApiOperation({ summary: 'Get payment info by token' })
   getByToken(@Param('token') token: string) {
     return this.service.getByToken(token);
   }
 
+  @Public()
   @Post('pay/:token/initiate')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiOperation({ summary: 'Initiate payment via active gateway' })
@@ -62,6 +66,7 @@ export class PaymentRequestPublicController {
    * audit row, so both are bounded: a per-IP throttle well above what a
    * provider sends, and a cap on how much of the body is kept.
    */
+  @Public()
   @Post('webhooks/payment/callback')
   @Throttle({ default: { limit: 120, ttl: 60_000 } })
   @ApiOperation({ summary: 'Payment gateway webhook callback' })
@@ -75,6 +80,7 @@ export class PaymentRequestPublicController {
     return result;
   }
 
+  @Public()
   @Post('webhooks/payment/mtn-momo')
   @Throttle({ default: { limit: 120, ttl: 60_000 } })
   @ApiOperation({ summary: 'MTN MoMo payment webhook callback' })

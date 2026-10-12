@@ -38,6 +38,11 @@ import {
 } from '../../common/services/geocoding/geo.utils';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
 import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
+import { UpdateJobOfferDto } from './dto/update-job-offer.dto';
+import {
+  describeJobOfferChanges,
+  type JobOfferTerms,
+} from './utils/job-offer-changes.util';
 import {
   generateJobReference,
   isValidReferenceShape,
@@ -45,6 +50,7 @@ import {
 } from './utils/job-reference.util';
 import { closesOnFill, isDatedMission } from './utils/employment-type.util';
 import { TERMINAL_JOB_OFFER_STATUSES } from './utils/job-offer-status.util';
+import { offerNotificationLinks } from './utils/offer-notification-links';
 import { isEmployerCoveredAtJobLevel } from '../contact-unlock/employer-coverage';
 import {
   AccountStatus,
@@ -75,6 +81,43 @@ const REFERENCE_MAX_ATTEMPTS = 5;
 const EMPLOYER_DELETABLE_JOB_OFFER_STATUSES: JobOfferStatus[] = [
   JobOfferStatus.ACTIVE,
   JobOfferStatus.EXPIRED,
+];
+
+/**
+ * Applications that commit the employer to a worker: a contact unlock in
+ * flight, a hire, a started or finished mission. Any one of them blocks an
+ * employer delete. Candidates still waiting (PENDING / VIEWED) do not — they
+ * are closed with the offer and told so.
+ */
+const EMPLOYER_DELETE_BLOCKING_APPLICATION_STATUSES: ApplicationStatus[] = [
+  ApplicationStatus.WAITING_PAYMENT,
+  ApplicationStatus.ACCEPTED,
+  ApplicationStatus.STARTED,
+  ApplicationStatus.END,
+];
+
+/**
+ * Applications holding a slot on an offer — the same set `accept()` counts
+ * against `quantity`, plus STARTED. An edit may not lower `quantity` below it.
+ */
+const SLOT_HOLDING_APPLICATION_STATUSES: ApplicationStatus[] = [
+  ApplicationStatus.WAITING_PAYMENT,
+  ApplicationStatus.ACCEPTED,
+  ApplicationStatus.STARTED,
+];
+
+/** Candidates told when an edit changes the pay, date or place. */
+const EDIT_NOTIFIED_APPLICATION_STATUSES: ApplicationStatus[] = [
+  ApplicationStatus.PENDING,
+  ApplicationStatus.VIEWED,
+  ApplicationStatus.WAITING_PAYMENT,
+  ApplicationStatus.ACCEPTED,
+];
+
+/** Assignments that mean a worker was actually engaged on the offer. */
+const EMPLOYER_DELETE_BLOCKING_ASSIGNMENT_STATUSES: AssignmentStatus[] = [
+  AssignmentStatus.CONFIRMED,
+  AssignmentStatus.COMPLETED,
 ];
 
 /**
@@ -173,6 +216,12 @@ export type AdminJobOfferListItem = {
   applicationsCount: number;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Set when the offer was deleted (by its employer) or archived (by an
+   * admin). `status` is left as it was, so this is the only field that says
+   * the offer is gone.
+   */
+  deletedAt: string | null;
   vectorIndexedAt: string | null;
 
   /**
@@ -333,6 +382,9 @@ export type JobOfferListItem = {
  * compile instead of shipping.
  */
 export type JobOfferDetail = JobOfferListItem & {
+  /** For the employer's edit form, which needs the ids behind the labels. */
+  category_id: string | null;
+  country_code: string | null;
   employer?: {
     id: string;
     first_name: string;
@@ -913,6 +965,8 @@ export class JobOfferService {
 
     return {
       ...this.toListItem(offer, offer._count.applications),
+      category_id: offer.category_id,
+      country_code: offer.country_code,
       employer: offer.employer
         ? {
             id: offer.employer.id,
@@ -955,6 +1009,8 @@ export class JobOfferService {
 
     return {
       ...this.toListItem(offer, offer._count.applications),
+      category_id: offer.category_id,
+      country_code: offer.country_code,
       employer: offer.employer
         ? {
             id: offer.employer.id,
@@ -1048,39 +1104,77 @@ export class JobOfferService {
   ): Promise<void> {
     if (!TERMINAL_JOB_OFFER_STATUSES.includes(status)) return;
 
-    const leftovers = await this.prisma.application.findMany({
-      where: {
-        job_offer_id: jobOfferId,
-        status: {
-          in: [
-            ApplicationStatus.PENDING,
-            ApplicationStatus.VIEWED,
-            ApplicationStatus.WAITING_PAYMENT,
-          ],
-        },
-      },
+    const ids = await this.rejectWaitingApplicants(this.prisma, jobOfferId, [
+      ApplicationStatus.PENDING,
+      ApplicationStatus.VIEWED,
+      ApplicationStatus.WAITING_PAYMENT,
+    ]);
+    this.notifyClosedApplicants(ids, 'closeApplicantsIfTerminal');
+  }
+
+  /**
+   * Rejects an offer's applicants still in `statuses` as an automatic close
+   * (not an employer decision — see RejectionSource) and returns their ids.
+   * Takes the client so a caller can run it inside its own transaction.
+   */
+  private async rejectWaitingApplicants(
+    db: Prisma.TransactionClient,
+    jobOfferId: string,
+    statuses: ApplicationStatus[],
+  ): Promise<string[]> {
+    const leftovers = await db.application.findMany({
+      where: { job_offer_id: jobOfferId, status: { in: statuses } },
       select: { id: true },
     });
-    if (leftovers.length === 0) return;
+    if (leftovers.length === 0) return [];
 
     const ids = leftovers.map((a) => a.id);
-    await this.prisma.application.updateMany({
+    await db.application.updateMany({
       where: { id: { in: ids } },
       data: {
         status: ApplicationStatus.REJECTED,
         rejected_at: new Date(),
-        // Offer closed, not an employer decision — see RejectionSource.
         rejection_source: RejectionSource.AUTO_FILL,
       },
     });
+    return ids;
+  }
+
+  /**
+   * Bell notifications that lead to these offers or their applications keep
+   * their text but lose their link: the page behind it is gone, and tapping
+   * one used to land on a 404. Both sides — the employer's « nouvelle
+   * candidature », the worker's « candidature acceptée », a recommendation.
+   */
+  private async unlinkOfferNotifications(
+    db: Prisma.TransactionClient,
+    offerIds: string[],
+  ): Promise<void> {
+    if (offerIds.length === 0) return;
+    const applications = await db.application.findMany({
+      where: { job_offer_id: { in: offerIds } },
+      select: { id: true },
+    });
+    await db.profileNotification.updateMany({
+      where: {
+        link: {
+          in: offerNotificationLinks(
+            offerIds,
+            applications.map((a) => a.id),
+          ),
+        },
+      },
+      data: { link: null },
+    });
+  }
+
+  /** Tells each closed applicant (bell + WhatsApp). Fire-and-forget. */
+  private notifyClosedApplicants(ids: string[], context: string): void {
     for (const appId of ids) {
       this.botNotification
         .sendApplicationRejectedToWorker(appId)
         .catch((err: unknown) =>
-          this.logger.warn(
-            `[closeApplicantsIfTerminal] notify failed for ${appId}:`,
-            err,
-          ),
+          this.logger.warn(`[${context}] notify failed for ${appId}:`, err),
         );
     }
   }
@@ -1429,6 +1523,7 @@ export class JobOfferService {
       applicationsCount: o._count.applications,
       createdAt: o.created_at.toISOString(),
       updatedAt: o.updated_at.toISOString(),
+      deletedAt: o.deleted_at?.toISOString() ?? null,
       vectorIndexedAt: o.vector_indexed_at?.toISOString() ?? null,
       employerUnlockPaid: o.employer_unlock_paid,
       ...(aggregates.get(o.id) ?? emptyJobOfferAggregates()),
@@ -1690,6 +1785,7 @@ export class JobOfferService {
       applicationsCount: offer._count.applications,
       createdAt: offer.created_at.toISOString(),
       updatedAt: offer.updated_at.toISOString(),
+      deletedAt: offer.deleted_at?.toISOString() ?? null,
       vectorIndexedAt: offer.vector_indexed_at?.toISOString() ?? null,
       employerUnlockPaid: offer.employer_unlock_paid,
       ...(aggregates.get(offer.id) ?? emptyJobOfferAggregates()),
@@ -1727,6 +1823,7 @@ export class JobOfferService {
       where: { id },
       data: { deleted_at: new Date() },
     });
+    await this.unlinkOfferNotifications(this.prisma, [id]);
     await this.cache.invalidate('jobs');
 
     // Remove from vector index — fire-and-forget, non-fatal
@@ -1751,10 +1848,12 @@ export class JobOfferService {
 
   /**
    * Employer-facing delete. An employer may remove one of their own offers only
-   * while it carries no engagement: ACTIVE or EXPIRED status, no live applications
-   * (candidates) and no assignments. This keeps started / filled / completed
-   * offers intact. Soft delete (reversible, preserves history) mirroring
-   * {@link deleteJobOfferByAdmin}.
+   * while nobody is engaged on it: ACTIVE or EXPIRED status, no application in
+   * {@link EMPLOYER_DELETE_BLOCKING_APPLICATION_STATUSES} and no confirmed or
+   * completed assignment. Candidates still waiting are closed with the offer
+   * (automatic rejection) and notified; rejected / cancelled ones, and
+   * cancelled assignments, no longer stand in the way. Soft delete (reversible,
+   * preserves history) mirroring {@link deleteJobOfferByAdmin}.
    */
   async deleteByEmployer(id: string, actorProfileId: string): Promise<void> {
     const offer = await this.prisma.jobOffer.findFirst({
@@ -1775,29 +1874,51 @@ export class JobOfferService {
       );
     }
 
-    const [liveApplications, assignments] = await Promise.all([
-      this.prisma.application.count({
-        where: {
-          job_offer_id: id,
-          deleted_at: null,
-          status: {
-            notIn: [ApplicationStatus.REJECTED, ApplicationStatus.CANCELLED],
+    // Checked inside the transaction so an accept landing between the check
+    // and the delete cannot leave a hired worker on a deleted offer.
+    const closedIds = await this.prisma.$transaction(async (tx) => {
+      const [engagedApplications, engagedAssignments] = await Promise.all([
+        tx.application.count({
+          where: {
+            job_offer_id: id,
+            deleted_at: null,
+            status: { in: EMPLOYER_DELETE_BLOCKING_APPLICATION_STATUSES },
           },
-        },
-      }),
-      this.prisma.assignment.count({ where: { job_offer_id: id } }),
-    ]);
-    if (liveApplications > 0 || assignments > 0) {
-      throw new BadRequestException(
-        'Impossible de supprimer : cette offre a déjà des candidats.',
-      );
-    }
+        }),
+        tx.assignment.count({
+          where: {
+            job_offer_id: id,
+            status: { in: EMPLOYER_DELETE_BLOCKING_ASSIGNMENT_STATUSES },
+          },
+        }),
+      ]);
+      if (engagedApplications > 0 || engagedAssignments > 0) {
+        throw new BadRequestException(
+          'Impossible de supprimer : un candidat est déjà engagé sur cette offre.',
+        );
+      }
 
-    await this.prisma.jobOffer.update({
-      where: { id },
-      data: { deleted_at: new Date() },
+      const ids = await this.rejectWaitingApplicants(tx, id, [
+        ApplicationStatus.PENDING,
+        ApplicationStatus.VIEWED,
+      ]);
+      const now = new Date();
+      await this.unlinkOfferNotifications(tx, [id]);
+      // Its applications go with it — every one is closed by now (anything
+      // engaged refused the delete above). Soft, like the offer, so neither
+      // side keeps listing a candidature whose offer page no longer exists.
+      await tx.application.updateMany({
+        where: { job_offer_id: id, deleted_at: null },
+        data: { deleted_at: now },
+      });
+      await tx.jobOffer.update({
+        where: { id },
+        data: { deleted_at: now },
+      });
+      return ids;
     });
     await this.cache.invalidate('jobs');
+    this.notifyClosedApplicants(closedIds, 'deleteByEmployer');
 
     // Remove from vector index — fire-and-forget, non-fatal
     void this.matchingService
@@ -1810,6 +1931,38 @@ export class JobOfferService {
       );
   }
 
+  /**
+   * When each of these offers was deleted, for the archived ones. Read before a
+   * restore clears it — see {@link restoreApplicationsDeletedWith}.
+   */
+  async archivedAt(ids: string[]): Promise<{ id: string; deletedAt: Date }[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.prisma.jobOffer.findMany({
+      where: { id: { in: ids }, deleted_at: { not: null } },
+      select: { id: true, deleted_at: true },
+    });
+    return rows.map((r) => ({ id: r.id, deletedAt: r.deleted_at! }));
+  }
+
+  /**
+   * After restoring offers, brings back the applications that were deleted
+   * WITH them — {@link deleteByEmployer} stamps both with the same instant.
+   * An application deleted on its own, at another time, stays deleted.
+   */
+  async restoreApplicationsDeletedWith(
+    offers: { id: string; deletedAt: Date }[],
+  ): Promise<number> {
+    let restored = 0;
+    for (const offer of offers) {
+      const { count } = await this.prisma.application.updateMany({
+        where: { job_offer_id: offer.id, deleted_at: offer.deletedAt },
+        data: { deleted_at: null },
+      });
+      restored += count;
+    }
+    return restored;
+  }
+
   /** Archive many offers at once (admin bulk delete). Returns the count archived. */
   async bulkSoftDeleteByAdmin(ids: string[]): Promise<{ count: number }> {
     if (ids.length === 0) return { count: 0 };
@@ -1817,6 +1970,7 @@ export class JobOfferService {
       where: { id: { in: ids }, deleted_at: null },
       data: { deleted_at: new Date() },
     });
+    await this.unlinkOfferNotifications(this.prisma, ids);
     await this.cache.invalidate('jobs');
     // Remove each from the vector index so archived offers stop being matched.
     for (const id of ids) {
@@ -1886,16 +2040,215 @@ export class JobOfferService {
       select: { title: true },
     });
 
+    await this.afterJobOfferEdited(id, updatedOffer.title, 'un admin');
+
+    return this.getJobOfferDetailForAdmin(id);
+  }
+
+  /**
+   * An employer's edit of their own offer, allowed while it is ACTIVE.
+   *
+   * The merged result is held to the same rules as creation, so an edit can
+   * never produce an offer `create()` would have refused. On top of that:
+   * - a new date must be at least MIN_HOURS_FROM_NOW ahead (an unchanged one
+   *   is left alone, however close it now is);
+   * - the type of engagement is locked once anyone has applied, since it
+   *   changes what they applied for;
+   * - `quantity` cannot drop below the slots already taken.
+   *
+   * Candidates still on the offer are told when the pay, date or place
+   * changes. The new-offer fan-out is NOT re-sent: this is the same offer.
+   */
+  async updateByEmployer(
+    id: string,
+    actorProfileId: string,
+    dto: UpdateJobOfferDto,
+  ): Promise<JobOfferListItem> {
+    const offer = await this.prisma.jobOffer.findFirst({
+      where: { id, deleted_at: null },
+    });
+    if (!offer) {
+      throw new NotFoundException('Offre introuvable');
+    }
+    if (offer.employer_id !== actorProfileId) {
+      throw new ForbiddenException(
+        "Vous n'êtes pas l'employeur de cette offre",
+      );
+    }
+    if (offer.status !== JobOfferStatus.ACTIVE) {
+      throw new BadRequestException(
+        'Seule une offre active peut être modifiée.',
+      );
+    }
+
+    const currentAmount = offer.amount == null ? null : Number(offer.amount);
+    this.validateCreateDto({
+      title: dto.title ?? offer.title,
+      description: dto.description ?? offer.description,
+      employment_type: dto.employment_type ?? offer.employment_type,
+      scheduled_at: dto.scheduled_at ?? offer.scheduled_at?.toISOString(),
+      amount:
+        dto.amount !== undefined ? dto.amount : (currentAmount ?? undefined),
+      address: dto.address ?? offer.address ?? undefined,
+      note: dto.note ?? offer.note ?? undefined,
+      quantity: dto.quantity ?? offer.quantity,
+    });
+
+    const scheduledAt =
+      dto.scheduled_at !== undefined ? new Date(dto.scheduled_at) : undefined;
+    if (
+      scheduledAt &&
+      scheduledAt.getTime() !== offer.scheduled_at?.getTime() &&
+      scheduledAt < new Date(Date.now() + MIN_HOURS_FROM_NOW * 60 * 60 * 1000)
+    ) {
+      throw new BadRequestException(
+        `La date doit être au moins ${MIN_HOURS_FROM_NOW} heures dans le futur`,
+      );
+    }
+
+    const applications = await this.prisma.application.findMany({
+      where: {
+        job_offer_id: id,
+        deleted_at: null,
+        status: {
+          notIn: [ApplicationStatus.CANCELLED, ApplicationStatus.REJECTED],
+        },
+      },
+      select: { id: true, status: true },
+    });
+    if (
+      dto.employment_type !== undefined &&
+      dto.employment_type !== offer.employment_type &&
+      applications.length > 0
+    ) {
+      throw new BadRequestException(
+        'Le type de contrat ne peut plus être modifié : des candidats ont déjà postulé.',
+      );
+    }
+    const slotsTaken = applications.filter((a) =>
+      SLOT_HOLDING_APPLICATION_STATUSES.includes(a.status),
+    ).length;
+    if (dto.quantity !== undefined && dto.quantity < slotsTaken) {
+      throw new BadRequestException(
+        `Le nombre de personnes ne peut pas être inférieur aux ${slotsTaken} candidat(s) déjà retenu(s).`,
+      );
+    }
+    if (dto.category_id) {
+      const category = await this.prisma.jobCategory.findUnique({
+        where: { id: dto.category_id },
+        select: { id: true },
+      });
+      if (!category) {
+        throw new BadRequestException('Catégorie introuvable');
+      }
+    }
+
+    const data: Prisma.JobOfferUpdateInput = {};
+    if (dto.title !== undefined) data.title = dto.title.trim();
+    if (dto.description !== undefined)
+      data.description = dto.description.trim();
+    if (scheduledAt) data.scheduled_at = scheduledAt;
+    if (dto.employment_type !== undefined)
+      data.employment_type = dto.employment_type;
+    if (dto.amount !== undefined) data.amount = dto.amount ?? null;
+    if (dto.payment_flow !== undefined)
+      data.payment_flow = dto.payment_flow ?? null;
+    if (dto.category_id) data.category = { connect: { id: dto.category_id } };
+    if (dto.note !== undefined) data.note = dto.note.trim() || null;
+    if (dto.quantity !== undefined) data.quantity = dto.quantity;
+    if (dto.isRemote !== undefined) data.is_remote = dto.isRemote;
+    if (dto.isRemote) {
+      // Same rule as creation: a remote job keeps no location at all.
+      data.address = null;
+      data.country_code = null;
+      data.country_name = null;
+      data.city = null;
+    } else {
+      // "" clears the address, as on creation; omitted leaves it alone.
+      if (dto.address !== undefined) data.address = dto.address.trim() || null;
+      Object.assign(
+        data,
+        this.geo.resolveLocation({
+          countryCode: dto.countryCode,
+          city: dto.city,
+        }),
+      );
+      // A city alone is snapped against the offer's own country.
+      if (dto.city && dto.countryCode === undefined) {
+        data.city = this.geo.canonicalCity(offer.country_code, dto.city);
+      }
+    }
+
+    const updated = await this.prisma.jobOffer.update({ where: { id }, data });
+
+    await this.afterJobOfferEdited(id, updated.title, "l'employeur");
+
+    const changes = describeJobOfferChanges(
+      this.termsOf(offer),
+      this.termsOf(updated),
+    );
+    if (changes.length > 0) {
+      for (const app of applications) {
+        if (!EDIT_NOTIFIED_APPLICATION_STATUSES.includes(app.status)) continue;
+        this.botNotification
+          .sendJobOfferUpdatedToWorker(app.id, changes)
+          .catch((err: unknown) =>
+            this.logger.warn(
+              `[updateByEmployer] notify failed for ${app.id}:`,
+              err,
+            ),
+          );
+      }
+    }
+
+    return this.toListItem(updated, slotsTaken);
+  }
+
+  private termsOf(offer: {
+    amount: unknown;
+    scheduled_at: Date | null;
+    is_remote: boolean;
+    address: string | null;
+    city: string | null;
+    country_code: string | null;
+  }): JobOfferTerms {
+    return {
+      amount: offer.amount == null ? null : Number(offer.amount),
+      scheduled_at: offer.scheduled_at,
+      is_remote: offer.is_remote,
+      address: offer.address,
+      city: offer.city,
+      country_code: offer.country_code,
+    };
+  }
+
+  /**
+   * What every edit must do once the row is written, whoever made it. The
+   * admin path used to skip the re-index, so matching kept ranking the offer
+   * on its old title, pay and place until something else touched it.
+   */
+  private async afterJobOfferEdited(
+    id: string,
+    title: string,
+    editor: string,
+  ): Promise<void> {
+    await this.cache.invalidate('jobs');
+    void this.matchingService
+      .indexJobOffer(id)
+      .catch((err: unknown) =>
+        this.logger.warn(
+          `re-index failed for edited offer ${id}`,
+          err instanceof Error ? err.message : String(err),
+        ),
+      );
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_UPDATED, {
       event: AdminNotificationEvent.JOB_OFFER_UPDATED,
       title: 'Offre mise à jour',
-      message: `L'offre d'emploi "${updatedOffer.title}" a été mise à jour par un admin`,
+      message: `L'offre d'emploi "${title}" a été mise à jour par ${editor}`,
       entityType: 'job-offer',
       entityId: String(id),
       timestamp: new Date().toISOString(),
     });
-
-    return this.getJobOfferDetailForAdmin(id);
   }
 
   private toListItem(

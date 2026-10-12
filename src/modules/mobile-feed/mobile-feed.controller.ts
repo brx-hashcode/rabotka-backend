@@ -5,6 +5,7 @@ import {
   isApplied,
 } from './chattable-applications';
 import {
+  Body,
   Controller,
   Delete,
   ForbiddenException,
@@ -12,6 +13,7 @@ import {
   Logger,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -50,6 +52,7 @@ import { KycVerifiedGuard } from '../auth/guards/kyc-verified.guard';
 import { ActiveProfileGuard } from '../auth/guards/active-profile.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { JobOfferService } from '../job-offer/job-offer.service';
+import { UpdateJobOfferDto } from '../job-offer/dto/update-job-offer.dto';
 import { ApplicationService } from '../application/application.service';
 import { MatchingService } from '../matching/matching.service';
 import { EngineRolloutService } from '../recommendation-engine/engine-rollout.service';
@@ -734,17 +737,42 @@ export class MobileFeedController {
     return { success: true };
   }
 
+  @Patch('job-offers/:id')
+  @UseGuards(ActiveProfileGuard)
+  @ApiOperation({
+    summary: '[Mobile/EMPLOYER] Edit one of my job offers',
+    description:
+      'Edits a job offer owned by the authenticated employer while it is ACTIVE. Omitted fields are left alone; the merged offer must pass the creation rules. A changed date must be at least 4h ahead, the employment type is locked once someone has applied, and quantity cannot drop below the slots already taken. Candidates still on the offer are notified when the pay, date or place changes.',
+  })
+  @ApiResponse({ status: 200, description: 'The updated job offer' })
+  @ApiResponse({
+    status: 400,
+    description: 'Not ACTIVE, or the edit breaks a rule',
+  })
+  @ApiResponse({ status: 403, description: 'Not an EMPLOYER / not the owner' })
+  @ApiResponse({ status: 404, description: 'Job offer not found' })
+  async updateJobOffer(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() dto: UpdateJobOfferDto,
+  ) {
+    const profileId = req.user.profileId;
+    await this.assertProfileType(profileId, ProfileType.EMPLOYER);
+
+    return this.jobOfferService.updateByEmployer(id, profileId, dto);
+  }
+
   @Delete('job-offers/:id')
   @UseGuards(ActiveProfileGuard)
   @ApiOperation({
     summary: '[Mobile/EMPLOYER] Delete one of my job offers',
     description:
-      'Soft-deletes a job offer owned by the authenticated employer. Only allowed while the offer is still ACTIVE with no candidates (no live applications) and no assignments.',
+      'Soft-deletes a job offer owned by the authenticated employer. Allowed while the offer is ACTIVE or EXPIRED and no worker is engaged on it (no WAITING_PAYMENT / ACCEPTED / STARTED / END application, no confirmed or completed assignment). Candidates still waiting (PENDING / VIEWED) are closed with it and notified.',
   })
   @ApiResponse({ status: 200, description: 'Job offer deleted' })
   @ApiResponse({
     status: 400,
-    description: 'Offer has candidates or is engaged',
+    description: 'A worker is engaged on the offer, or it is in progress',
   })
   @ApiResponse({ status: 403, description: 'Not an EMPLOYER / not the owner' })
   @ApiResponse({ status: 404, description: 'Job offer not found' })

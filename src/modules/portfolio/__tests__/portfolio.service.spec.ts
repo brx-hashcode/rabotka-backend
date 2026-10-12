@@ -357,7 +357,9 @@ describe('PortfolioService', () => {
         rating_avg: 4.5,
         rating_count: 12,
         description: 'Peintre',
-        address: 'Bacongo',
+        address: '12 rue Mfoa, Bacongo',
+        city: 'Brazzaville',
+        country_name: 'Congo-Brazzaville',
         profile_type: ProfileType.WORKER,
         portfolio_items: [
           {
@@ -383,6 +385,64 @@ describe('PortfolioService', () => {
       expect(JSON.stringify(view)).not.toContain('email');
       expect(view).not.toHaveProperty('phone');
       expect(view).not.toHaveProperty('email');
+    });
+
+    it('shows the city, never the street address, and only the last-name initial', async () => {
+      prisma.profile.findUnique.mockResolvedValue({
+        id: 'w1',
+        portfolio_slug: 'jean-dupont-abc123',
+        first_name: 'Jean',
+        last_name: 'dupont',
+        avatar_url: null,
+        reliability_score: 88,
+        rating_avg: null,
+        rating_count: 0,
+        description: '',
+        address: '12 rue Mfoa, Bacongo',
+        city: 'Brazzaville',
+        country_name: 'Congo-Brazzaville',
+        profile_type: ProfileType.WORKER,
+        portfolio_items: [],
+      });
+      prisma.application.count.mockResolvedValue(0);
+
+      const view = await service.getPublicBySlug('jean-dupont-abc123');
+
+      expect(view.location).toBe('Brazzaville, Congo-Brazzaville');
+      expect(view.lastName).toBe('D.');
+      expect(view).not.toHaveProperty('address');
+      expect(JSON.stringify(view)).not.toContain('Mfoa');
+      // The slug is built from the name and stays (changing it would break
+      // every shared link); the name fields themselves carry the initial.
+      expect(view.firstName).toBe('Jean');
+      // Not even read: what is not selected cannot leak.
+      const { select } = prisma.profile.findUnique.mock.calls[0][0];
+      expect(select).not.toHaveProperty('address');
+      expect(select).not.toHaveProperty('phone');
+    });
+
+    it('has no location when neither city nor country is known', async () => {
+      prisma.profile.findUnique.mockResolvedValue({
+        id: 'w1',
+        portfolio_slug: 's',
+        first_name: 'Jean',
+        last_name: '',
+        avatar_url: null,
+        reliability_score: null,
+        rating_avg: null,
+        rating_count: 0,
+        description: '',
+        city: null,
+        country_name: '  ',
+        profile_type: ProfileType.WORKER,
+        portfolio_items: [],
+      });
+      prisma.application.count.mockResolvedValue(0);
+
+      const view = await service.getPublicBySlug('s');
+
+      expect(view.location).toBeNull();
+      expect(view.lastName).toBe('');
     });
 
     it('throws 404 for an unknown slug', async () => {

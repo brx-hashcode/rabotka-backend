@@ -497,6 +497,11 @@ export function applyPenalties(
     /** 1 = just shown, 0 = fully recovered. */
     seenDecay?: number;
     unsaved?: boolean;
+    /**
+     * The worker cancelled on this employer before: the multiplier from
+     * {@link pairCancellationFactor}, 1 when they never did.
+     */
+    pairCancellation?: number;
   },
   penalties: Penalties = DEFAULT_PENALTIES,
 ): number {
@@ -505,7 +510,41 @@ export function applyPenalties(
   if (flags.seenDecay)
     score *= 1 - clamp01(penalties.seen) * clamp01(flags.seenDecay);
   if (flags.unsaved) score *= 1 - clamp01(penalties.unsaved);
+  if (flags.pairCancellation !== undefined)
+    score *= clamp01(flags.pairCancellation);
   return clamp01(score);
+}
+
+/**
+ * How much a worker's past cancellations on one employer weigh on the pair's
+ * compatibility, as a multiplier: 1 with none, lower with each one.
+ *
+ * Each cancellation takes `strength` off (×0.75 at 0.25), fading linearly to
+ * nothing over `decayDays`. Several compound, so a worker who keeps walking
+ * out on the same employer sinks for that employer — and that employer for
+ * them — while everyone else still sees them as before.
+ */
+export function pairCancellationFactor(
+  ageDays: readonly number[],
+  strength: number,
+  decayDays: number,
+): number {
+  if (!(decayDays > 0)) return 1;
+  const s = clamp01(strength);
+  let factor = 1;
+  for (const age of ageDays) {
+    const weight = Math.max(0, 1 - Math.max(0, age) / decayDays);
+    factor *= 1 - s * weight;
+  }
+  return clamp01(factor);
+}
+
+/** The displayed compatibility once the pair's cancellations are applied. */
+export function withPairCancellation(
+  fit: number | null,
+  factor: number,
+): number | null {
+  return fit === null ? null : clamp01(fit * clamp01(factor));
 }
 
 export const FRESHNESS_HALF_LIFE_HOURS = 72;

@@ -93,3 +93,82 @@ export function reapplyDecision(
   // "fix" it to bar: it would bar the ghost-cancel victims for good.
   return 'ALLOW';
 }
+
+/**
+ * Statuses in which the worker had committed — accepted, paying for the
+ * contact, or hired on an ongoing engagement. Walking away from one of these
+ * is what costs reliability points (see cancellationScoreDeduction).
+ */
+export const COMMITTED_CANCEL_STATUSES: readonly ApplicationStatus[] = [
+  ApplicationStatus.ACCEPTED,
+  ApplicationStatus.WAITING_PAYMENT,
+  ApplicationStatus.END,
+];
+
+export function isCommittedCancellation(
+  fromStatus: ApplicationStatus,
+): boolean {
+  return COMMITTED_CANCEL_STATUSES.includes(fromStatus);
+}
+
+/**
+ * Statuses from which a worker's cancellation counts toward the
+ * repeated-cancellation suspension: every one they make themselves — the
+ * committed ones, and withdrawing an application still waiting for an answer
+ * too. Someone who keeps applying and pulling out is the pattern this rule
+ * is for, whether or not the employer had answered yet. Withdrawals cost no
+ * reliability points; only committed cancellations do.
+ */
+export const SUSPENSION_COUNTED_CANCEL_STATUSES: readonly ApplicationStatus[] =
+  [
+    ApplicationStatus.PENDING,
+    ApplicationStatus.VIEWED,
+    ...COMMITTED_CANCEL_STATUSES,
+  ];
+
+export function countsTowardSuspension(fromStatus: ApplicationStatus): boolean {
+  return SUSPENSION_COUNTED_CANCEL_STATUSES.includes(fromStatus);
+}
+
+/**
+ * Where a worker stands against the repeated-cancellation rule, given how
+ * many counted cancellations they already have in the window. Pure, so the
+ * preview and the cancel itself cannot disagree.
+ */
+export function cancellationSuspensionOutlook(args: {
+  /** Counted cancellations already in the window, this one excluded. */
+  priorInWindow: number;
+  /** Whether THIS cancellation would count. */
+  counts: boolean;
+  threshold: number;
+}): { afterThis: number; wouldSuspend: boolean; remaining: number | null } {
+  const threshold = Number.isFinite(args.threshold) ? args.threshold : 0;
+  const afterThis = args.priorInWindow + (args.counts ? 1 : 0);
+  if (threshold <= 0) {
+    return { afterThis, wouldSuspend: false, remaining: null };
+  }
+  return {
+    afterThis,
+    wouldSuspend: args.counts && afterThis >= threshold,
+    remaining: Math.max(0, threshold - afterThis),
+  };
+}
+
+/**
+ * Reliability points a worker cancellation costs: the late-cancellation
+ * deduction when it is late, plus `fees.cancellation_score_deduction` for
+ * walking away from any committed mission (see isCommittedCancellation),
+ * early or late. Pure, so the cancel and its preview agree.
+ */
+export function cancellationScoreDeduction(args: {
+  late: boolean;
+  committed: boolean;
+  lateDeduction: number;
+  anyDeduction: number;
+}): number {
+  const safe = (n: number) => (Number.isFinite(n) && n > 0 ? n : 0);
+  return (
+    (args.late ? safe(args.lateDeduction) : 0) +
+    (args.committed ? safe(args.anyDeduction) : 0)
+  );
+}

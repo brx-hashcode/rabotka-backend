@@ -109,6 +109,30 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    // Reliability points lost for walking away from ANY committed mission
+    // (accepted, paying, hired), early or late — on top of the late deduction
+    // when it is late. 0 = only late cancellations cost points, as before.
+    key: 'fees.cancellation_score_deduction',
+    value: '0',
+    category: ConfigCategory.FEES,
+    label: 'Points de fiabilité perdus pour toute annulation de mission',
+    isSecret: false,
+  },
+  {
+    key: 'fees.cancellation_suspension_count',
+    value: '3',
+    category: ConfigCategory.FEES,
+    label: 'Annulations (missions ou candidatures) avant suspension du compte',
+    isSecret: false,
+  },
+  {
+    key: 'fees.cancellation_suspension_window_days',
+    value: '30',
+    category: ConfigCategory.FEES,
+    label: 'Période de comptage des annulations (jours)',
+    isSecret: false,
+  },
+  {
     key: 'fees.penalty_hard_block_days',
     value: '3',
     category: ConfigCategory.FEES,
@@ -293,6 +317,20 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     value: '0.3',
     category: ConfigCategory.MATCHING,
     label: 'Score minimum pour le fil de profils recommandés (employeur)',
+    isSecret: false,
+  },
+  {
+    key: 'matching.pair_cancel_penalty',
+    value: '0.25',
+    category: ConfigCategory.MATCHING,
+    label: 'Baisse de compatibilité par annulation (candidat ↔ recruteur, 0–1)',
+    isSecret: false,
+  },
+  {
+    key: 'matching.pair_cancel_decay_days',
+    value: '180',
+    category: ConfigCategory.MATCHING,
+    label: 'Durée d’effet d’une annulation sur la compatibilité (jours)',
     isSecret: false,
   },
   {

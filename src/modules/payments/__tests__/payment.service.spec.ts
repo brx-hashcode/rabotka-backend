@@ -28,6 +28,7 @@ const mockPrisma = {
       last_name: 'Doe',
     }),
     update: jest.fn().mockResolvedValue({ phone: '+242001' }),
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
   },
 };
 
@@ -207,26 +208,51 @@ describe('PaymentService', () => {
   });
 
   describe('handlePenaltyPaymentSuccess', () => {
-    it('marks penalties as paid and reactivates profile when no remaining', async () => {
+    it('marks penalties as paid and lifts a penalty suspension when none remain', async () => {
       await service.handlePenaltyPaymentSuccess('profile-1');
       expect(mockPrisma.penalty.updateMany).toHaveBeenCalled();
-      expect(mockPrisma.profile.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { status: 'ACTIVE' } }),
-      );
+      const call = mockPrisma.profile.updateMany.mock.calls[0][0];
+      expect(call.where).toMatchObject({
+        id: 'profile-1',
+        status: 'SUSPENDED',
+      });
+      expect(call.where.OR).toEqual([
+        { suspension_source: 'UNPAID_PENALTIES' },
+        {
+          suspension_source: null,
+          suspension_reason: { contains: 'pénalités impayées' },
+        },
+      ]);
+      expect(call.data).toEqual({
+        status: 'ACTIVE',
+        suspension_reason: null,
+        suspended_at: null,
+        suspension_source: null,
+      });
       expect(mockBotNotification.sendMessage).toHaveBeenCalled();
       expect(mockEventEmitter.emit).toHaveBeenCalledTimes(2);
+    });
+
+    it('leaves any other suspension (admin, repeated cancellations, ban) alone', async () => {
+      // The where clause matched nothing: the account is not suspended for
+      // unpaid penalties.
+      mockPrisma.profile.updateMany.mockResolvedValueOnce({ count: 0 });
+      await service.handlePenaltyPaymentSuccess('profile-1');
+      expect(mockPrisma.profile.update).not.toHaveBeenCalled();
+      expect(mockBotNotification.sendMessage).not.toHaveBeenCalled();
     });
 
     it('does not reactivate profile when remaining penalties exist', async () => {
       mockPrisma.penalty.count.mockResolvedValueOnce(2);
       await service.handlePenaltyPaymentSuccess('profile-1');
-      expect(mockPrisma.profile.update).not.toHaveBeenCalled();
+      expect(mockPrisma.profile.updateMany).not.toHaveBeenCalled();
       expect(mockBotNotification.sendMessage).not.toHaveBeenCalled();
     });
 
     it('handles missing profile gracefully', async () => {
       mockPrisma.profile.findUnique.mockResolvedValueOnce(null);
       await service.handlePenaltyPaymentSuccess('profile-1');
+      expect(mockBotNotification.sendMessage).not.toHaveBeenCalled();
       expect(mockEventEmitter.emit).toHaveBeenCalledTimes(2);
     });
   });
