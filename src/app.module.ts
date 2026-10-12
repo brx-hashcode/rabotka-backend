@@ -1,3 +1,7 @@
+import type Redis from 'ioredis';
+import { REDIS_CONNECTION } from './common/services/redis/redis.constants';
+import { RedisThrottlerStorage } from './common/services/throttler/redis-throttler.storage';
+import { positiveIntFromEnv } from './common/services/throttler/positive-int-from-env';
 import { ArcjetModule, detectBot, fixedWindow, shield } from '@arcjet/nest';
 import { Module } from '@nestjs/common';
 import { createArcjetLoggerAdapter } from './common/utils/arcjet-logger.adapter.js';
@@ -93,14 +97,21 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     }),
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
+      // REDIS_CONNECTION comes from the global RedisModule.
+      inject: [ConfigService, REDIS_CONNECTION],
+      useFactory: (config: ConfigService, redis: Redis) => ({
         throttlers: [
           {
-            ttl: config.get<number>('THROTTLE_TTL', 60000),
-            limit: config.get<number>('THROTTLE_LIMIT', 100),
+            // Environment values are strings whatever `get<number>` says. A
+            // string TTL made the storage compute `Date.now() + "60000"` — a
+            // block that never expired, so an IP over the limit stayed locked
+            // out of that route until the next restart.
+            ttl: positiveIntFromEnv(config.get('THROTTLE_TTL'), 60_000),
+            limit: positiveIntFromEnv(config.get('THROTTLE_LIMIT'), 100),
           },
         ],
+        // Shared across instances and restarts; see RedisThrottlerStorage.
+        storage: new RedisThrottlerStorage(redis),
       }),
     }),
     ArcjetModule.forRootAsync({
