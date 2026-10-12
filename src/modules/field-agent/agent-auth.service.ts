@@ -1,3 +1,4 @@
+import { mayLogSecretsLocally } from '../auth/local-dev-secrets';
 import {
   HttpException,
   HttpStatus,
@@ -226,7 +227,7 @@ export class AgentAuthService {
       otp,
     );
 
-    if (this.configService.get<string>('IS_PROD') !== 'true') {
+    if (mayLogSecretsLocally(this.configService)) {
       this.logger.warn(`[AGENT OTP] ${email} → ${otp}`);
     }
 
