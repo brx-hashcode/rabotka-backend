@@ -29,6 +29,7 @@ import {
   ApiConsumes,
 } from '@nestjs/swagger';
 import { ProfileService } from './profile.service';
+import { ProfileFilesService } from './profile-files.service';
 import { ArchiveService } from '../admin-archive/archive.service';
 import { AdminContactRecordService } from '../contact-unlock/admin-contact-record.service';
 import { BulkDeleteDto } from '../../common/dto/bulk-delete.dto';
@@ -94,6 +95,10 @@ export class AdminProfileController {
     // dispatcher above: specs build this controller by position.
     @Optional()
     private readonly botPause?: BotPauseService,
+    // Same positional reason. Without it a purge still deletes the rows; only
+    // the files are left in storage, as before.
+    @Optional()
+    private readonly profileFiles?: ProfileFilesService,
   ) {}
 
   /**
@@ -183,7 +188,7 @@ export class AdminProfileController {
   @ApiOperation({
     summary: 'Permanently delete archived rows (SUPER_ADMIN only)',
     description:
-      'Irreversible. Refuses rows carrying records that must outlive them (financial or compliance), returning 409 with the blocking counts.',
+      'Irreversible. Refuses a profile that made or attempted a payment, returning 409 with the blocking counts. Otherwise deletes the profile with everything linked to it, then removes its files (KYC, avatar, portfolio, attachments) from storage.',
   })
   @ApiResponse({ status: 201, description: 'Rows permanently deleted' })
   @ApiResponse({ status: 409, description: 'Blocked by linked records' })
@@ -191,15 +196,30 @@ export class AdminProfileController {
     @Body() dto: BulkDeleteDto,
     @Req() req: AdminAuthenticatedRequest,
   ): Promise<{ count: number }> {
-    const result = await this.archiveService.purge('profiles', dto.ids);
+    const profileFiles = this.profileFiles;
+    const result = await this.archiveService.purge('profiles', dto.ids, {
+      // Listed inside the purge transaction, so it matches what is deleted.
+      collect: profileFiles
+        ? (tx, ids) => profileFiles.collect(tx, ids)
+        : undefined,
+    });
+    // Only once the rows are gone: a refused or failed purge touches no file.
+    const files = profileFiles
+      ? await profileFiles.remove(result.collected ?? [])
+      : { deleted: 0, failed: 0 };
     await this.logService.create({
       action: 'PROFILE_BULK_PURGED',
       entityType: 'Profile',
       userId: req.user?.userId,
-      metadata: { ids: dto.ids, count: result.count },
+      metadata: {
+        ids: dto.ids,
+        count: result.count,
+        filesDeleted: files.deleted,
+        filesFailed: files.failed,
+      },
       ...extractRequestMeta(req),
     });
-    return result;
+    return { count: result.count };
   }
 
   @Post('bulk-delete')

@@ -4,6 +4,7 @@ import { put, del, head } from '@vercel/blob';
 import { StorageProvider } from '@prisma/client';
 import { IStorageProvider } from '../interfaces/storage-provider.interface';
 import {
+  DeleteOptions,
   DownloadOptions,
   DownloadResult,
   ExistsOptions,
@@ -62,7 +63,8 @@ export class VercelBlobStorageProvider implements IStorageProvider {
     }
   }
 
-  async delete(key: string): Promise<void> {
+  // One container: there is no other bucket to delete from.
+  async delete(key: string, _options?: DeleteOptions): Promise<void> {
     try {
       await del(key, {
         token: this.token,

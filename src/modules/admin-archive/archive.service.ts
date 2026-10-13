@@ -9,7 +9,14 @@ import {
 export type PurgeBlocker = { label: string; count: number };
 
 export type RestoreResult = { count: number };
-export type PurgeResult = { count: number };
+export type PurgeResult<T = undefined> = { count: number; collected?: T };
+
+/**
+ * Runs inside the purge transaction, after the blockers passed and before the
+ * delete: reads what the caller needs from rows about to disappear (the
+ * storage keys of their files, typically).
+ */
+export type PurgeCollector<T> = (tx: unknown, ids: string[]) => Promise<T>;
 
 /**
  * Restore and permanent-delete for soft-deleted admin rows.
@@ -58,32 +65,16 @@ export class ArchiveService {
    * it would leave a window where a payment lands between the check and the
    * delete, and the cascade would take it with no trace.
    */
-  async purge(entity: ArchiveEntity, ids: string[]): Promise<PurgeResult> {
+  async purge<T = undefined>(
+    entity: ArchiveEntity,
+    ids: string[],
+    opts: { collect?: PurgeCollector<T> } = {},
+  ): Promise<PurgeResult<T>> {
     if (ids.length === 0) return { count: 0 };
-    const config = ARCHIVE_REGISTRY[entity];
 
     return this.prisma.$transaction(async (tx) => {
       const delegate = this.delegate(entity, tx);
-      const blockers: PurgeBlocker[] = [];
-
-      // Rows that are themselves financial records (a settled penalty, an
-      // approved payment request, any ledger entry).
-      if (config.selfBlocked) {
-        const count = await delegate.count({
-          where: { id: { in: ids }, ...config.selfBlocked.where },
-        });
-        if (count > 0) {
-          blockers.push({ label: config.selfBlocked.label, count });
-        }
-      }
-
-      // Rows that OWN records which must survive them.
-      for (const rel of config.relations) {
-        const count = await delegate.count({
-          where: { id: { in: ids }, [rel.field]: { some: {} } },
-        });
-        if (count > 0) blockers.push({ label: rel.label, count });
-      }
+      const blockers = await this.countBlockers(entity, delegate, ids);
 
       if (blockers.length > 0) {
         throw new ConflictException({
@@ -93,13 +84,16 @@ export class ArchiveService {
         });
       }
 
+      // Read before deleting: afterwards the cascade has taken the rows.
+      const collected = opts.collect ? await opts.collect(tx, ids) : undefined;
+
       // Only archived rows are purgeable — a live row must be archived first,
       // which keeps the destructive step behind a deliberate two-step flow.
       const { count } = await delegate.deleteMany({
         where: { id: { in: ids }, deleted_at: { not: null } },
       });
       if (count > 0) await this.cache.invalidate(entity);
-      return { count };
+      return { count, collected };
     });
   }
 
@@ -112,23 +106,51 @@ export class ArchiveService {
     ids: string[],
   ): Promise<PurgeBlocker[]> {
     if (ids.length === 0) return [];
-    const config = ARCHIVE_REGISTRY[entity];
-    const delegate = this.delegate(entity);
-    const blockers: PurgeBlocker[] = [];
+    return this.countBlockers(entity, this.delegate(entity), ids);
+  }
 
+  /**
+   * What stops these rows being purged. One definition for `purge` and
+   * `purgeBlockers`, so the warning the admin sees is exactly the rule
+   * enforced.
+   *
+   * Blockers sharing a label (the two directions of a paid unlock) are summed
+   * into one line.
+   */
+  private async countBlockers(
+    entity: ArchiveEntity,
+    delegate: ReturnType<typeof this.delegate>,
+    ids: string[],
+  ): Promise<PurgeBlocker[]> {
+    const config = ARCHIVE_REGISTRY[entity];
+    const counts = new Map<string, number>();
+    const tally = (label: string, count: number) => {
+      if (count > 0) counts.set(label, (counts.get(label) ?? 0) + count);
+    };
+
+    // Rows that are themselves financial records (a settled penalty, an
+    // approved payment request, any ledger entry).
     if (config.selfBlocked) {
-      const count = await delegate.count({
-        where: { id: { in: ids }, ...config.selfBlocked.where },
-      });
-      if (count > 0) blockers.push({ label: config.selfBlocked.label, count });
+      tally(
+        config.selfBlocked.label,
+        await delegate.count({
+          where: { id: { in: ids }, ...config.selfBlocked.where },
+        }),
+      );
     }
+
+    // Rows that OWN records which must survive them — all of them, or only
+    // those matching `where` when the relation narrows it.
     for (const rel of config.relations) {
-      const count = await delegate.count({
-        where: { id: { in: ids }, [rel.field]: { some: {} } },
-      });
-      if (count > 0) blockers.push({ label: rel.label, count });
+      tally(
+        rel.label,
+        await delegate.count({
+          where: { id: { in: ids }, [rel.field]: { some: rel.where ?? {} } },
+        }),
+      );
     }
-    return blockers;
+
+    return [...counts].map(([label, count]) => ({ label, count }));
   }
 
   /**

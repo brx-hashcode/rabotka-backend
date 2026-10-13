@@ -95,6 +95,20 @@ describe('CloudflareStorageProvider', () => {
       mockSend.mockResolvedValue({});
       const provider = new CloudflareStorageProvider(makeConfig(baseConfig));
       await expect(provider.delete('file.txt')).resolves.toBeUndefined();
+      expect(mockSend).toHaveBeenCalledWith({
+        Bucket: 'my-bucket',
+        Key: 'file.txt',
+      });
+    });
+
+    it('deletes from another bucket when asked (private KYC bucket)', async () => {
+      mockSend.mockResolvedValue({});
+      const provider = new CloudflareStorageProvider(makeConfig(baseConfig));
+      await provider.delete('kyc-documents/id.jpg', { bucket: 'kyc-private' });
+      expect(mockSend).toHaveBeenCalledWith({
+        Bucket: 'kyc-private',
+        Key: 'kyc-documents/id.jpg',
+      });
     });
 
     it('throws on failure', async () => {
