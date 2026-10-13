@@ -3,6 +3,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { ProfileController } from './profile.controller';
 import { AdminProfileController } from './admin-profile.controller';
 import { ProfileService } from './profile.service';
+import { ProfileFilesService } from './profile-files.service';
 import { FileModule } from '../file/file.module';
 import { MailModule } from '../mail/mail.module';
 import { AuthModule } from '../auth/auth.module';
@@ -57,7 +58,7 @@ import { WhatsAppDocumentModule } from '../whatsapp/documents/whatsapp-document.
     WhatsAppDocumentModule,
   ],
   controllers: [ProfileController, AdminProfileController],
-  providers: [ProfileService],
+  providers: [ProfileService, ProfileFilesService],
   exports: [ProfileService],
 })
 export class ProfileModule {}

@@ -58,7 +58,14 @@ describe('StorageService', () => {
 
     it('delete() delegates to provider', async () => {
       await service.delete('file.jpg');
-      expect(provider.delete).toHaveBeenCalledWith('file.jpg');
+      expect(provider.delete).toHaveBeenCalledWith('file.jpg', undefined);
+    });
+
+    it('delete() passes the bucket through', async () => {
+      await service.delete('kyc-documents/a.jpg', { bucket: 'kyc' });
+      expect(provider.delete).toHaveBeenCalledWith('kyc-documents/a.jpg', {
+        bucket: 'kyc',
+      });
     });
 
     it('getUrl() delegates to provider', async () => {
