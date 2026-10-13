@@ -904,4 +904,75 @@ describe('AdminProfileController', () => {
       expect(result).toEqual({ success: true });
     });
   });
+
+  describe('bulkPurge()', () => {
+    const req = {
+      user: { userId: 'admin-1' },
+      headers: {},
+      ip: '127.0.0.1',
+    } as any;
+    const build = (
+      purge: jest.Mock,
+      profileFiles: any,
+      log = makeLogService(),
+    ) =>
+      new AdminProfileController(
+        makeProfileService() as any,
+        log as any,
+        makePaymentRequestService() as any,
+        makePrisma(null) as any,
+        makeWhatsApp() as any,
+        makeLoginLink() as any,
+        makeMail() as any,
+        makeLayout() as any,
+        makeWalletService() as any,
+        makePortfolioService() as any,
+        { restore: jest.fn(), purge, purgeBlockers: jest.fn() } as any,
+        { forProfile: jest.fn() } as any,
+        undefined,
+        undefined,
+        profileFiles,
+      );
+
+    it('removes the files the purge collected, once it succeeded', async () => {
+      const files = [{ key: 'kyc-documents/id.jpg', bucket: 'kyc' }];
+      const profileFiles = {
+        collect: jest.fn().mockResolvedValue(files),
+        remove: jest.fn().mockResolvedValue({ deleted: 1, failed: 0 }),
+      };
+      const purge = jest.fn(async (_e: string, ids: string[], opts: any) => {
+        // The collector runs inside the transaction, with its client.
+        const collected = await opts.collect('tx-client', ids);
+        return { count: 1, collected };
+      });
+      const log = makeLogService();
+      const ctrl = build(purge, profileFiles, log);
+
+      const res = await ctrl.bulkPurge({ ids: ['p1'] }, req);
+
+      expect(profileFiles.collect).toHaveBeenCalledWith('tx-client', ['p1']);
+      expect(profileFiles.remove).toHaveBeenCalledWith(files);
+      expect(res).toEqual({ count: 1 });
+      expect(log.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'PROFILE_BULK_PURGED',
+          metadata: expect.objectContaining({
+            filesDeleted: 1,
+            filesFailed: 0,
+          }),
+        }),
+      );
+    });
+
+    it('touches no file when the purge is refused', async () => {
+      const profileFiles = { collect: jest.fn(), remove: jest.fn() };
+      const purge = jest.fn().mockRejectedValue(new Error('409 payments'));
+      const ctrl = build(purge, profileFiles);
+
+      await expect(ctrl.bulkPurge({ ids: ['p1'] }, req)).rejects.toThrow(
+        '409 payments',
+      );
+      expect(profileFiles.remove).not.toHaveBeenCalled();
+    });
+  });
 });

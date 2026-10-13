@@ -49,6 +49,11 @@ export type ExistsOptions = {
   bucket?: string;
 };
 
+/** Which bucket to delete from, when it is not the default one (KYC files). */
+export type DeleteOptions = {
+  bucket?: string;
+};
+
 /** Where to read an object from, when it is not the default bucket. */
 export type DownloadOptions = {
   bucket?: string;

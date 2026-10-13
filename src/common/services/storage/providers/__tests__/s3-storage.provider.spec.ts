@@ -113,6 +113,20 @@ describe('S3StorageProvider', () => {
       mockSend.mockResolvedValue({});
       const provider = new S3StorageProvider(makeConfigService(baseConfig));
       await expect(provider.delete('file.txt')).resolves.toBeUndefined();
+      expect(mockSend).toHaveBeenCalledWith({
+        Bucket: 'test-bucket',
+        Key: 'file.txt',
+      });
+    });
+
+    it('deletes from another bucket when asked', async () => {
+      mockSend.mockResolvedValue({});
+      const provider = new S3StorageProvider(makeConfigService(baseConfig));
+      await provider.delete('kyc-documents/id.jpg', { bucket: 'kyc-private' });
+      expect(mockSend).toHaveBeenCalledWith({
+        Bucket: 'kyc-private',
+        Key: 'kyc-documents/id.jpg',
+      });
     });
 
     it('throws on delete failure', async () => {

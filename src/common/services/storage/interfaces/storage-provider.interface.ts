@@ -1,6 +1,7 @@
 import {
   DownloadOptions,
   DownloadResult,
+  DeleteOptions,
   ExistsOptions,
   GetUrlOptions,
   UploadOptions,
@@ -24,8 +25,10 @@ export interface IStorageProvider {
   /**
    * Delete a file from the storage provider
    * @param key - Storage key of the file to delete
+   * @param options - `bucket` for an object outside the default bucket.
+   *   Providers with a single container ignore it.
    */
-  delete(key: string): Promise<void>;
+  delete(key: string, options?: DeleteOptions): Promise<void>;
 
   /**
    * Get the public URL for a file

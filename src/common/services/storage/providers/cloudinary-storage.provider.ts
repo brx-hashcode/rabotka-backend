@@ -5,6 +5,7 @@ import type { UploadApiOptions } from 'cloudinary';
 import { StorageProvider } from '@prisma/client';
 import { IStorageProvider } from '../interfaces/storage-provider.interface';
 import {
+  DeleteOptions,
   DownloadOptions,
   DownloadResult,
   ExistsOptions,
@@ -105,7 +106,8 @@ export class CloudinaryStorageProvider implements IStorageProvider {
     }
   }
 
-  async delete(key: string): Promise<void> {
+  // One container: there is no other bucket to delete from.
+  async delete(key: string, _options?: DeleteOptions): Promise<void> {
     try {
       const result = await cloudinary.uploader.destroy(key);
       if (result?.result === 'not found') {

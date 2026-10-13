@@ -11,6 +11,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { StorageProvider } from '@prisma/client';
 import { IStorageProvider } from '../interfaces/storage-provider.interface';
 import {
+  DeleteOptions,
   DownloadOptions,
   DownloadResult,
   ExistsOptions,
@@ -111,10 +112,10 @@ export class CloudflareStorageProvider implements IStorageProvider {
     }
   }
 
-  async delete(key: string): Promise<void> {
+  async delete(key: string, options?: DeleteOptions): Promise<void> {
     try {
       const command = new DeleteObjectCommand({
-        Bucket: this.bucket,
+        Bucket: options?.bucket || this.bucket,
         Key: key,
       });
 

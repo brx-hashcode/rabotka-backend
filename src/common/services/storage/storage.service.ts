@@ -4,6 +4,7 @@ import { IStorageProvider } from './interfaces/storage-provider.interface';
 import {
   DownloadOptions,
   DownloadResult,
+  DeleteOptions,
   ExistsOptions,
   GetUrlOptions,
   UploadOptions,
@@ -48,8 +49,8 @@ export class StorageService implements OnModuleInit {
     return this.ensureProvider().upload(file, filename, options);
   }
 
-  async delete(key: string): Promise<void> {
-    return this.ensureProvider().delete(key);
+  async delete(key: string, options?: DeleteOptions): Promise<void> {
+    return this.ensureProvider().delete(key, options);
   }
 
   async getUrl(key: string, options?: GetUrlOptions): Promise<string> {
