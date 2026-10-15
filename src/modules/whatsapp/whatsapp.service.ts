@@ -626,6 +626,39 @@ export class WhatsAppService {
   }
 
   /**
+   * A document (PDF) as a free-form message. Only deliverable inside the 24h
+   * customer-service window — see `isServiceWindowOpen`; outside it, send a
+   * document template instead.
+   *
+   * The transcript row names the file and omits the URL, which is a signed
+   * credential and must not land in the messages table.
+   */
+  async sendDocumentMessage(
+    phone: string,
+    documentUrl: string,
+    filename: string,
+    caption?: string,
+  ): Promise<boolean> {
+    const sid = await this.attempt(
+      'media',
+      phone,
+      {
+        kind: 'media',
+        bodyPreview: caption
+          ? `[DOC:${filename}] ${caption}`
+          : `[DOC:${filename}]`,
+      },
+      (logId) =>
+        this.provider.sendMedia(
+          phone,
+          { kind: 'document', url: documentUrl, filename, caption },
+          this.sendOpts(logId),
+        ),
+    );
+    return sid != null;
+  }
+
+  /**
    * Show the composer bubble against an inbound message.
    *
    * Best-effort and never throws: it is a courtesy, and a failure here must not

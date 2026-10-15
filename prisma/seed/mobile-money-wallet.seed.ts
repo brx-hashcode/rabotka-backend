@@ -9,17 +9,17 @@ const TRANSACTIONS: {
   referenceType: string;
   daysAgo: number;
 }[] = [
-  // Credits — MTN Mobile Money via Monetbil
-  { type: WalletTransactionType.MOBILE_MONEY_CREDIT, amount: 15000, referenceType: 'payment_request:MONETBIL:CG_MTNMOBILEMONEY', daysAgo: 45 },
-  { type: WalletTransactionType.MOBILE_MONEY_CREDIT, amount: 8500,  referenceType: 'payment_request:MONETBIL:CG_MTNMOBILEMONEY', daysAgo: 40 },
-  { type: WalletTransactionType.MOBILE_MONEY_CREDIT, amount: 22000, referenceType: 'payment_request:MONETBIL:CG_MTNMOBILEMONEY', daysAgo: 35 },
-  { type: WalletTransactionType.MOBILE_MONEY_CREDIT, amount: 5000,  referenceType: 'payment_request:MONETBIL:CG_MTNMOBILEMONEY', daysAgo: 28 },
-  { type: WalletTransactionType.MOBILE_MONEY_CREDIT, amount: 12000, referenceType: 'payment_request:MONETBIL:CG_MTNMOBILEMONEY', daysAgo: 21 },
+  // Credits — MTN Mobile Money via pawaPay
+  { type: WalletTransactionType.MOBILE_MONEY_CREDIT, amount: 15000, referenceType: 'payment_request:PAWAPAY:MTN_MOMO_COG', daysAgo: 45 },
+  { type: WalletTransactionType.MOBILE_MONEY_CREDIT, amount: 8500,  referenceType: 'payment_request:PAWAPAY:MTN_MOMO_COG', daysAgo: 40 },
+  { type: WalletTransactionType.MOBILE_MONEY_CREDIT, amount: 22000, referenceType: 'payment_request:PAWAPAY:MTN_MOMO_COG', daysAgo: 35 },
+  { type: WalletTransactionType.MOBILE_MONEY_CREDIT, amount: 5000,  referenceType: 'payment_request:PAWAPAY:MTN_MOMO_COG', daysAgo: 28 },
+  { type: WalletTransactionType.MOBILE_MONEY_CREDIT, amount: 12000, referenceType: 'payment_request:PAWAPAY:MTN_MOMO_COG', daysAgo: 21 },
 
-  // Credits — Airtel Money via Monetbil
-  { type: WalletTransactionType.MOBILE_MONEY_CREDIT, amount: 9000,  referenceType: 'payment_request:MONETBIL:CG_AIRTEL', daysAgo: 38 },
-  { type: WalletTransactionType.MOBILE_MONEY_CREDIT, amount: 18500, referenceType: 'payment_request:MONETBIL:CG_AIRTEL', daysAgo: 30 },
-  { type: WalletTransactionType.MOBILE_MONEY_CREDIT, amount: 7500,  referenceType: 'payment_request:MONETBIL:CG_AIRTEL', daysAgo: 14 },
+  // Credits — Airtel Money via pawaPay
+  { type: WalletTransactionType.MOBILE_MONEY_CREDIT, amount: 9000,  referenceType: 'payment_request:PAWAPAY:AIRTEL_COG', daysAgo: 38 },
+  { type: WalletTransactionType.MOBILE_MONEY_CREDIT, amount: 18500, referenceType: 'payment_request:PAWAPAY:AIRTEL_COG', daysAgo: 30 },
+  { type: WalletTransactionType.MOBILE_MONEY_CREDIT, amount: 7500,  referenceType: 'payment_request:PAWAPAY:AIRTEL_COG', daysAgo: 14 },
 
   // Credits — MTN via MTN_MOMO gateway
   { type: WalletTransactionType.MOBILE_MONEY_CREDIT, amount: 30000, referenceType: 'payment_request:MTN_MOMO:CG_MTNMOBILEMONEY', daysAgo: 20 },

@@ -181,6 +181,17 @@ export class PaymentService {
       },
     });
 
+    // Who pays, for the gateway's records (pawaPay keeps it as metadata).
+    const payer = await this.prisma.profile.findUnique({
+      where: { id: params.profileId },
+      select: {
+        first_name: true,
+        last_name: true,
+        email: true,
+        profile_type: true,
+      },
+    });
+
     let gatewayRef: string;
     try {
       const result = await this.paymentGateway.initiatePayment({
@@ -188,8 +199,17 @@ export class PaymentService {
         currency: 'XAF',
         externalId: paymentRequest.id,
         phone: params.phone,
+        operator: params.operator,
         description: params.description,
-        metadata: { operator: params.operator },
+        requestType: params.requestType,
+        payer: {
+          profileId: params.profileId,
+          name: payer
+            ? `${payer.first_name} ${payer.last_name}`.trim()
+            : 'Utilisateur',
+          email: payer?.email,
+          profileType: payer?.profile_type,
+        },
       });
       gatewayRef = result.gatewayRef;
     } catch (err) {

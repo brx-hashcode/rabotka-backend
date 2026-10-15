@@ -205,7 +205,7 @@ export class MtnMomoPaymentGateway implements IPaymentGateway {
     const gatewayRef =
       (body['referenceId'] as string) ?? (body['externalId'] as string) ?? '';
 
-    // Nothing to look up — see the same guard in the Monetbil gateway.
+    // Nothing to look up — see the same guard in the pawaPay gateway.
     if (typeof gatewayRef !== 'string' || !gatewayRef) {
       return { gatewayRef: '', status: 'PENDING', rawPayload: payload };
     }

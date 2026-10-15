@@ -22,7 +22,7 @@ import { InvoiceService } from '../../invoice/invoice.service';
 import { StorageService } from '../../../common/services/storage/storage.service';
 import { QueueService } from '../../../common/services/queue/queue.service';
 import { PaymentGatewayService } from '../../../common/services/payment/payment-gateway.service';
-import { MONETBIL_METADATA } from '../../../common/services/payment/providers/monetbil-payment.gateway';
+import { PAWAPAY_METADATA } from '../../../common/services/payment/providers/pawapay-payment.gateway';
 import { MTN_MOMO_METADATA } from '../../../common/services/payment/providers/mtn-momo-payment.gateway';
 import { inAppNotifications } from '../../profile-notification/__tests__/in-app-notifications';
 
@@ -142,7 +142,7 @@ describe('PaymentRequestService', () => {
           useValue: {
             getRaw: jest.fn().mockResolvedValue('5000'),
             get: jest.fn().mockResolvedValue(''),
-            getPaymentGatewayDriver: jest.fn().mockResolvedValue('MONETBIL'),
+            getPaymentGatewayDriver: jest.fn().mockResolvedValue('PAWAPAY'),
           },
         },
         {
@@ -162,12 +162,15 @@ describe('PaymentRequestService', () => {
           useValue: {
             initiatePayment: jest.fn(),
             checkPaymentStatus: jest.fn(),
-            // The suite drives Monetbil-shaped operators, so the active gateway
+            // The suite drives pawaPay-shaped operators, so the active gateway
             // has to be one that accepts them.
-            getActiveMetadata: jest.fn().mockReturnValue(MONETBIL_METADATA),
+            getActiveMetadata: jest.fn().mockReturnValue(PAWAPAY_METADATA),
+            getActiveMetadataOrNull: jest
+              .fn()
+              .mockReturnValue(PAWAPAY_METADATA),
             listAvailable: jest
               .fn()
-              .mockReturnValue([MONETBIL_METADATA, MTN_MOMO_METADATA]),
+              .mockReturnValue([PAWAPAY_METADATA, MTN_MOMO_METADATA]),
             handleWebhookPayload: jest.fn().mockResolvedValue({
               gatewayRef: null,
               status: 'PENDING',
@@ -263,6 +266,23 @@ describe('PaymentRequestService', () => {
       expect(result.profileName).toBe('Alice Dupont');
     });
 
+    it.each([
+      ['CG', 'COG'],
+      ['CM', 'CMR'],
+      ['FR', null],
+      [null, null],
+    ])(
+      "gives the payer's country %s as %s, for the operators to offer",
+      async (alpha2, alpha3) => {
+        (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+          makeRequest(PaymentRequestStatus.PENDING, {
+            profile: { ...mockProfile, country_code: alpha2 },
+          }),
+        );
+        expect((await service.getByToken(TOKEN)).payerCountry).toBe(alpha3);
+      },
+    );
+
     it('throws NotFoundException when token not found', async () => {
       (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(null);
 
@@ -338,7 +358,7 @@ describe('PaymentRequestService', () => {
       (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(null);
 
       await expect(
-        service.initiatePayment(TOKEN, '237600000001', 'CG_MTNMOBILEMONEY'),
+        service.initiatePayment(TOKEN, '237600000001', 'MTN_MOMO_COG'),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -348,7 +368,7 @@ describe('PaymentRequestService', () => {
       );
 
       await expect(
-        service.initiatePayment(TOKEN, '237600000001', 'CG_MTNMOBILEMONEY'),
+        service.initiatePayment(TOKEN, '237600000001', 'MTN_MOMO_COG'),
       ).rejects.toThrow(BadRequestException);
     });
   });
@@ -414,17 +434,44 @@ describe('PaymentRequestService', () => {
       pendingRequest();
       await expect(
         // A real code — but Airtel's, on a build running MTN MoMo.
-        service.initiatePayment(TOKEN, '+242001', 'CG_AIRTELMONEY_TYPO'),
-      ).rejects.toThrow(/Opérateur invalide pour Monetbil/);
+        service.initiatePayment(TOKEN, '+242001', 'AIRTEL_COG_TYPO'),
+      ).rejects.toThrow(/Opérateur invalide pour pawaPay/);
       // Rejected before the request is claimed, so the payer can retry.
       expect(prisma.paymentRequest.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("rejects a network of another country than the payer's", async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING, {
+          amount: 5000,
+          profile: { ...mockProfile, country_code: 'CG' },
+        }),
+      );
+      await expect(
+        service.initiatePayment(TOKEN, '+237677123456', 'MTN_MOMO_CMR'),
+      ).rejects.toThrow("Cet opérateur n'est pas disponible dans votre pays.");
+      expect(prisma.paymentRequest.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("accepts a network of the payer's own country", async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING, {
+          amount: 5000,
+          profile: { ...mockProfile, country_code: 'CM' },
+        }),
+      );
+      await service
+        .initiatePayment(TOKEN, '+237677123456', 'ORANGE_CMR')
+        .catch(() => undefined);
+      // Got past the operator check: the request was claimed.
+      expect(prisma.paymentRequest.updateMany).toHaveBeenCalled();
     });
 
     it('rejects a missing operator when the gateway routes by network', async () => {
       pendingRequest();
       await expect(
         service.initiatePayment(TOKEN, '+242001', ''),
-      ).rejects.toThrow(/Opérateur invalide pour Monetbil/);
+      ).rejects.toThrow(/Opérateur invalide pour pawaPay/);
     });
 
     it('accepts any operator when the gateway serves a single network', async () => {
@@ -448,9 +495,9 @@ describe('PaymentRequestService', () => {
   describe('listGateways()', () => {
     it('reports the active gateway alongside every registered one', () => {
       const result = service.listGateways();
-      expect(result.active).toBe('MONETBIL');
+      expect(result.active).toBe('PAWAPAY');
       expect(result.gateways.map((g) => g.key)).toEqual([
-        'MONETBIL',
+        'PAWAPAY',
         'MTN_MOMO',
       ]);
     });
@@ -462,7 +509,7 @@ describe('PaymentRequestService', () => {
         makeRequest(PaymentRequestStatus.PENDING, { amount: null }),
       );
       await expect(
-        service.initiatePayment(TOKEN, '+242001', 'CG_MTNMOBILEMONEY'),
+        service.initiatePayment(TOKEN, '+242001', 'MTN_MOMO_COG'),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -474,7 +521,7 @@ describe('PaymentRequestService', () => {
         count: 0,
       });
       await expect(
-        service.initiatePayment(TOKEN, '+242001', 'CG_MTNMOBILEMONEY'),
+        service.initiatePayment(TOKEN, '+242001', 'MTN_MOMO_COG'),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -490,7 +537,7 @@ describe('PaymentRequestService', () => {
         .fn()
         .mockRejectedValueOnce(new Error('Gateway error'));
       await expect(
-        service.initiatePayment(TOKEN, '+242001', 'CG_MTNMOBILEMONEY'),
+        service.initiatePayment(TOKEN, '+242001', 'MTN_MOMO_COG'),
       ).rejects.toThrow(BadRequestException);
       expect(prisma.paymentRequest.updateMany).toHaveBeenCalledTimes(2); // original + revert
     });
@@ -512,7 +559,7 @@ describe('PaymentRequestService', () => {
       const result = await service.initiatePayment(
         TOKEN,
         '+242001',
-        'CG_MTNMOBILEMONEY',
+        'MTN_MOMO_COG',
       );
       expect(result.success).toBe(true);
     });
@@ -532,7 +579,7 @@ describe('PaymentRequestService', () => {
       const result = await service.initiatePayment(
         TOKEN,
         '+242001',
-        'CG_MTNMOBILEMONEY',
+        'MTN_MOMO_COG',
       );
       expect(result.success).toBe(true);
     });
@@ -606,7 +653,6 @@ describe('PaymentRequestService', () => {
         recommendation_worker_id: null,
         description: 'Penalty payment',
         gateway_payment_ref: null,
-        monetbil_payment_ref: null,
         profile: {
           ...mockProfile,
           phone: '+24200000001',
@@ -681,7 +727,6 @@ describe('PaymentRequestService', () => {
         recommendation_worker_id: null,
         description: 'Penalty payment',
         gateway_payment_ref: null,
-        monetbil_payment_ref: null,
         profile: { ...mockProfile, phone: null, email: null },
       };
       (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
@@ -714,11 +759,10 @@ describe('PaymentRequestService', () => {
       request_type: PaymentRequestType.WALLET_TOP_UP,
       contact_unlock_attempt_id: null,
       gateway_payment_ref: 'gw-ref-9',
-      monetbil_payment_ref: null,
       token: TOKEN,
       phone: null,
       operator: 'MTN',
-      gateway: 'MONETBIL',
+      gateway: 'PAWAPAY',
       profile: { ...mockProfile, phone: null },
     });
 
@@ -773,7 +817,6 @@ describe('PaymentRequestService', () => {
         recommendation_worker_id: null,
         description: 'Contact unlock',
         gateway_payment_ref: null,
-        monetbil_payment_ref: null,
         profile: {
           ...mockProfile,
           phone: '+242',
@@ -827,7 +870,6 @@ describe('PaymentRequestService', () => {
         recommendation_worker_id: 'worker-1',
         description: null,
         gateway_payment_ref: null,
-        monetbil_payment_ref: null,
         profile: {
           ...mockProfile,
           phone: '+242',
@@ -879,11 +921,10 @@ describe('PaymentRequestService', () => {
         request_type: PaymentRequestType.CONTACT_UNLOCK,
         contact_unlock_attempt_id: 'unlock-1',
         gateway_payment_ref: 'gw-ref-1',
-        monetbil_payment_ref: null,
         token: TOKEN,
         phone: '+242000001',
         operator: 'MTN',
-        gateway: 'MONETBIL',
+        gateway: 'PAWAPAY',
         profile: { ...mockProfile },
       };
       (prisma.paymentRequest.findFirst as jest.Mock).mockResolvedValue(req);
@@ -914,11 +955,10 @@ describe('PaymentRequestService', () => {
         request_type: PaymentRequestType.PENALTY_BATCH,
         contact_unlock_attempt_id: null,
         gateway_payment_ref: 'gw-ref-2',
-        monetbil_payment_ref: null,
         token: TOKEN,
         phone: '+242000001',
         operator: 'MTN',
-        gateway: 'MONETBIL',
+        gateway: 'PAWAPAY',
         profile: { ...mockProfile },
       };
       (prisma.paymentRequest.findFirst as jest.Mock).mockResolvedValue(req);
@@ -957,7 +997,6 @@ describe('PaymentRequestService', () => {
         recommendation_worker_id: null,
         description: 'Test payment',
         gateway_payment_ref: null,
-        monetbil_payment_ref: null,
         profile: {
           ...mockProfile,
           phone: '+242000001',
@@ -981,7 +1020,7 @@ describe('PaymentRequestService', () => {
       return req;
     }
 
-    it('sends notification for RECOMMENDATION_CONTACT (isRecommendationContact=true)', async () => {
+    it('sends no WhatsApp confirmation for RECOMMENDATION_CONTACT, only the email', async () => {
       setupProcessApproval({
         request_type: PaymentRequestType.RECOMMENDATION_CONTACT,
         recommendation_worker_id: 'w-1',
@@ -1002,10 +1041,18 @@ describe('PaymentRequestService', () => {
         contactUnlock.getContactsIfUnlocked = jest.fn().mockResolvedValue(null);
       }
       await service.processApprovedPaymentById(REQUEST_ID);
-      expect(whatsApp.sendTextMessage).toHaveBeenCalled();
+      // Confirmed on screen already: WhatsApp must not repeat it.
+      expect(
+        (whatsApp.sendTextMessage as jest.Mock).mock.calls.some(([, text]) =>
+          String(text).includes('Paiement confirmé'),
+        ),
+      ).toBe(false);
+      expect((service as any).mailService.sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({ to: 'alice@test.com' }),
+      );
     });
 
-    it('sends notification for CONTACT_UNLOCK nowUnlocked=false', async () => {
+    it('sends no WhatsApp confirmation for CONTACT_UNLOCK nowUnlocked=false, only the email', async () => {
       setupProcessApproval({
         request_type: PaymentRequestType.CONTACT_UNLOCK,
         contact_unlock_attempt_id: 'att-1',
@@ -1027,10 +1074,18 @@ describe('PaymentRequestService', () => {
         contactUnlock.getContactsIfUnlocked = jest.fn().mockResolvedValue(null);
       }
       await service.processApprovedPaymentById(REQUEST_ID);
-      expect(whatsApp.sendTextMessage).toHaveBeenCalled();
+      // Confirmed on screen already: WhatsApp must not repeat it.
+      expect(
+        (whatsApp.sendTextMessage as jest.Mock).mock.calls.some(([, text]) =>
+          String(text).includes('Paiement confirmé'),
+        ),
+      ).toBe(false);
+      expect((service as any).mailService.sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({ to: 'alice@test.com' }),
+      );
     });
 
-    it('sends notification for CONTACT_UNLOCK nowUnlocked=true', async () => {
+    it('sends no WhatsApp confirmation for CONTACT_UNLOCK nowUnlocked=true, only the email', async () => {
       setupProcessApproval({
         request_type: PaymentRequestType.CONTACT_UNLOCK,
         contact_unlock_attempt_id: 'att-1',
@@ -1060,7 +1115,15 @@ describe('PaymentRequestService', () => {
           .mockResolvedValue(undefined);
       }
       await service.processApprovedPaymentById(REQUEST_ID);
-      expect(whatsApp.sendTextMessage).toHaveBeenCalled();
+      // Confirmed on screen already: WhatsApp must not repeat it.
+      expect(
+        (whatsApp.sendTextMessage as jest.Mock).mock.calls.some(([, text]) =>
+          String(text).includes('Paiement confirmé'),
+        ),
+      ).toBe(false);
+      expect((service as any).mailService.sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({ to: 'alice@test.com' }),
+      );
     });
 
     it('handles null email (skips email notification)', async () => {
@@ -1070,6 +1133,91 @@ describe('PaymentRequestService', () => {
       await service.processApprovedPaymentById(REQUEST_ID);
       // Should not throw
       expect(true).toBe(true);
+    });
+  });
+
+  describe('settled amount check', () => {
+    const processing = () =>
+      makeRequest(PaymentRequestStatus.PROCESSING, {
+        amount: 5000,
+        gateway_payment_ref: 'dep-1',
+      });
+
+    const callbackSays = (settled: { amount?: number; currency?: string }) => {
+      (
+        service as any
+      ).paymentGateway.handleWebhookPayload.mockResolvedValueOnce({
+        gatewayRef: 'dep-1',
+        status: 'COMPLETED',
+        transactionId: 'tx-1',
+        ...settled,
+      });
+      (prisma.paymentRequest.findFirst as jest.Mock).mockResolvedValue(
+        processing(),
+      );
+    };
+
+    const mismatchLogged = () =>
+      ((service as any).logService.create as jest.Mock).mock.calls.some(
+        ([entry]) => entry.action === 'PAYMENT_AMOUNT_MISMATCH',
+      );
+
+    beforeEach(() => {
+      (prisma.$transaction as jest.Mock).mockClear();
+      ((service as any).logService.create as jest.Mock).mockClear();
+    });
+
+    it('does not approve a deposit settled for less than asked', async () => {
+      callbackSays({ amount: 100, currency: 'XAF' });
+
+      await service.handlePaymentCallback({ depositId: 'dep-1' });
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(mismatchLogged()).toBe(true);
+    });
+
+    it('does not approve a deposit settled in another currency', async () => {
+      callbackSays({ amount: 5000, currency: 'EUR' });
+
+      await service.handlePaymentCallback({ depositId: 'dep-1' });
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(mismatchLogged()).toBe(true);
+    });
+
+    it('applies the same check on the polling path', async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        processing(),
+      );
+
+      await service.processApprovedPaymentById(REQUEST_ID, 'tx-1', {
+        amount: 4999.4,
+        currency: 'XAF',
+      });
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(mismatchLogged()).toBe(true);
+    });
+
+    it('lets a matching settlement through to approval', async () => {
+      callbackSays({ amount: 5000.0, currency: 'XAF' });
+      (prisma.$transaction as jest.Mock).mockResolvedValue(undefined);
+
+      await service
+        .handlePaymentCallback({ depositId: 'dep-1' })
+        .catch(() => undefined);
+
+      expect(mismatchLogged()).toBe(false);
+    });
+
+    it('does not check gateways that report no amount', async () => {
+      callbackSays({});
+
+      await service
+        .handlePaymentCallback({ depositId: 'dep-1' })
+        .catch(() => undefined);
+
+      expect(mismatchLogged()).toBe(false);
     });
   });
 });

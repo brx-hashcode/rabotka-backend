@@ -143,4 +143,44 @@ describe('WhatsAppDocumentService', () => {
 
     await expect(service.send(input())).rejects.toThrow('r2 down');
   });
+
+  describe('sendPreferringWindow()', () => {
+    const asked = () => ({ ...input(), caption: 'Votre reçu' });
+
+    beforeEach(() => {
+      Object.assign(whatsApp, {
+        isServiceWindowOpen: jest.fn(),
+        sendDocumentMessage: jest.fn().mockResolvedValue(true),
+      });
+    });
+
+    it('sends a plain document while the 24h window is open, no template', async () => {
+      (whatsApp as any).isServiceWindowOpen.mockResolvedValue({ open: true });
+      // The switch only gates templates: a plain document needs no approval.
+      systemConfig.get.mockImplementation((key: string) =>
+        Promise.resolve(
+          key === DOCUMENT_DELIVERY_CONFIG_KEY ? '' : 'rabotka-private',
+        ),
+      );
+
+      await expect(service.sendPreferringWindow(asked())).resolves.toBe(true);
+
+      expect((whatsApp as any).sendDocumentMessage).toHaveBeenCalledWith(
+        '+242069917686',
+        SIGNED,
+        'accord_Okemba.pdf',
+        'Votre reçu',
+      );
+      expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the template when the window is closed', async () => {
+      (whatsApp as any).isServiceWindowOpen.mockResolvedValue({ open: false });
+
+      await service.sendPreferringWindow(asked());
+
+      expect(whatsApp.sendTemplateMessage).toHaveBeenCalled();
+      expect((whatsApp as any).sendDocumentMessage).not.toHaveBeenCalled();
+    });
+  });
 });

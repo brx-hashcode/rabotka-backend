@@ -26,7 +26,7 @@ Rabotka connects informal workers and employers through a WhatsApp assistant —
 | WhatsApp | Twilio |
 | Email | Nodemailer + MJML templates |
 | Storage | S3 / Cloudinary (factory pattern) |
-| Payments | Monetbil, MTN MoMo |
+| Payments | pawaPay, MTN MoMo |
 | API Docs | Scalar (@scalar/nestjs-api-reference) |
 | i18n | nestjs-i18n (en, fr, ru) |
 | Security | Arcjet (bot/rate-limit), csrf-csrf, @nestjs/throttler |
@@ -56,7 +56,7 @@ src/
 │       ├── queue/             # BullMQ queue service
 │       ├── storage/           # Multi-provider storage factory (S3, Cloudinary)
 │       ├── twilio/            # WhatsApp / SMS service
-│       ├── payment/           # Payment gateway factory (Monetbil, MTN MoMo)
+│       ├── payment/           # Payment gateway factory (pawaPay, MTN MoMo)
 │       ├── image-watermark/
 │       └── geocoding/
 │
@@ -104,7 +104,7 @@ prisma/
 | `mail` | Email sending via MJML templates + BullMQ job queue |
 | `matching` | Job-to-worker matching via Qdrant vector search |
 | `notification` | Notification service used by other modules |
-| `payment-request` | Payment gateway integration (Monetbil, MTN MoMo) with webhooks |
+| `payment-request` | Payment gateway integration (pawaPay, MTN MoMo) with signed webhooks |
 | `payments` | Payment processing and transaction tracking |
 | `penalty` | No-show/cancellation penalties with notifications and payment requests |
 | `profile` | Worker/employer profiles with KYC, ratings, categories, vector indexing |
@@ -130,7 +130,7 @@ Key models:
 | `Invoice` | Invoice for payment, penalty, or contact unlock |
 | `Payment` | Payment transaction |
 | `Wallet` / `WalletTransaction` | Ledger per profile or user |
-| `PaymentRequest` | Gateway request (Monetbil, MTN) |
+| `PaymentRequest` | Gateway request (pawaPay, MTN) |
 | `ContactUnlockAttempt` | Bilateral payment to reveal contact info |
 | `Penalty` | No-show / cancellation penalty |
 | `KycDocument` / `KycVerificationImage` | Identity verification |
