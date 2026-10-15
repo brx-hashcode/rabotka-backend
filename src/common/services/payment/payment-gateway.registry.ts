@@ -1,9 +1,9 @@
 import { ConfigService } from '@nestjs/config';
 import { IPaymentGateway } from './interfaces/payment-gateway.interface';
 import {
-  MONETBIL_METADATA,
-  MonetbilPaymentGateway,
-} from './providers/monetbil-payment.gateway';
+  PAWAPAY_METADATA,
+  PawapayPaymentGateway,
+} from './providers/pawapay-payment.gateway';
 import {
   MTN_MOMO_METADATA,
   MtnMomoPaymentGateway,
@@ -31,9 +31,9 @@ export const PAYMENT_GATEWAY_REGISTRY: Record<
   PaymentGatewayDriver,
   PaymentGatewayRegistration
 > = {
-  [PaymentGatewayDriver.MONETBIL]: {
-    metadata: MONETBIL_METADATA,
-    build: (config) => new MonetbilPaymentGateway(config),
+  [PaymentGatewayDriver.PAWAPAY]: {
+    metadata: PAWAPAY_METADATA,
+    build: (config) => new PawapayPaymentGateway(config),
   },
   [PaymentGatewayDriver.MTN_MOMO]: {
     metadata: MTN_MOMO_METADATA,

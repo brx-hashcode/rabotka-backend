@@ -1,6 +1,8 @@
 import {
+  BadGatewayException,
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Get,
   HttpCode,
@@ -39,6 +41,36 @@ import { ArchiveService } from '../admin-archive/archive.service';
 import { BulkDeleteDto } from '../../common/dto/bulk-delete.dto';
 import { LogService } from '../log/log.service';
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
+import { PaymentGatewayService } from '../../common/services/payment/payment-gateway.service';
+import type {
+  GatewayBalance,
+  GatewayCountry,
+} from '../../common/services/payment/types/payment-gateway.types';
+
+/** The country the gateway balance card opens on. */
+export const DEFAULT_BALANCE_COUNTRY = 'COG';
+
+/**
+ * The countries to offer, default first. When the gateway could not say
+ * which countries the account has, the default alone is offered rather than
+ * an empty toggle.
+ */
+export function balanceCountryChoices(countries: GatewayCountry[]): {
+  countries: GatewayCountry[];
+  default: string;
+} {
+  if (countries.length === 0) {
+    return {
+      countries: [{ code: DEFAULT_BALANCE_COUNTRY, name: 'Congo' }],
+      default: DEFAULT_BALANCE_COUNTRY,
+    };
+  }
+  const ordered = [
+    ...countries.filter((c) => c.code === DEFAULT_BALANCE_COUNTRY),
+    ...countries.filter((c) => c.code !== DEFAULT_BALANCE_COUNTRY),
+  ];
+  return { countries: ordered, default: ordered[0].code };
+}
 
 /**
  * Why this is a hand-rolled set rather than `@Roles` like every other
@@ -73,7 +105,97 @@ export class WalletController {
     private readonly prisma: PrismaService,
     private readonly logService: LogService,
     private readonly archiveService: ArchiveService,
+    // Appended: the specs build this controller by position.
+    private readonly paymentGateway?: PaymentGatewayService,
   ) {}
+
+  /** Same rule as every wallet route: ADMIN and above, or FINANCE. */
+  private async assertWalletAccess(
+    req: AdminAuthenticatedRequest,
+  ): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { role: true },
+    });
+    if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
+      throw new ForbiddenException(
+        'Only ADMIN, SUPER_ADMIN or FINANCE can access wallet data',
+      );
+    }
+  }
+
+  /** The active gateway, when it can report balances. */
+  private balanceGateway(): PaymentGatewayService {
+    if (!this.paymentGateway?.supportsBalances()) {
+      throw new ConflictException(
+        "Le moyen de paiement actif n'expose pas de solde.",
+      );
+    }
+    return this.paymentGateway;
+  }
+
+  @Get('gateway/balance-countries')
+  @ApiOperation({
+    summary: 'Countries the payment gateway account holds wallets in',
+    description:
+      'For the balance card toggle. COG is the default and comes first; when the gateway cannot be reached, COG alone is returned.',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Active gateway reports no balances',
+  })
+  async getGatewayBalanceCountries(
+    @Req() req: AdminAuthenticatedRequest,
+  ): Promise<{ countries: GatewayCountry[]; default: string }> {
+    await this.assertWalletAccess(req);
+    const gateway = this.balanceGateway();
+    const countries = await gateway
+      .listBalanceCountries()
+      .catch((): GatewayCountry[] => []);
+    return balanceCountryChoices(countries);
+  }
+
+  @Get('gateway/balances')
+  @ApiOperation({
+    summary: 'Payment gateway account balances for one country',
+    description:
+      'Reads the live balances from the gateway (pawaPay: v1 wallet balances). `country` is ISO 3166-1 alpha-3 and defaults to COG.',
+  })
+  @ApiResponse({ status: 400, description: 'Country not available' })
+  @ApiResponse({
+    status: 409,
+    description: 'Active gateway reports no balances',
+  })
+  @ApiResponse({ status: 502, description: 'Gateway unreachable' })
+  async getGatewayBalances(
+    @Req() req: AdminAuthenticatedRequest,
+    @Query('country') country?: string,
+  ): Promise<{ country: string; balances: GatewayBalance[] }> {
+    await this.assertWalletAccess(req);
+    const gateway = this.balanceGateway();
+
+    const code = (country ?? DEFAULT_BALANCE_COUNTRY).trim().toUpperCase();
+    if (!/^[A-Z]{3}$/.test(code)) {
+      throw new BadRequestException('Code pays invalide (ISO 3166-1 alpha-3).');
+    }
+    const available = await gateway
+      .listBalanceCountries()
+      .catch((): GatewayCountry[] => []);
+    // When the list is unknown, the gateway itself will refuse a bad country.
+    if (available.length > 0 && !available.some((c) => c.code === code)) {
+      throw new BadRequestException(
+        "Ce pays n'est pas disponible sur le compte de paiement.",
+      );
+    }
+
+    try {
+      return { country: code, balances: await gateway.getBalances(code) };
+    } catch {
+      throw new BadGatewayException(
+        'Solde indisponible : le moyen de paiement ne répond pas.',
+      );
+    }
+  }
 
   @Get('revenue')
   @ApiOperation({

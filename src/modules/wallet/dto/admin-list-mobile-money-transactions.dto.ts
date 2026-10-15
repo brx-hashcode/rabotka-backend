@@ -42,7 +42,7 @@ export class AdminListMobileMoneyTransactionsDto {
   @ApiPropertyOptional({
     description:
       'Filter by gateway. Not constrained to the registry: historical rows can carry a gateway this build no longer ships.',
-    example: 'MONETBIL',
+    example: 'PAWAPAY',
   })
   @IsOptional()
   @IsString()

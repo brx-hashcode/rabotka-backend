@@ -41,7 +41,7 @@ describe('payment gateway registry', () => {
   });
 
   it('resolves loosely typed driver values', () => {
-    expect(resolvePaymentGatewayDriver('monetbil')).toBe('MONETBIL');
+    expect(resolvePaymentGatewayDriver('pawapay')).toBe('PAWAPAY');
     expect(resolvePaymentGatewayDriver(' MTN_MOMO ')).toBe('MTN_MOMO');
     expect(resolvePaymentGatewayDriver('stripe')).toBeNull();
     expect(resolvePaymentGatewayDriver(undefined)).toBeNull();
@@ -49,7 +49,9 @@ describe('payment gateway registry', () => {
   });
 
   it('looks metadata up by driver, and returns null for a retired one', () => {
-    expect(findPaymentGatewayMetadata('MONETBIL')?.label).toBe('Monetbil');
+    expect(findPaymentGatewayMetadata('PAWAPAY')?.label).toBe('pawaPay');
+    // Monetbil was removed: its historical rows have no metadata any more.
+    expect(findPaymentGatewayMetadata('MONETBIL')).toBeNull();
     // A row written by a build that shipped a gateway this one does not.
     expect(findPaymentGatewayMetadata('ORANGE_MONEY')).toBeNull();
   });

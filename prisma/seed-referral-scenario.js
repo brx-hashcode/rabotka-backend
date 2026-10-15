@@ -200,8 +200,8 @@ async function wipe(prisma) {
         contact_unlock_attempt_id: attempt.id,
         amount: EMPLOYER_FEE,
         description: `Déverrouillage contact — ${job.reference}`,
-        gateway: 'MONETBIL',
-        operator: 'CG_MTNMOBILEMONEY',
+        gateway: 'PAWAPAY',
+        operator: 'MTN_MOMO_COG',
       },
     });
     await prisma.paymentRequest.create({
@@ -213,8 +213,8 @@ async function wipe(prisma) {
         contact_unlock_attempt_id: attempt.id,
         amount: WORKER_FEE,
         description: `Déverrouillage contact — ${job.reference}`,
-        gateway: 'MONETBIL',
-        operator: 'CG_MTNMOBILEMONEY',
+        gateway: 'PAWAPAY',
+        operator: 'MTN_MOMO_COG',
       },
     });
     await prisma.contactUnlockAttempt.update({

@@ -72,7 +72,6 @@ const PAYMENT_REQUEST_SELECT = {
   operator: true,
   gateway: true,
   gateway_payment_ref: true,
-  monetbil_payment_ref: true,
   request_type: true,
   recommendation_worker_id: true,
   contact_unlock_attempt_id: true,
@@ -223,11 +222,12 @@ export class PaymentRequestService {
    * them being redeployed with a new constant.
    */
   listGateways(): {
-    active: string;
+    /** Null when payments are disabled (no usable gateway configured). */
+    active: string | null;
     gateways: PaymentGatewayMetadata[];
   } {
     return {
-      active: this.paymentGateway.getActiveMetadata().key,
+      active: this.paymentGateway.getActiveMetadataOrNull()?.key ?? null,
       gateways: this.paymentGateway.listAvailable(),
     };
   }
@@ -235,7 +235,7 @@ export class PaymentRequestService {
   /**
    * The DTO can only confirm the operator is a code *some* gateway knows;
    * whether it fits the one this deployment runs on is a runtime question.
-   * Sending Monetbil's `CG_AIRTELMONEY` to MTN MoMo would otherwise be accepted
+   * Sending pawaPay's `AIRTEL_COG` to MTN MoMo would otherwise be accepted
    * here and rejected by the gateway, after the request had already been
    * claimed PROCESSING.
    */
@@ -264,7 +264,15 @@ export class PaymentRequestService {
     const request = await this.prisma.paymentRequest.findUnique({
       where: { token },
       include: {
-        profile: { select: { first_name: true, last_name: true, email: true } },
+        profile: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            profile_type: true,
+          },
+        },
       },
     });
 
@@ -294,7 +302,6 @@ export class PaymentRequestService {
     const profileName = request.profile
       ? `${request.profile.first_name} ${request.profile.last_name}`.trim()
       : 'Utilisateur';
-    const profileEmail = request.profile?.email ?? '';
 
     let gatewayRef: string;
     try {
@@ -303,8 +310,19 @@ export class PaymentRequestService {
         currency: 'XAF',
         externalId: request.id,
         phone,
+        operator,
         description: request.description ?? undefined,
-        metadata: { operator, userName: profileName, email: profileEmail },
+        requestType: request.request_type,
+        // Who pays, for the gateway's records (pawaPay keeps it as metadata,
+        // flagging what identifies the person).
+        payer: request.profile
+          ? {
+              profileId: request.profile.id,
+              name: profileName,
+              email: request.profile.email,
+              profileType: request.profile.profile_type,
+            }
+          : undefined,
       });
       gatewayRef = result.gatewayRef;
     } catch (err) {
@@ -396,7 +414,7 @@ export class PaymentRequestService {
   async handlePaymentCallback(
     payload: Record<string, string>,
   ): Promise<{ received: boolean }> {
-    const { gatewayRef, status, transactionId } =
+    const { gatewayRef, status, transactionId, amount, currency } =
       await this.paymentGateway.handleWebhookPayload(payload);
 
     if (typeof gatewayRef !== 'string' || !gatewayRef) {
@@ -404,21 +422,9 @@ export class PaymentRequestService {
       return { received: true };
     }
 
-    // Nothing writes `monetbil_payment_ref` any more, but a callback can still
-    // arrive for a request created by the previous deploy. The fallback goes
-    // when the column does.
     const request = await this.prisma.paymentRequest.findFirst({
-      where: {
-        OR: [
-          { gateway_payment_ref: gatewayRef },
-          { monetbil_payment_ref: gatewayRef },
-        ],
-      },
-      select: {
-        ...PAYMENT_REQUEST_SELECT,
-        gateway_payment_ref: true,
-        monetbil_payment_ref: true,
-      },
+      where: { gateway_payment_ref: gatewayRef },
+      select: { ...PAYMENT_REQUEST_SELECT, gateway_payment_ref: true },
     });
 
     if (!request) {
@@ -435,6 +441,9 @@ export class PaymentRequestService {
 
     // status and transactionId already re-verified by the gateway's handleWebhookPayload
     if (status === 'COMPLETED') {
+      if (await this.settlementMismatch(request, { amount, currency })) {
+        return { received: true };
+      }
       await this.processSuccessfulPayment(request, transactionId);
       this.paymentStatusGateway.emitPaymentStatus(request.token, 'APPROVED');
     } else if (status === 'FAILED' || status === 'CANCELLED') {
@@ -483,14 +492,11 @@ export class PaymentRequestService {
   async processApprovedPaymentById(
     requestId: string,
     transactionId?: string,
+    settled?: { amount?: number; currency?: string },
   ): Promise<void> {
     const request = await this.prisma.paymentRequest.findUnique({
       where: { id: requestId },
-      select: {
-        ...PAYMENT_REQUEST_SELECT,
-        gateway_payment_ref: true,
-        monetbil_payment_ref: true,
-      },
+      select: { ...PAYMENT_REQUEST_SELECT, gateway_payment_ref: true },
     });
     if (
       !request ||
@@ -499,7 +505,49 @@ export class PaymentRequestService {
     ) {
       return;
     }
+    if (settled && (await this.settlementMismatch(request, settled))) return;
     await this.processSuccessfulPayment(request, transactionId);
+  }
+
+  /**
+   * Whether the gateway settled something other than what was asked. A
+   * gateway that does not report the amount (MTN MoMo) is not checked.
+   *
+   * A mismatch is not approved and not rejected: the money did move, so the
+   * request stays PROCESSING for someone to look at, and the audit log says
+   * why.
+   */
+  private async settlementMismatch(
+    request: {
+      id: string;
+      amount: unknown;
+      gateway_payment_ref?: string | null;
+    },
+    settled: { amount?: number; currency?: string },
+  ): Promise<boolean> {
+    const expected = Math.round(Number(request.amount));
+    const amountOff =
+      settled.amount !== undefined && Math.round(settled.amount) !== expected;
+    const currencyOff =
+      settled.currency !== undefined && settled.currency !== 'XAF';
+    if (!amountOff && !currencyOff) return false;
+
+    this.logger.warn(
+      `Payment ${request.id} settled ${settled.amount ?? '?'} ${settled.currency ?? '?'} instead of ${expected} XAF — not approved`,
+    );
+    await this.logService
+      .create({
+        action: 'PAYMENT_AMOUNT_MISMATCH',
+        entityType: 'payment_request',
+        entityId: request.id,
+        metadata: {
+          expected: { amount: expected, currency: 'XAF' },
+          settled,
+          gatewayRef: request.gateway_payment_ref ?? null,
+        },
+      })
+      .catch(() => undefined);
+    return true;
   }
 
   private async processSuccessfulPayment(

@@ -104,11 +104,27 @@ describe('PollPaymentStatusProcessor', () => {
     await processor.process({ data: baseJobData });
     expect(
       mockPaymentRequestService.processApprovedPaymentById,
-    ).toHaveBeenCalledWith('req-1', 'tx-1');
+    ).toHaveBeenCalledWith('req-1', 'tx-1', {
+      amount: undefined,
+      currency: undefined,
+    });
     expect(mockPaymentStatusGateway.emitPaymentStatus).toHaveBeenCalledWith(
       'tok-1',
       'APPROVED',
     );
+  });
+
+  it('passes what the gateway says was settled, for the amount check', async () => {
+    mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({
+      status: 'COMPLETED',
+      transactionId: 'tx-1',
+      amount: 1500,
+      currency: 'XAF',
+    });
+    await processor.process({ data: baseJobData });
+    expect(
+      mockPaymentRequestService.processApprovedPaymentById,
+    ).toHaveBeenCalledWith('req-1', 'tx-1', { amount: 1500, currency: 'XAF' });
   });
 
   it('processes FAILED payment', async () => {
