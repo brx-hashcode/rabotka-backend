@@ -1,3 +1,4 @@
+import { toAlpha3 } from '../../common/services/payment/payment-countries';
 import {
   Injectable,
   NotFoundException,
@@ -84,6 +85,7 @@ const PAYMENT_REQUEST_SELECT = {
       phone: true,
       status: true,
       profile_type: true,
+      country_code: true,
     },
   },
 } as const;
@@ -211,6 +213,9 @@ export class PaymentRequestService {
       profileName: this.fullName(request.profile),
       amount: request.amount === null ? null : Number(request.amount),
       description: request.description ?? null,
+      // The payer's country (ISO3), so the page offers that country's
+      // networks only. Null when the profile has no country we can map.
+      payerCountry: toAlpha3(request.profile?.country_code),
     };
   }
 
@@ -239,7 +244,10 @@ export class PaymentRequestService {
    * here and rejected by the gateway, after the request had already been
    * claimed PROCESSING.
    */
-  private assertOperatorMatchesGateway(operator: string | undefined): void {
+  private assertOperatorMatchesGateway(
+    operator: string | undefined,
+    payerCountry?: string | null,
+  ): void {
     const gateway = this.paymentGateway.getActiveMetadata();
 
     if (!gateway.requiresOperator) return;
@@ -248,6 +256,18 @@ export class PaymentRequestService {
     if (!operator || !accepted.includes(operator)) {
       throw new BadRequestException(
         `Opérateur invalide pour ${gateway.label}. Valeurs acceptées : ${accepted.join(', ')}`,
+      );
+    }
+
+    // A network of another country would charge the wrong number, or be
+    // refused by the gateway after the request was claimed. Only checked when
+    // both sides know their country.
+    const operatorCountry = gateway.operators.find(
+      (o) => o.code === operator,
+    )?.country;
+    if (operatorCountry && payerCountry && operatorCountry !== payerCountry) {
+      throw new BadRequestException(
+        "Cet opérateur n'est pas disponible dans votre pays.",
       );
     }
   }
@@ -271,6 +291,7 @@ export class PaymentRequestService {
             last_name: true,
             email: true,
             profile_type: true,
+            country_code: true,
           },
         },
       },
@@ -284,7 +305,10 @@ export class PaymentRequestService {
       throw new BadRequestException('Montant non défini pour cette demande');
     }
 
-    this.assertOperatorMatchesGateway(operator);
+    this.assertOperatorMatchesGateway(
+      operator,
+      toAlpha3(request.profile?.country_code),
+    );
 
     // Atomically claim PENDING → PROCESSING before calling the gateway.
     // Concurrent double-taps both attempt this; only one succeeds (count === 1).
@@ -589,8 +613,8 @@ export class PaymentRequestService {
     // Compute unlock result first (needed for the confirmation message text).
     const unlockResult = await this.handleContactUnlockPostPayment(request);
 
-    // 1. "Paiement confirmé"
-    await this.sendPaymentSuccessNotifications(request, context, unlockResult);
+    // 1. Confirmation by email (the app already showed it on screen).
+    await this.sendPaymentSuccessNotifications(request, context);
 
     // 2. Contact details (regular unlock) — this is what the user is waiting
     // for after paying, so send it before the invoice, not after.
@@ -898,50 +922,13 @@ export class PaymentRequestService {
   private async sendPaymentSuccessNotifications(
     request: PaymentRequestWithProfile,
     context: PaymentProcessingContext,
-    unlockResult?: { nowUnlocked: boolean },
   ): Promise<void> {
     const profileName = this.fullName(request.profile);
 
-    if (request.profile.phone) {
-      const lines = [
-        `*Paiement confirmé*`,
-        '',
-        `Montant : *${context.amount.toLocaleString('fr-FR')} FCFA*`,
-        `Objet : ${context.paymentDescription}`,
-        '',
-        `Merci pour votre paiement !`,
-      ];
-
-      if (context.isRecommendationContact) {
-        lines.push(
-          '',
-          '*Les coordonnées du travailleur vous seront envoyées dans le message suivant.*',
-        );
-      } else if (context.isContactUnlock) {
-        if (unlockResult?.nowUnlocked) {
-          lines.push(
-            '',
-            '*Les deux parties ont payé — les coordonnées vous seront envoyées dans le message suivant.*',
-          );
-        } else {
-          lines.push(
-            '',
-            "*En attente du paiement de l'autre partie. Les coordonnées seront révélées dès que les deux parties auront payé.*",
-          );
-        }
-      }
-
-      const text = lines.join('\n');
-      await this.whatsAppService
-        .sendTextMessage(request.profile.phone, text)
-        .catch((err) =>
-          this.logger.warn(
-            `WhatsApp notification failed for ${request.profile.phone}:`,
-            err,
-          ),
-        );
-    }
-
+    // No WhatsApp "Paiement confirmé" here: every payment is confirmed on
+    // screen (the payment page or the in-app result), and the message only
+    // repeated it. What the payer actually needs on WhatsApp follows on its
+    // own — the unlocked contact, and the receipt when they ask for it.
     if (request.profile.email) {
       await this.mailService
         .sendMail({

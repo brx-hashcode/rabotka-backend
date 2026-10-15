@@ -8,6 +8,7 @@ import {
   Req,
   HttpCode,
   UnauthorizedException,
+  Optional,
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
@@ -17,6 +18,7 @@ import { PaymentRequestService } from './payment-request.service';
 import { InitiatePaymentDto } from './dto/initiate-payment.dto';
 import { LogService } from '../log/log.service';
 import { PawapaySignatureVerifier } from '../../common/services/payment/providers/pawapay-signature';
+import { MobileMoneyPayoutService } from '../wallet/mobile-money-payout.service';
 
 @ApiTags('Payment')
 @Controller()
@@ -25,6 +27,8 @@ export class PaymentRequestPublicController {
     private readonly service: PaymentRequestService,
     private readonly logService: LogService,
     private readonly pawapaySignature: PawapaySignatureVerifier,
+    // Appended and @Optional(): specs build this controller with fewer providers.
+    @Optional() private readonly payouts?: MobileMoneyPayoutService,
   ) {}
 
   /**
@@ -106,8 +110,8 @@ export class PaymentRequestPublicController {
   }
 
   /**
-   * Payout callbacks. Nothing initiates payouts yet, so a verified callback is
-   * only recorded; it is still verified, so the log holds no forged entries.
+   * Payout callbacks (admin payouts from Finance › Mobile Money). Verified
+   * like deposits; the payout's status is then read back from the API.
    */
   @Public()
   @Post('webhooks/payment/pawapay/payouts')
@@ -119,6 +123,7 @@ export class PaymentRequestPublicController {
     @Body() payload: Record<string, unknown>,
   ) {
     await this.verifyPawapay(req, payload, 'payout');
+    await this.payouts?.handleCallback(payload);
     await this.logService.create({
       action: 'PAYOUT_WEBHOOK_RECEIVED',
       entityType: 'Payout',

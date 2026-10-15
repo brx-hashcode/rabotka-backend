@@ -3,8 +3,13 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  BadGatewayException,
+  ServiceUnavailableException,
   Inject,
+  Logger,
+  Optional,
 } from '@nestjs/common';
+import { WhatsAppDocumentService } from '../whatsapp/documents/whatsapp-document.service';
 import Redis from 'ioredis';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { DocumentService } from '../document/document.service';
@@ -45,11 +50,94 @@ export type InvoiceItem = {
 
 @Injectable()
 export class InvoiceService {
+  private readonly logger = new Logger(InvoiceService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly documentService: DocumentService,
     @Inject(REDIS_CONNECTION) private readonly redis: Redis,
+    // Appended and @Optional(): specs build this service by position.
+    @Optional() private readonly whatsAppDocuments?: WhatsAppDocumentService,
   ) {}
+
+  /**
+   * Sends the invoice PDF to the owner's own WhatsApp, on request (the
+   * "Envoyer le reçu" button after a payment). Never sent unasked: the payer
+   * has just seen the confirmation in the app.
+   *
+   * Only to the number on the profile — never to a number from the request —
+   * so the route cannot be used to deliver someone's invoice elsewhere.
+   */
+  async sendToWhatsApp(
+    invoiceId: string,
+    requestingProfileId: string,
+  ): Promise<{ sent: true }> {
+    // Ownership is checked here (403 for someone else's invoice), and the PDF
+    // comes from the same cache the download uses.
+    const { buffer, filename } = await this.download(
+      invoiceId,
+      requestingProfileId,
+    );
+
+    const invoice = await this.prisma.invoice.findUnique({
+      where: { id: invoiceId },
+      select: {
+        amount: true,
+        reason: true,
+        profile: { select: { phone: true } },
+        payment_request: { select: { description: true } },
+      },
+    });
+    const phone = invoice?.profile.phone;
+    if (!invoice || !phone) {
+      throw new BadRequestException('Aucun numéro WhatsApp sur votre profil.');
+    }
+
+    const purpose =
+      invoice.payment_request?.description ??
+      {
+        CONTACT_UNLOCK: 'Déverrouillage de contact',
+        PENALTY: 'Régularisation',
+        WALLET_TOP_UP: 'Recharge de portefeuille',
+        OTHER: 'Paiement Rabotka',
+      }[invoice.reason];
+
+    let sent: boolean;
+    try {
+      sent =
+        (await this.whatsAppDocuments?.sendPreferringWindow({
+          phone,
+          profileId: requestingProfileId,
+          template: 'paymentReceiptDocument',
+          params: {
+            amount: Number(invoice.amount).toLocaleString('fr-FR'),
+            purpose,
+          },
+          pdf: buffer,
+          filename,
+          // One object per invoice: a resend overwrites it.
+          storageKey: `invoices/${invoiceId}.pdf`,
+          // Used when the 24h window is open (plain document, no template).
+          caption: `Votre reçu pour le paiement de ${Number(invoice.amount).toLocaleString('fr-FR')} FCFA — ${purpose}.`,
+        })) ?? false;
+    } catch (err) {
+      this.logger.warn(
+        `Invoice ${invoiceId} WhatsApp send failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      throw new BadGatewayException(
+        "L'envoi du reçu sur WhatsApp a échoué. Réessayez dans un instant.",
+      );
+    }
+
+    if (!sent) {
+      // Window closed and the receipt template unavailable (document delivery
+      // switched off, or a provider that cannot attach documents).
+      throw new ServiceUnavailableException(
+        "L'envoi du reçu sur WhatsApp n'est pas encore disponible.",
+      );
+    }
+    return { sent: true };
+  }
 
   private invoiceRef(id: string, createdAt: Date): string {
     const year = createdAt.getFullYear();

@@ -44,13 +44,20 @@ export class PawapaySignatureVerifier {
     const signatureInput = header('signature-input');
     const signature = header('signature');
     const contentDigest = header('content-digest');
-    if (
-      !signatureInput ||
-      !signature ||
-      !contentDigest ||
-      !header('signature-date')
-    ) {
-      throw this.refuse('missing signature headers');
+    const missing = [
+      'signature',
+      'signature-input',
+      'signature-date',
+      'content-digest',
+    ].filter((name) => !header(name));
+    if (missing.length > 0) {
+      // All four missing almost always means signing is off for the account:
+      // "Sign all callbacks" in the pawaPay dashboard (Developers > API Security).
+      throw this.refuse(
+        missing.length === 4
+          ? 'unsigned callback — enable "Sign all callbacks" in the pawaPay dashboard'
+          : `missing signature headers: ${missing.join(', ')}`,
+      );
     }
     if (!callback.rawBody) {
       throw this.refuse('raw body unavailable');

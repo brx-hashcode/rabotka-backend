@@ -26,8 +26,10 @@ export const PAWAPAY_METADATA: PaymentGatewayMetadata = {
   label: 'pawaPay',
   requiresOperator: true,
   operators: [
-    { code: 'MTN_MOMO_COG', label: 'MTN Mobile Money' },
-    { code: 'AIRTEL_COG', label: 'Airtel Money' },
+    { code: 'MTN_MOMO_COG', label: 'MTN Mobile Money', country: 'COG' },
+    { code: 'AIRTEL_COG', label: 'Airtel Money', country: 'COG' },
+    { code: 'MTN_MOMO_CMR', label: 'MTN Mobile Money', country: 'CMR' },
+    { code: 'ORANGE_CMR', label: 'Orange Money', country: 'CMR' },
   ],
 };
 

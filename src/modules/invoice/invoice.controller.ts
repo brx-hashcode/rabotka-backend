@@ -1,4 +1,14 @@
-import { Controller, Get, Param, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import {
   ApiTags,
@@ -47,6 +57,25 @@ export class InvoiceController {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(buffer);
+  }
+
+  @Post(':invoiceId/send-whatsapp')
+  @HttpCode(200)
+  // Each send is a billable WhatsApp message: a few retries, not a loop.
+  @Throttle({ default: { limit: 5, ttl: 10 * 60_000 } })
+  @ApiOperation({
+    summary: "Send an invoice PDF to the owner's WhatsApp (owner only)",
+    description:
+      "Sent to the profile's own number only. 503 when WhatsApp document delivery is off or unsupported by the provider.",
+  })
+  @ApiResponse({ status: 200, description: 'Sent' })
+  @ApiResponse({ status: 403, description: 'Not authorized' })
+  @ApiResponse({ status: 503, description: 'Document delivery unavailable' })
+  async sendWhatsApp(
+    @Param('invoiceId') invoiceId: string,
+    @Req() req: ProfileAuthenticatedRequest,
+  ) {
+    return this.invoiceService.sendToWhatsApp(invoiceId, req.user.profileId);
   }
 }
 

@@ -1198,6 +1198,49 @@ export const WHATSAPP_TEMPLATES = {
   >,
 
   /**
+   * A payment receipt (invoice PDF), sent when the payer asks for it from the
+   * payment confirmation screen — never on its own, since the payer has just
+   * seen the confirmation in the app.
+   *
+   * UTILITY, and submitted as UTILITY: requested by the user, about a payment
+   * they made. See the note on `kycAgreementDocument` for why the category is
+   * not a formality.
+   */
+  paymentReceiptDocument: {
+    cloudOnly: true,
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_PAYMENT_RECEIPT_DOC',
+        'rabotka_payment_receipt_document_v1',
+      ),
+    },
+    documentHeaderVar: DOCUMENT_URL_VAR,
+    // Amount and purpose: what tells someone WHICH payment this receipt is
+    // for, once they have several.
+    variables: (p: {
+      amount: string;
+      purpose: string;
+      documentUrl: string;
+      documentFilename: string;
+    }) => ({
+      '1': p.amount,
+      '2': p.purpose,
+      [DOCUMENT_URL_VAR]: p.documentUrl,
+      [DOCUMENT_FILENAME_VAR]: p.documentFilename,
+    }),
+  } satisfies WhatsAppTemplate<
+    [
+      params: {
+        amount: string;
+        purpose: string;
+        documentUrl: string;
+        documentFilename: string;
+      },
+    ]
+  >,
+
+  /**
    * One-sided reveal: an employer paid to reach a worker from the recommendation
    * feed. This path used to send FREE-FORM text with `.catch(() => undefined)`,
    * so an employer who paid on the web outside the 24h window silently received

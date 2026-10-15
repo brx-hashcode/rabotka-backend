@@ -15,6 +15,11 @@ export type PaymentOperatorMetadata = {
   code: string;
   /** Human label for the admin and the payment page. */
   label: string;
+  /**
+   * ISO 3166-1 alpha-3 country the network serves, for gateways that cover
+   * several. The payment page offers a payer only their own country's.
+   */
+  country?: string;
 };
 
 /**

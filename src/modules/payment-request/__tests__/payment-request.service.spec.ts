@@ -266,6 +266,23 @@ describe('PaymentRequestService', () => {
       expect(result.profileName).toBe('Alice Dupont');
     });
 
+    it.each([
+      ['CG', 'COG'],
+      ['CM', 'CMR'],
+      ['FR', null],
+      [null, null],
+    ])(
+      "gives the payer's country %s as %s, for the operators to offer",
+      async (alpha2, alpha3) => {
+        (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+          makeRequest(PaymentRequestStatus.PENDING, {
+            profile: { ...mockProfile, country_code: alpha2 },
+          }),
+        );
+        expect((await service.getByToken(TOKEN)).payerCountry).toBe(alpha3);
+      },
+    );
+
     it('throws NotFoundException when token not found', async () => {
       (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(null);
 
@@ -421,6 +438,33 @@ describe('PaymentRequestService', () => {
       ).rejects.toThrow(/Opérateur invalide pour pawaPay/);
       // Rejected before the request is claimed, so the payer can retry.
       expect(prisma.paymentRequest.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("rejects a network of another country than the payer's", async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING, {
+          amount: 5000,
+          profile: { ...mockProfile, country_code: 'CG' },
+        }),
+      );
+      await expect(
+        service.initiatePayment(TOKEN, '+237677123456', 'MTN_MOMO_CMR'),
+      ).rejects.toThrow("Cet opérateur n'est pas disponible dans votre pays.");
+      expect(prisma.paymentRequest.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("accepts a network of the payer's own country", async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING, {
+          amount: 5000,
+          profile: { ...mockProfile, country_code: 'CM' },
+        }),
+      );
+      await service
+        .initiatePayment(TOKEN, '+237677123456', 'ORANGE_CMR')
+        .catch(() => undefined);
+      // Got past the operator check: the request was claimed.
+      expect(prisma.paymentRequest.updateMany).toHaveBeenCalled();
     });
 
     it('rejects a missing operator when the gateway routes by network', async () => {
@@ -976,7 +1020,7 @@ describe('PaymentRequestService', () => {
       return req;
     }
 
-    it('sends notification for RECOMMENDATION_CONTACT (isRecommendationContact=true)', async () => {
+    it('sends no WhatsApp confirmation for RECOMMENDATION_CONTACT, only the email', async () => {
       setupProcessApproval({
         request_type: PaymentRequestType.RECOMMENDATION_CONTACT,
         recommendation_worker_id: 'w-1',
@@ -997,10 +1041,18 @@ describe('PaymentRequestService', () => {
         contactUnlock.getContactsIfUnlocked = jest.fn().mockResolvedValue(null);
       }
       await service.processApprovedPaymentById(REQUEST_ID);
-      expect(whatsApp.sendTextMessage).toHaveBeenCalled();
+      // Confirmed on screen already: WhatsApp must not repeat it.
+      expect(
+        (whatsApp.sendTextMessage as jest.Mock).mock.calls.some(([, text]) =>
+          String(text).includes('Paiement confirmé'),
+        ),
+      ).toBe(false);
+      expect((service as any).mailService.sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({ to: 'alice@test.com' }),
+      );
     });
 
-    it('sends notification for CONTACT_UNLOCK nowUnlocked=false', async () => {
+    it('sends no WhatsApp confirmation for CONTACT_UNLOCK nowUnlocked=false, only the email', async () => {
       setupProcessApproval({
         request_type: PaymentRequestType.CONTACT_UNLOCK,
         contact_unlock_attempt_id: 'att-1',
@@ -1022,10 +1074,18 @@ describe('PaymentRequestService', () => {
         contactUnlock.getContactsIfUnlocked = jest.fn().mockResolvedValue(null);
       }
       await service.processApprovedPaymentById(REQUEST_ID);
-      expect(whatsApp.sendTextMessage).toHaveBeenCalled();
+      // Confirmed on screen already: WhatsApp must not repeat it.
+      expect(
+        (whatsApp.sendTextMessage as jest.Mock).mock.calls.some(([, text]) =>
+          String(text).includes('Paiement confirmé'),
+        ),
+      ).toBe(false);
+      expect((service as any).mailService.sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({ to: 'alice@test.com' }),
+      );
     });
 
-    it('sends notification for CONTACT_UNLOCK nowUnlocked=true', async () => {
+    it('sends no WhatsApp confirmation for CONTACT_UNLOCK nowUnlocked=true, only the email', async () => {
       setupProcessApproval({
         request_type: PaymentRequestType.CONTACT_UNLOCK,
         contact_unlock_attempt_id: 'att-1',
@@ -1055,7 +1115,15 @@ describe('PaymentRequestService', () => {
           .mockResolvedValue(undefined);
       }
       await service.processApprovedPaymentById(REQUEST_ID);
-      expect(whatsApp.sendTextMessage).toHaveBeenCalled();
+      // Confirmed on screen already: WhatsApp must not repeat it.
+      expect(
+        (whatsApp.sendTextMessage as jest.Mock).mock.calls.some(([, text]) =>
+          String(text).includes('Paiement confirmé'),
+        ),
+      ).toBe(false);
+      expect((service as any).mailService.sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({ to: 'alice@test.com' }),
+      );
     });
 
     it('handles null email (skips email notification)', async () => {

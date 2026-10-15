@@ -43,6 +43,7 @@ export const AUTHORED_KEYS: ReadonlySet<WhatsAppTemplateName> = new Set([
   // for that at all, so these have no Content fixture to capture.
   'kycAgreementDocument',
   'missionContractDocument',
+  'paymentReceiptDocument',
   // The broadcast template. Authored straight for Meta: it is new, the account
   // is on Cloud, and getting one template approved twice to satisfy a binding
   // nobody sends on is pure cost.
@@ -879,6 +880,33 @@ export function authoredTemplates(): Partial<
             'Il reprend les informations convenues entre les deux parties. Conservez-le pour vos dossiers.',
           ].join('\n'),
           example: { body_text: [['Peinture appartement 2 pièces']] },
+        },
+      ],
+    },
+
+    /**
+     * A payment receipt, sent only when the payer asks for it from the
+     * payment confirmation screen. Same DOCUMENT-header requirement as
+     * `kycAgreementDocument` above.
+     */
+    paymentReceiptDocument: {
+      name: 'rabotka_payment_receipt_document_v1',
+      language: 'fr',
+      category: 'UTILITY',
+      components: [
+        {
+          type: 'HEADER',
+          format: 'DOCUMENT',
+          example: { header_handle: ['MISSING_MEDIA_HANDLE'] },
+        },
+        {
+          type: 'BODY',
+          text: [
+            'Votre reçu pour le paiement de *{{1}} FCFA* — {{2}}.',
+            '',
+            'Conservez-le pour vos dossiers.',
+          ].join('\n'),
+          example: { body_text: [['5 000', 'Contact recommandé']] },
         },
       ],
     },

@@ -9,6 +9,7 @@ import {
   HttpStatus,
   Post,
   Query,
+  Param,
   ForbiddenException,
   UseGuards,
   Req,
@@ -42,6 +43,12 @@ import { BulkDeleteDto } from '../../common/dto/bulk-delete.dto';
 import { LogService } from '../log/log.service';
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
 import { PaymentGatewayService } from '../../common/services/payment/payment-gateway.service';
+import { MobileMoneyPayoutService } from './mobile-money-payout.service';
+import {
+  AdminListPayoutsDto,
+  AdminSendPayoutDto,
+} from './dto/admin-send-payout.dto';
+import { Throttle } from '@nestjs/throttler';
 import type {
   GatewayBalance,
   GatewayCountry,
@@ -107,7 +114,85 @@ export class WalletController {
     private readonly archiveService: ArchiveService,
     // Appended: the specs build this controller by position.
     private readonly paymentGateway?: PaymentGatewayService,
+    private readonly payouts?: MobileMoneyPayoutService,
   ) {}
+
+  /** Payouts move real money: SUPER_ADMIN and FINANCE only. */
+  private async assertPayoutAccess(
+    req: AdminAuthenticatedRequest,
+  ): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { role: true },
+    });
+    if (
+      !user ||
+      (user.role !== UserRole.SUPER_ADMIN && user.role !== UserRole.FINANCE)
+    ) {
+      throw new ForbiddenException(
+        'Only SUPER_ADMIN or FINANCE can send payouts',
+      );
+    }
+  }
+
+  private payoutService(): MobileMoneyPayoutService {
+    if (!this.payouts) {
+      throw new ConflictException('Payouts are not available.');
+    }
+    return this.payouts;
+  }
+
+  @Get('mobile-money/payouts')
+  @ApiOperation({ summary: 'Payouts sent from the gateway account' })
+  async listPayouts(
+    @Req() req: AdminAuthenticatedRequest,
+    @Query() dto: AdminListPayoutsDto,
+  ) {
+    await this.assertWalletAccess(req);
+    return this.payoutService().list({
+      page: dto.page ?? 1,
+      limit: dto.limit ?? 20,
+      status: dto.status,
+    });
+  }
+
+  @Post('mobile-money/payouts')
+  @HttpCode(HttpStatus.CREATED)
+  // Each call can move money: a handful per window, never a loop.
+  @Throttle({ default: { limit: 10, ttl: 10 * 60_000 } })
+  @ApiOperation({
+    summary: 'Send money from the gateway account to a mobile-money number',
+    description:
+      'SUPER_ADMIN or FINANCE. The amount is typed twice and must be covered by both the ledger and the live gateway balance. The same clientRequestId never sends twice. The ledger is debited when the gateway confirms the payout.',
+  })
+  async sendPayout(
+    @Req() req: AdminAuthenticatedRequest,
+    @Body() dto: AdminSendPayoutDto,
+  ) {
+    await this.assertPayoutAccess(req);
+    return this.payoutService().send({
+      clientRequestId: dto.clientRequestId,
+      amount: dto.amount,
+      confirmAmount: dto.confirmAmount,
+      phone: dto.phone,
+      operator: dto.operator,
+      note: dto.note,
+      adminId: req.user.userId,
+    });
+  }
+
+  @Post('mobile-money/payouts/:id/refresh')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Re-read a pending payout's status from the gateway",
+  })
+  async refreshPayout(
+    @Req() req: AdminAuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
+    await this.assertWalletAccess(req);
+    return this.payoutService().refresh(id);
+  }
 
   /** Same rule as every wallet route: ADMIN and above, or FINANCE. */
   private async assertWalletAccess(
@@ -490,6 +575,8 @@ export class WalletController {
       limit: dto.limit ?? 20,
       operator: dto.operator,
       gateway: dto.gateway,
+      network: dto.network,
+      q: dto.q,
       type: dto.type,
       created_from: dto.created_from,
       created_to: dto.created_to,

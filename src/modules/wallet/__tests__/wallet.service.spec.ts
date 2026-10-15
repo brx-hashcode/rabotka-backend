@@ -947,31 +947,55 @@ describe('WalletService', () => {
   });
 
   describe('getMobileMoneyBalance()', () => {
-    it('returns balance, transactionCount, and operator/gateway breakdown', async () => {
+    it('sums in the database, by network and by gateway', async () => {
       (prisma.wallet.findFirst as jest.Mock).mockResolvedValue({
         ...mockMobileMoneyWallet,
         balance: 75000,
       });
-      (prisma.walletTransaction as any).findMany = jest.fn().mockResolvedValue([
+      (prisma.walletTransaction as any).groupBy = jest.fn().mockResolvedValue([
         {
-          amount: 50000,
           reference_type: 'payment_request:MONETBIL:CG_MTNMOBILEMONEY',
+          _sum: { amount: 50000 },
+          _count: { _all: 3 },
         },
         {
-          amount: 25000,
-          reference_type: 'payment_request:MTN_MOMO:CG_AIRTELMONEY',
+          reference_type: 'payment_request:PAWAPAY:MTN_MOMO_COG',
+          _sum: { amount: 8 },
+          _count: { _all: 4 },
+        },
+        {
+          reference_type: 'payment_request:PAWAPAY:AIRTEL_COG',
+          _sum: { amount: 25000 },
+          _count: { _all: 2 },
         },
       ]);
-      (prisma.walletTransaction as any).count = jest.fn().mockResolvedValue(2);
+      (prisma.walletTransaction as any).aggregate = jest
+        .fn()
+        .mockResolvedValue({
+          _sum: { amount: 5000 },
+          _count: { _all: 1 },
+        });
+      (prisma.walletTransaction as any).count = jest.fn().mockResolvedValue(10);
 
       const result = await service.getMobileMoneyBalance();
 
       expect(result.balance).toBe(75000);
-      expect(result.transactionCount).toBe(2);
-      expect(result.byOperator['CG_MTNMOBILEMONEY']).toBe(50000);
-      expect(result.byOperator['CG_AIRTELMONEY']).toBe(25000);
-      expect(result.byGateway['MONETBIL']).toBe(50000);
-      expect(result.byGateway['MTN_MOMO']).toBe(25000);
+      expect(result.transactionCount).toBe(10);
+      expect(result.credits).toEqual({ amount: 75008, count: 9 });
+      expect(result.withdrawals).toEqual({ amount: 5000, count: 1 });
+      // Monetbil's and pawaPay's MTN codes are the same network.
+      expect(result.networks).toEqual([
+        { key: 'MTN', label: 'MTN Mobile Money', amount: 50008, count: 7 },
+        { key: 'AIRTEL', label: 'Airtel Money', amount: 25000, count: 2 },
+      ]);
+      expect(result.gateways).toEqual([
+        { key: 'MONETBIL', amount: 50000, count: 3 },
+        { key: 'PAWAPAY', amount: 25008, count: 6 },
+      ]);
+      // Never loads the rows themselves.
+      expect((prisma.walletTransaction as any).groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({ by: ['reference_type'] }),
+      );
     });
   });
 
@@ -1042,23 +1066,41 @@ describe('WalletService', () => {
   });
 
   describe('listMobileMoneyTransactionsForAdmin()', () => {
-    it('queries mobile money wallet and returns paginated result', async () => {
+    it('returns each inflow with its payer, purpose and references', async () => {
       (prisma.wallet.findFirst as jest.Mock).mockResolvedValue(
         mockMobileMoneyWallet,
       );
-      const mockTx = {
-        id: 'tx-mm-1',
-        wallet_id: MM_WALLET_ID,
-        type: WalletTransactionType.MOBILE_MONEY_CREDIT,
-        amount: 10000,
-        reference_type: 'payment_request:MONETBIL:CG_MTNMOBILEMONEY',
-        reference_id: 'pr-1',
-        created_at: new Date('2026-01-01'),
-      };
-      (prisma.walletTransaction as any).findMany = jest
-        .fn()
-        .mockResolvedValue([mockTx]);
+      (prisma.walletTransaction as any).findMany = jest.fn().mockResolvedValue([
+        {
+          id: 'tx-mm-1',
+          wallet_id: MM_WALLET_ID,
+          type: WalletTransactionType.MOBILE_MONEY_CREDIT,
+          amount: 2,
+          reference_type: 'payment_request:PAWAPAY:MTN_MOMO_COG',
+          reference_id: 'pr-1',
+          created_at: new Date('2026-10-15'),
+        },
+      ]);
       (prisma.walletTransaction as any).count = jest.fn().mockResolvedValue(1);
+      (prisma as any).paymentRequest = {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'pr-1',
+            description: 'Contact recommandé — Sophie Test',
+            request_type: 'RECOMMENDATION_CONTACT',
+            phone: '+242060000000',
+            gateway_payment_ref: 'dep-1',
+            gateway_tx_id: 'mtn-tx-9',
+            invoice: { id: 'inv-1' },
+            profile: {
+              id: 'p-1',
+              first_name: 'Jean',
+              last_name: 'ITOUA',
+              profile_type: 'EMPLOYER',
+            },
+          },
+        ]),
+      };
 
       const result = await service.listMobileMoneyTransactionsForAdmin({
         page: 1,
@@ -1066,13 +1108,72 @@ describe('WalletService', () => {
       });
 
       expect(result.total).toBe(1);
-      expect(result.data[0].gateway).toBe('MONETBIL');
-      expect(result.data[0].operator).toBe('CG_MTNMOBILEMONEY');
-      expect(result.data[0].amount).toBe(10000);
+      expect(result.data[0]).toMatchObject({
+        gateway: 'PAWAPAY',
+        operator: 'MTN_MOMO_COG',
+        network: 'MTN',
+        amount: 2,
+        description: 'Contact recommandé — Sophie Test',
+        payerName: 'Jean ITOUA',
+        payerProfileType: 'EMPLOYER',
+        payerPhone: '+242060000000',
+        requestType: 'RECOMMENDATION_CONTACT',
+        paymentRequestId: 'pr-1',
+        gatewayRef: 'dep-1',
+        gatewayTxId: 'mtn-tx-9',
+        invoiceId: 'inv-1',
+      });
       expect(
         (prisma.walletTransaction.findMany as jest.Mock).mock.calls[0][0].where
           .wallet_id,
       ).toBe(MM_WALLET_ID);
+    });
+
+    it('combines the gateway and network filters instead of replacing one', async () => {
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue(
+        mockMobileMoneyWallet,
+      );
+      (prisma.walletTransaction as any).findMany = jest
+        .fn()
+        .mockResolvedValue([]);
+      (prisma.walletTransaction as any).count = jest.fn().mockResolvedValue(0);
+
+      await service.listMobileMoneyTransactionsForAdmin({
+        page: 1,
+        limit: 20,
+        gateway: 'PAWAPAY',
+        network: 'AIRTEL',
+      });
+
+      const where = (prisma.walletTransaction.findMany as jest.Mock).mock
+        .calls[0][0].where;
+      expect(where.AND).toEqual([
+        { reference_type: { contains: ':PAWAPAY:' } },
+        { reference_type: { contains: 'AIRTEL', mode: 'insensitive' } },
+      ]);
+    });
+
+    it('finds payments by payer name or phone', async () => {
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue(
+        mockMobileMoneyWallet,
+      );
+      (prisma.walletTransaction as any).findMany = jest
+        .fn()
+        .mockResolvedValue([]);
+      (prisma.walletTransaction as any).count = jest.fn().mockResolvedValue(0);
+      (prisma as any).paymentRequest = {
+        findMany: jest.fn().mockResolvedValue([{ id: 'pr-7' }]),
+      };
+
+      await service.listMobileMoneyTransactionsForAdmin({
+        page: 1,
+        limit: 20,
+        q: 'itoua',
+      });
+
+      const where = (prisma.walletTransaction.findMany as jest.Mock).mock
+        .calls[0][0].where;
+      expect(where.AND).toEqual([{ reference_id: { in: ['pr-7'] } }]);
     });
 
     it('applies pagination skip/take math', async () => {
