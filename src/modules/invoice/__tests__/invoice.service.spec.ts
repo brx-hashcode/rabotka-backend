@@ -1,4 +1,10 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { InvoiceService } from '../invoice.service';
 import { InvoiceReason } from '@prisma/client';
 
@@ -335,6 +341,91 @@ describe('InvoiceService', () => {
         reason: InvoiceReason.OTHER,
       });
       expect(prisma.invoice.create).toHaveBeenCalled();
+    });
+  });
+
+  describe('sendToWhatsApp()', () => {
+    const owned = (over: Record<string, unknown> = {}) => ({
+      ...baseInvoice,
+      profile: baseProfile,
+      payment_request: {
+        description: 'Contact recommandé — Bob Worker',
+        payment_reference: null,
+      },
+      payment: null,
+      ...over,
+    });
+
+    const withDocuments = (send: jest.Mock) =>
+      new InvoiceService(
+        prisma as any,
+        documentService as any,
+        redis as any,
+        { sendPreferringWindow: send } as any,
+      );
+
+    it("sends the receipt to the owner's own number", async () => {
+      prisma.invoice.findUnique.mockResolvedValue(owned());
+      const send = jest.fn().mockResolvedValue(true);
+
+      await expect(
+        withDocuments(send).sendToWhatsApp('inv-1', 'profile-1'),
+      ).resolves.toEqual({ sent: true });
+
+      expect(send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phone: '+242001',
+          profileId: 'profile-1',
+          template: 'paymentReceiptDocument',
+          params: {
+            amount: (5000).toLocaleString('fr-FR'),
+            purpose: 'Contact recommandé — Bob Worker',
+          },
+          storageKey: 'invoices/inv-1.pdf',
+          pdf: expect.any(Buffer),
+          caption: expect.stringContaining('Contact recommandé — Bob Worker'),
+        }),
+      );
+    });
+
+    it("refuses someone else's invoice before sending anything", async () => {
+      prisma.invoice.findUnique.mockResolvedValue(
+        owned({ profile_id: 'other' }),
+      );
+      const send = jest.fn();
+
+      await expect(
+        withDocuments(send).sendToWhatsApp('inv-1', 'profile-1'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it('says when there is no number to send to', async () => {
+      prisma.invoice.findUnique.mockResolvedValue(
+        owned({ profile: { ...baseProfile, phone: null } }),
+      );
+      await expect(
+        withDocuments(jest.fn()).sendToWhatsApp('inv-1', 'profile-1'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('answers 503 while WhatsApp document delivery is off', async () => {
+      prisma.invoice.findUnique.mockResolvedValue(owned());
+      await expect(
+        withDocuments(jest.fn().mockResolvedValue(false)).sendToWhatsApp(
+          'inv-1',
+          'profile-1',
+        ),
+      ).rejects.toThrow(ServiceUnavailableException);
+    });
+
+    it('answers 502 when the send itself fails', async () => {
+      prisma.invoice.findUnique.mockResolvedValue(owned());
+      await expect(
+        withDocuments(
+          jest.fn().mockRejectedValue(new Error('132001 template')),
+        ).sendToWhatsApp('inv-1', 'profile-1'),
+      ).rejects.toThrow(BadGatewayException);
     });
   });
 });

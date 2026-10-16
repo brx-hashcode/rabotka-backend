@@ -1,4 +1,10 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  Optional,
+  forwardRef,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { privateBucket } from '../../../common/services/storage/kyc-bucket';
 import { SystemConfigService } from '../../system-config/system-config.service';
@@ -57,6 +63,10 @@ export class WhatsAppDocumentService {
   private readonly logger = new Logger(WhatsAppDocumentService.name);
 
   constructor(
+    // forwardRef: InvoiceService depends on this service, and WhatsAppService
+    // reaches InvoiceService through the bot, so the import graph is a cycle
+    // and the class can still be undefined when this one is decorated.
+    @Inject(forwardRef(() => WhatsAppService))
     private readonly whatsApp: WhatsAppService,
     private readonly fileService: FileService,
     private readonly config: ConfigService,
@@ -91,22 +101,7 @@ export class WhatsAppDocumentService {
       return false;
     }
 
-    const bucket = await privateBucket(this.systemConfig, this.config);
-    const key = `${STORAGE_PREFIX}/${input.storageKey}`;
-
-    // `application/pdf` is not cosmetic: R2 returns it as the Content-Type on
-    // the presigned GET, and Meta validates the fetched content type against
-    // the template's declared DOCUMENT header format.
-    await this.fileService.uploadBuffer(input.pdf, key, {
-      mimeType: 'application/pdf',
-      access: 'private',
-      bucket,
-    });
-
-    // Presigned against THE SAME bucket it was written to — signing against the
-    // default bucket yields a URL that resolves to nothing, which has happened
-    // here before (see the note in `cloudflare-storage.provider.ts`).
-    const documentUrl = await this.fileService.getPresignedUrl(key, bucket);
+    const documentUrl = await this.uploadAndSign(input.pdf, input.storageKey);
 
     // The `body` argument becomes the conversation transcript row. `[DOC:…]`
     // mirrors the existing `[IMG:…]` convention and deliberately omits the URL,
@@ -122,6 +117,52 @@ export class WhatsAppDocumentService {
       input.profileId,
       `[DOC:${input.filename}]`,
     );
+  }
+
+  /**
+   * Sends the PDF as a plain document while the recipient's 24h window is
+   * open — no template, so no Meta approval and no document switch involved —
+   * and falls back to the template otherwise (`send`, with its switch).
+   *
+   * For documents the user asked for from the app: the window is open whenever
+   * they have written to the bot in the last day.
+   */
+  async sendPreferringWindow<K extends TemplateKey>(
+    input: WhatsAppDocumentSend<K> & { caption: string },
+  ): Promise<boolean> {
+    const { open } = await this.whatsApp.isServiceWindowOpen(input.profileId);
+    if (!open) return this.send(input);
+
+    const documentUrl = await this.uploadAndSign(input.pdf, input.storageKey);
+    return this.whatsApp.sendDocumentMessage(
+      input.phone,
+      documentUrl,
+      input.filename,
+      input.caption,
+    );
+  }
+
+  /** Stores the PDF in the private bucket and returns a short-lived link. */
+  private async uploadAndSign(
+    pdf: Buffer,
+    storageKey: string,
+  ): Promise<string> {
+    const bucket = await privateBucket(this.systemConfig, this.config);
+    const key = `${STORAGE_PREFIX}/${storageKey}`;
+
+    // `application/pdf` is not cosmetic: R2 returns it as the Content-Type on
+    // the presigned GET, and Meta validates the fetched content type against
+    // the template's declared DOCUMENT header format.
+    await this.fileService.uploadBuffer(pdf, key, {
+      mimeType: 'application/pdf',
+      access: 'private',
+      bucket,
+    });
+
+    // Presigned against THE SAME bucket it was written to — signing against the
+    // default bucket yields a URL that resolves to nothing, which has happened
+    // here before (see the note in `cloudflare-storage.provider.ts`).
+    return this.fileService.getPresignedUrl(key, bucket);
   }
 
   private async isEnabled(): Promise<boolean> {

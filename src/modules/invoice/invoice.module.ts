@@ -7,9 +7,15 @@ import { InvoiceService } from './invoice.service';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
 import { DocumentModule } from '../document/document.module';
+import { WhatsAppDocumentModule } from '../whatsapp/documents/whatsapp-document.module';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => AuthModule), DocumentModule],
+  imports: [
+    PrismaModule,
+    forwardRef(() => AuthModule),
+    DocumentModule,
+    WhatsAppDocumentModule,
+  ],
   controllers: [InvoiceController, AdminInvoiceController],
   providers: [InvoiceService],
   exports: [InvoiceService],

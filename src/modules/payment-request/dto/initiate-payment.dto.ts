@@ -32,7 +32,7 @@ export class InitiatePaymentDto {
   @ApiPropertyOptional({
     description:
       'Mobile-money operator code. Required by gateways that route by network, omitted by gateways that serve a single one — see GET /payment-requests/gateways.',
-    example: 'CG_MTNMOBILEMONEY',
+    example: 'MTN_MOMO_COG',
     enum: KNOWN_PAYMENT_OPERATORS,
   })
   @IsOptional()

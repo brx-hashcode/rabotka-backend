@@ -81,13 +81,13 @@ Moteur v2 + Qdrant + `InteractionGraph`. Un match **ne crée aucun objet persist
 
 ### 2.6 Paiement — *réutilisable, avec des angles morts à connaître*
 
-Deux passerelles derrière un registre, une seule active par déploiement via `PAYMENT_GATEWAY_DRIVER` : Monetbil et MTN MoMo (`src/common/services/payment/payment-gateway.registry.ts:30-42`, `payment-gateway.factory.ts:16-28`).
+Deux passerelles derrière un registre, une seule active par déploiement via `PAYMENT_GATEWAY_DRIVER` : pawaPay et MTN MoMo (`src/common/services/payment/payment-gateway.registry.ts`, `payment-gateway.factory.ts`). Monetbil a été retiré.
 
 `PaymentRequest` (`schema.prisma:1415-1454`), statuts `PENDING | PROCESSING | SUBMITTED | APPROVED | REJECTED` (:282-288).
 
 **Idempotence : aucune clé d'idempotence.** Toute la protection repose sur des `updateMany` conditionnels suivis d'un test `count === 0` — revendication PENDING→PROCESSING (`payment-request.service.ts:283-292`), revendication APPROVED dans une transaction (`:662-682`), revendication atomique de `employer_paid` / `worker_paid` (`contact-unlock.service.ts:292-303`).
 
-**Webhooks : aucune vérification de signature** sur `/webhooks/payment/callback` et `/webhooks/payment/mtn-momo` (`payment-request-public.controller.ts:56-78`). La défense est le rappel de l'API passerelle avant toute décision (`monetbil-payment.gateway.ts:126-127`, `mtn-momo-payment.gateway.ts:208-209`). À noter : le webhook **pénalités**, lui, est authentifié par secret partagé (`src/modules/payments/payment.webhook.controller.ts:26-29`).
+**Webhooks** : `/webhooks/payment/pawapay` (et `/pawapay/payouts`) exigent la **signature pawaPay** (RFC 9421, `providers/pawapay-signature.ts`) et refusent en 401 sinon ; `/webhooks/payment/mtn-momo` n'est pas signé. Dans les deux cas, le statut est relu auprès de l'API passerelle avant toute décision (`pawapay-payment.gateway.ts`, `mtn-momo-payment.gateway.ts`), et pour pawaPay le montant et la devise sont comparés à la demande. À noter : le webhook **pénalités**, lui, est authentifié par secret partagé (`src/modules/payments/payment.webhook.controller.ts:26-29`).
 
 **Remboursements en argent : ils n'existent pas.** `PaymentStatus.REFUNDED` est dans l'énumération (`schema.prisma:179`) et n'est **jamais écrit**. `refundProfileWallet` est un alias d'une ligne sur `creditProfileWallet` (`src/modules/wallet/wallet.service.ts:205-222`) : tout « remboursement » est un crédit de portefeuille.
 

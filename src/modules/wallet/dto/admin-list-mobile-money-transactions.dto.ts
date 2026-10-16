@@ -7,6 +7,8 @@ import {
   Max,
   IsDateString,
   IsEnum,
+  IsIn,
+  MaxLength,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { WalletTransactionType } from '@prisma/client';
@@ -42,11 +44,25 @@ export class AdminListMobileMoneyTransactionsDto {
   @ApiPropertyOptional({
     description:
       'Filter by gateway. Not constrained to the registry: historical rows can carry a gateway this build no longer ships.',
-    example: 'MONETBIL',
+    example: 'PAWAPAY',
   })
   @IsOptional()
   @IsString()
   gateway?: string;
+
+  @ApiPropertyOptional({
+    description: 'Filter by network, whatever the gateway called it',
+    enum: ['MTN', 'AIRTEL', 'ORANGE', 'OTHER'],
+  })
+  @IsOptional()
+  @IsIn(['MTN', 'AIRTEL', 'ORANGE', 'OTHER'])
+  network?: 'MTN' | 'AIRTEL' | 'ORANGE' | 'OTHER';
+
+  @ApiPropertyOptional({ description: 'Payer name or phone' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
 
   @ApiPropertyOptional({
     description: 'Filter by transaction type',

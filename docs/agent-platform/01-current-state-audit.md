@@ -12,7 +12,7 @@ _Audit date: 2026-10-02. Branch: `develop`. This audit was read-only and changed
 2. **The wallet can't serve as an agent payout ledger.** `Wallet.balance` is a mutable column. `WalletTransaction` rows have no status, no `balance_after` and no idempotency key, and admins can **soft-delete, restore and permanently purge** them (`wallet.controller.ts:202-290`, `wallet.service.ts:968`). Today's profile wallet holds spending credit that can't be withdrawn; agent earnings must not share it.
 3. **Nothing exists for agent capability (to be granted by admins only, with no self-application), zones, escalation, call logging, phone-reveal logging, attribution or per-profile withdrawals.** Location is free-text `address` + `city` + lat/lng. There's no zone or neighbourhood entity.
 4. **One person can't be both worker and employer.** `Profile.profile_type` is a single enum, `phone` is unique, and ~35 files branch on `profile_type`. "Agent as a capability" fits well. "Worker AND employer" doesn't exist today, and conflict-of-interest checks have to account for that.
-5. **Payment integrity.** Webhooks re-check **status** with the provider but never **amount or currency** (`monetbil-payment.gateway.ts:85-140`, `payment-gateway.types.ts:56-69`). Commission logic would inherit that trust gap.
+5. **Payment integrity.** Webhooks re-check **status** with the provider but never **amount or currency** (at the time of this audit; pawaPay now also compares amount and currency, see `pawapay-payment.gateway.ts`). Commission logic would inherit that trust gap.
 
 ## 2. Current state
 
@@ -27,7 +27,7 @@ _Audit date: 2026-10-02. Branch: `develop`. This audit was read-only and changed
 - **External services:**
   - WhatsApp: Meta Cloud or Twilio, chosen by `whatsapp-provider.factory`.
   - SMS: `TwilioService.sendSms` exists (`common/services/twilio/twilio.service.ts:296`) but **has no callers** (`whatsapp/whatsapp.config.ts:38`).
-  - Mobile Money: Monetbil and MTN MoMo behind `IPaymentGateway` (`common/services/payment/`).
+  - Mobile Money: pawaPay and MTN MoMo behind `IPaymentGateway` (`common/services/payment/`).
   - Vector search: Qdrant + fastembed (`modules/qdrant`).
   - LLMs via LangChain (`modules/rag`), S3/Cloudinary/Vercel Blob storage, mail.
 - **Tests:** Jest, 332 `*.spec.ts` files co-located in `__tests__/`. There are only 3 e2e specs (`test/`), and they use a mocked Prisma client (`test/jest-e2e.json`). The 70% global coverage threshold (`package.json` jest config) is **not enforced in CI**: `deploy-develop.yml:63` runs `pnpm test --no-coverage`. The last local lcov is from 2026-09-04, so it's stale. Line coverage at that time: application 79%, auth 97%, contact-unlock 88%, job-offer 81%, matching 95%, payment-request 89%, payments 98%, profile 82%, referral 86%, wallet **76%**, whatsapp 82%, bot 86%.
@@ -128,7 +128,7 @@ _Audit date: 2026-10-02. Branch: `develop`. This audit was read-only and changed
   - `initiatePayment` atomically claims `PENDING→PROCESSING` (`payment-request.service.ts:259-315`), calls the active gateway, and enqueues a poll on `POLL_PAYMENT_STATUS_QUEUE` (`poll-payment-status.processor.ts`).
 - **Webhooks:**
   - `POST webhooks/payment/callback` and `/mtn-momo` are public and throttled at 120/min (`payment-request-public.controller.ts:56-89`).
-  - The gateway **re-checks status with the provider** (`monetbil-payment.gateway.ts:121-140`, `mtn-momo-payment.gateway.ts:203-214`) but **does not check amount, currency or payer**.
+  - The gateway **re-checks status with the provider** (`mtn-momo-payment.gateway.ts`; pawaPay since compares amount and currency too) but **does not check amount, currency or payer**.
   - `handlePaymentCallback` (`payment-request.service.ts:396-481`) and `persistApprovedPayment` (`:652+`) use conditional `updateMany` claims for idempotency. `gateway_payment_ref` is unique.
   - Penalties have a separate shared-secret webhook (`payments/payment.webhook.controller.ts`).
 - **Tables:**

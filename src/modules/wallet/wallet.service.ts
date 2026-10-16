@@ -63,16 +63,100 @@ export type AdminWalletTransactionItem = {
 export type AdminMobileMoneyTransactionItem = AdminWalletTransactionItem & {
   gateway: string | null;
   operator: string | null;
+  /** The network, whatever the gateway called it — see `MOBILE_NETWORKS`. */
+  network: MobileNetworkKey | null;
   description: string | null;
+  /** Who paid, for an inflow from a payment request. */
+  payerName: string | null;
+  payerProfileId: string | null;
+  /** WORKER / EMPLOYER. */
+  payerProfileType: string | null;
+  /** The number the money came from. */
+  payerPhone: string | null;
+  /** What it paid for (`PaymentRequestType`). */
+  requestType: string | null;
+  /** The payment request it settled. */
+  paymentRequestId: string | null;
+  /** The gateway's reference (pawaPay depositId) and the operator's transaction id. */
+  gatewayRef: string | null;
+  gatewayTxId: string | null;
+  /** The invoice issued for it, when there is one. */
+  invoiceId: string | null;
   status: string;
 };
 
+/** An amount and how many movements made it. */
+export type AmountCount = { amount: number; count: number };
+
 export type AdminMobileMoneyBalanceResult = {
+  /** Rabotka's own ledger: what came in through mobile money, minus withdrawals. */
   balance: number;
   transactionCount: number;
+  credits: AmountCount;
+  withdrawals: AmountCount;
+  /** Inflows per network, the same network named once across gateways. */
+  networks: Array<{ key: MobileNetworkKey; label: string } & AmountCount>;
+  /** Inflows per gateway (PAWAPAY, MTN_MOMO, and retired ones like MONETBIL). */
+  gateways: Array<{ key: string } & AmountCount>;
+  /** @deprecated Raw operator codes; use `networks`. */
   byOperator: Record<string, number>;
+  /** @deprecated Use `gateways`. */
   byGateway: Record<string, number>;
 };
+
+/**
+ * The mobile-money networks, recognised in the operator codes every gateway
+ * has used: Monetbil's `CG_MTNMOBILEMONEY`, pawaPay's `MTN_MOMO_COG`, MTN
+ * MoMo's own gateway — all the same MTN wallet for the payer.
+ */
+export const MOBILE_NETWORKS = [
+  { key: 'MTN', label: 'MTN Mobile Money', match: 'MTN' },
+  { key: 'AIRTEL', label: 'Airtel Money', match: 'AIRTEL' },
+  { key: 'ORANGE', label: 'Orange Money', match: 'ORANGE' },
+] as const;
+
+export type MobileNetworkKey =
+  (typeof MOBILE_NETWORKS)[number]['key'] | 'OTHER';
+
+/** The network an operator code (or, failing that, a gateway) stands for. */
+export function networkOf(
+  operator: string | null | undefined,
+  gateway?: string | null,
+): MobileNetworkKey {
+  for (const code of [operator, gateway]) {
+    const upper = (code ?? '').toUpperCase();
+    const found = MOBILE_NETWORKS.find((n) => upper.includes(n.match));
+    if (found) return found.key;
+  }
+  return 'OTHER';
+}
+
+/** `payment_request:GATEWAY:OPERATOR` / `withdrawal:REFERENCE:DESCRIPTION`. */
+function parseMobileMoneyRef(ref: string | null): {
+  kind: 'payment_request' | 'withdrawal' | 'other';
+  gateway: string | null;
+  operator: string | null;
+  description: string | null;
+} {
+  const parts = (ref ?? '').split(':');
+  if (parts[0] === 'payment_request') {
+    return {
+      kind: 'payment_request',
+      gateway: parts[1] || 'UNKNOWN',
+      operator: parts[2] || 'UNKNOWN',
+      description: null,
+    };
+  }
+  if (parts[0] === 'withdrawal') {
+    return {
+      kind: 'withdrawal',
+      gateway: parts[1] || null,
+      operator: null,
+      description: parts.slice(2).join(':') || null,
+    };
+  }
+  return { kind: 'other', gateway: null, operator: null, description: null };
+}
 
 export type AdminProfileWallet = {
   balance: number;
@@ -995,38 +1079,82 @@ export class WalletService {
     return { id: wallet.id, balance: Number(wallet.balance) };
   }
 
+  /**
+   * The mobile-money ledger, summed in the database: one row per distinct
+   * reference (a handful), never one per transaction.
+   */
   async getMobileMoneyBalance(): Promise<AdminMobileMoneyBalanceResult> {
     const wallet = await this.getOrCreateMobileMoneyWallet();
 
-    const [creditTxs, transactionCount] = await Promise.all([
-      this.prisma.walletTransaction.findMany({
+    const [creditGroups, withdrawals, transactionCount] = await Promise.all([
+      this.prisma.walletTransaction.groupBy({
+        by: ['reference_type'],
         where: {
           wallet_id: wallet.id,
           type: WalletTransactionType.MOBILE_MONEY_CREDIT,
         },
-        select: { amount: true, reference_type: true },
+        _sum: { amount: true },
+        _count: { _all: true },
+      }),
+      this.prisma.walletTransaction.aggregate({
+        where: {
+          wallet_id: wallet.id,
+          type: WalletTransactionType.MOBILE_MONEY_WITHDRAWAL,
+        },
+        _sum: { amount: true },
+        _count: { _all: true },
       }),
       this.prisma.walletTransaction.count({ where: { wallet_id: wallet.id } }),
     ]);
 
+    const credits: AmountCount = { amount: 0, count: 0 };
+    const networks = new Map<MobileNetworkKey, AmountCount>();
+    const gateways = new Map<string, AmountCount>();
     const byOperator: Record<string, number> = {};
-    const byGateway: Record<string, number> = {};
+    const add = <K>(
+      map: Map<K, AmountCount>,
+      key: K,
+      amount: number,
+      count: number,
+    ) => {
+      const cur = map.get(key) ?? { amount: 0, count: 0 };
+      map.set(key, { amount: cur.amount + amount, count: cur.count + count });
+    };
 
-    for (const tx of creditTxs) {
-      // reference_type = "payment_request:GATEWAY:OPERATOR"
-      const parts = (tx.reference_type ?? '').split(':');
-      const gateway = parts[1] ?? 'UNKNOWN';
-      const operator = parts[2] ?? 'UNKNOWN';
-      const amount = Number(tx.amount);
-      byOperator[operator] = (byOperator[operator] ?? 0) + amount;
-      byGateway[gateway] = (byGateway[gateway] ?? 0) + amount;
+    for (const group of creditGroups) {
+      const amount = Number(group._sum.amount ?? 0);
+      const count = group._count._all;
+      const ref = parseMobileMoneyRef(group.reference_type);
+      credits.amount += amount;
+      credits.count += count;
+      add(networks, networkOf(ref.operator, ref.gateway), amount, count);
+      add(gateways, ref.gateway ?? 'UNKNOWN', amount, count);
+      const op = ref.operator ?? 'UNKNOWN';
+      byOperator[op] = (byOperator[op] ?? 0) + amount;
     }
+
+    const networkList = [
+      ...MOBILE_NETWORKS,
+      { key: 'OTHER' as const, label: 'Autre' },
+    ]
+      .filter((n) => networks.has(n.key))
+      .map((n) => ({ key: n.key, label: n.label, ...networks.get(n.key)! }));
+    const gatewayList = [...gateways.entries()]
+      .map(([key, v]) => ({ key, ...v }))
+      .sort((a, b) => b.amount - a.amount);
 
     return {
       balance: Number(wallet.balance),
       transactionCount,
+      credits,
+      withdrawals: {
+        amount: Number(withdrawals._sum.amount ?? 0),
+        count: withdrawals._count._all,
+      },
+      networks: networkList,
+      gateways: gatewayList,
       byOperator,
-      byGateway,
+      byGateway: Object.fromEntries(gatewayList.map((g) => [g.key, g.amount])),
     };
   }
 
@@ -1035,6 +1163,9 @@ export class WalletService {
     limit: number;
     operator?: string;
     gateway?: string;
+    network?: MobileNetworkKey;
+    /** Payer name or phone. */
+    q?: string;
     type?: string;
     created_from?: string;
     created_to?: string;
@@ -1051,11 +1182,54 @@ export class WalletService {
     if (params.type) {
       where.type = params.type as WalletTransactionType;
     }
+    // Every reference filter applies; they used to replace each other.
+    const refFilters: Prisma.WalletTransactionWhereInput[] = [];
     if (params.operator) {
-      where.reference_type = { contains: params.operator };
-    } else if (params.gateway) {
-      where.reference_type = { contains: params.gateway };
+      refFilters.push({ reference_type: { contains: params.operator } });
     }
+    if (params.gateway) {
+      refFilters.push({ reference_type: { contains: `:${params.gateway}:` } });
+    }
+    if (params.network && params.network !== 'OTHER') {
+      const match = MOBILE_NETWORKS.find(
+        (n) => n.key === params.network,
+      )!.match;
+      refFilters.push({
+        reference_type: { contains: match, mode: Prisma.QueryMode.insensitive },
+      });
+    }
+    const q = params.q?.trim();
+    if (q) {
+      // Payers whose name or phone matches, then the requests they paid.
+      const words = q.split(/\s+/).slice(0, 4);
+      const requests = await this.prisma.paymentRequest.findMany({
+        where: {
+          profile: {
+            AND: words.map((w) => ({
+              OR: [
+                {
+                  first_name: {
+                    contains: w,
+                    mode: Prisma.QueryMode.insensitive,
+                  },
+                },
+                {
+                  last_name: {
+                    contains: w,
+                    mode: Prisma.QueryMode.insensitive,
+                  },
+                },
+                { phone: { contains: w } },
+              ],
+            })),
+          },
+        },
+        select: { id: true },
+        take: 500,
+      });
+      refFilters.push({ reference_id: { in: requests.map((r) => r.id) } });
+    }
+    if (refFilters.length > 0) where.AND = refFilters;
     if (params.created_from || params.created_to) {
       where.created_at = {
         ...(params.created_from ? { gte: new Date(params.created_from) } : {}),
@@ -1084,11 +1258,71 @@ export class WalletService {
       this.prisma.walletTransaction.count({ where }),
     ]);
 
+    // What each inflow paid for, and who paid it — one query for the page.
+    const requestIds = rows
+      .filter(
+        (r) =>
+          r.reference_id && r.reference_type?.startsWith('payment_request:'),
+      )
+      .map((r) => r.reference_id!);
+    const requests = requestIds.length
+      ? await this.prisma.paymentRequest.findMany({
+          where: { id: { in: requestIds } },
+          select: {
+            id: true,
+            description: true,
+            request_type: true,
+            phone: true,
+            gateway_payment_ref: true,
+            gateway_tx_id: true,
+            invoice: { select: { id: true } },
+            profile: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+                profile_type: true,
+              },
+            },
+          },
+        })
+      : [];
+    const requestById = new Map(requests.map((r) => [r.id, r]));
+
+    // Withdrawals sent as gateway payouts: their recipient and references.
+    const payoutIds = rows
+      .filter(
+        (r) =>
+          r.reference_id &&
+          r.type === WalletTransactionType.MOBILE_MONEY_WITHDRAWAL,
+      )
+      .map((r) => r.reference_id!);
+    const payouts = payoutIds.length
+      ? await this.prisma.mobileMoneyPayout.findMany({
+          where: { id: { in: payoutIds } },
+          select: {
+            id: true,
+            phone: true,
+            operator: true,
+            gateway_ref: true,
+            gateway_tx_id: true,
+          },
+        })
+      : [];
+    const payoutById = new Map(payouts.map((p) => [p.id, p]));
+
     return {
       data: rows.map((r) => {
-        const ref = r.reference_type ?? '';
-        const parts = ref.split(':');
-        const isPaymentRequest = parts[0] === 'payment_request';
+        const ref = parseMobileMoneyRef(r.reference_type);
+        const request = r.reference_id
+          ? requestById.get(r.reference_id)
+          : undefined;
+        const payout = r.reference_id
+          ? payoutById.get(r.reference_id)
+          : undefined;
+        const payerName = request?.profile
+          ? `${request.profile.first_name} ${request.profile.last_name}`.trim()
+          : null;
         return {
           id: r.id,
           walletId: r.wallet_id,
@@ -1097,14 +1331,26 @@ export class WalletService {
           referenceType: r.reference_type ?? null,
           referenceId: r.reference_id ?? null,
           createdAt: r.created_at.toISOString(),
-          gateway: isPaymentRequest
-            ? (parts[1] ?? 'UNKNOWN')
-            : parts[0] === 'withdrawal'
-              ? parts[1] || null
-              : null,
-          operator: isPaymentRequest ? (parts[2] ?? 'UNKNOWN') : null,
-          description:
-            parts[0] === 'withdrawal' ? parts.slice(2).join(':') || null : null,
+          gateway: ref.gateway,
+          operator: ref.operator ?? payout?.operator ?? null,
+          network:
+            ref.kind === 'payment_request'
+              ? networkOf(ref.operator, ref.gateway)
+              : payout
+                ? networkOf(payout.operator)
+                : null,
+          description: ref.description ?? request?.description ?? null,
+          payerName,
+          payerProfileId: request?.profile?.id ?? null,
+          payerProfileType: request?.profile?.profile_type ?? null,
+          // For a payout: the number the money was sent to.
+          payerPhone: request?.phone ?? payout?.phone ?? null,
+          requestType: request?.request_type ?? null,
+          paymentRequestId: request?.id ?? null,
+          gatewayRef:
+            request?.gateway_payment_ref ?? payout?.gateway_ref ?? null,
+          gatewayTxId: request?.gateway_tx_id ?? payout?.gateway_tx_id ?? null,
+          invoiceId: request?.invoice?.id ?? null,
           status: 'COMPLETED',
         };
       }),

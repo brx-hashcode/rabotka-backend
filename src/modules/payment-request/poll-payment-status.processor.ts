@@ -54,6 +54,7 @@ export interface IProcessApprovedPayment {
   processApprovedPaymentById(
     requestId: string,
     transactionId?: string,
+    settled?: { amount?: number; currency?: string },
   ): Promise<void>;
 }
 
@@ -89,13 +90,14 @@ export class PollPaymentStatusProcessor {
       `Poll attempt ${attempt}/${maxAttempts} for request ${requestId} (gatewayRef: ${gatewayRef})`,
     );
 
-    const { status, transactionId } =
+    const { status, transactionId, amount, currency } =
       await this.paymentGateway.checkPaymentStatus(gatewayRef);
 
     if (status === 'COMPLETED') {
       await this.paymentRequestService.processApprovedPaymentById(
         requestId,
         transactionId,
+        { amount, currency },
       );
       this.paymentStatusGateway.emitPaymentStatus(token, 'APPROVED');
       return;

@@ -244,6 +244,7 @@ describe('authored templates', () => {
     'adminMessage',
     'kycAgreementDocument',
     'missionContractDocument',
+    'paymentReceiptDocument',
   ] as const;
   // A URL button AND a quick reply. Only the broadcast: it is the one template
   // here that is MARKETING by nature, and a marketing message people cannot
