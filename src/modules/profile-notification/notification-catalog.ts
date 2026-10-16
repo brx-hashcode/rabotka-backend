@@ -173,7 +173,27 @@ export type NotificationInput =
        * broadcasts, and without this the read counter could never move.
        */
       broadcastId: string;
-    };
+    }
+  | {
+      type: 'MISSION_REMINDER';
+      /** The day before, or the hour it starts. */
+      when: 'TOMORROW' | 'NOW';
+      applicationId: string;
+      jobTitle: string;
+      schedule: string;
+      address: string | null;
+    }
+  | { type: 'MISSION_STARTED'; jobOfferId: string; jobTitle: string }
+  | { type: 'MISSION_STATUS_CHECK'; jobOfferId: string; jobTitle: string }
+  | {
+      type: 'JOB_OFFER_EXPIRED';
+      recipientRole: 'WORKER' | 'EMPLOYER';
+      jobOfferId: string;
+      jobTitle: string;
+    }
+  | { type: 'KYC_REJECTED'; reason: string | null }
+  | { type: 'ACCOUNT_SUSPENDED'; reason: string | null }
+  | { type: 'UNLOCK_CONVERTED_TO_CREDIT'; amount: number };
 
 export type NotificationType = NotificationInput['type'];
 
@@ -403,6 +423,69 @@ export function renderNotification(
         title: input.title,
         body: input.body,
         link: input.link ? `/${input.link.replace(/^\/+/, '')}` : null,
+      };
+
+    case 'MISSION_REMINDER': {
+      const where = input.address?.trim() ? ` · ${input.address.trim()}` : '';
+      return input.when === 'TOMORROW'
+        ? {
+            title: 'Votre mission commence demain',
+            body: `${quoted(input.jobTitle).trim()} — ${input.schedule}${where}. Prévenez l’employeur au plus tôt si vous ne pouvez plus venir.`,
+            link: `/applications/${input.applicationId}`,
+          }
+        : {
+            title: 'Votre mission commence',
+            body: `${quoted(input.jobTitle).trim()} — ${input.schedule}${where}. Prévenez l’employeur si vous avez du retard.`,
+            link: `/applications/${input.applicationId}`,
+          };
+    }
+
+    case 'MISSION_STARTED':
+      return {
+        title: 'Mission démarrée',
+        body: `${quoted(input.jobTitle).trim()} a démarré à l’heure prévue. Vous pourrez la clôturer et noter le travailleur une fois terminée.`,
+        link: `/missions/${input.jobOfferId}`,
+      };
+
+    case 'MISSION_STATUS_CHECK':
+      return {
+        title: 'Votre mission est-elle terminée ?',
+        body: `Confirmez la fin de${quoted(input.jobTitle)} pour débloquer la notation.`,
+        link: `/missions/${input.jobOfferId}`,
+      };
+
+    case 'JOB_OFFER_EXPIRED':
+      return input.recipientRole === 'EMPLOYER'
+        ? {
+            title: 'Votre offre a expiré',
+            body: `${quoted(input.jobTitle).trim()} est arrivée à échéance sans recrutement. Vous pouvez la republier avec une nouvelle date.`,
+            link: `/job-offers/${input.jobOfferId}`,
+          }
+        : {
+            title: 'Offre expirée',
+            body: `${quoted(input.jobTitle).trim()} est arrivée à échéance et votre candidature est close. D’autres missions sont disponibles.`,
+            link: '/recherche-offres',
+          };
+
+    case 'KYC_REJECTED':
+      return {
+        title: 'Vérification refusée',
+        body: `Vos documents n’ont pas pu être validés. Motif : ${input.reason?.trim() || 'non précisé'}. Vous pouvez envoyer de nouveaux documents ou ouvrir une réclamation.`,
+        link: '/claims/new',
+      };
+
+    case 'ACCOUNT_SUSPENDED':
+      return {
+        title: 'Compte suspendu',
+        body: `Votre compte a été suspendu. Motif : ${input.reason?.trim() || 'non précisé'}. Contactez-nous si vous pensez qu’il s’agit d’une erreur.`,
+        link: '/claims/new',
+      };
+
+    case 'UNLOCK_CONVERTED_TO_CREDIT':
+      return {
+        title: 'Paiement converti en crédit',
+        body: `La mission n’a pas abouti dans les délais. ${fcfa(input.amount)} ont été crédités sur votre portefeuille.`,
+        link: '/portefeuille',
       };
   }
 }

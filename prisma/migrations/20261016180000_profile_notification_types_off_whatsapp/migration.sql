@@ -1,0 +1,8 @@
+-- In-app notifications for events that no longer go to WhatsApp by default.
+ALTER TYPE "ProfileNotificationType" ADD VALUE IF NOT EXISTS 'MISSION_REMINDER';
+ALTER TYPE "ProfileNotificationType" ADD VALUE IF NOT EXISTS 'MISSION_STARTED';
+ALTER TYPE "ProfileNotificationType" ADD VALUE IF NOT EXISTS 'MISSION_STATUS_CHECK';
+ALTER TYPE "ProfileNotificationType" ADD VALUE IF NOT EXISTS 'JOB_OFFER_EXPIRED';
+ALTER TYPE "ProfileNotificationType" ADD VALUE IF NOT EXISTS 'KYC_REJECTED';
+ALTER TYPE "ProfileNotificationType" ADD VALUE IF NOT EXISTS 'ACCOUNT_SUSPENDED';
+ALTER TYPE "ProfileNotificationType" ADD VALUE IF NOT EXISTS 'UNLOCK_CONVERTED_TO_CREDIT';

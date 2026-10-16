@@ -1,3 +1,4 @@
+import { inAppNotifications } from '../../../profile-notification/__tests__/in-app-notifications';
 import { Logger } from '@nestjs/common';
 import { ReminderProcessor } from '../reminder.processor';
 import {
@@ -566,6 +567,66 @@ describe('ReminderProcessor', () => {
   });
 
   // ─── sendReminder24h() ────────────────────────────────────────────────────
+
+  describe('in-app first, WhatsApp switched off', () => {
+    let events: { emit: jest.Mock };
+    let dispatcher: { send: jest.Mock };
+
+    beforeEach(() => {
+      events = { emit: jest.fn() };
+      // The switch lives in the dispatcher: off means nothing goes out.
+      dispatcher = {
+        send: jest.fn().mockResolvedValue({ mode: 'TEMPLATE', sent: false }),
+      };
+      (processor as any).dispatcher = dispatcher;
+      (processor as any).events = events;
+    });
+
+    it('puts the day-before reminder in the bell, deduplicated', async () => {
+      prisma.application.findUnique.mockResolvedValue(buildApplication());
+
+      await processor.process({
+        data: { type: 'reminder_24h', applicationId: 'app-1' },
+      });
+
+      const [payload] = inAppNotifications(events.emit, 'MISSION_REMINDER');
+      expect(payload).toMatchObject({
+        input: { when: 'TOMORROW', applicationId: 'app-1' },
+      });
+      expect(payload.dedupeKey).toContain('app-1');
+      expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+    });
+
+    it('tells applicants and the employer in-app when an offer expires', async () => {
+      prisma.jobOffer.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+        {
+          id: 'offer-1',
+          title: 'Ménage',
+          employer_id: 'emp-1',
+          employer: { phone: null, first_name: 'Bob' },
+          applications: [
+            {
+              id: 'app-a',
+              worker: { id: 'worker-a', phone: null, first_name: 'Awa' },
+            },
+          ],
+        },
+      ]);
+      prisma.application.findMany.mockResolvedValue([] as never);
+
+      await processor.process({ data: { type: 'scan' } });
+
+      const expired = inAppNotifications(events.emit, 'JOB_OFFER_EXPIRED');
+      expect(
+        expired.map((p) => [p.recipientId, (p.input as any).recipientRole]),
+      ).toEqual(
+        expect.arrayContaining([
+          ['emp-1', 'EMPLOYER'],
+          ['worker-a', 'WORKER'],
+        ]),
+      );
+    });
+  });
 
   describe('sendReminder24h()', () => {
     it('sends WhatsApp message and sets redis key', async () => {

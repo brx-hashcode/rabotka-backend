@@ -34,7 +34,10 @@ describe('JobNotificationService', () => {
   let matching: { findMatchingWorkersForJob: jest.Mock };
   let engine: { recommendWorkersForJobOffer: jest.Mock };
   let rollout: { versionFor: jest.Mock };
-  let bot: { sendRecommendedJobNotification: jest.Mock };
+  let bot: {
+    sendRecommendedJobNotification: jest.Mock;
+    whatsAppAllows: jest.Mock;
+  };
   let interactions: { record: jest.Mock };
   let redis: { set: jest.Mock; del: jest.Mock; exists: jest.Mock };
   let events: { emit: jest.Mock };
@@ -67,7 +70,10 @@ describe('JobNotificationService', () => {
     };
     // Legacy by default, matching the shipped config.
     rollout = { versionFor: jest.fn().mockResolvedValue('legacy') };
-    bot = { sendRecommendedJobNotification: jest.fn().mockResolvedValue(true) };
+    bot = {
+      sendRecommendedJobNotification: jest.fn().mockResolvedValue(true),
+      whatsAppAllows: jest.fn().mockResolvedValue(true),
+    };
     interactions = { record: jest.fn().mockResolvedValue(undefined) };
     redis = {
       // `set … NX` returns 'OK' when the claim is won, null when it is not.
@@ -424,6 +430,17 @@ describe('JobNotificationService', () => {
         jobOfferId: OFFER_ID,
         jobTitle: 'Plombier',
       });
+    });
+
+    it('still fills the bell when WhatsApp recommendations are switched off', async () => {
+      bot.whatsAppAllows.mockResolvedValue(false);
+
+      await service.notifyForOffer(OFFER_ID);
+
+      expect(bot.sendRecommendedJobNotification).not.toHaveBeenCalled();
+      expect(
+        inAppNotifications(events.emit, 'JOB_RECOMMENDATION'),
+      ).toHaveLength(3);
     });
 
     it('skips the bell for a worker still in cooldown', async () => {

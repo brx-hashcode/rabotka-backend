@@ -38,10 +38,17 @@ import { closeRecruitedOfferTx } from '../../job-offer/utils/close-recruited-off
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { BotNotificationService } from '../services/bot-notification.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  notificationDedupeKey,
+  notifyProfile,
+} from '../../profile-notification/profile-notification.events';
 
 const REMINDER_24H_SENT_KEY = 'reminder:sent:24h:';
 const REMINDER_START_SENT_KEY = 'reminder:sent:start:';
 const SENT_KEY_TTL = 48 * 60 * 60;
+/** Absorbs job retries of the same in-app notification. */
+const IN_APP_DEDUPE_SECONDS = 7 * 24 * 60 * 60;
 const SCAN_INTERVAL_MS = 15 * 60 * 1000;
 
 /**
@@ -100,6 +107,9 @@ export class ReminderProcessor {
     // which is what every send here did before the dispatcher existed.
     @Optional()
     private readonly dispatcher?: NotificationDispatcher,
+    // In-app notifications. Optional for the same positional-spec reason.
+    @Optional()
+    private readonly events?: EventEmitter2,
   ) {}
 
   /**
@@ -463,6 +473,29 @@ export class ReminderProcessor {
       worker?: { phone?: string | null } | null;
     }[];
   }): Promise<void> {
+    notifyProfile(this.events, {
+      recipientId: offer.employer_id,
+      dedupeKey: notificationDedupeKey('mission-started', offer.id),
+      dedupeTtlSeconds: IN_APP_DEDUPE_SECONDS,
+      input: {
+        type: 'MISSION_STARTED',
+        jobOfferId: offer.id,
+        jobTitle: offer.title,
+      },
+    });
+    for (const app of offer.applications) {
+      notifyProfile(this.events, {
+        recipientId: app.worker_id,
+        dedupeKey: notificationDedupeKey('status-check', offer.id, app.id),
+        dedupeTtlSeconds: IN_APP_DEDUPE_SECONDS,
+        input: {
+          type: 'MISSION_STATUS_CHECK',
+          jobOfferId: offer.id,
+          jobTitle: offer.title,
+        },
+      });
+    }
+
     const phone = offer.employer?.phone;
 
     if (phone) {
@@ -648,19 +681,31 @@ export class ReminderProcessor {
     for (const offer of overdue) {
       await this.notifyExpiredOffer(offer);
       for (const app of offer.applications ?? []) {
-        await this.notifyExpiredApplicant(offer.title, app.worker);
+        await this.notifyExpiredApplicant(offer, app.worker);
       }
     }
   }
 
   private async notifyExpiredApplicant(
-    offerTitle: string,
+    offer: { id: string; title: string },
     worker: {
       id: string;
       phone: string | null;
       first_name?: string | null;
     },
   ): Promise<void> {
+    const offerTitle = offer.title;
+    notifyProfile(this.events, {
+      recipientId: worker.id,
+      dedupeKey: notificationDedupeKey('offer-expired', offer.id, worker.id),
+      dedupeTtlSeconds: IN_APP_DEDUPE_SECONDS,
+      input: {
+        type: 'JOB_OFFER_EXPIRED',
+        recipientRole: 'WORKER',
+        jobOfferId: offer.id,
+        jobTitle: offerTitle,
+      },
+    });
     const phone = worker.phone;
     if (!phone) return;
     await this.notify({
@@ -704,6 +749,21 @@ export class ReminderProcessor {
     employer_id: string;
     employer?: { phone?: string | null; first_name?: string | null } | null;
   }): Promise<void> {
+    notifyProfile(this.events, {
+      recipientId: offer.employer_id,
+      dedupeKey: notificationDedupeKey(
+        'offer-expired',
+        offer.id,
+        offer.employer_id,
+      ),
+      dedupeTtlSeconds: IN_APP_DEDUPE_SECONDS,
+      input: {
+        type: 'JOB_OFFER_EXPIRED',
+        recipientRole: 'EMPLOYER',
+        jobOfferId: offer.id,
+        jobTitle: offer.title,
+      },
+    });
     const phone = offer.employer?.phone;
     if (!phone) return;
     // No bot state is armed alongside this template. Republishing is a CTA away
@@ -803,6 +863,20 @@ export class ReminderProcessor {
 
     if (!app?.worker?.phone || app.status !== 'ACCEPTED') return;
 
+    notifyProfile(this.events, {
+      recipientId: app.worker_id,
+      dedupeKey: notificationDedupeKey('reminder', 'tomorrow', applicationId),
+      dedupeTtlSeconds: IN_APP_DEDUPE_SECONDS,
+      input: {
+        type: 'MISSION_REMINDER',
+        when: 'TOMORROW',
+        applicationId,
+        jobTitle: app.job_offer.title,
+        schedule: formatDate(app.job_offer.scheduled_at),
+        address: jobLocationLabel(app.job_offer),
+      },
+    });
+
     const fees = await this.systemConfigService.getFees();
     const params = {
       offerTitle: app.job_offer.title,
@@ -897,6 +971,19 @@ export class ReminderProcessor {
         employerPhone: app.job_offer.employer.phone,
         applicationId,
       };
+      notifyProfile(this.events, {
+        recipientId: app.worker_id,
+        dedupeKey: notificationDedupeKey('reminder', 'now', applicationId),
+        dedupeTtlSeconds: IN_APP_DEDUPE_SECONDS,
+        input: {
+          type: 'MISSION_REMINDER',
+          when: 'NOW',
+          applicationId,
+          jobTitle: app.job_offer.title,
+          schedule: `aujourd’hui à ${time}`,
+          address: params.address,
+        },
+      });
       await this.notify({
         phone: app.worker.phone,
         profileId: app.worker_id,

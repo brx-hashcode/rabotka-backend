@@ -1,4 +1,9 @@
 import {
+  WHATSAPP_NOTIFICATION_GROUPS,
+  whatsAppNotificationKey,
+  type WhatsAppNotificationGroup,
+} from '../notification-dispatch/whatsapp-notification-groups';
+import {
   BadRequestException,
   Injectable,
   Logger,
@@ -281,6 +286,11 @@ export class SystemConfigService implements OnModuleInit {
     'agent.commission_requires_momo_worker': ['true', 'false'],
     'agent.commission_requires_momo_employer': ['true', 'false'],
     'agent.invite_whatsapp_enabled': ['true', 'false'],
+    ...Object.fromEntries(
+      (
+        Object.keys(WHATSAPP_NOTIFICATION_GROUPS) as WhatsAppNotificationGroup[]
+      ).map((group) => [whatsAppNotificationKey(group), ['true', 'false']]),
+    ),
   };
 
   async set(key: string, value: string, adminId?: string): Promise<void> {

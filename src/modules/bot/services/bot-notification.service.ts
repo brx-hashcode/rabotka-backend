@@ -40,9 +40,13 @@ import {
   applicationRejectedFreeForm,
   cancellationFreeForm,
   unlockExpiredConversionFreeForm,
+  contactUnlockedFreeForm,
+  contactUnlockedRecommendationFreeForm,
   jobRecommendationFreeForm,
   newApplicationFreeForm,
 } from '../messages/notifications.messages';
+import { formatContactUnlockedMessage } from '../messages/contact-unlock.messages';
+import type { WhatsAppNotificationGroup } from '../../notification-dispatch/whatsapp-notification-groups';
 
 /** A mission unlocks once; this only absorbs retries of the same unlock. */
 const CONTACT_UNLOCKED_DEDUPE_SECONDS = 30 * 24 * 3600;
@@ -98,14 +102,24 @@ export class BotNotificationService {
     key: K;
     params: TemplateParams<K>;
     freeForm?: FreeFormMessage;
+    /** How the message reads in the admin conversation view. */
+    body?: string;
   }): Promise<boolean> {
     if (!this.dispatcher) {
-      return this.whatsApp.sendTemplateMessage(
-        params.phone,
-        params.key,
-        params.params,
-        params.profileId,
-      );
+      return params.body
+        ? this.whatsApp.sendTemplateMessage(
+            params.phone,
+            params.key,
+            params.params,
+            params.profileId,
+            params.body,
+          )
+        : this.whatsApp.sendTemplateMessage(
+            params.phone,
+            params.key,
+            params.params,
+            params.profileId,
+          );
     }
 
     const { sent } = await this.dispatcher.send({
@@ -113,8 +127,37 @@ export class BotNotificationService {
       ...(params.profileId ? { profileId: params.profileId } : {}),
       template: { key: params.key, params: params.params },
       ...(params.freeForm ? { freeForm: params.freeForm } : {}),
+      ...(params.body ? { body: params.body } : {}),
     });
     return sent;
+  }
+
+  /**
+   * The employer paid to reach a recommended worker: their details. Free
+   * inside the 24h window, the template (with its feedback button) outside —
+   * where an employer who paid on the web usually is.
+   */
+  async sendContactUnlockedRecommendation(p: {
+    phone: string;
+    employerId: string;
+    worker: { name: string; phone: string | null; email: string | null };
+  }): Promise<boolean> {
+    return this.notify({
+      phone: p.phone,
+      profileId: p.employerId,
+      key: 'contactUnlockedRecommendation',
+      params: {
+        ...p.worker,
+        flowToken: this.feedback.mintFlowToken(p.employerId),
+      },
+      freeForm: contactUnlockedRecommendationFreeForm(p.worker),
+      body: formatContactUnlockedMessage(p.worker),
+    });
+  }
+
+  /** The per-type switch, for the sends that bypass {@link notify}. */
+  async whatsAppAllows(group: WhatsAppNotificationGroup): Promise<boolean> {
+    return this.dispatcher ? this.dispatcher.allows(group) : true;
   }
 
   /**
@@ -424,30 +467,42 @@ export class BotNotificationService {
       // used to be `feedback.requestFeedback`, a free-form interactive send:
       // WhatsApp rejects those outside the 24h service window (131047), which
       // is precisely where anyone who paid on the web sits.
+      // Through the dispatcher: free inside the 24h window, the template (with
+      // its feedback button) outside it.
       if (employer?.phone && worker && attempt.employer_id !== skipId) {
-        await this.whatsApp.sendTemplateMessage(
-          employer.phone,
-          'contactUnlocked',
-          {
-            name: `${worker.first_name} ${worker.last_name}`.trim(),
-            phone: worker.phone,
-            email: worker.email,
+        const contact = {
+          name: `${worker.first_name} ${worker.last_name}`.trim(),
+          phone: worker.phone,
+          email: worker.email,
+        };
+        await this.notify({
+          phone: employer.phone,
+          profileId: attempt.employer_id,
+          key: 'contactUnlocked',
+          params: {
+            ...contact,
             flowToken: this.feedback.mintFlowToken(attempt.employer_id),
           },
-        );
+          freeForm: contactUnlockedFreeForm(contact),
+        });
       }
 
       if (worker?.phone && employer && attempt.worker_id !== skipId) {
-        await this.whatsApp.sendTemplateMessage(
-          worker.phone,
-          'contactUnlocked',
-          {
-            name: `${employer.first_name} ${employer.last_name}`.trim(),
-            phone: employer.phone,
-            email: employer.email,
+        const contact = {
+          name: `${employer.first_name} ${employer.last_name}`.trim(),
+          phone: employer.phone,
+          email: employer.email,
+        };
+        await this.notify({
+          phone: worker.phone,
+          profileId: attempt.worker_id,
+          key: 'contactUnlocked',
+          params: {
+            ...contact,
             flowToken: this.feedback.mintFlowToken(attempt.worker_id),
           },
-        );
+          freeForm: contactUnlockedFreeForm(contact),
+        });
       }
 
       // The contract, after both contact messages and behind its own failure
@@ -499,6 +554,8 @@ export class BotNotificationService {
     // half-paid attempt would be a real bug, not a cosmetic one.
     if (attempt.status !== ContactUnlockStatus.UNLOCKED) return;
     if (!this.contractService || !this.whatsAppDocuments) return;
+    // Off by default: the contract stays downloadable in the app.
+    if (!(await this.whatsAppAllows('mission_contract_pdf'))) return;
     if (!this.whatsApp.supports('templateDocumentHeader')) return;
 
     const contract = await this.contractService.create(attempt.application_id);
@@ -572,6 +629,10 @@ export class BotNotificationService {
     profileId: string,
     amount: number,
   ): Promise<void> {
+    notifyProfile(this.events, {
+      recipientId: profileId,
+      input: { type: 'UNLOCK_CONVERTED_TO_CREDIT', amount },
+    });
     try {
       const profile = await this.prisma.profile.findUnique({
         where: { id: profileId },
@@ -669,6 +730,7 @@ export class BotNotificationService {
         input: { type: 'HIRE_CANCELLED', jobTitle: app.job_offer.title },
       });
       if (!app.worker?.phone) return;
+      if (!(await this.whatsAppAllows('cancellations'))) return;
 
       const lines = [
         `*${app.worker.first_name}*, l'employeur a annulé votre mission « ${app.job_offer.title} ».`,
@@ -719,6 +781,7 @@ export class BotNotificationService {
         },
       });
       if (!app.worker?.phone) return;
+      if (!(await this.whatsAppAllows('offer_updates'))) return;
 
       await this.whatsApp.sendTextMessage(
         app.worker.phone,

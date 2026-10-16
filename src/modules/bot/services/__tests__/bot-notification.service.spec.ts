@@ -424,11 +424,13 @@ describe('BotNotificationService', () => {
         '+242001',
         'contactUnlocked',
         expect.objectContaining({ flowToken: 'fb_emp-1_uuid' }),
+        'emp-1',
       );
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+242002',
         'contactUnlocked',
         expect.objectContaining({ flowToken: 'fb_worker-1_uuid' }),
+        'worker-1',
       );
     });
 
@@ -937,6 +939,132 @@ describe('BotNotificationService', () => {
         service.sendRecommendedJobNotification('worker-1', 'jo-1'),
       ).resolves.toBe(false);
       expect(deps.whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('with the dispatcher (per-type switches)', () => {
+    let dispatcher: { send: jest.Mock; allows: jest.Mock };
+
+    beforeEach(() => {
+      dispatcher = {
+        send: jest.fn().mockResolvedValue({ mode: 'FREE_FORM', sent: true }),
+        allows: jest.fn().mockResolvedValue(false),
+      };
+      (service as any).dispatcher = dispatcher;
+    });
+
+    const unlockParties = () => {
+      deps.prisma.contactUnlockAttempt.findUnique.mockResolvedValue({
+        id: 'attempt-1',
+        status: 'UNLOCKED',
+        application_id: 'app-1',
+        employer_id: 'emp-1',
+        worker_id: 'worker-1',
+      });
+      deps.prisma.profile.findUnique
+        .mockResolvedValueOnce({
+          phone: '+242001',
+          first_name: 'Alice',
+          last_name: 'Smith',
+          email: 'a@t.com',
+        })
+        .mockResolvedValueOnce({
+          phone: '+242002',
+          first_name: 'Bob',
+          last_name: 'Jones',
+          email: 'b@t.com',
+        });
+      deps.prisma.application.findUnique = jest
+        .fn()
+        .mockResolvedValue({ job_offer: { title: 'Peinture' } });
+      redis.set.mockResolvedValue('OK');
+    };
+
+    it('sends the unlock through the dispatcher, free-form inside the window', async () => {
+      unlockParties();
+
+      await service.sendContactUnlockedNotification('attempt-1');
+
+      expect(deps.whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+      expect(dispatcher.send).toHaveBeenCalledTimes(2);
+      expect(dispatcher.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phone: '+242001',
+          profileId: 'emp-1',
+          template: expect.objectContaining({ key: 'contactUnlocked' }),
+          freeForm: expect.objectContaining({
+            body: expect.stringContaining('Bob Jones'),
+          }),
+        }),
+      );
+    });
+
+    it('sends no contract PDF while its switch is off', async () => {
+      unlockParties();
+
+      await service.sendContactUnlockedNotification('attempt-1');
+
+      expect(dispatcher.allows).toHaveBeenCalledWith('mission_contract_pdf');
+      expect(whatsAppDocuments.send).not.toHaveBeenCalled();
+    });
+
+    it('sends the contract PDF when its switch is on', async () => {
+      dispatcher.allows.mockResolvedValue(true);
+      unlockParties();
+
+      await service.sendContactUnlockedNotification('attempt-1');
+
+      expect(whatsAppDocuments.send).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps a cancelled hire in-app only while cancellations are off', async () => {
+      deps.prisma.application.findUnique.mockResolvedValue({
+        worker_id: 'worker-1',
+        job_offer: { title: 'Plombier', employer_id: 'emp-1' },
+        worker: { phone: '+242001', first_name: 'Bob' },
+      });
+
+      await service.sendCancellationToWorker('app-1', null);
+
+      expect(inAppNotifications(events.emit, 'HIRE_CANCELLED')).toHaveLength(1);
+      expect(dispatcher.allows).toHaveBeenCalledWith('cancellations');
+      expect(deps.whatsApp.sendTextMessage).not.toHaveBeenCalled();
+    });
+
+    it('keeps an offer change in-app only while offer updates are off', async () => {
+      deps.prisma.application.findUnique.mockResolvedValue({
+        worker_id: 'worker-1',
+        job_offer: { title: 'Plombier', employer_id: 'emp-1' },
+        worker: { phone: '+242001', first_name: 'Bob' },
+      });
+
+      await service.sendJobOfferUpdatedToWorker('app-1', ['la date']);
+
+      expect(inAppNotifications(events.emit, 'JOB_OFFER_UPDATED')).toHaveLength(
+        1,
+      );
+      expect(deps.whatsApp.sendTextMessage).not.toHaveBeenCalled();
+    });
+
+    it('sends the recommendation unlock through the dispatcher', async () => {
+      await service.sendContactUnlockedRecommendation({
+        phone: '+242001',
+        employerId: 'emp-1',
+        worker: { name: 'Sara K', phone: '+242002', email: null },
+      });
+
+      expect(dispatcher.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          profileId: 'emp-1',
+          template: expect.objectContaining({
+            key: 'contactUnlockedRecommendation',
+            params: expect.objectContaining({ name: 'Sara K' }),
+          }),
+          freeForm: expect.objectContaining({
+            body: expect.stringContaining('Sara K'),
+          }),
+        }),
+      );
     });
   });
 });
