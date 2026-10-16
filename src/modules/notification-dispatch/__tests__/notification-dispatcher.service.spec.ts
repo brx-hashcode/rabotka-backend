@@ -29,7 +29,7 @@ describe('NotificationDispatcher', () => {
     openServiceWindows: jest.Mock;
   };
   let loginLink: { shortLink: jest.Mock };
-  let systemConfig: { prefersFreeForm: jest.Mock };
+  let systemConfig: { prefersFreeForm: jest.Mock; get: jest.Mock };
   let module: TestingModule;
 
   beforeEach(async () => {
@@ -46,7 +46,11 @@ describe('NotificationDispatcher', () => {
     loginLink = {
       shortLink: jest.fn().mockResolvedValue('https://rabotka.work/s/ABC123'),
     };
-    systemConfig = { prefersFreeForm: jest.fn().mockResolvedValue(true) };
+    // Every notification group switched on, unless a test says otherwise.
+    systemConfig = {
+      prefersFreeForm: jest.fn().mockResolvedValue(true),
+      get: jest.fn().mockResolvedValue('true'),
+    };
 
     module = await Test.createTestingModule({
       providers: [
@@ -66,6 +70,49 @@ describe('NotificationDispatcher', () => {
   afterEach(async () => {
     await module.close();
     jest.clearAllMocks();
+  });
+
+  describe('per-type switch', () => {
+    it('sends nothing when the group is switched off', async () => {
+      systemConfig.get.mockResolvedValue('false');
+
+      const result = await dispatcher.send({
+        phone: PHONE,
+        profileId: PROFILE_ID,
+        template,
+        freeForm,
+      });
+
+      expect(result).toEqual({ mode: 'TEMPLATE', sent: false });
+      expect(systemConfig.get).toHaveBeenCalledWith(
+        'whatsapp.notify.application_rejected',
+        'false',
+      );
+      expect(whatsApp.sendInteractiveCta).not.toHaveBeenCalled();
+      expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the group default when the key was never set', async () => {
+      systemConfig.get.mockImplementation((_key: string, fallback: string) =>
+        Promise.resolve(fallback),
+      );
+
+      await expect(dispatcher.allows('new_application')).resolves.toBe(true);
+      await expect(dispatcher.allows('mission_reminders')).resolves.toBe(false);
+    });
+
+    it('never gates a template outside the groups', async () => {
+      systemConfig.get.mockResolvedValue('false');
+
+      const result = await dispatcher.send({
+        phone: PHONE,
+        profileId: PROFILE_ID,
+        template: { key: 'accountActivatedWorker', params: undefined } as never,
+      });
+
+      expect(result.sent).toBe(true);
+      expect(whatsApp.sendTemplateMessage).toHaveBeenCalled();
+    });
   });
 
   it('sends free-form inside the window, and pays for no template', async () => {

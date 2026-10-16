@@ -271,33 +271,13 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
     );
   });
 
-  it('fetches new balance and sends WhatsApp confirmation after top-up', async () => {
+  it('confirms the top-up in-app only, with no WhatsApp text', async () => {
     await service.handlePaymentCallback({
       paymentId: GATEWAY_REF,
       status: 'SUCCESS',
     });
 
-    expect(mockWalletService.getProfileWalletBalance).toHaveBeenCalledWith(
-      PROFILE_ID,
-    );
-    expect(mockBotNotification.sendMessage).toHaveBeenCalledWith(
-      mockProfile.phone,
-      expect.stringContaining('Wallet rechargé'),
-    );
-  });
-
-  it('WhatsApp message includes credited amount and new balance', async () => {
-    mockWalletService.getProfileWalletBalance.mockResolvedValue(15000);
-
-    await service.handlePaymentCallback({
-      paymentId: GATEWAY_REF,
-      status: 'SUCCESS',
-    });
-
-    const sentMessage = mockBotNotification.sendMessage.mock
-      .calls[0]?.[1] as string;
-    expect(sentMessage).toContain('5'); // credited amount
-    expect(sentMessage).toContain('15'); // new balance
+    expect(mockBotNotification.sendMessage).not.toHaveBeenCalled();
   });
 
   it('does NOT credit wallet for PENALTY_BATCH payment (no regression)', async () => {
