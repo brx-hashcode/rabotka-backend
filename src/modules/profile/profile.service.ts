@@ -39,6 +39,7 @@ import {
   accountSuspendedFreeForm,
 } from '../bot/messages/notifications.messages';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
+import { notifyProfile } from '../profile-notification/profile-notification.events';
 import {
   PROFILE_AUTO_SUSPENDED_EVENT,
   type ProfileAutoSuspendedPayload,
@@ -1365,6 +1366,10 @@ export class ProfileService {
     reason: string | null,
   ): Promise<void> {
     const profileId = profile.id;
+    notifyProfile(this.eventEmitter, {
+      recipientId: profileId,
+      input: { type: 'ACCOUNT_SUSPENDED', reason },
+    });
     try {
       if (profile.email) {
         await this.mailService.sendMail({

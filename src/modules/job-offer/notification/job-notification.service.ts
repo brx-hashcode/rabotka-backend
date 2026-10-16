@@ -229,12 +229,20 @@ export class JobNotificationService {
       }
     }
 
-    let sent = false;
+    // Switched off on WhatsApp: the bell alone carries it, under the same
+    // cooldown and sent marker.
+    const viaWhatsApp = await this.botNotification.whatsAppAllows(
+      'job_recommendations',
+    );
+
+    let sent = !viaWhatsApp;
     try {
-      sent = await this.botNotification.sendRecommendedJobNotification(
-        worker.id,
-        offer.id,
-      );
+      if (viaWhatsApp) {
+        sent = await this.botNotification.sendRecommendedJobNotification(
+          worker.id,
+          offer.id,
+        );
+      }
     } catch (err) {
       this.logger.warn(
         `sendRecommendedJobNotification threw for worker ${worker.id}`,

@@ -5,6 +5,12 @@ import { BotPauseService } from '../bot/services/bot-pause.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { notificationDispatchCounter } from '../whatsapp/telemetry/metrics';
 import type { TemplateKey, TemplateParams } from '../whatsapp/contracts';
+import {
+  TEMPLATE_NOTIFICATION_GROUP,
+  WHATSAPP_NOTIFICATION_GROUPS,
+  whatsAppNotificationKey,
+  type WhatsAppNotificationGroup,
+} from './whatsapp-notification-groups';
 
 /** How the message actually left, for the caller and for the metric. */
 export type DispatchMode = 'FREE_FORM' | 'TEMPLATE';
@@ -99,10 +105,34 @@ export class NotificationDispatcher {
     return this.whatsApp.openServiceWindows(profileIds);
   }
 
+  /**
+   * Whether this kind of notification goes out on WhatsApp at all — see
+   * `WHATSAPP_NOTIFICATION_GROUPS`. The in-app notification is written by the
+   * caller either way.
+   */
+  async allows(group: WhatsAppNotificationGroup): Promise<boolean> {
+    const fallback = String(WHATSAPP_NOTIFICATION_GROUPS[group]);
+    const value = await this.systemConfig.get(
+      whatsAppNotificationKey(group),
+      fallback,
+    );
+    return value === 'true';
+  }
+
   async send<K extends TemplateKey>(
     input: DispatchInput<K>,
   ): Promise<DispatchResult> {
     const { phone, profileId, template, freeForm, body } = input;
+
+    const group = TEMPLATE_NOTIFICATION_GROUP[template.key];
+    if (group && !(await this.allows(group))) {
+      notificationDispatchCounter.inc({
+        mode: 'template',
+        reason: 'type_disabled',
+        template: template.key,
+      });
+      return { mode: 'TEMPLATE', sent: false };
+    }
 
     /**
      * An admin has taken this conversation over — nothing automated goes out.

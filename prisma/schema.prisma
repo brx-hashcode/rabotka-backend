@@ -2176,6 +2176,14 @@ enum ProfileNotificationType {
   /// one was just hired, and here is the one step that would raise this
   /// profile. Anonymous, at most once a week (SimilarHireNudgeService).
   SIMILAR_PROFILE_HIRED
+  // Moved off WhatsApp: news the app now carries on its own.
+  MISSION_REMINDER
+  MISSION_STARTED
+  MISSION_STATUS_CHECK
+  JOB_OFFER_EXPIRED
+  KYC_REJECTED
+  ACCOUNT_SUSPENDED
+  UNLOCK_CONVERTED_TO_CREDIT
 }
 
 /// The in-app feed behind the bell in rabotka-client.

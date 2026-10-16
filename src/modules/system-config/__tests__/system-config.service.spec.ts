@@ -122,6 +122,13 @@ describe('SystemConfigService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('refuses a WhatsApp notification switch that is not true or false', async () => {
+      await expect(
+        service.set('whatsapp.notify.mission_reminders', 'yes', 'admin-1'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.systemConfig.update).not.toHaveBeenCalled();
+    });
+
     it('allows setting non-fee keys to any string value', async () => {
       mockPrisma.systemConfig.update.mockResolvedValue({});
       await expect(

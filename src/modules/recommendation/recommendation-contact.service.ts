@@ -27,8 +27,6 @@ import { SystemConfigService } from '../system-config/system-config.service';
 import { InvoiceService } from '../invoice/invoice.service';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { PaymentRequestService } from '../payment-request/payment-request.service';
-import { formatContactUnlockedMessage } from '../bot/messages/contact-unlock.messages';
-import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { notifyProfile } from '../profile-notification/profile-notification.events';
 import { personName } from '../profile-notification/notification-catalog';
@@ -159,28 +157,16 @@ export class RecommendationContactService {
       select: { phone: true },
     });
     if (employer?.phone) {
-      // Sent as an approved template, not free-form. The employer usually pays
-      // on the web without ever messaging the bot, which puts them outside
-      // WhatsApp's 24h service window — free-form is rejected there (63016), so
-      // the contact they just paid for silently never arrived.
-      const tpl = WHATSAPP_TEMPLATES.contactUnlockedRecommendation;
-      void this.whatsApp
-        .sendTemplateMessage(
-          employer.phone,
-          'contactUnlockedRecommendation',
-          {
-            name: workerName,
-            phone: worker.phone ?? null,
-            email: worker.email ?? null,
-            flowToken: this.feedback.mintFlowToken(employerId),
-          },
+      void this.botNotification
+        .sendContactUnlockedRecommendation({
+          phone: employer.phone,
           employerId,
-          formatContactUnlockedMessage({
+          worker: {
             name: workerName,
             phone: worker.phone ?? null,
             email: worker.email ?? null,
-          }),
-        )
+          },
+        })
         .catch(() => undefined);
     }
 

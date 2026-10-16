@@ -794,6 +794,17 @@ describe('PaymentRequestService', () => {
       expect(payload.dedupeKey).toContain(req.id);
     });
 
+    it('sends no WhatsApp text: the failure lives in-app only', async () => {
+      (prisma.paymentRequest.findFirst as jest.Mock).mockResolvedValue(
+        failedRequest(),
+      );
+      (prisma.paymentRequest as any).updateMany.mockResolvedValue({ count: 1 });
+
+      await service.handlePaymentCallback({ status: 'FAILED' });
+
+      expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+    });
+
     it('stays quiet when another webhook already settled it', async () => {
       (prisma.paymentRequest.findFirst as jest.Mock).mockResolvedValue(
         failedRequest(),

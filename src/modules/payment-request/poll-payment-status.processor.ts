@@ -14,7 +14,6 @@ import { QueueService } from '../../common/services/queue/queue.service';
 import { POLL_PAYMENT_STATUS_QUEUE } from '../../common/services/queue/queue.module';
 import { LogService } from '../log/log.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
-import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import {
   notifyProfile,
   paymentFailedNotification,
@@ -69,7 +68,6 @@ export class PollPaymentStatusProcessor {
     private readonly paymentStatusGateway: PaymentStatusGateway,
     private readonly queueService: QueueService,
     private readonly logService: LogService,
-    private readonly whatsApp: WhatsAppService,
     // Appended and optional: the specs construct this processor positionally.
     @Optional() private readonly events?: EventEmitter2,
   ) {}
@@ -129,7 +127,6 @@ export class PollPaymentStatusProcessor {
           request_type: job.data.requestType,
         }),
       );
-      await this.notifyPaymentFailed(job.data);
       return;
     }
 
@@ -156,7 +153,6 @@ export class PollPaymentStatusProcessor {
       attempt,
     });
     this.paymentStatusGateway.emitPaymentStatus(token, 'TIMEOUT');
-    await this.notifyPaymentFailed(job.data);
   }
 
   private async recordFailure(
@@ -231,33 +227,5 @@ export class PollPaymentStatusProcessor {
     this.logger.warn(
       `Payment FAILED — request ${requestId} | reason: ${options.reason} | amount: ${amount} FCFA | phone: ${phone ?? 'n/a'} | gatewayRef: ${gatewayRef} | attempt: ${options.attempt}`,
     );
-  }
-
-  private async notifyPaymentFailed(
-    jobData: PollPaymentStatusJobData,
-  ): Promise<void> {
-    try {
-      const profile = await this.prisma.profile.findUnique({
-        where: { id: jobData.profileId },
-        select: { phone: true },
-      });
-      if (!profile?.phone) return;
-
-      const amountStr = jobData.amount.toLocaleString('fr-FR');
-      const message = [
-        `❌ *Paiement échoué*`,
-        ``,
-        `Votre paiement de *${amountStr} FCFA* via Mobile Money n'a pas abouti.`,
-        ``,
-        `Vous pouvez réessayer ou choisir un autre mode de paiement.`,
-      ].join('\n');
-
-      await this.whatsApp.sendTextMessage(profile.phone, message);
-    } catch (err) {
-      this.logger.warn(
-        `Could not send payment failure WhatsApp notification for request ${jobData.requestId}`,
-        err instanceof Error ? err.message : String(err),
-      );
-    }
   }
 }

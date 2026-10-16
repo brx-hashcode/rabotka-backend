@@ -154,6 +154,8 @@ describe('PollPaymentStatusProcessor', () => {
       input: { amount: 5000, kind: 'CONTACT_UNLOCK' },
     });
     expect(payload.dedupeKey).toMatch(/payfail:req-1$/);
+    // In-app only: the WhatsApp text doubled the webhook's.
+    expect(mockWhatsApp.sendTextMessage).not.toHaveBeenCalled();
   });
 
   it('does not report a timeout as a failure in the bell', async () => {

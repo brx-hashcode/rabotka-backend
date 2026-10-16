@@ -1,3 +1,5 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { notifyProfile } from '../profile-notification/profile-notification.events';
 import {
   Controller,
   Get,
@@ -54,7 +56,10 @@ import { KYC_REJECTED_CTA_PATH } from '../../common/constants/whatsapp-templates
 import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
 import { NotificationDispatcher } from '../notification-dispatch/notification-dispatcher.service';
 import { BotPauseService } from '../bot/services/bot-pause.service';
-import { kycRejectedFreeForm } from '../bot/messages/notifications.messages';
+import {
+  kycApprovedFreeForm,
+  kycRejectedFreeForm,
+} from '../bot/messages/notifications.messages';
 import { AdminListProfilesDto } from './dto/admin-list-profiles.dto';
 import {
   AdminVerifyProfileDto,
@@ -99,6 +104,9 @@ export class AdminProfileController {
     // the files are left in storage, as before.
     @Optional()
     private readonly profileFiles?: ProfileFilesService,
+    // In-app notifications. Optional for the same positional reason.
+    @Optional()
+    private readonly events?: EventEmitter2,
   ) {}
 
   /**
@@ -987,14 +995,26 @@ export class AdminProfileController {
         html: await this.layout.wrap(kycApprovedEmail(fullName)),
       });
 
-      this.whatsApp
-        .sendTemplateMessage(result.phone, 'kyc', result.firstName, id)
-        .catch((err) =>
-          console.warn(
-            `Failed to send KYC validated WhatsApp message for ${id}:`,
-            err,
-          ),
-        );
+      // Free inside the 24h window, the template outside it.
+      (this.dispatcher
+        ? this.dispatcher.send({
+            phone: result.phone,
+            profileId: id,
+            template: { key: 'kyc', params: result.firstName },
+            freeForm: kycApprovedFreeForm(result.firstName),
+          })
+        : this.whatsApp.sendTemplateMessage(
+            result.phone,
+            'kyc',
+            result.firstName,
+            id,
+          )
+      ).catch((err: unknown) =>
+        console.warn(
+          `Failed to send KYC validated WhatsApp message for ${id}:`,
+          err,
+        ),
+      );
 
       // The agreement, as a second message and deliberately after the one
       // above. The `kyc` template carries the CTA that gets the user back into
@@ -1012,6 +1032,10 @@ export class AdminProfileController {
           ),
         );
     } else {
+      notifyProfile(this.events, {
+        recipientId: id,
+        input: { type: 'KYC_REJECTED', reason: dto.reason ?? null },
+      });
       await this.mail.sendMail({
         to: result.email,
         subject: 'Votre vérification KYC a été rejetée',

@@ -72,6 +72,25 @@ const SAMPLES: NotificationInput[] = [
     city: 'Brazzaville',
     step: 'PORTFOLIO',
   },
+  {
+    type: 'MISSION_REMINDER',
+    when: 'TOMORROW',
+    applicationId: 'a-1',
+    jobTitle: 'Plombier',
+    schedule: '01/06/2026 11:00',
+    address: 'Poto-Poto',
+  },
+  { type: 'MISSION_STARTED', jobOfferId: 'o-1', jobTitle: 'Plombier' },
+  { type: 'MISSION_STATUS_CHECK', jobOfferId: 'o-1', jobTitle: 'Plombier' },
+  {
+    type: 'JOB_OFFER_EXPIRED',
+    recipientRole: 'EMPLOYER',
+    jobOfferId: 'o-1',
+    jobTitle: 'Plombier',
+  },
+  { type: 'KYC_REJECTED', reason: 'Pièce illisible' },
+  { type: 'ACCOUNT_SUSPENDED', reason: null },
+  { type: 'UNLOCK_CONVERTED_TO_CREDIT', amount: 500 },
 ];
 
 describe('renderNotification', () => {
@@ -213,5 +232,52 @@ describe('SIMILAR_PROFILE_HIRED', () => {
         step: 'PORTFOLIO',
       }),
     ).toMatchObject({ link: '/profile/portfolio' });
+  });
+
+  describe('events moved off WhatsApp', () => {
+    it('reminds the worker the day before, with the place, linking to the mission', () => {
+      expect(
+        renderNotification({
+          type: 'MISSION_REMINDER',
+          when: 'TOMORROW',
+          applicationId: 'a-1',
+          jobTitle: 'Plombier',
+          schedule: '01/06/2026 11:00',
+          address: 'Poto-Poto',
+        }),
+      ).toEqual({
+        title: 'Votre mission commence demain',
+        body: '« Plombier » — 01/06/2026 11:00 · Poto-Poto. Prévenez l’employeur au plus tôt si vous ne pouvez plus venir.',
+        link: '/applications/a-1',
+      });
+    });
+
+    it('sends an expired applicant to the offers, the employer to their offer', () => {
+      const base = { jobOfferId: 'o-1', jobTitle: 'Plombier' };
+      expect(
+        renderNotification({
+          type: 'JOB_OFFER_EXPIRED',
+          recipientRole: 'WORKER',
+          ...base,
+        }).link,
+      ).toBe('/recherche-offres');
+      expect(
+        renderNotification({
+          type: 'JOB_OFFER_EXPIRED',
+          recipientRole: 'EMPLOYER',
+          ...base,
+        }).link,
+      ).toBe('/job-offers/o-1');
+    });
+
+    it('says why when a reason is given, and stays readable without one', () => {
+      expect(
+        renderNotification({ type: 'KYC_REJECTED', reason: 'Pièce illisible' })
+          .body,
+      ).toContain('Motif : Pièce illisible.');
+      expect(
+        renderNotification({ type: 'ACCOUNT_SUSPENDED', reason: null }).body,
+      ).toContain('Motif : non précisé.');
+    });
   });
 });

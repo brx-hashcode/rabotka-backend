@@ -46,7 +46,6 @@ import { PaymentStatusGateway } from '../ws-notifications/payment-status.gateway
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { formatPenaltyPaidSuccess } from '../bot/messages/penalty.messages';
-import { formatContactUnlockedMessage } from '../bot/messages/contact-unlock.messages';
 import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
 import { InvoiceService } from '../invoice/invoice.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
@@ -497,13 +496,8 @@ export class PaymentRequestService {
         gatewayRef,
       });
       this.paymentStatusGateway.emitPaymentStatus(request.token, 'REJECTED');
+      // In-app only: a WhatsApp text here duplicated the poller's.
       notifyProfile(this.eventEmitter, paymentFailedNotification(request));
-      this.notifyPaymentFailedByWebhook(request).catch((err: unknown) =>
-        this.logger.warn(
-          `Could not send webhook failure WhatsApp notification for request ${request.id}`,
-          err instanceof Error ? err.message : String(err),
-        ),
-      );
     } else {
       this.logger.warn(
         `Payment callback for ${gatewayRef} re-verified as PENDING — no action taken`,
@@ -810,26 +804,6 @@ export class PaymentRequestService {
     });
   }
 
-  private async notifyPaymentFailedByWebhook(request: {
-    profile_id: string;
-    amount: unknown;
-  }): Promise<void> {
-    const profile = await this.prisma.profile.findUnique({
-      where: { id: request.profile_id },
-      select: { phone: true },
-    });
-    if (!profile?.phone) return;
-    const amountStr = Number(request.amount).toLocaleString('fr-FR');
-    const message = [
-      `*Paiement échoué*`,
-      ``,
-      `Votre paiement de *${amountStr} FCFA* via Mobile Money n'a pas abouti.`,
-      ``,
-      `Vous pouvez réessayer ou choisir un autre mode de paiement.`,
-    ].join('\n');
-    await this.whatsAppService.sendTextMessage(profile.phone, message);
-  }
-
   private async persistFailedPayment(
     request: PaymentRequestWithProfile,
     options: {
@@ -1107,30 +1081,16 @@ export class PaymentRequestService {
       });
       if (!request.profile.phone) return;
 
-      // The approved template, not free-form text. Two reasons: it carries the
-      // feedback Flow on its « Laisser un avis » button, and an employer who
-      // paid on the web without ever messaging the bot is outside WhatsApp's
-      // 24h service window — where free-form is rejected (63016) and the
-      // contact they just paid for silently never arrives. Mirrors
-      // `RecommendationContactService`, which sends the same template on the
-      // wallet-paid path.
-      await this.whatsAppService
-        .sendTemplateMessage(
-          request.profile.phone,
-          'contactUnlockedRecommendation',
-          {
+      await this.botNotification
+        .sendContactUnlockedRecommendation({
+          phone: request.profile.phone,
+          employerId: request.profile_id,
+          worker: {
             name: workerName,
             phone: worker.phone ?? null,
             email: worker.email ?? null,
-            flowToken: this.feedback.mintFlowToken(request.profile_id),
           },
-          request.profile_id,
-          formatContactUnlockedMessage({
-            name: workerName,
-            phone: worker.phone ?? null,
-            email: worker.email ?? null,
-          }),
-        )
+        })
         .catch((err) =>
           this.logger.warn(
             `Recommendation contact send failed for worker ${context.recommendationWorkerId}:`,
@@ -1276,27 +1236,7 @@ export class PaymentRequestService {
           ),
         );
 
-      const newBalance = await this.walletService.getProfileWalletBalance(
-        request.profile_id,
-      );
-
-      if (request.profile.phone) {
-        const message = [
-          `*Wallet rechargé avec succès*`,
-          ``,
-          `Montant crédité : *${context.amount.toLocaleString('fr-FR')} FCFA*`,
-          `Nouveau solde : *${newBalance.toLocaleString('fr-FR')} FCFA*`,
-        ].join('\n');
-        await this.botNotification
-          .sendMessage(request.profile.phone, message)
-          .catch((err) =>
-            this.logger.warn(
-              `Wallet top-up WhatsApp notification failed for profile ${request.profile_id}:`,
-              err,
-            ),
-          );
-      }
-
+      // The top-up is confirmed in-app (PAYMENT_SUCCEEDED, above).
       this.logger.log(
         `Wallet top-up: ${context.amount} FCFA credited to profile ${request.profile_id} via payment request ${request.id}`,
       );

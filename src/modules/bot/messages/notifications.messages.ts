@@ -453,3 +453,51 @@ export function jobRecommendationFreeForm(p: {
     path: `offres/${p.jobOfferId}`,
   };
 }
+
+/** `contactUnlocked` — both parties paid; the counterpart's details. */
+export function contactUnlockedFreeForm(p: {
+  name: string;
+  phone: string | null;
+  email: string | null;
+}): FreeFormMessage {
+  return {
+    body: [
+      '*Contact débloqué*',
+      '',
+      `Les deux parties ont réglé leur part. Voici les coordonnées de *${p.name}* :`,
+      '',
+      `Téléphone : ${p.phone?.trim() || 'Non renseigné'}`,
+      `Email : ${p.email?.trim() || 'Non renseigné'}`,
+      '',
+      'Un premier message pour vous présenter et confirmer votre présence, et tout est prêt.',
+      '',
+      'Toute l’équipe Rabotka vous souhaite une excellente collaboration.',
+    ].join('\n'),
+    buttonText: 'Ouvrir l’application',
+    path: 'home',
+  };
+}
+
+/** `contactUnlockedRecommendation` — the employer paid to reach a recommended worker. */
+export function contactUnlockedRecommendationFreeForm(p: {
+  name: string;
+  phone: string | null;
+  email: string | null;
+}): FreeFormMessage {
+  return {
+    body: [
+      '*Contact débloqué*',
+      '',
+      `Votre paiement est confirmé. Voici comment joindre *${p.name}* :`,
+      '',
+      `Téléphone : ${p.phone?.trim() || 'Non renseigné'}`,
+      `Email : ${p.email?.trim() || 'Non renseigné'}`,
+      '',
+      'Présentez-lui votre mission dès maintenant — les profils les plus demandés répondent vite.',
+      '',
+      'Toute l’équipe Rabotka vous souhaite une excellente collaboration.',
+    ].join('\n'),
+    buttonText: 'Ouvrir l’application',
+    path: 'home',
+  };
+}
