@@ -90,7 +90,6 @@
     "class-validator": "^0.14.4",
     "cloudinary": "^2.10.1",
     "cookie-parser": "^1.4.7",
-    "csrf-csrf": "^4.0.3",
     "docxtemplater": "^3.69.3",
     "dotenv": "^17.4.2",
     "exceljs": "^4.4.0",

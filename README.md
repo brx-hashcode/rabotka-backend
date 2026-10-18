@@ -29,7 +29,7 @@ Rabotka connects informal workers and employers through a WhatsApp assistant —
 | Payments | pawaPay, MTN MoMo |
 | API Docs | Scalar (@scalar/nestjs-api-reference) |
 | i18n | nestjs-i18n (en, fr, ru) |
-| Security | Arcjet (bot/rate-limit), csrf-csrf, @nestjs/throttler |
+| Security | Arcjet (bot/rate-limit), origin-checked CSRF, @nestjs/throttler |
 | Document generation | docxtemplater, puppeteer, libreoffice-convert, mammoth |
 | Health | @nestjs/terminus |
 
@@ -89,7 +89,7 @@ prisma/
 | `contact-unlock` | Bilateral payment flow to unlock contact info |
 | `contract` | Contract template generation and download for assignments |
 | `conversation` | WhatsApp conversation thread management |
-| `csrf` | CSRF token endpoint + middleware |
+| `csrf` | Origin-check CSRF middleware + exempt routes |
 | `dashboard` | Admin KPIs and activity analytics |
 | `document` | Document management (upload, Google Docs, template variables) |
 | `event` | Internal events with multi-channel delivery |
@@ -182,7 +182,6 @@ REDIS_PORT=6379
 # Auth
 JWT_SECRET=your-secret
 JWT_EXPIRES_IN=7d
-CSRF_SECRET=your-csrf-secret
 
 # Rate limiting
 THROTTLE_TTL=60000
@@ -300,11 +299,7 @@ pnpm worker:dev
 
 ### CSRF protection
 
-All state-changing requests require a CSRF token:
-
-1. `GET /api/v1/csrf` — fetch token
-2. Send it in the `x-csrf-token` header
-3. Include cookies (`credentials: true`)
+No token. A POST/PUT/PATCH/DELETE whose `Origin` (or, failing that, `Referer`) is not in `ALLOW_ORIGINS` or the API's own `APP_BASE_URL` is answered `403 Origin not allowed`. Bearer-authenticated requests, requests without either header (non-browser clients) and the routes in `src/modules/csrf/csrf-exempt.ts` are not checked. See `origin-check.middleware.ts`.
 
 ### i18n
 

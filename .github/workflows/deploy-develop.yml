@@ -251,7 +251,6 @@ jobs:
           REDIS_PASSWORD=$(echo "$VAULT_SECRET" | jq -r '.REDIS_PASSWORD')
           JWT_SECRET=$(echo "$VAULT_SECRET" | jq -r '.JWT_SECRET')
           JWT_EXPIRES_IN=$(echo "$VAULT_SECRET" | jq -r '.JWT_EXPIRES_IN')
-          CSRF_SECRET=$(echo "$VAULT_SECRET" | jq -r '.CSRF_SECRET')
           # "Login with Rabotka" (OIDC provider). The app refuses to boot without
           # these — deliberately: a missing signing key must fail at startup, not
           # at the first partner login. See the preflight step below, which

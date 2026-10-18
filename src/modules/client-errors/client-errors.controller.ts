@@ -21,7 +21,7 @@ import { ClientErrorReportDto } from './dto/client-error-report.dto';
  * error went to a console nobody could open. This makes it a log line.
  *
  * Public, because the crash can happen before the session is known. CSRF-exempt
- * (see csrf.module.ts), because the report is sent with `sendBeacon`, which
+ * (see csrf-exempt.ts), because the report is sent with `sendBeacon`, which
  * cannot attach headers. Both are safe here: the endpoint changes no state, and
  * the throttle plus the DTO caps bound what a forged report can do to the logs.
  */
