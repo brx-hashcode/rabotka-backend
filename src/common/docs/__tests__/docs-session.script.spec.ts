@@ -55,24 +55,6 @@ function load(respond: (req: Request) => Response) {
 }
 
 describe('docs session script', () => {
-  it('sends the CSRF token from GET /csrf on later writes, not on reads', async () => {
-    const page = load((req) =>
-      req.url.endsWith('/api/v1/csrf')
-        ? json({ csrfToken: 'tok-1' })
-        : json({}),
-    );
-
-    await page.fetch(`${ORIGIN}/api/v1/csrf`);
-    await page.fetch(`${ORIGIN}/api/v1/admin/agents`, {
-      method: 'POST',
-      body: '{}',
-    });
-    await page.fetch(`${ORIGIN}/api/v1/admin/agents`);
-
-    expect(page.sent[1].headers.get('x-csrf-token')).toBe('tok-1');
-    expect(page.sent[2].headers.get('x-csrf-token')).toBeNull();
-  });
-
   it('keeps a login token and sends it as Bearer on every later call', async () => {
     const page = load((req) =>
       req.url.endsWith('/verify-otp')
@@ -138,11 +120,11 @@ describe('docs session script', () => {
   });
 
   it('leaves requests to any other origin untouched', async () => {
-    const page = load((req) =>
-      req.url.endsWith('/csrf') ? json({ csrfToken: 'tok-1' }) : json({}),
-    );
-    await page.fetch(`${ORIGIN}/api/v1/csrf`);
+    const page = load(() => json({ token: A_JWT }));
+    await page.fetch(`${ORIGIN}/api/v1/agent/auth/verify-otp`, {
+      method: 'POST',
+    });
     await page.fetch('https://example.com/api/v1/x', { method: 'POST' });
-    expect(page.sent[1].headers.get('x-csrf-token')).toBeNull();
+    expect(page.sent[1].headers.get('authorization')).toBeNull();
   });
 });

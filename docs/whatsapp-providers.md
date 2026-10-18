@@ -110,10 +110,11 @@ other order fails for a reason the dashboard will not explain.
 Three pieces of global middleware sit in front of this route, and each has bitten
 this codebase:
 
-- **CSRF** — `doubleCsrfProtection` runs on every request. `/webhooks/whatsapp/`
-  is exempted in `csrf.module.ts`. Without that entry, every POST is answered
-  with `{"statusCode":403,"message":"Invalid CSRF token"}` from middleware and
-  the signature check never runs.
+- **CSRF** — the origin check (`origin-check.middleware.ts`) runs on every
+  request; `/webhooks/whatsapp/` is exempted in `csrf-exempt.ts`. Without that
+  entry a POST carrying a foreign `Origin` is answered
+  `{"statusCode":403,"message":"Origin not allowed"}` from middleware and the
+  signature check never runs.
 - **Throttling** — `ThrottlerGuard` and the Arcjet fixed window both allow
   100 req/min per IP. Both webhook controllers carry `@SkipThrottle()`; the real
   limit is per-phone, in `InboundIngestService`.

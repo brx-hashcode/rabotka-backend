@@ -6,12 +6,9 @@ import { Logger, type INestApplication } from '@nestjs/common';
 import { createHmac } from 'node:crypto';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
-import type { Request, Response, NextFunction } from 'express';
 import { CloudWebhookController } from '../cloud-webhook.controller';
 import { InboundIngestService } from '../inbound-ingest.service';
-import { CsrfModule } from '../../../csrf/csrf.module';
-import { CSRF_UTILITIES } from '../../../csrf/csrf.constants';
-import { csrfVisitorMiddleware } from '../../../csrf/csrf-visitor.middleware';
+import { originCheck } from '../../../csrf/origin-check.middleware';
 import { CloudProvider } from '../../providers/cloud/cloud.provider';
 import { WHATSAPP_PROVIDER } from '../../contracts';
 import type { CloudProviderConfig } from '../../whatsapp.config';
@@ -68,14 +65,6 @@ const PAYLOAD = {
     },
   ],
 };
-
-interface CsrfUtilities {
-  doubleCsrfProtection: (
-    req: Request,
-    res: Response,
-    next: (err?: unknown) => void,
-  ) => void;
-}
 
 /**
  * A real CloudProvider — signature verification has to be the genuine article,
@@ -142,7 +131,6 @@ describe('duplicate webhook delivery', () => {
           ignoreEnvFile: true,
           load: [
             () => ({
-              CSRF_SECRET: 'x'.repeat(32),
               NODE_ENV: 'test',
               THROTTLE_TTL: 60000,
               THROTTLE_LIMIT: 100,
@@ -161,7 +149,6 @@ describe('duplicate webhook delivery', () => {
             ],
           }),
         }),
-        CsrfModule,
       ],
       controllers: [CloudWebhookController],
       providers: [
@@ -212,20 +199,7 @@ describe('duplicate webhook delivery', () => {
     app = moduleRef.createNestApplication({ rawBody: true });
     app.setGlobalPrefix('api/v1', { exclude: ['metrics'] });
     app.use(cookieParser());
-    app.use(csrfVisitorMiddleware);
-
-    const csrf = app.get<CsrfUtilities>(CSRF_UTILITIES);
-    app.use((req: Request, res: Response, next: NextFunction) => {
-      csrf.doubleCsrfProtection(req, res, (err?: unknown) => {
-        if (err) {
-          res
-            .status(403)
-            .json({ statusCode: 403, message: 'Invalid CSRF token' });
-          return;
-        }
-        next();
-      });
-    });
+    app.use(originCheck(['http://localhost:3000']));
 
     await app.init();
     processor = moduleRef.get(WhatsAppInboundProcessor);

@@ -22,7 +22,6 @@ import { RedisModule } from './common/services/redis/redis.module';
 import { IdempotencyModule } from './common/services/idempotency/idempotency.module';
 import { QueueModule } from './common/services/queue/queue.module';
 import { HealthModule } from './modules/health/health.module';
-import { CsrfModule } from './modules/csrf/csrf.module';
 import { getMailerTransportConfig } from './modules/mail/mailer-transport.config.js';
 import { MailModule } from './modules/mail/mail.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -167,7 +166,6 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
       useFactory: (config: ConfigService) => getMailerTransportConfig(config),
     }),
     HealthModule,
-    CsrfModule,
     MailModule,
     WhatsAppTelemetryModule,
     WhatsAppModule,

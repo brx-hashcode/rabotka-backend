@@ -269,7 +269,7 @@ export class AuthController {
 
   // --- Mobile bearer-token endpoints -------------------------------------
   // Cookie-less: tokens are returned in the response body. These paths are
-  // CSRF-exempt (see CsrfModule.skipCsrfProtection).
+  // CSRF-exempt (see csrf-exempt.ts).
 
   @Public()
   @Post('mobile/send-otp')

@@ -6,12 +6,9 @@ import { Logger, type INestApplication } from '@nestjs/common';
 import { createHmac } from 'node:crypto';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
-import type { Request, Response, NextFunction } from 'express';
 import { CloudWebhookController } from '../cloud-webhook.controller';
 import { InboundIngestService } from '../inbound-ingest.service';
-import { CsrfModule } from '../../../csrf/csrf.module';
-import { CSRF_UTILITIES } from '../../../csrf/csrf.constants';
-import { csrfVisitorMiddleware } from '../../../csrf/csrf-visitor.middleware';
+import { originCheck } from '../../../csrf/origin-check.middleware';
 import { CloudProvider } from '../../providers/cloud/cloud.provider';
 import { WHATSAPP_PROVIDER } from '../../contracts';
 import type { CloudProviderConfig } from '../../whatsapp.config';
@@ -55,20 +52,12 @@ const PAYLOAD = {
   ],
 };
 
-interface CsrfUtilities {
-  doubleCsrfProtection: (
-    req: Request,
-    res: Response,
-    next: (err?: unknown) => void,
-  ) => void;
-}
-
 /**
  * The Cloud webhook behind the middleware this app actually runs.
  *
  * Testing the controller in isolation would pass while production returned 403:
- * `doubleCsrfProtection` is mounted on every request in main.ts, and until this
- * change `skipCsrfProtection` exempted only `/whatsapp/incoming`. Meta would
+ * the CSRF middleware is mounted on every request in main.ts, and at one point
+ * its exempt list covered only `/whatsapp/incoming`. Meta would
  * have retried against that 403 for days without the signature check ever
  * running. The same goes for the global ThrottlerGuard, which shares a 100/min
  * per-IP budget with real traffic.
@@ -89,7 +78,6 @@ describe('Cloud webhook through the middleware chain', () => {
           ignoreEnvFile: true,
           load: [
             () => ({
-              CSRF_SECRET: 'x'.repeat(32),
               NODE_ENV: 'test',
               THROTTLE_TTL: 60000,
               THROTTLE_LIMIT: 100,
@@ -108,7 +96,6 @@ describe('Cloud webhook through the middleware chain', () => {
             ],
           }),
         }),
-        CsrfModule,
       ],
       controllers: [CloudWebhookController],
       providers: [
@@ -124,20 +111,7 @@ describe('Cloud webhook through the middleware chain', () => {
     app = moduleRef.createNestApplication({ rawBody: true });
     app.setGlobalPrefix('api/v1', { exclude: ['metrics'] });
     app.use(cookieParser());
-    app.use(csrfVisitorMiddleware);
-
-    const csrf = app.get<CsrfUtilities>(CSRF_UTILITIES);
-    app.use((req: Request, res: Response, next: NextFunction) => {
-      csrf.doubleCsrfProtection(req, res, (err?: unknown) => {
-        if (err) {
-          res
-            .status(403)
-            .json({ statusCode: 403, message: 'Invalid CSRF token' });
-          return;
-        }
-        next();
-      });
-    });
+    app.use(originCheck(['http://localhost:3000']));
 
     await app.init();
   });
@@ -165,13 +139,15 @@ describe('Cloud webhook through the middleware chain', () => {
 
   it('is NOT answered with the CSRF middleware 403', async () => {
     // The specific regression: a 403 whose body is the CSRF error rather than
-    // the controller's signature rejection.
+    // the controller's signature rejection. A foreign Origin makes sure the
+    // exemption, not the missing header, is what lets it through.
     const res = await request(app.getHttpServer())
       .post(url)
       .set('Content-Type', 'application/json')
+      .set('Origin', 'https://www.facebook.com')
       .send(raw);
 
-    expect(res.body).not.toMatchObject({ message: 'Invalid CSRF token' });
+    expect(res.body).not.toMatchObject({ message: 'Origin not allowed' });
   });
 
   it('rejects an unsigned payload with 403 from the controller', async () => {

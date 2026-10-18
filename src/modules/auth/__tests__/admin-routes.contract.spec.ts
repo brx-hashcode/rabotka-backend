@@ -27,7 +27,6 @@ const PUBLIC_PREFIXES = new Set([
   '', // AppController — root/health
   'auth', // login, OTP, QR pairing; guarded per handler where it matters
   'health',
-  'csrf',
   'metrics',
   's', // one-tap short links
   'r', // ad click tracking

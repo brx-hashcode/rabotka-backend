@@ -11,8 +11,10 @@ import { AppModule } from './app.module';
 import { initVovaTracing } from './modules/rag/observability/tracing';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { RedisIoAdapter } from './common/adapters/redis-io.adapter';
-import { CSRF_UTILITIES } from './modules/csrf/csrf.constants';
-import { csrfVisitorMiddleware } from './modules/csrf/csrf-visitor.middleware';
+import {
+  originCheck,
+  parseAllowOrigins,
+} from './modules/csrf/origin-check.middleware';
 import { requestIdMiddleware } from './common/middleware/request-id.middleware';
 import { securityHeaders } from './common/middleware/security-headers.middleware';
 
@@ -42,13 +44,13 @@ async function bootstrap() {
     'http://localhost:3000',
   );
 
-  const origins = allowOrigins
-    .split(',')
-    .map((o) => o.trim())
-    .filter(Boolean);
+  const parsedOrigins = parseAllowOrigins(allowOrigins);
+  const origins = parsedOrigins.length
+    ? parsedOrigins
+    : ['http://localhost:3000'];
 
   app.enableCors({
-    origin: origins.length ? origins : ['http://localhost:3000'],
+    origin: origins,
     credentials: true,
   });
 
@@ -60,7 +62,7 @@ async function bootstrap() {
   const isProduction = environment === 'production';
 
   // First, so the headers are on every response — static files, the docs page
-  // and the JSON 403 the CSRF wrapper writes below included.
+  // and the JSON 403 the origin check writes below included.
   app.use(securityHeaders(isProduction));
 
   // The interactive API reference lists every route, parameter and schema, and
@@ -111,28 +113,15 @@ async function bootstrap() {
   app.use(requestIdMiddleware);
   app.use(I18nMiddleware);
   app.use(cookieParser());
-  app.use(csrfVisitorMiddleware);
-
-  const csrfUtilities = app.get(CSRF_UTILITIES);
-
-  // Wrap doubleCsrfProtection so CSRF failures always return JSON 403 directly,
-  // bypassing Express/NestJS error handler chains that may produce HTML.
+  // CSRF: refuse a state-changing request from an origin that is not ours —
+  // the same list CORS allows, plus the API's own host for the docs page. See
+  // origin-check.middleware.ts for why this replaced the CSRF token.
+  const appBaseUrl = configService.get<string>('APP_BASE_URL');
   app.use(
-    (
-      req: import('express').Request,
-      res: import('express').Response,
-      next: import('express').NextFunction,
-    ) => {
-      csrfUtilities.doubleCsrfProtection(req, res, (err?: unknown) => {
-        if (err) {
-          res
-            .status(403)
-            .json({ statusCode: 403, message: 'Invalid CSRF token' });
-          return;
-        }
-        next();
-      });
-    },
+    originCheck([
+      ...origins,
+      ...(appBaseUrl ? [appBaseUrl] : [`http://localhost:${port}`]),
+    ]),
   );
 
   app.useGlobalInterceptors(new LoggingInterceptor());
@@ -169,19 +158,11 @@ async function bootstrap() {
     app.use(
       '/api-docs',
       // Our own page around Scalar: it adds the session script that fills in
-      // the CSRF token and the bearer token by itself — see
+      // the bearer token by itself — see
       // common/docs/docs-session.script.ts.
       apiDocsPage(
         {
           defaultOpenAllTags: true,
-          additionalHeaders: [
-            {
-              name: 'X-CSRF-TOKEN',
-              description:
-                'Filled in automatically once GET /api/v1/csrf has been called. Not needed with a Bearer token.',
-              required: false,
-            },
-          ],
           hideClientButton: false,
 
           showSidebar: true,

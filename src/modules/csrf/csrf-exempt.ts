@@ -1,12 +1,12 @@
 /**
- * The routes that are called by something other than Rabotka's own pages and
- * therefore cannot carry a CSRF token.
+ * The routes that are called by something other than Rabotka's own pages, and
+ * which the origin check (origin-check.middleware.ts) therefore skips.
  *
  * Each entry is a PATH PREFIX under the global `/api/v1` prefix, matched on a
  * segment boundary. Why each one is here:
  *
  * - `whatsapp/incoming` and `webhooks/whatsapp` — Twilio's and Meta's webhooks.
- *   A provider cannot carry a CSRF token, and a 403 from this middleware means
+ *   A provider is not one of our origins, and a 403 from the check means
  *   signature verification never runs and Meta retries against it for days.
  * - `auth/mobile` — the mobile app, which holds no cookie session.
  * - `agent/auth` — the field-agent app's login, for the same reason: it holds
