@@ -28,10 +28,6 @@ export const REQUEST_ID_HEADER = 'x-request-id';
  *
  * Honours an inbound `x-request-id` so a caller that already has a correlation
  * id keeps it, and echoes the value on the response.
- *
- * Distinct from `csrfSessionId`, which is a year-long visitor cookie — that is a
- * session identity, not a request one, and it is only ever assigned on a
- * visitor's very first request.
  */
 export function requestIdMiddleware(
   req: Request,

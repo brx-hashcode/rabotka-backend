@@ -36,8 +36,8 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
  * `interaction/` is called by Rabotka's own consent page as the user works
  * through it. That split is deliberate: the interaction endpoints are same-site
  * calls from `FRONTEND_URL` carrying the session cookie, so they stay behind
- * CSRF protection, while `authorize` is a plain cross-site navigation and
- * cannot carry a CSRF token at all.
+ * CSRF protection, while `authorize` is a plain cross-site navigation from the
+ * partner's site.
  */
 @ApiTags('OpenID Connect')
 @Controller('oauth')

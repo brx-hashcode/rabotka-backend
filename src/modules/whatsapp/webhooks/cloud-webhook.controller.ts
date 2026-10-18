@@ -31,10 +31,9 @@ import { normalizeCloudWebhook } from './inbound-normalizer';
  *
  * Three things about this route are easy to get wrong in this codebase:
  *
- * 1. CSRF. `doubleCsrfProtection` runs on every request and previously exempted
- *    only `/whatsapp/incoming`; without an entry for this path every POST would
- *    get a JSON 403 from middleware and signature verification would never run.
- *    See `skipCsrfProtection` in csrf.module.ts.
+ * 1. CSRF. The origin check runs on every request; without an entry for this
+ *    path in csrf-exempt.ts a POST carrying a foreign Origin would get a JSON
+ *    403 from middleware and signature verification would never run.
  * 2. Throttling. ThrottlerGuard and the Arcjet fixed window are both global and
  *    both allow 100 req/min per IP. Meta batches statuses and retries hard, so
  *    a bulk send could exhaust that budget and turn into a retry storm.

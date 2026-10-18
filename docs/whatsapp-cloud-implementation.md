@@ -347,9 +347,10 @@ or CR that survives `env_file` — docker compose does not trim.
 
 ### Three pieces of global middleware that have each bitten this route
 
-- **CSRF** — `doubleCsrfProtection` runs on every request; `/webhooks/whatsapp/`
-  is exempted in `csrf.module.ts`. Without that entry every POST is answered
-  `{"statusCode":403,"message":"Invalid CSRF token"}` from middleware and the
+- **CSRF** — the origin check (`origin-check.middleware.ts`) runs on every
+  request; `/webhooks/whatsapp/` is exempted in `csrf-exempt.ts`. Without that
+  entry a POST carrying a foreign `Origin` is answered
+  `{"statusCode":403,"message":"Origin not allowed"}` from middleware and the
   signature check never runs.
 - **Throttling** — `ThrottlerGuard` and the Arcjet fixed window both allow
   100 req/min per IP; Meta batches statuses and retries hard. Both webhook
