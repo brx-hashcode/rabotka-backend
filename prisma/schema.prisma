@@ -587,6 +587,7 @@ model Profile {
   notifications_received          ProfileNotification[]         @relation("ProfileNotificationRecipient")
   broadcast_deliveries            BroadcastRecipient[]
   notifications_triggered         ProfileNotification[]         @relation("ProfileNotificationActor")
+  push_subscriptions              ProfilePushSubscription[]
   conversations_as_worker         ProfileConversation[]         @relation("ConversationWorker")
   conversations_as_employer       ProfileConversation[]         @relation("ConversationEmployer")
   messages_sent                   ProfileMessage[]
@@ -2217,6 +2218,25 @@ model ProfileNotification {
   @@index([recipient_id, created_at(sort: Desc)], name: "idx_profile_notif_recipient_time")
   @@index([recipient_id, type, read_at], name: "idx_profile_notif_recipient_unread")
   @@map("profile_notifications")
+}
+
+/// One browser install that receives the profile's in-app notifications by Web
+/// Push — the client app's twin of AgentPushSubscription. `endpoint` is the
+/// push service's URL for that installation; a 404/410 from it deletes the row.
+model ProfilePushSubscription {
+  id              String    @id @default(uuid()) @db.Uuid
+  created_at      DateTime  @default(now())
+  profile_id      String    @db.Uuid
+  endpoint        String    @unique
+  p256dh          String
+  auth            String
+  user_agent      String?
+  last_success_at DateTime?
+
+  profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+
+  @@index([profile_id], name: "idx_profile_push_profile")
+  @@map("profile_push_subscriptions")
 }
 
 model AdminNotification {

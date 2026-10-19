@@ -21,6 +21,7 @@ import { AgentNotificationController } from './agent-notification.controller';
 import { AgentNotificationService } from './agent-notification.service';
 import { AgentNotificationStream } from './agent-notification-stream';
 import { AgentWebPushService } from './agent-web-push.service';
+import { WebPushModule } from '../../common/services/web-push/web-push.module';
 import { AgentLeadService } from './agent-lead.service';
 import { AgentPortalController } from './agent-portal.controller';
 import { AgentPortalService } from './agent-portal.service';
@@ -54,6 +55,7 @@ import { PublicJobsController } from './public-jobs.controller';
     MatchingModule,
     forwardRef(() => NotificationDispatchModule),
     RecommendationEngineModule,
+    WebPushModule,
   ],
   controllers: [
     AgentAuthController,

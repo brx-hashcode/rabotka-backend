@@ -12,6 +12,7 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { IdempotencyService } from '../../common/services/idempotency/idempotency.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { ProfileNotificationsGateway } from './profile-notifications.gateway';
+import { ProfileWebPushService } from './profile-web-push.service';
 import {
   PROFILE_VIEWS_THRESHOLD_EVENT,
   PROFILE_VIEW_DEDUPE_SECONDS,
@@ -110,6 +111,11 @@ function metadataOf(input: NotificationInput): Prisma.InputJsonValue {
   return rest;
 }
 
+/** The phone notification for an in-app one: same copy, same tap target. */
+function pushPayload(dto: ProfileNotificationDto) {
+  return { id: dto.id, title: dto.title, body: dto.body, link: dto.link };
+}
+
 @Injectable()
 export class ProfileNotificationService {
   private readonly logger = new Logger(ProfileNotificationService.name);
@@ -120,6 +126,7 @@ export class ProfileNotificationService {
     private readonly systemConfig: SystemConfigService,
     private readonly gateway: ProfileNotificationsGateway,
     private readonly events: EventEmitter2,
+    private readonly push: ProfileWebPushService,
   ) {}
 
   /**
@@ -171,9 +178,18 @@ export class ProfileNotificationService {
       select: { ...PUBLIC_SELECT, recipient_id: true },
     });
 
+    const pushes: {
+      profileId: string;
+      payload: ReturnType<typeof pushPayload>;
+    }[] = [];
     for (const { recipient_id, ...row } of rows) {
-      this.gateway.emitNew(recipient_id, toDto(row));
+      const dto = toDto(row);
+      this.gateway.emitNew(recipient_id, dto);
+      pushes.push({ profileId: recipient_id, payload: pushPayload(dto) });
     }
+    // Awaited, unlike create(): a broadcast runs in the queue worker, where
+    // nothing waits on it, and the job should not finish before its sends.
+    await this.push.sendMany(pushes);
 
     return result.count;
   }
@@ -198,6 +214,9 @@ export class ProfileNotificationService {
     });
     const dto = toDto(row);
     this.gateway.emitNew(recipientId, dto);
+    // Not awaited: the caller is the business event that caused this, and a
+    // slow push service must not hold it up. send() never throws.
+    void this.push.send(recipientId, pushPayload(dto));
     return dto;
   }
 
