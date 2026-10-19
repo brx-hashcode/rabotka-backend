@@ -9,6 +9,8 @@ import { ProfileNotificationController } from './profile-notification.controller
 import { AdminProfileNotificationController } from './admin-profile-notification.controller';
 import { ProfileNotificationListener } from './profile-notification.listener';
 import { SimilarHireNudgeService } from './similar-hire-nudge.service';
+import { ProfileWebPushService } from './profile-web-push.service';
+import { WebPushModule } from '../../common/services/web-push/web-push.module';
 
 /**
  * The per-profile in-app feed. Deliberately free of WhatsApp — the reminder
@@ -16,7 +18,13 @@ import { SimilarHireNudgeService } from './similar-hire-nudge.service';
  * modules that import this one do not inherit WhatsApp's import graph.
  */
 @Module({
-  imports: [ConfigModule, AuthModule, PrismaModule, SystemConfigModule],
+  imports: [
+    ConfigModule,
+    AuthModule,
+    PrismaModule,
+    SystemConfigModule,
+    WebPushModule,
+  ],
   controllers: [
     ProfileNotificationController,
     AdminProfileNotificationController,
@@ -26,6 +34,7 @@ import { SimilarHireNudgeService } from './similar-hire-nudge.service';
     ProfileNotificationsGateway,
     ProfileNotificationListener,
     SimilarHireNudgeService,
+    ProfileWebPushService,
   ],
   exports: [ProfileNotificationService],
 })

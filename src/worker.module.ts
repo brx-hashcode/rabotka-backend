@@ -40,6 +40,8 @@ import { BroadcastProcessor } from './modules/broadcast/broadcast.processor';
 import { BotPauseService } from './modules/bot/services/bot-pause.service';
 import { NotificationDispatcher } from './modules/notification-dispatch/notification-dispatcher.service';
 import { ProfileNotificationService } from './modules/profile-notification/profile-notification.service';
+import { ProfileWebPushService } from './modules/profile-notification/profile-web-push.service';
+import { WebPushService } from './common/services/web-push/web-push.service';
 
 /**
  * Worker module for the queue worker process.
@@ -245,6 +247,7 @@ export class WorkerModule {
         systemConfig: SystemConfigService,
         idempotency: IdempotencyService,
         mail: MailService,
+        config: ConfigService,
       ) => {
         // The worker builds its providers by hand, so a new dependency on the
         // dispatcher has to be supplied here too. It is a per-profile bot
@@ -267,6 +270,9 @@ export class WorkerModule {
           systemConfig,
           gateway,
           new EventEmitter2(),
+          // A broadcast's phone notifications go out from here, the process
+          // that writes its rows.
+          new ProfileWebPushService(prisma, new WebPushService(prisma, config)),
         );
         return new BroadcastProcessor(
           prisma,
@@ -285,6 +291,7 @@ export class WorkerModule {
         SystemConfigService,
         IdempotencyService,
         MailService,
+        ConfigService,
       ],
     };
 
