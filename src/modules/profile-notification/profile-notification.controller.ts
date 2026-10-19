@@ -1,7 +1,10 @@
 import {
+  Body,
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Post,
@@ -19,13 +22,21 @@ import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { ProfileNotificationService } from './profile-notification.service';
 import { ListProfileNotificationsDto } from './dto/list-profile-notifications.dto';
+import {
+  ProfilePushSubscribeDto,
+  ProfilePushUnsubscribeDto,
+} from './dto/profile-push-subscription.dto';
+import { ProfileWebPushService } from './profile-web-push.service';
 
 @ApiTags('Profile — Notifications')
 @ApiBearerAuth()
 @Controller('profile/notifications')
 @UseGuards(ProfileAuthGuard)
 export class ProfileNotificationController {
-  constructor(private readonly service: ProfileNotificationService) {}
+  constructor(
+    private readonly service: ProfileNotificationService,
+    private readonly push: ProfileWebPushService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: '[Web/PROFILE] My notifications, newest first' })
@@ -78,6 +89,43 @@ export class ProfileNotificationController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     await this.service.markRead(req.user.profileId, id);
+    return { success: true };
+  }
+
+  @Get('push/key')
+  @ApiOperation({
+    summary: '[Web/PROFILE] The Web Push (VAPID) public key to subscribe with',
+  })
+  async pushKey() {
+    return { publicKey: await this.push.publicKey() };
+  }
+
+  @Post('push/subscribe')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      '[Web/PROFILE] Receive my notifications by Web Push on this device',
+  })
+  async pushSubscribe(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Body() dto: ProfilePushSubscribeDto,
+  ) {
+    await this.push.subscribe(req.user.profileId, {
+      endpoint: dto.endpoint,
+      keys: dto.keys,
+      userAgent: req.headers['user-agent']?.slice(0, 255) ?? null,
+    });
+    return { success: true };
+  }
+
+  @Post('push/unsubscribe')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '[Web/PROFILE] Stop Web Push on this device' })
+  async pushUnsubscribe(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Body() dto: ProfilePushUnsubscribeDto,
+  ) {
+    await this.push.unsubscribe(req.user.profileId, dto.endpoint);
     return { success: true };
   }
 }

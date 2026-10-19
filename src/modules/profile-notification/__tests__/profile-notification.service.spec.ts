@@ -52,6 +52,7 @@ describe('ProfileNotificationService', () => {
       findMany: jest.Mock;
       findUnique: jest.Mock;
       updateMany: jest.Mock;
+      createMany?: jest.Mock;
     };
     broadcastRecipient: { updateMany: jest.Mock };
     broadcast: { update: jest.Mock };
@@ -64,6 +65,7 @@ describe('ProfileNotificationService', () => {
   };
   let gateway: { emitNew: jest.Mock };
   let events: { emit: jest.Mock };
+  let push: { send: jest.Mock; sendMany: jest.Mock };
 
   beforeEach(() => {
     prisma = {
@@ -99,6 +101,10 @@ describe('ProfileNotificationService', () => {
     };
     gateway = { emitNew: jest.fn() };
     events = { emit: jest.fn() };
+    push = {
+      send: jest.fn().mockResolvedValue(undefined),
+      sendMany: jest.fn().mockResolvedValue(undefined),
+    };
 
     service = new ProfileNotificationService(
       prisma as never,
@@ -106,6 +112,7 @@ describe('ProfileNotificationService', () => {
       systemConfig as never,
       gateway as never,
       events as never,
+      push as never,
     );
   });
 
@@ -287,6 +294,25 @@ describe('ProfileNotificationService', () => {
       expect(data.body).toContain('Awa K.');
       expect(idempotency.claim).not.toHaveBeenCalled();
       expect(gateway.emitNew).toHaveBeenCalledWith('emp-1', expect.anything());
+    });
+
+    it('sends the same notification to the recipient’s phone', async () => {
+      await service.handleEvent({
+        recipientId: 'emp-1',
+        input: {
+          type: 'NEW_APPLICATION',
+          applicationId: 'app-1',
+          jobTitle: 'Plombier',
+          workerName: 'Awa K.',
+        },
+      });
+
+      expect(push.send).toHaveBeenCalledWith('emp-1', {
+        id: createdRow.id,
+        title: createdRow.title,
+        body: createdRow.body,
+        link: createdRow.link,
+      });
     });
 
     const failed = {
@@ -505,6 +531,30 @@ describe('ProfileNotificationService', () => {
       // The row IS read — a reporting counter must not be able to undo that.
       await expect(service.markRead(WORKER_ID, 'n-1')).resolves.toBeUndefined();
       expect(prisma.profileNotification.updateMany).toHaveBeenCalled();
+    });
+  });
+  describe('createMany', () => {
+    it('pushes each written row to its recipient', async () => {
+      prisma.profileNotification.createMany = jest
+        .fn()
+        .mockResolvedValue({ count: 2 });
+      prisma.profileNotification.findMany.mockResolvedValue([
+        { ...createdRow, id: 'n-a', recipient_id: 'p-a' },
+        { ...createdRow, id: 'n-b', recipient_id: 'p-b' },
+      ]);
+
+      await service.createMany(['p-a', 'p-b'], {
+        type: 'ANNOUNCEMENT',
+        broadcastId: 'b-1',
+        title: 'Nouveauté',
+        body: 'Texte',
+        link: null,
+      });
+
+      expect(push.sendMany).toHaveBeenCalledWith([
+        { profileId: 'p-a', payload: expect.objectContaining({ id: 'n-a' }) },
+        { profileId: 'p-b', payload: expect.objectContaining({ id: 'n-b' }) },
+      ]);
     });
   });
 });
