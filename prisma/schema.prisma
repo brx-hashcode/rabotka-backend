@@ -3196,3 +3196,57 @@ enum PayoutStatus {
   COMPLETED
   FAILED
 }
+
+/// How far a sign-up got. In order: each one is a screen of the onboarding the
+/// person reached, so the stage of an unfinished attempt is where they stopped.
+enum OnboardingStage {
+  /// A WhatsApp code was sent and never entered.
+  CODE_SENT
+  /// The number checked out — they were on the profile type screen.
+  PHONE_VERIFIED
+  /// They reached the identity documents.
+  DOCUMENTS
+  /// They reached the last screen, the review before « Créer mon compte ».
+  CONFIRMATION
+  /// The account exists.
+  COMPLETED
+}
+
+/// One sign-up attempt per phone number, from the first WhatsApp code to the
+/// account — so the people who stopped halfway can be called and asked why.
+///
+/// Recorded best-effort: a failure to write here is logged and never refuses
+/// or slows a sign-up. A row is not an account, and nothing reads it but the
+/// back office.
+model OnboardingAttempt {
+  id                String          @id @default(uuid()) @db.Uuid
+  created_at        DateTime        @default(now())
+  updated_at        DateTime        @updatedAt
+  /// Normalised as the signup endpoints normalise it — the same key the
+  /// verification and the account creation use.
+  phone             String          @unique
+  first_name        String?
+  last_name         String?
+  profile_type      ProfileType?
+  /// The furthest stage reached. Only ever moves forward, except when a number
+  /// whose account was deleted starts over.
+  stage             OnboardingStage @default(CODE_SENT)
+  /// WhatsApp codes requested. Several with no verification usually means the
+  /// code is not arriving.
+  code_sends        Int             @default(1)
+  started_at        DateTime        @default(now())
+  last_activity_at  DateTime        @default(now())
+  phone_verified_at DateTime?
+  completed_at      DateTime?
+  /// The account it became. A plain id, not a relation: the attempt outlives a
+  /// deleted profile as a record of the sign-up.
+  profile_id        String?         @db.Uuid
+  /// Follow-up by the team: when someone reached out, who, and what was said.
+  contacted_at      DateTime?
+  contacted_by_id   String?         @db.Uuid
+  contact_note      String?
+
+  @@index([stage, last_activity_at], name: "idx_onboarding_attempt_stage_activity")
+  @@index([started_at], name: "idx_onboarding_attempt_started")
+  @@map("onboarding_attempts")
+}

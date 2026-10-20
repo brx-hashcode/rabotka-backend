@@ -44,6 +44,8 @@ export const LATERAL_ACCESS: Record<LateralRole, Record<string, AreaAccess>> = {
     'admin/wallet': 'full',
     'admin/payment-requests': 'full',
     'admin/penalties': 'full',
+    // Calling the people whose sign-up stopped halfway is support's work.
+    'admin/onboarding-attempts': 'full',
     'admin/profiles': 'full',
     'admin/job-offers': 'full',
     'admin/applications': 'full',

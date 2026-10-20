@@ -24,6 +24,7 @@ import { PortfolioModule } from '../portfolio/portfolio.module';
 import { ReferralModule } from '../referral/referral.module';
 import { ContactUnlockModule } from '../contact-unlock/contact-unlock.module';
 import { WhatsAppDocumentModule } from '../whatsapp/documents/whatsapp-document.module';
+import { OnboardingAttemptModule } from '../onboarding-attempt/onboarding-attempt.module';
 
 @Module({
   imports: [
@@ -51,6 +52,8 @@ import { WhatsAppDocumentModule } from '../whatsapp/documents/whatsapp-document.
     GeocodingModule,
     PortfolioModule,
     ReferralModule,
+    // Marks the sign-up attempt completed when the account is created.
+    OnboardingAttemptModule,
     // For the admin profile "contacts payés" tab. forwardRef: ContactUnlockModule
     // pulls in Bot/Wallet, which reach back to profile.
     forwardRef(() => ContactUnlockModule),
