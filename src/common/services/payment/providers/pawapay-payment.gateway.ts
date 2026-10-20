@@ -10,6 +10,7 @@ import {
   InitiatePayoutParams,
   PaymentGatewayDriver,
   PaymentGatewayMetadata,
+  PaymentOperatorMetadata,
   PaymentStatusResult,
   PayoutResult,
   PayoutStatusResult,
@@ -20,6 +21,12 @@ import { fetchWithTimeout } from '../../../utils/fetch-with-timeout.util';
 /**
  * pawaPay routes by network, so the payer has to pick one. Codes are
  * pawaPay's own provider codes (`<NETWORK>_<ISO3>`), sent as-is.
+ *
+ * These operators are only the FALLBACK, used when the account's live
+ * configuration cannot be read: what the checkout offers comes from
+ * `liveOperators()`, so a network enabled or switched off on pawaPay shows up
+ * without a deploy. (This list once offered Orange Cameroon, which the
+ * account does not have, and missed Airtel Gabon, which it does.)
  */
 export const PAWAPAY_METADATA: PaymentGatewayMetadata = {
   key: PaymentGatewayDriver.PAWAPAY,
@@ -33,13 +40,13 @@ export const PAWAPAY_METADATA: PaymentGatewayMetadata = {
   ],
 };
 
-/** Calling code per country, to put a local number in MSISDN form. */
-const DIAL_CODES: Record<string, string> = { COG: '242', CMR: '237' };
+/** Fallback calling codes, when the live configuration cannot be read. */
+const FALLBACK_DIAL_CODES: Record<string, string> = { COG: '242', CMR: '237' };
 
 /** pawaPay accepts at most 10 metadata fields on a payment. */
 const MAX_METADATA_FIELDS = 10;
 
-/** How long the account's country list is trusted before asking again. */
+/** How long the account's configuration is trusted before asking again. */
 const COUNTRIES_TTL_MS = 60 * 60 * 1000;
 
 /** What each kind of payment says on the payer's SMS receipt. */
@@ -77,12 +84,21 @@ export function countryOfOperator(operator: string): string {
  * country calling code. A local Congolese number keeps its leading 0
  * (`06 123 45 67` → `242061234567`), as the networks number them that way.
  */
-export function toMsisdn(phone: string, country: string): string {
+export function toMsisdn(phone: string, dial: string | undefined): string {
   let digits = phone.replace(/\D/g, '');
   if (digits.startsWith('00')) digits = digits.slice(2);
-  const dial = DIAL_CODES[country];
   if (!dial || digits.startsWith(dial)) return digits;
   return `${dial}${digits}`;
+}
+
+type ConfCountry = Record<string, unknown>;
+type ConfProvider = Record<string, unknown>;
+type ConfCurrency = Record<string, unknown>;
+
+/** A country's name as pawaPay words it, French first. */
+function confCountryName(c: ConfCountry): string {
+  const names = (c['displayName'] ?? {}) as Record<string, string>;
+  return names['fr'] || names['en'] || text(c['country']);
 }
 
 /** Whole francs as a string: XAF has no decimals, and pawaPay rejects them. */
@@ -168,7 +184,8 @@ function settledAmount(data: Record<string, unknown>): {
 @Injectable()
 export class PawapayPaymentGateway implements IPaymentGateway {
   private readonly logger = new Logger(PawapayPaymentGateway.name);
-  private countries: { value: GatewayCountry[]; at: number } | null = null;
+  /** The account's active configuration (its `countries`), cached. */
+  private conf: { countries: ConfCountry[]; at: number } | null = null;
 
   readonly metadata = PAWAPAY_METADATA;
 
@@ -213,10 +230,15 @@ export class PawapayPaymentGateway implements IPaymentGateway {
     params: InitiatePaymentParams,
   ): Promise<InitiatePaymentResult> {
     const operator = params.operator ?? '';
-    if (!PAWAPAY_METADATA.operators.some((o) => o.code === operator)) {
+    const network = await this.findOperator(
+      operator,
+      params.currency,
+      'DEPOSIT',
+    );
+    if (!network) {
       throw new BadRequestException('Opérateur non pris en charge.');
     }
-    const msisdn = toMsisdn(params.phone, countryOfOperator(operator));
+    const msisdn = toMsisdn(params.phone, network.dialCode);
     const depositId = randomUUID();
 
     const body = {
@@ -325,7 +347,12 @@ export class PawapayPaymentGateway implements IPaymentGateway {
   // ── Payouts ────────────────────────────────────────────────────────────
 
   async initiatePayout(params: InitiatePayoutParams): Promise<PayoutResult> {
-    if (!PAWAPAY_METADATA.operators.some((o) => o.code === params.operator)) {
+    const network = await this.findOperator(
+      params.operator,
+      params.currency,
+      'PAYOUT',
+    );
+    if (!network) {
       throw new BadRequestException('Opérateur non pris en charge.');
     }
     const payoutId = randomUUID();
@@ -336,10 +363,7 @@ export class PawapayPaymentGateway implements IPaymentGateway {
       recipient: {
         type: 'MMO',
         accountDetails: {
-          phoneNumber: toMsisdn(
-            params.phone,
-            countryOfOperator(params.operator),
-          ),
+          phoneNumber: toMsisdn(params.phone, network.dialCode),
           provider: params.operator,
         },
       },
@@ -432,8 +456,90 @@ export class PawapayPaymentGateway implements IPaymentGateway {
 
   /** The countries the account is configured for, from its active configuration. */
   async listBalanceCountries(): Promise<GatewayCountry[]> {
-    if (this.countries && Date.now() - this.countries.at < COUNTRIES_TTL_MS) {
-      return this.countries.value;
+    const countries = await this.activeConf();
+    return countries
+      .map((c) => ({ code: text(c['country']), name: confCountryName(c) }))
+      .filter((c) => /^[A-Z]{3}$/.test(c.code));
+  }
+
+  /**
+   * The networks the account can charge right now in `currency`: enabled on
+   * pawaPay, taking that currency, and operational for the operation. A
+   * Rwandan network exists on the account, but in RWF — so it is not one an
+   * XAF payment can go through, and is not offered for one.
+   */
+  async liveOperators(
+    currency: string,
+    operation: 'DEPOSIT' | 'PAYOUT' = 'DEPOSIT',
+  ): Promise<PaymentOperatorMetadata[]> {
+    const countries = await this.activeConf();
+    const out: PaymentOperatorMetadata[] = [];
+    for (const c of countries) {
+      const country = text(c['country']);
+      const providers = (c['providers'] ?? []) as ConfProvider[];
+      for (const p of providers) {
+        const code = text(p['provider']);
+        if (!code) continue;
+        const currencies = (p['currencies'] ?? []) as ConfCurrency[];
+        const match = currencies.find(
+          (cu) => text(cu['currency']) === currency,
+        );
+        const op = (match?.['operationTypes'] ?? {}) as Record<
+          string,
+          Record<string, unknown>
+        >;
+        const status = text(op[operation]?.['status']);
+        if (!match || !op[operation] || (status && status !== 'OPERATIONAL'))
+          continue;
+        out.push({
+          code,
+          label: text(p['displayName'], code),
+          country,
+          countryName: confCountryName(c),
+          dialCode: text(c['prefix']) || undefined,
+          countryFlag: text(c['flag']) || undefined,
+          logo: text(p['logo']) || undefined,
+          currency,
+        });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * An operator the account can use for this payment, with its calling code.
+   * Falls back to the static list when the configuration cannot be read, so a
+   * pawaPay hiccup on `/active-conf` does not stop every payment.
+   */
+  private async findOperator(
+    code: string,
+    currency: string,
+    operation: 'DEPOSIT' | 'PAYOUT',
+  ): Promise<PaymentOperatorMetadata | null> {
+    try {
+      return (
+        (await this.liveOperators(currency, operation)).find(
+          (o) => o.code === code,
+        ) ?? null
+      );
+    } catch (err) {
+      this.logger.warn(
+        `pawaPay active configuration unavailable, using the fallback operators: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      const known = PAWAPAY_METADATA.operators.find((o) => o.code === code);
+      if (!known) return null;
+      return {
+        ...known,
+        dialCode: FALLBACK_DIAL_CODES[countryOfOperator(code)],
+      };
+    }
+  }
+
+  private async activeConf(): Promise<ConfCountry[]> {
+    if (this.conf && Date.now() - this.conf.at < COUNTRIES_TTL_MS) {
+      return this.conf.countries;
     }
     const res = await this.call('GET', '/v2/active-conf');
     if (res.status !== 200 || !res.body) {
@@ -441,18 +547,9 @@ export class PawapayPaymentGateway implements IPaymentGateway {
         `pawaPay active configuration failed: HTTP ${res.status}`,
       );
     }
-    const countries = (res.body['countries'] ?? []) as Array<
-      Record<string, unknown>
-    >;
-    const value = countries
-      .map((c) => {
-        const code = text(c['country']);
-        const names = (c['displayName'] ?? {}) as Record<string, string>;
-        return { code, name: names['fr'] || names['en'] || code };
-      })
-      .filter((c) => /^[A-Z]{3}$/.test(c.code));
-    this.countries = { value, at: Date.now() };
-    return value;
+    const countries = (res.body['countries'] ?? []) as ConfCountry[];
+    this.conf = { countries, at: Date.now() };
+    return countries;
   }
 
   private failureCode(body: Record<string, unknown> | null): string {

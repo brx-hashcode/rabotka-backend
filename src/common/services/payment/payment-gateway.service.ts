@@ -21,6 +21,7 @@ import {
   PayoutResult,
   PayoutStatusResult,
   PaymentGatewayMetadata,
+  PaymentOperatorMetadata,
   PaymentStatusResult,
   WebhookHandleResult,
 } from './types/payment-gateway.types';
@@ -79,6 +80,34 @@ export class PaymentGatewayService implements OnModuleInit {
   /** What the gateway this deployment runs on declares about itself. */
   getActiveMetadata(): PaymentGatewayMetadata {
     return this.ensureGateway().metadata;
+  }
+
+  /**
+   * The networks the active gateway can charge now in any of `currencies` —
+   * each tagged with its own — live from
+   * the provider when it can say (pawaPay's active configuration), else the
+   * gateway's declared list. Empty when payments are disabled.
+   */
+  async activeOperators(
+    currencies: readonly string[],
+  ): Promise<PaymentOperatorMetadata[]> {
+    const gateway = this.gateway;
+    if (!gateway) return [];
+    const live = gateway.liveOperators?.bind(gateway);
+    if (live) {
+      try {
+        const lists = await Promise.all(currencies.map((c) => live(c)));
+        return lists.flat();
+      } catch (err) {
+        this.logger.warn(
+          `${gateway.metadata.label} live operators unavailable, using its declared list: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    // The declared lists are all CEMAC networks, charged in XAF.
+    return gateway.metadata.operators.map((o) => ({ currency: 'XAF', ...o }));
   }
 
   /**
