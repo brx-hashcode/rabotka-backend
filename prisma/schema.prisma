@@ -207,6 +207,10 @@ enum PaymentFlow {
   HOURLY
   DAILY
   MONTHLY
+  /// A fixed price for the whole job ("forfait") — a repair, a move, an
+  /// outfit to sew. Most missions are paid this way, and the three time-based
+  /// flows left an employer with a fixed price nothing true to pick.
+  TASK
 }
 
 /// What kind of engagement an offer is.
@@ -1299,7 +1303,7 @@ model InteractionProfile {
   counterparty_affinity Json @default("{}")
   /// { 'petit budget' | 'budget moyen' | 'budget élevé': 0..1 }
   amount_band_affinity  Json @default("{}")
-  /// { HOURLY | DAILY | MONTHLY: 0..1 }
+  /// { HOURLY | DAILY | MONTHLY | TASK: 0..1 }
   payment_flow_affinity Json @default("{}")
 
   negative_category_ids String[] @db.Uuid
