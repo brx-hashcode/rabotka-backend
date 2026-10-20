@@ -13,10 +13,12 @@ import {
   IsEmail,
   ValidateNested,
   Matches,
+  ArrayMaxSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AdvertiserType } from '@prisma/client';
 import { TargetFiltersDto } from './target-filters.dto';
+import { MAX_AD_IMAGES } from '../advertisement.constants';
 
 export class CreateAdvertisementDto {
   @IsString()
@@ -39,6 +41,9 @@ export class CreateAdvertisementDto {
 
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(MAX_AD_IMAGES, {
+    message: `Une publicité compte au plus ${MAX_AD_IMAGES} images`,
+  })
   @IsUrl({}, { each: true })
   imageUrls?: string[];
 
