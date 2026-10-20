@@ -9,6 +9,7 @@ import {
   PayoutResult,
   PayoutStatusResult,
   WebhookHandleResult,
+  PaymentOperatorMetadata,
 } from '../types/payment-gateway.types';
 
 /**
@@ -44,6 +45,13 @@ export interface IPaymentGateway {
   getBalances?(country: string): Promise<GatewayBalance[]>;
   /** Countries the account holds wallets in. */
   listBalanceCountries?(): Promise<GatewayCountry[]>;
+  /**
+   * The networks the account can charge right now in `currency`, from the
+   * provider's live configuration — enabled countries and networks change
+   * without a deploy. Throws when the provider cannot be reached; callers
+   * fall back to `metadata.operators`.
+   */
+  liveOperators?(currency: string): Promise<PaymentOperatorMetadata[]>;
 }
 
 export type PayoutCapableGateway = IPaymentGateway &

@@ -47,6 +47,69 @@ const deposit = {
   },
 };
 
+/**
+ * The account's active configuration, shaped like pawaPay's real answer: a
+ * country with its prefix and networks, each with currencies and operation
+ * statuses. Rwanda is enabled but only in RWF.
+ */
+const ACTIVE_CONF = {
+  countries: [
+    {
+      country: 'COG',
+      prefix: '242',
+      flag: 'https://static-content.pawapay.io/country_flags/cog.svg',
+      displayName: { en: 'Congo', fr: 'Congo' },
+      providers: [
+        {
+          provider: 'MTN_MOMO_COG',
+          displayName: 'MTN',
+          logo: 'https://static-content.pawapay.io/provider_logos/mtn.png',
+          currencies: [
+            {
+              currency: 'XAF',
+              operationTypes: {
+                DEPOSIT: { status: 'OPERATIONAL' },
+                PAYOUT: { status: 'OPERATIONAL' },
+              },
+            },
+          ],
+        },
+        {
+          provider: 'AIRTEL_COG',
+          displayName: 'Airtel',
+          currencies: [
+            {
+              currency: 'XAF',
+              // Closed for deposits, open for payouts: checked per operation.
+              operationTypes: {
+                DEPOSIT: { status: 'CLOSED' },
+                PAYOUT: { status: 'OPERATIONAL' },
+              },
+            },
+          ],
+        },
+      ],
+    },
+    {
+      country: 'RWA',
+      prefix: '250',
+      displayName: { en: 'Rwanda', fr: 'Rwanda' },
+      providers: [
+        {
+          provider: 'MTN_MOMO_RWA',
+          displayName: 'MTN',
+          currencies: [
+            {
+              currency: 'RWF',
+              operationTypes: { DEPOSIT: { status: 'OPERATIONAL' } },
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
 const sentBody = (call = 0) =>
   JSON.parse(fetchMock.mock.calls[call][1].body as string);
 
@@ -56,6 +119,12 @@ describe('PawapayPaymentGateway', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     gateway = new PawapayPaymentGateway(config as never);
+    // Already read, so each test's fetch mock speaks only for the call it is
+    // about. The configuration tests below clear it to exercise the fetch.
+    (gateway as unknown as { conf: unknown }).conf = {
+      countries: ACTIVE_CONF.countries,
+      at: Date.now(),
+    };
   });
 
   describe('initiatePayment (deposit, v2)', () => {
@@ -326,6 +395,7 @@ describe('PawapayPaymentGateway', () => {
     });
 
     it('lists the account countries from the active configuration, cached', async () => {
+      (gateway as unknown as { conf: unknown }).conf = null;
       fetchMock.mockResolvedValue(
         reply(200, {
           countries: [
@@ -348,14 +418,61 @@ describe('PawapayPaymentGateway', () => {
   });
 });
 
+describe('PawapayPaymentGateway live operators', () => {
+  let gateway: PawapayPaymentGateway;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    gateway = new PawapayPaymentGateway(config as never);
+  });
+
+  it("offers the account's operational networks in the payment's currency", async () => {
+    fetchMock.mockResolvedValue(reply(200, ACTIVE_CONF));
+
+    const operators = await gateway.liveOperators('XAF');
+
+    // Airtel Congo is closed for deposits; Rwanda only takes RWF.
+    expect(operators).toEqual([
+      {
+        code: 'MTN_MOMO_COG',
+        label: 'MTN',
+        country: 'COG',
+        countryName: 'Congo',
+        dialCode: '242',
+        countryFlag: 'https://static-content.pawapay.io/country_flags/cog.svg',
+        logo: 'https://static-content.pawapay.io/provider_logos/mtn.png',
+        currency: 'XAF',
+      },
+    ]);
+  });
+
+  it('offers Rwanda for a payment in its own currency', async () => {
+    fetchMock.mockResolvedValue(reply(200, ACTIVE_CONF));
+    const operators = await gateway.liveOperators('RWF');
+    expect(operators.map((o) => o.code)).toEqual(['MTN_MOMO_RWA']);
+  });
+
+  it('falls back to the declared networks when the configuration is unreachable', async () => {
+    fetchMock
+      .mockResolvedValueOnce(reply(503, {}))
+      .mockResolvedValue(reply(200, { status: 'ACCEPTED' }));
+
+    await gateway.initiatePayment(deposit as never);
+
+    // The deposit went out, formatted with the fallback calling code.
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(body.payer.accountDetails.phoneNumber.startsWith('242')).toBe(true);
+  });
+});
+
 describe('pawaPay helpers', () => {
   it.each([
-    ['06 123 45 67', 'COG', '242061234567'],
-    ['+242 06 123 45 67', 'COG', '242061234567'],
-    ['00242061234567', 'COG', '242061234567'],
-    ['677 12 34 56', 'CMR', '237677123456'],
-  ])('puts %s in MSISDN form for %s', (phone, country, msisdn) => {
-    expect(toMsisdn(phone, country)).toBe(msisdn);
+    ['06 123 45 67', '242', '242061234567'],
+    ['+242 06 123 45 67', '242', '242061234567'],
+    ['00242061234567', '242', '242061234567'],
+    ['677 12 34 56', '237', '237677123456'],
+  ])('puts %s in MSISDN form with calling code %s', (phone, dial, msisdn) => {
+    expect(toMsisdn(phone, dial)).toBe(msisdn);
   });
 
   it('omits the email when there is none, and never sends more than 10 fields', () => {

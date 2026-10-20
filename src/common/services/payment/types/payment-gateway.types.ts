@@ -20,6 +20,16 @@ export type PaymentOperatorMetadata = {
    * several. The payment page offers a payer only their own country's.
    */
   country?: string;
+  /** The country's name, as the gateway words it for a payer (French first). */
+  countryName?: string;
+  /** International calling code of that country, digits only (`242`). */
+  dialCode?: string;
+  /** The gateway's own flag image for that country. */
+  countryFlag?: string;
+  /** The gateway's own logo for the network. */
+  logo?: string;
+  /** The currency the network is charged in (`XAF`, `XOF`), when known. */
+  currency?: string;
 };
 
 /**
