@@ -32,11 +32,35 @@ export const PAWAPAY_METADATA: PaymentGatewayMetadata = {
   key: PaymentGatewayDriver.PAWAPAY,
   label: 'pawaPay',
   requiresOperator: true,
+  // Carries what the checkout needs to show a country — name, calling code,
+  // currency — so a pawaPay outage degrades to a shorter list, not to bare
+  // « COG » / « CMR » codes and blank flags. Only networks the account has:
+  // Orange Cameroon is not enabled on it, and charging it would fail.
   operators: [
-    { code: 'MTN_MOMO_COG', label: 'MTN Mobile Money', country: 'COG' },
-    { code: 'AIRTEL_COG', label: 'Airtel Money', country: 'COG' },
-    { code: 'MTN_MOMO_CMR', label: 'MTN Mobile Money', country: 'CMR' },
-    { code: 'ORANGE_CMR', label: 'Orange Money', country: 'CMR' },
+    {
+      code: 'MTN_MOMO_COG',
+      label: 'MTN',
+      country: 'COG',
+      countryName: 'Congo',
+      dialCode: '242',
+      currency: 'XAF',
+    },
+    {
+      code: 'AIRTEL_COG',
+      label: 'Airtel',
+      country: 'COG',
+      countryName: 'Congo',
+      dialCode: '242',
+      currency: 'XAF',
+    },
+    {
+      code: 'MTN_MOMO_CMR',
+      label: 'MTN',
+      country: 'CMR',
+      countryName: 'Cameroun',
+      dialCode: '237',
+      currency: 'XAF',
+    },
   ],
 };
 
@@ -532,7 +556,8 @@ export class PawapayPaymentGateway implements IPaymentGateway {
       if (!known) return null;
       return {
         ...known,
-        dialCode: FALLBACK_DIAL_CODES[countryOfOperator(code)],
+        dialCode:
+          known.dialCode ?? FALLBACK_DIAL_CODES[countryOfOperator(code)],
       };
     }
   }
