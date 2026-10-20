@@ -1,4 +1,7 @@
-import { toAlpha3 } from '../../common/services/payment/payment-countries';
+import {
+  countryOfPhone,
+  toAlpha3,
+} from '../../common/services/payment/payment-countries';
 import {
   Injectable,
   NotFoundException,
@@ -258,15 +261,15 @@ export class PaymentRequestService {
       );
     }
 
-    // A network of another country would charge the wrong number, or be
-    // refused by the gateway after the request was claimed. Only checked when
-    // both sides know their country.
+    // A network of another country than the number's would be refused by the
+    // gateway after the request was claimed. Only checked when both sides
+    // know their country.
     const operatorCountry = gateway.operators.find(
       (o) => o.code === operator,
     )?.country;
     if (operatorCountry && payerCountry && operatorCountry !== payerCountry) {
       throw new BadRequestException(
-        "Cet opérateur n'est pas disponible dans votre pays.",
+        'Cet opérateur ne correspond pas au pays de ce numéro.',
       );
     }
   }
@@ -304,9 +307,13 @@ export class PaymentRequestService {
       throw new BadRequestException('Montant non défini pour cette demande');
     }
 
+    // The number decides which country's networks can charge it — someone
+    // living in Congo can pay with a Cameroonian number, and the checkout lets
+    // them switch country. The profile's country is the fallback for a local
+    // number given without its prefix.
     this.assertOperatorMatchesGateway(
       operator,
-      toAlpha3(request.profile?.country_code),
+      countryOfPhone(phone) ?? toAlpha3(request.profile?.country_code),
     );
 
     // Atomically claim PENDING → PROCESSING before calling the gateway.

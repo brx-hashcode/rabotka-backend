@@ -440,7 +440,38 @@ describe('PaymentRequestService', () => {
       expect(prisma.paymentRequest.updateMany).not.toHaveBeenCalled();
     });
 
-    it("rejects a network of another country than the payer's", async () => {
+    it("rejects a network of another country than the number's", async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING, {
+          amount: 5000,
+          profile: { ...mockProfile, country_code: 'CM' },
+        }),
+      );
+      await expect(
+        // A Congolese number on a Cameroonian network.
+        service.initiatePayment(TOKEN, '+242061234567', 'MTN_MOMO_CMR'),
+      ).rejects.toThrow(
+        'Cet opérateur ne correspond pas au pays de ce numéro.',
+      );
+      expect(prisma.paymentRequest.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("accepts another country's network when the number is from there", async () => {
+      // Lives in Congo, pays with a Cameroonian number: the checkout lets them
+      // switch country, and the number is what the network charges.
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING, {
+          amount: 5000,
+          profile: { ...mockProfile, country_code: 'CG' },
+        }),
+      );
+      await service
+        .initiatePayment(TOKEN, '+237677123456', 'MTN_MOMO_CMR')
+        .catch(() => undefined);
+      expect(prisma.paymentRequest.updateMany).toHaveBeenCalled();
+    });
+
+    it("falls back to the profile's country for a number without prefix", async () => {
       (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
         makeRequest(PaymentRequestStatus.PENDING, {
           amount: 5000,
@@ -448,9 +479,10 @@ describe('PaymentRequestService', () => {
         }),
       );
       await expect(
-        service.initiatePayment(TOKEN, '+237677123456', 'MTN_MOMO_CMR'),
-      ).rejects.toThrow("Cet opérateur n'est pas disponible dans votre pays.");
-      expect(prisma.paymentRequest.updateMany).not.toHaveBeenCalled();
+        service.initiatePayment(TOKEN, '677123456', 'MTN_MOMO_CMR'),
+      ).rejects.toThrow(
+        'Cet opérateur ne correspond pas au pays de ce numéro.',
+      );
     });
 
     it("accepts a network of the payer's own country", async () => {
