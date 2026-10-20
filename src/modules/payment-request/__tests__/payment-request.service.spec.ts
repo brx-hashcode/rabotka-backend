@@ -500,7 +500,7 @@ describe('PaymentRequestService', () => {
         }),
       );
       await service
-        .initiatePayment(TOKEN, '+237677123456', 'ORANGE_CMR')
+        .initiatePayment(TOKEN, '+237677123456', 'MTN_MOMO_CMR')
         .catch(() => undefined);
       // Got past the operator check: the request was claimed.
       expect(prisma.paymentRequest.updateMany).toHaveBeenCalled();
