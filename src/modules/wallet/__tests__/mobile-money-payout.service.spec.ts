@@ -63,6 +63,23 @@ function setup() {
         { code: 'MTN_MOMO_COG', label: 'MTN Mobile Money', country: 'COG' },
       ],
     }),
+    // The live networks the payout is checked against, with their franc.
+    activeOperators: jest.fn().mockResolvedValue([
+      {
+        code: 'MTN_MOMO_COG',
+        label: 'MTN',
+        country: 'COG',
+        dialCode: '242',
+        currency: 'XAF',
+      },
+      {
+        code: 'ORANGE_SEN',
+        label: 'Orange',
+        country: 'SEN',
+        dialCode: '221',
+        currency: 'XOF',
+      },
+    ]),
     getBalances: jest
       .fn()
       .mockResolvedValue([
@@ -127,6 +144,27 @@ describe('MobileMoneyPayoutService', () => {
         gatewayRef: 'gw-1',
         requestedBy: 'Jean ITOUA',
       });
+    });
+
+    it('pays a network in its own franc: XOF for Sénégal, against the XOF balance', async () => {
+      const { service, prisma, gateway } = setup();
+      gateway.getBalances.mockResolvedValueOnce([
+        { country: 'SEN', currency: 'XOF', balance: '20000.00' },
+      ]);
+      prisma.mobileMoneyPayout.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(payoutRow());
+
+      await service.send({
+        ...input(),
+        phone: '+221771234567',
+        operator: 'ORANGE_SEN',
+      });
+
+      expect(gateway.getBalances).toHaveBeenCalledWith('SEN');
+      expect(gateway.initiatePayout).toHaveBeenCalledWith(
+        expect.objectContaining({ operator: 'ORANGE_SEN', currency: 'XOF' }),
+      );
     });
 
     it('never sends twice for the same request id', async () => {

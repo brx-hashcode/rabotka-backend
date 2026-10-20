@@ -1,4 +1,7 @@
-import { toAlpha3 } from '../../common/services/payment/payment-countries';
+import {
+  CFA_CURRENCIES,
+  toAlpha3,
+} from '../../common/services/payment/payment-countries';
 import {
   Injectable,
   NotFoundException,
@@ -112,15 +115,8 @@ type PaymentProcessingContext = {
 // rule instead, missed WALLET_TOP_UP, and filed failed wallet recharges as
 // penalties.
 
-/**
- * The currencies a payment request can be charged in. Requests are priced in
- * CFA francs, and both CFA francs are pegged to the euro at the same rate by
- * treaty (655.957), so 1 XAF = 1 XOF exactly: a Beninese or Senegalese
- * network is charged the same amount, in its own franc, with no conversion.
- * Floating currencies (RWF, KES…) would need an exchange rate and are not
- * offered.
- */
-const PAYMENT_CURRENCIES = ['XAF', 'XOF'] as const;
+/** Requests are priced in CFA francs; either franc can be charged (see CFA_CURRENCIES). */
+const PAYMENT_CURRENCIES = CFA_CURRENCIES;
 
 @Injectable()
 export class PaymentRequestService {
