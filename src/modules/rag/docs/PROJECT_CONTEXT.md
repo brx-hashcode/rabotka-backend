@@ -110,7 +110,7 @@ deliberately (commit *"unify the work vocabulary on mission"*):
 1. Registers, KYC, activation — identical gate.
 2. Publishes a mission: title, description, category, `employment_type`
    (default and effectively only supported value: `MISSION`), amount +
-   `payment_flow` (HOURLY/DAILY/MONTHLY), address / country / city / lat-lng or
+   `payment_flow` (HOURLY/DAILY/MONTHLY/TASK — TASK is a fixed price for the job), address / country / city / lat-lng or
    `is_remote`, closing date (`scheduled_at`), `quantity` (seats).
 3. Receives applications and recommended profiles, each with a reliability
    score.

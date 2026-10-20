@@ -22,6 +22,8 @@ export function formatPaymentFlow(flow: string | null): string {
     HOURLY: 'par heure',
     DAILY: 'par jour',
     MONTHLY: 'par mois',
+    // Reads as "15 000 FCFA la tâche".
+    TASK: 'la tâche',
   };
   return map[flow] ?? flow;
 }

@@ -385,6 +385,7 @@ export class MatchingService {
       HOURLY: "paiement à l'heure",
       DAILY: 'paiement journalier',
       MONTHLY: 'paiement mensuel',
+      TASK: 'paiement à la tâche, forfait',
     };
     if (job.payment_flow && flowLabels[job.payment_flow]) {
       parts.push(flowLabels[job.payment_flow]);

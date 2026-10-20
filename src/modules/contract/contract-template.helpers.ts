@@ -64,7 +64,7 @@ export type MissionPeriodForPdf = {
 
 /**
  * MISSION, MONTHLY: end date = contract creation (acceptance proxy) + 30 calendar days; duration label "30 jours".
- * MISSION, other flows: start = scheduled_at, length from note or 1 day inclusive.
+ * MISSION, other flows (TASK included): start = scheduled_at, length from note or 1 day inclusive.
  * CDD / CDI / STAGE: no derived period at all — see below.
  */
 export function resolveMissionPeriodForContractPdf(params: {
@@ -129,6 +129,8 @@ export function paymentFlowPayModeFr(
       return 'Rémunération à la journée';
     case 'MONTHLY':
       return 'Rémunération au mois';
+    case 'TASK':
+      return 'Rémunération forfaitaire, à la tâche';
     default:
       return '-';
   }
@@ -144,6 +146,8 @@ export function paymentFlowFrequencyFr(
       return 'Journalier';
     case 'MONTHLY':
       return 'Mensuel';
+    case 'TASK':
+      return 'Forfait';
     default:
       return '-';
   }
