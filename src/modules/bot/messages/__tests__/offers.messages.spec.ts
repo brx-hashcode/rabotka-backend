@@ -1,7 +1,4 @@
-import {
-  formatPaymentFlow,
-  type OfferListItem,
-} from '../offers.messages';
+import { formatPaymentFlow, type OfferListItem } from '../offers.messages';
 
 const date = new Date('2026-03-20T09:00:00');
 
@@ -30,6 +27,8 @@ describe('formatPaymentFlow', () => {
     expect(formatPaymentFlow('DAILY')).toBe('par jour'));
   it('returns "par mois" for MONTHLY', () =>
     expect(formatPaymentFlow('MONTHLY')).toBe('par mois'));
+  it('returns "la tâche" for TASK, so an amount reads "… FCFA la tâche"', () =>
+    expect(formatPaymentFlow('TASK')).toBe('la tâche'));
   it('returns the value unchanged for unknown flow', () =>
     expect(formatPaymentFlow('WEEKLY')).toBe('WEEKLY'));
 });

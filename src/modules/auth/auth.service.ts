@@ -1,4 +1,12 @@
-import { issueSignupToken, SIGNUP_TOKEN_TTL_SECONDS } from './signup-token';
+import {
+  issueSignupToken,
+  phoneForSignupToken,
+  SIGNUP_TOKEN_TTL_SECONDS,
+} from './signup-token';
+import {
+  OnboardingAttemptService,
+  type ReportableStage,
+} from '../onboarding-attempt/onboarding-attempt.service';
 import { mayLogSecretsLocally } from './local-dev-secrets';
 import {
   Injectable,
@@ -11,12 +19,13 @@ import {
   HttpException,
   HttpStatus,
   ServiceUnavailableException,
+  Optional,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import Redis from 'ioredis';
-import { AccountStatus } from '@prisma/client';
+import { AccountStatus, ProfileType } from '@prisma/client';
 
 import {
   REDIS_KEY_PREFIX,
@@ -105,6 +114,10 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly logService: LogService,
     private readonly whatsAppLoginLink: WhatsAppLoginLinkService,
+    // Appended and @Optional(): the specs build this service positionally, and
+    // drop-off tracking is never something a sign-up may depend on.
+    @Optional()
+    private readonly onboardingAttempts?: OnboardingAttemptService,
   ) {}
 
   /**
@@ -167,7 +180,14 @@ export class AuthService {
    * account already exists — the login says the same, so this reveals nothing
    * new. Same send cap as the login code (otp-store), on its own counter.
    */
-  async sendSignupOtp(phone: string): Promise<{ success: boolean }> {
+  async sendSignupOtp(
+    phone: string,
+    who: {
+      firstName?: string;
+      lastName?: string;
+      profileType?: ProfileType;
+    } = {},
+  ): Promise<{ success: boolean }> {
     const normalized = this.normalize(phone);
     if (!this.isPhone(normalized)) {
       throw new BadRequestException('Numéro de téléphone invalide');
@@ -188,8 +208,29 @@ export class AuthService {
       otp,
     );
     await this.sendOtpByWhatsApp(normalized, otp);
+    // After the send, so a refused or failed code is not an attempt. Not
+    // awaited: the sign-up never waits on drop-off tracking.
+    void this.onboardingAttempts?.codeSent(normalized, who);
 
     return { success: true };
+  }
+
+  /**
+   * The app reached a later sign-up screen. Keyed by the signup token rather
+   * than a phone in the body, so nobody can move someone else's attempt; a
+   * missing or spent token is simply not recorded.
+   */
+  async recordSignupProgress(
+    token: string | null,
+    stage: ReportableStage,
+    who: { profileType?: ProfileType } = {},
+  ): Promise<void> {
+    if (!token || !this.onboardingAttempts) return;
+    const phone = await phoneForSignupToken(this.redis, token).catch(
+      () => null,
+    );
+    if (!phone) return;
+    void this.onboardingAttempts.reached(phone, stage, who);
   }
 
   /**
@@ -210,6 +251,7 @@ export class AuthService {
     if (!matched) {
       throw new BadRequestException('Code incorrect ou expiré');
     }
+    void this.onboardingAttempts?.phoneVerified(normalized);
     return {
       signupToken: await issueSignupToken(this.redis, normalized),
       expiresIn: SIGNUP_TOKEN_TTL_SECONDS,

@@ -87,6 +87,7 @@ import {
   VerificationStatus,
 } from '@prisma/client';
 import { randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { OnboardingAttemptService } from '../onboarding-attempt/onboarding-attempt.service';
 
 const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
   [ProfileType.WORKER]: 'Travailleur',
@@ -399,6 +400,10 @@ export class ProfileService {
     // positional-spec reason. `notify()` falls back to the template without it.
     @Optional()
     private readonly notificationDispatcher?: NotificationDispatcher,
+    // Drop-off tracking: marks the sign-up attempt completed. Appended and
+    // @Optional() for the same positional-spec reason.
+    @Optional()
+    private readonly onboardingAttempts?: OnboardingAttemptService,
   ) {}
 
   /**
@@ -1784,6 +1789,11 @@ export class ProfileService {
       const profile = await this.createProfileWithDocuments(createProfileDto);
 
       this.logger.log(`Profile created successfully: ${profile.id}`);
+      // The sign-up attempt is done. Not awaited, never throws.
+      void this.onboardingAttempts?.completed(
+        createProfileDto.phone,
+        profile.id,
+      );
 
       // Give every worker a public portfolio URL from day one. The slug used to
       // be minted only on the first realization upload, so a worker who had not

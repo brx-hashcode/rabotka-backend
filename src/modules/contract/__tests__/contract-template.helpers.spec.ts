@@ -61,6 +61,9 @@ describe('contract-template.helpers', () => {
   describe('paymentFlowPayModeFr', () => {
     it('maps enum', () => {
       expect(paymentFlowPayModeFr('DAILY')).toContain('journée');
+      expect(paymentFlowPayModeFr('TASK')).toBe(
+        'Rémunération forfaitaire, à la tâche',
+      );
       expect(paymentFlowPayModeFr(null)).toBe('-');
     });
   });
@@ -100,27 +103,38 @@ describe('contract-template.helpers', () => {
       expect(p.endDate?.getUTCDate()).toBe(5);
     });
 
-    it.each([
-      EmploymentType.CDI,
-      EmploymentType.CDD,
-      EmploymentType.STAGE,
-    ])('derives no period for a %s — nobody here knows one', (employmentType) => {
-      // The term starts when the person actually begins working, off-platform,
-      // on a day nobody reports to us, and `scheduled_at` on these types is the
-      // day applications closed. Before this, a permanent contract came out of
-      // the generator saying it lasted "1 jour" with both dates blank — a
-      // falsehood on a legal document, stated with total confidence.
+    it('dates a TASK from the mission day, like DAILY — not the 30-day MONTHLY rule', () => {
       const p = resolveMissionPeriodForContractPdf({
         scheduledAt: new Date(Date.UTC(2026, 1, 1, 8, 0, 0)),
         contractCreatedAt: new Date(Date.UTC(2026, 0, 1, 0, 0, 0)),
-        paymentFlow: 'MONTHLY',
+        paymentFlow: 'TASK',
         jobNote: null,
-        employmentType,
       });
-      expect(p.durationLabel).toBe('à convenir entre les parties');
-      expect(p.startDate).toBeNull();
-      expect(p.endDate).toBeNull();
+      expect(p.durationLabel).toBe('1 jour');
+      expect(p.startDate?.getUTCDate()).toBe(1);
+      expect(p.endDate?.getUTCDate()).toBe(1);
     });
+
+    it.each([EmploymentType.CDI, EmploymentType.CDD, EmploymentType.STAGE])(
+      'derives no period for a %s — nobody here knows one',
+      (employmentType) => {
+        // The term starts when the person actually begins working, off-platform,
+        // on a day nobody reports to us, and `scheduled_at` on these types is the
+        // day applications closed. Before this, a permanent contract came out of
+        // the generator saying it lasted "1 jour" with both dates blank — a
+        // falsehood on a legal document, stated with total confidence.
+        const p = resolveMissionPeriodForContractPdf({
+          scheduledAt: new Date(Date.UTC(2026, 1, 1, 8, 0, 0)),
+          contractCreatedAt: new Date(Date.UTC(2026, 0, 1, 0, 0, 0)),
+          paymentFlow: 'MONTHLY',
+          jobNote: null,
+          employmentType,
+        });
+        expect(p.durationLabel).toBe('à convenir entre les parties');
+        expect(p.startDate).toBeNull();
+        expect(p.endDate).toBeNull();
+      },
+    );
 
     it('still derives a period when the type is absent, i.e. a MISSION', () => {
       // Defaults to MISSION everywhere: a missing field must behave as it
@@ -167,9 +181,9 @@ N.B: Je souhaiterais un diagnostic et possible une réparation, en cas de non en
   it('never exceeds three lines in the column', () => {
     // The point of the whole helper: a longer row pushed the table past the
     // page and took the contract's layout with it.
-    expect(wrapped(contractDescriptionSummary(PLUMBING)).length).toBeLessThanOrEqual(
-      CONTRACT_DESCRIPTION_MAX_LINES,
-    );
+    expect(
+      wrapped(contractDescriptionSummary(PLUMBING)).length,
+    ).toBeLessThanOrEqual(CONTRACT_DESCRIPTION_MAX_LINES);
   });
 
   it('flattens the author’s own line breaks', () => {
@@ -215,13 +229,17 @@ N.B: Je souhaiterais un diagnostic et possible une réparation, en cas de non en
     // A URL, usually. Without the hard cut there is no boundary to break on.
     const wall = 'a'.repeat(400);
     const out = contractDescriptionSummary(wall);
-    expect(wrapped(out).length).toBeLessThanOrEqual(CONTRACT_DESCRIPTION_MAX_LINES);
+    expect(wrapped(out).length).toBeLessThanOrEqual(
+      CONTRACT_DESCRIPTION_MAX_LINES,
+    );
     expect(out.endsWith('…')).toBe(true);
   });
 
   it('drops the list markers it inherits', () => {
     // Run into one paragraph, a leading "-" reads as a stray dash.
-    const out = contractDescriptionSummary('Titre :\n- premier point\n- second');
+    const out = contractDescriptionSummary(
+      'Titre :\n- premier point\n- second',
+    );
     expect(out).not.toContain('- ');
   });
 });

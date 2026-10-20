@@ -13,6 +13,7 @@ import { LogModule } from '../log/log.module';
 import { JwtAuthGuard, AdminAuthGuard, RolesGuard } from './guards';
 import { QrGateway } from '../ws-notifications/qr.gateway';
 import { WhatsAppLoginLinkModule } from './whatsapp-login-link.module';
+import { OnboardingAttemptModule } from '../onboarding-attempt/onboarding-attempt.module';
 
 @Module({
   imports: [
@@ -22,6 +23,8 @@ import { WhatsAppLoginLinkModule } from './whatsapp-login-link.module';
     LogModule,
     MailModule,
     WhatsAppLoginLinkModule,
+    // Records where each sign-up got to; recording only, no controller.
+    OnboardingAttemptModule,
     forwardRef(() => WhatsAppModule),
     forwardRef(() => WsNotificationsModule),
     JwtModule.registerAsync({
@@ -40,8 +43,7 @@ import { WhatsAppLoginLinkModule } from './whatsapp-login-link.module';
             // browser keeps sending a session the server already refuses, and
             // there is no cookie-side refresh flow to recover from it.
             expiresIn: configService.get<string>('JWT_EXPIRES_IN', '30d') as
-              | `${number}${'s' | 'm' | 'h' | 'd'}`
-              | `${number}`,
+              `${number}${'s' | 'm' | 'h' | 'd'}` | `${number}`,
           },
         };
       },

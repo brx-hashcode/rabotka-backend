@@ -52,6 +52,7 @@ import { ReminderModule } from './modules/bot/reminder/reminder.module';
 import { PaymentsModule } from './modules/payments/payment.module';
 import { KycModule } from './modules/kyc/kyc.module';
 import { FeedbackModule } from './modules/feedback/feedback.module';
+import { OnboardingAttemptAdminModule } from './modules/onboarding-attempt/onboarding-attempt-admin.module';
 import { ClientErrorsModule } from './modules/client-errors/client-errors.module';
 import { SystemConfigModule } from './modules/system-config/system-config.module';
 import { QdrantModule } from './modules/qdrant/qdrant.module';
@@ -209,6 +210,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     PaymentsModule,
     KycModule,
     FeedbackModule,
+    OnboardingAttemptAdminModule,
     ClientErrorsModule,
     QdrantModule,
     LlmModule,

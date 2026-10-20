@@ -1,3 +1,5 @@
+import { OnboardingStage, ProfileType } from '@prisma/client';
+import { OnboardingAttemptService } from '../../onboarding-attempt/onboarding-attempt.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   BadRequestException,
@@ -48,6 +50,7 @@ describe('AuthService', () => {
   let mailService: jest.Mocked<MailService>;
   let whatsAppService: jest.Mocked<WhatsAppService>;
   let whatsAppLoginLink: { consume: jest.Mock; mint: jest.Mock; appendTo: jest.Mock };
+  let attempts: { codeSent: jest.Mock; phoneVerified: jest.Mock; reached: jest.Mock };
   let redis: {
     get: jest.Mock;
     set: jest.Mock;
@@ -112,6 +115,14 @@ describe('AuthService', () => {
           useValue: { create: jest.fn().mockResolvedValue(undefined) },
         },
         {
+          provide: OnboardingAttemptService,
+          useValue: {
+            codeSent: jest.fn().mockResolvedValue(undefined),
+            phoneVerified: jest.fn().mockResolvedValue(undefined),
+            reached: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
           provide: WhatsAppLoginLinkService,
           useValue: {
             mint: jest.fn().mockResolvedValue('code-1'),
@@ -131,6 +142,7 @@ describe('AuthService', () => {
     mailService = module.get(MailService);
     whatsAppService = module.get(WhatsAppService);
     whatsAppLoginLink = module.get(WhatsAppLoginLinkService);
+    attempts = module.get(OnboardingAttemptService);
   });
 
   describe('signup verification', () => {
@@ -147,6 +159,38 @@ describe('AuthService', () => {
         300,
       );
       expect(whatsAppService.sendTemplateMessage).toHaveBeenCalled();
+    });
+
+    it('records the attempt, with who is signing up, once the code is sent', async () => {
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await service.sendSignupOtp('+24200000009', {
+        firstName: 'Awa',
+        profileType: ProfileType.WORKER,
+      });
+
+      expect(attempts.codeSent).toHaveBeenCalledWith('+24200000009', {
+        firstName: 'Awa',
+        profileType: ProfileType.WORKER,
+      });
+    });
+
+    it('records no attempt for a number that already has an account', async () => {
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(mockProfile);
+
+      await expect(service.sendSignupOtp('+24200000001')).rejects.toThrow(
+        ConflictException,
+      );
+      expect(attempts.codeSent).not.toHaveBeenCalled();
+    });
+
+    it('ignores a progress report without a live signup token', async () => {
+      redis.get.mockResolvedValue(null);
+
+      await service.recordSignupProgress(null, OnboardingStage.DOCUMENTS);
+      await service.recordSignupProgress('spent', OnboardingStage.DOCUMENTS);
+
+      expect(attempts.reached).not.toHaveBeenCalled();
     });
 
     it('refuses a number that already has an account', async () => {
