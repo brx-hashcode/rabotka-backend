@@ -1,4 +1,7 @@
-import { toAlpha3 } from '../../common/services/payment/payment-countries';
+import {
+  CFA_CURRENCIES,
+  toAlpha3,
+} from '../../common/services/payment/payment-countries';
 import {
   Injectable,
   NotFoundException,
@@ -41,7 +44,10 @@ import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import { paymentSuccessEmail } from '../mail/templates';
 import { PaymentGatewayService } from '../../common/services/payment/payment-gateway.service';
-import type { PaymentGatewayMetadata } from '../../common/services/payment/types/payment-gateway.types';
+import type {
+  PaymentGatewayMetadata,
+  PaymentOperatorMetadata,
+} from '../../common/services/payment/types/payment-gateway.types';
 import { PaymentStatusGateway } from '../ws-notifications/payment-status.gateway';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
@@ -108,6 +114,9 @@ type PaymentProcessingContext = {
 // hand-written interface to break exactly that cycle — so it open-coded the
 // rule instead, missed WALLET_TOP_UP, and filed failed wallet recharges as
 // penalties.
+
+/** Requests are priced in CFA francs; either franc can be charged (see CFA_CURRENCIES). */
+const PAYMENT_CURRENCIES = CFA_CURRENCIES;
 
 @Injectable()
 export class PaymentRequestService {
@@ -215,6 +224,9 @@ export class PaymentRequestService {
       // The payer's country (ISO3), so the page offers that country's
       // networks only. Null when the profile has no country we can map.
       payerCountry: toAlpha3(request.profile?.country_code),
+      // The profile's own ISO alpha-2 code, so the page can find the
+      // payer's country among the gateway's live ones by calling code.
+      payerCountryCode: request.profile?.country_code ?? null,
     };
   }
 
@@ -225,14 +237,24 @@ export class PaymentRequestService {
    * new provider shows up in the payment page and the admin without either of
    * them being redeployed with a new constant.
    */
-  listGateways(): {
+  async listGateways(): Promise<{
     /** Null when payments are disabled (no usable gateway configured). */
     active: string | null;
     gateways: PaymentGatewayMetadata[];
-  } {
+  }> {
+    const active = this.paymentGateway.getActiveMetadataOrNull();
+    // The live gateway's networks are what its account can charge in our
+    // currency today, read from the provider — not a list kept in code.
+    const liveOperators = active
+      ? await this.paymentGateway.activeOperators(PAYMENT_CURRENCIES)
+      : [];
     return {
-      active: this.paymentGateway.getActiveMetadataOrNull()?.key ?? null,
-      gateways: this.paymentGateway.listAvailable(),
+      active: active?.key ?? null,
+      gateways: this.paymentGateway
+        .listAvailable()
+        .map((g) =>
+          g.key === active?.key ? { ...g, operators: liveOperators } : g,
+        ),
     };
   }
 
@@ -243,32 +265,42 @@ export class PaymentRequestService {
    * here and rejected by the gateway, after the request had already been
    * claimed PROCESSING.
    */
-  private assertOperatorMatchesGateway(
+  /** The network to charge, checked against the number — null for a gateway that does not route by network. */
+  private async assertOperatorMatchesGateway(
     operator: string | undefined,
-    payerCountry?: string | null,
-  ): void {
+    phone: string,
+  ): Promise<PaymentOperatorMetadata | null> {
     const gateway = this.paymentGateway.getActiveMetadata();
 
-    if (!gateway.requiresOperator) return;
+    if (!gateway.requiresOperator) return null;
 
-    const accepted = gateway.operators.map((o) => o.code);
-    if (!operator || !accepted.includes(operator)) {
+    const operators =
+      await this.paymentGateway.activeOperators(PAYMENT_CURRENCIES);
+    const network = operators.find((o) => o.code === operator);
+    if (!operator || !network) {
       throw new BadRequestException(
-        `Opérateur invalide pour ${gateway.label}. Valeurs acceptées : ${accepted.join(', ')}`,
+        `Opérateur invalide pour ${gateway.label}. Valeurs acceptées : ${operators
+          .map((o) => o.code)
+          .join(', ')}`,
       );
     }
 
-    // A network of another country would charge the wrong number, or be
-    // refused by the gateway after the request was claimed. Only checked when
-    // both sides know their country.
-    const operatorCountry = gateway.operators.find(
-      (o) => o.code === operator,
-    )?.country;
-    if (operatorCountry && payerCountry && operatorCountry !== payerCountry) {
-      throw new BadRequestException(
-        "Cet opérateur n'est pas disponible dans votre pays.",
-      );
+    // The number decides which country's networks can charge it — someone
+    // living in Congo may pay with a Cameroonian number. Its international
+    // prefix must be the network's country's; a local number without one is
+    // put in that country's form by the gateway, so it cannot disagree.
+    const trimmed = phone.trim();
+    const international = trimmed.startsWith('+') || trimmed.startsWith('00');
+    if (international && network.dialCode) {
+      let digits = trimmed.replace(/\D/g, '');
+      if (trimmed.startsWith('00')) digits = digits.slice(2);
+      if (!digits.startsWith(network.dialCode)) {
+        throw new BadRequestException(
+          'Cet opérateur ne correspond pas au pays de ce numéro.',
+        );
+      }
     }
+    return network;
   }
 
   /**
@@ -304,10 +336,7 @@ export class PaymentRequestService {
       throw new BadRequestException('Montant non défini pour cette demande');
     }
 
-    this.assertOperatorMatchesGateway(
-      operator,
-      toAlpha3(request.profile?.country_code),
-    );
+    const network = await this.assertOperatorMatchesGateway(operator, phone);
 
     // Atomically claim PENDING → PROCESSING before calling the gateway.
     // Concurrent double-taps both attempt this; only one succeeds (count === 1).
@@ -330,7 +359,8 @@ export class PaymentRequestService {
     try {
       const result = await this.paymentGateway.initiatePayment({
         amount: Number(request.amount),
-        currency: 'XAF',
+        // The network's own franc: XOF in Bénin, XAF in Congo — same amount.
+        currency: network?.currency ?? 'XAF',
         externalId: request.id,
         phone,
         operator,
@@ -546,8 +576,10 @@ export class PaymentRequestService {
     const expected = Math.round(Number(request.amount));
     const amountOff =
       settled.amount !== undefined && Math.round(settled.amount) !== expected;
+    // Either CFA franc: same value, so the same amount is right in both.
     const currencyOff =
-      settled.currency !== undefined && settled.currency !== 'XAF';
+      settled.currency !== undefined &&
+      !(PAYMENT_CURRENCIES as readonly string[]).includes(settled.currency);
     if (!amountOff && !currencyOff) return false;
 
     this.logger.warn(

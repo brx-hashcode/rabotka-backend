@@ -165,6 +165,14 @@ describe('PaymentRequestService', () => {
             // The suite drives pawaPay-shaped operators, so the active gateway
             // has to be one that accepts them.
             getActiveMetadata: jest.fn().mockReturnValue(PAWAPAY_METADATA),
+            // What the account's live configuration would say, with each
+            // network's calling code.
+            activeOperators: jest.fn().mockResolvedValue(
+              PAWAPAY_METADATA.operators.map((o) => ({
+                ...o,
+                dialCode: o.country === 'CMR' ? '237' : '242',
+              })),
+            ),
             getActiveMetadataOrNull: jest
               .fn()
               .mockReturnValue(PAWAPAY_METADATA),
@@ -440,17 +448,48 @@ describe('PaymentRequestService', () => {
       expect(prisma.paymentRequest.updateMany).not.toHaveBeenCalled();
     });
 
-    it("rejects a network of another country than the payer's", async () => {
+    it("rejects a network of another country than the number's", async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING, {
+          amount: 5000,
+          profile: { ...mockProfile, country_code: 'CM' },
+        }),
+      );
+      await expect(
+        // A Congolese number on a Cameroonian network.
+        service.initiatePayment(TOKEN, '+242061234567', 'MTN_MOMO_CMR'),
+      ).rejects.toThrow(
+        'Cet opérateur ne correspond pas au pays de ce numéro.',
+      );
+      expect(prisma.paymentRequest.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("accepts another country's network when the number is from there", async () => {
+      // Lives in Congo, pays with a Cameroonian number: the checkout lets them
+      // switch country, and the number is what the network charges.
       (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
         makeRequest(PaymentRequestStatus.PENDING, {
           amount: 5000,
           profile: { ...mockProfile, country_code: 'CG' },
         }),
       );
-      await expect(
-        service.initiatePayment(TOKEN, '+237677123456', 'MTN_MOMO_CMR'),
-      ).rejects.toThrow("Cet opérateur n'est pas disponible dans votre pays.");
-      expect(prisma.paymentRequest.updateMany).not.toHaveBeenCalled();
+      await service
+        .initiatePayment(TOKEN, '+237677123456', 'MTN_MOMO_CMR')
+        .catch(() => undefined);
+      expect(prisma.paymentRequest.updateMany).toHaveBeenCalled();
+    });
+
+    it("accepts a local number: the gateway puts it in the network's country form", async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING, {
+          amount: 5000,
+          profile: { ...mockProfile, country_code: 'CG' },
+        }),
+      );
+      await service
+        .initiatePayment(TOKEN, '677123456', 'MTN_MOMO_CMR')
+        .catch(() => undefined);
+      expect(prisma.paymentRequest.updateMany).toHaveBeenCalled();
     });
 
     it("accepts a network of the payer's own country", async () => {
@@ -461,10 +500,35 @@ describe('PaymentRequestService', () => {
         }),
       );
       await service
-        .initiatePayment(TOKEN, '+237677123456', 'ORANGE_CMR')
+        .initiatePayment(TOKEN, '+237677123456', 'MTN_MOMO_CMR')
         .catch(() => undefined);
       // Got past the operator check: the request was claimed.
       expect(prisma.paymentRequest.updateMany).toHaveBeenCalled();
+    });
+
+    it('charges a network in its own franc: XOF for Bénin', async () => {
+      const paymentGateway = (service as any).paymentGateway;
+      (paymentGateway.activeOperators as jest.Mock).mockResolvedValueOnce([
+        {
+          code: 'MTN_MOMO_BEN',
+          label: 'MTN',
+          country: 'BEN',
+          dialCode: '229',
+          currency: 'XOF',
+        },
+      ]);
+      pendingRequest();
+      (paymentGateway.initiatePayment as jest.Mock).mockResolvedValueOnce({
+        gatewayRef: 'dep-ben',
+      });
+
+      await service
+        .initiatePayment(TOKEN, '+22997123456', 'MTN_MOMO_BEN')
+        .catch(() => undefined);
+
+      expect(paymentGateway.initiatePayment).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 5000, currency: 'XOF' }),
+      );
     });
 
     it('rejects a missing operator when the gateway routes by network', async () => {
@@ -493,12 +557,32 @@ describe('PaymentRequestService', () => {
   });
 
   describe('listGateways()', () => {
-    it('reports the active gateway alongside every registered one', () => {
-      const result = service.listGateways();
+    it('reports the active gateway alongside every registered one', async () => {
+      const result = await service.listGateways();
       expect(result.active).toBe('PAWAPAY');
       expect(result.gateways.map((g) => g.key)).toEqual([
         'PAWAPAY',
         'MTN_MOMO',
+      ]);
+    });
+
+    it("gives the live gateway the account's live networks, not its declared list", async () => {
+      const paymentGateway = (service as any).paymentGateway;
+      (paymentGateway.activeOperators as jest.Mock).mockResolvedValueOnce([
+        {
+          code: 'AIRTEL_GAB',
+          label: 'Airtel',
+          country: 'GAB',
+          dialCode: '241',
+        },
+      ]);
+      const result = await service.listGateways();
+      expect(result.gateways[0].operators.map((o) => o.code)).toEqual([
+        'AIRTEL_GAB',
+      ]);
+      expect(paymentGateway.activeOperators).toHaveBeenCalledWith([
+        'XAF',
+        'XOF',
       ]);
     });
   });
@@ -1212,6 +1296,18 @@ describe('PaymentRequestService', () => {
 
     it('lets a matching settlement through to approval', async () => {
       callbackSays({ amount: 5000.0, currency: 'XAF' });
+      (prisma.$transaction as jest.Mock).mockResolvedValue(undefined);
+
+      await service
+        .handlePaymentCallback({ depositId: 'dep-1' })
+        .catch(() => undefined);
+
+      expect(mismatchLogged()).toBe(false);
+    });
+
+    it('approves the same amount settled in XOF — the CFA francs are at par', async () => {
+      // A Beninese network is charged 5 000 XOF for a 5 000 XAF request.
+      callbackSays({ amount: 5000, currency: 'XOF' });
       (prisma.$transaction as jest.Mock).mockResolvedValue(undefined);
 
       await service
