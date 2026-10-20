@@ -13,6 +13,7 @@ import {
   HttpStatus,
   UseGuards,
   UnauthorizedException,
+  Headers,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -43,7 +44,9 @@ import {
   WhatsAppSessionDto,
   SignupSendOtpDto,
   SignupVerifyOtpDto,
+  SignupProgressDto,
 } from './dto';
+import { SIGNUP_TOKEN_HEADER } from './guards/signup-upload.guard';
 import { QrGateway } from '../ws-notifications/qr.gateway';
 import { WsNotificationsGateway } from '../ws-notifications/ws-notifications.gateway';
 
@@ -88,7 +91,11 @@ export class AuthController {
   })
   @ApiResponse({ status: 429, description: 'Too many codes for this number' })
   async sendSignupOtp(@Body() dto: SignupSendOtpDto) {
-    return this.authService.sendSignupOtp(dto.phone);
+    return this.authService.sendSignupOtp(dto.phone, {
+      firstName: dto.firstName,
+      lastName: dto.lastName,
+      profileType: dto.profileType,
+    });
   }
 
   @Public()
@@ -105,6 +112,26 @@ export class AuthController {
   @ApiResponse({ status: 400, description: 'Wrong or expired code' })
   async verifySignupOtp(@Body() dto: SignupVerifyOtpDto) {
     return this.authService.verifySignupOtp(dto.phone, dto.code);
+  }
+
+  @Public()
+  @Post('signup/progress')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Signup: the app reached a later screen (drop-off tracking)',
+    description:
+      'Authenticated by the `X-Signup-Token` header from signup/verify-otp. Always answers `{ success: true }` — a missing or spent token is not the caller’s problem, and the answer must not say which numbers are signing up.',
+  })
+  @ApiBody({ type: SignupProgressDto })
+  async signupProgress(
+    @Body() dto: SignupProgressDto,
+    @Headers(SIGNUP_TOKEN_HEADER) token?: string,
+  ) {
+    await this.authService.recordSignupProgress(token ?? null, dto.stage, {
+      profileType: dto.profileType,
+    });
+    return { success: true };
   }
 
   @Public()
