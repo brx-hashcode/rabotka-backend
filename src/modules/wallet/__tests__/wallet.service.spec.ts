@@ -65,6 +65,7 @@ describe('WalletService', () => {
       profile: { findUnique: jest.fn() },
       penalty: { findUnique: jest.fn(), update: jest.fn() },
       payment: {
+        groupBy: jest.fn().mockResolvedValue([]),
         create: jest.fn(),
         aggregate: jest.fn(),
         count: jest.fn(),
@@ -264,6 +265,7 @@ describe('WalletService', () => {
         [
           ...(prisma.payment.aggregate as jest.Mock).mock.calls,
           ...(prisma.payment.count as jest.Mock).mock.calls,
+          ...(prisma.payment.groupBy as jest.Mock).mock.calls,
         ].map(([args]) => args.where);
 
       beforeEach(() => {
@@ -283,7 +285,7 @@ describe('WalletService', () => {
           created_to: '2026-12-31',
         });
 
-        expect(wheres()).toHaveLength(5);
+        expect(wheres()).toHaveLength(4);
         for (const where of wheres()) {
           expect(where.created_at).toEqual({
             gte: new Date('2026-01-01'),
@@ -296,7 +298,7 @@ describe('WalletService', () => {
       it('stays all-time when no window is given', async () => {
         await service.getSystemRevenue();
 
-        expect(wheres()).toHaveLength(5);
+        expect(wheres()).toHaveLength(4);
         for (const where of wheres()) {
           expect(where).not.toHaveProperty('created_at');
         }
@@ -331,6 +333,60 @@ describe('WalletService', () => {
           PaymentType.REGISTRATION,
         ]),
       );
+    });
+
+    it('breaks completed payments down without folding top-ups into revenue', async () => {
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue(
+        mockSystemWallet,
+      );
+      (prisma.payment.aggregate as jest.Mock).mockResolvedValue({
+        _sum: { amount: 10000 },
+        _count: 15,
+      });
+      (prisma.payment.count as jest.Mock).mockResolvedValue(0);
+      (prisma.payment.groupBy as jest.Mock).mockResolvedValue([
+        {
+          type: PaymentType.CONTACT_UNLOCK,
+          payment_method: PaymentMethod.MOBILE_MONEY,
+          _sum: { amount: 7000 },
+          _count: { _all: 7 },
+        },
+        {
+          type: PaymentType.CONTACT_UNLOCK,
+          payment_method: PaymentMethod.WALLET,
+          _sum: { amount: 3000 },
+          _count: { _all: 3 },
+        },
+        {
+          type: PaymentType.PENALTY,
+          payment_method: PaymentMethod.OTHER,
+          _sum: { amount: null },
+          _count: { _all: 0 },
+        },
+        {
+          type: PaymentType.WALLET_TOP_UP,
+          payment_method: PaymentMethod.MOBILE_MONEY,
+          _sum: { amount: 1500 },
+          _count: { _all: 3 },
+        },
+      ]);
+
+      const result = await service.getSystemRevenue();
+
+      expect(result.totalRevenue).toBe(10000);
+      expect(result.revenueByType).toEqual({
+        penalty: 0,
+        contactUnlock: 10000,
+      });
+      expect(result.contactUnlockByMethod).toEqual({
+        mobileMoney: 7000,
+        wallet: 3000,
+        other: 0,
+      });
+      expect(result.walletTopUps).toEqual({ amount: 1500, count: 3 });
+      // Matches pending/failed, which count every type.
+      expect(result.completedPaymentsCount).toBe(13);
+      expect(result.completedCount).toBe(15);
     });
 
     it('excludes wallet top-ups, which are deposits and not earnings', () => {
@@ -408,13 +464,21 @@ describe('WalletService', () => {
   describe('creditProfileWallet()', () => {
     it('throws BadRequestException when amount is zero', async () => {
       await expect(
-        service.creditProfileWallet('profile-1', 0, WalletTransactionType.WELCOME_CREDIT),
+        service.creditProfileWallet(
+          'profile-1',
+          0,
+          WalletTransactionType.WELCOME_CREDIT,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('throws BadRequestException when amount is negative', async () => {
       await expect(
-        service.creditProfileWallet('profile-1', -100, WalletTransactionType.WELCOME_CREDIT),
+        service.creditProfileWallet(
+          'profile-1',
+          -100,
+          WalletTransactionType.WELCOME_CREDIT,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 

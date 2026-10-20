@@ -297,6 +297,7 @@ export class WalletController {
         totalRevenue: { type: 'number', example: 2348000 },
         balance: { type: 'number', example: 2348000 },
         completedCount: { type: 'number', example: 120 },
+        completedPaymentsCount: { type: 'number', example: 134 },
         pendingCount: { type: 'number', example: 3 },
         failedCount: { type: 'number', example: 7 },
         revenueByType: {
@@ -304,6 +305,22 @@ export class WalletController {
           properties: {
             penalty: { type: 'number', example: 48000 },
             contactUnlock: { type: 'number', example: 2300000 },
+          },
+        },
+        contactUnlockByMethod: {
+          type: 'object',
+          properties: {
+            mobileMoney: { type: 'number', example: 1800000 },
+            wallet: { type: 'number', example: 500000 },
+            other: { type: 'number', example: 0 },
+          },
+        },
+        walletTopUps: {
+          type: 'object',
+          description: 'Completed wallet top-ups — deposits, not revenue.',
+          properties: {
+            amount: { type: 'number', example: 700000 },
+            count: { type: 'number', example: 14 },
           },
         },
       },

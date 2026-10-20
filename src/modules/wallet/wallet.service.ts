@@ -763,16 +763,30 @@ export class WalletService {
    * Revenue figures for the Finance cards, optionally narrowed to payments
    * created inside a window. `balance` is the system wallet's live balance and
    * ignores the window.
+   *
+   * `walletTopUps` sits beside the revenue rather than in it (see
+   * REVENUE_PAYMENT_TYPES): it is there so the cards say what they leave out,
+   * not so anything adds it in. `contactUnlockByMethod` splits the unlock
+   * revenue the same way — WALLET is the top-up (or credit) being spent.
    */
   async getSystemRevenue(
     params: { created_from?: string; created_to?: string } = {},
   ): Promise<{
     totalRevenue: number;
     balance: number;
+    /** Completed revenue payments — the ones `totalRevenue` sums. */
     completedCount: number;
+    /** Completed payments of every type, top-ups included, like the two below. */
+    completedPaymentsCount: number;
     pendingCount: number;
     failedCount: number;
     revenueByType: { penalty: number; contactUnlock: number };
+    contactUnlockByMethod: {
+      mobileMoney: number;
+      wallet: number;
+      other: number;
+    };
+    walletTopUps: { amount: number; count: number };
   }> {
     const systemWallet = await this.getOrCreateSystemWallet();
 
@@ -790,59 +804,70 @@ export class WalletService {
           }
         : {};
 
-    const [
-      completedAgg,
-      pendingCount,
-      failedCount,
-      penaltyAgg,
-      contactUnlockAgg,
-    ] = await Promise.all([
-      this.prisma.payment.aggregate({
-        where: {
-          status: PaymentStatus.COMPLETED,
-          type: { in: [...REVENUE_PAYMENT_TYPES] },
-          ...window,
-        },
-        _sum: { amount: true },
-        _count: true,
-      }),
-      this.prisma.payment.count({
-        where: { status: PaymentStatus.PENDING, ...window },
-      }),
-      this.prisma.payment.count({
-        where: { status: PaymentStatus.FAILED, ...window },
-      }),
-      this.prisma.payment.aggregate({
-        where: {
-          status: PaymentStatus.COMPLETED,
-          type: PaymentType.PENALTY,
-          ...window,
-        },
-        _sum: { amount: true },
-      }),
-      this.prisma.payment.aggregate({
-        where: {
-          status: PaymentStatus.COMPLETED,
-          type: PaymentType.CONTACT_UNLOCK,
-          ...window,
-        },
-        _sum: { amount: true },
-      }),
-    ]);
+    const [completedAgg, pendingCount, failedCount, completedGroups] =
+      await Promise.all([
+        this.prisma.payment.aggregate({
+          where: {
+            status: PaymentStatus.COMPLETED,
+            type: { in: [...REVENUE_PAYMENT_TYPES] },
+            ...window,
+          },
+          _sum: { amount: true },
+          _count: true,
+        }),
+        this.prisma.payment.count({
+          where: { status: PaymentStatus.PENDING, ...window },
+        }),
+        this.prisma.payment.count({
+          where: { status: PaymentStatus.FAILED, ...window },
+        }),
+        this.prisma.payment.groupBy({
+          by: ['type', 'payment_method'],
+          where: { status: PaymentStatus.COMPLETED, ...window },
+          _sum: { amount: true },
+          _count: { _all: true },
+        }),
+      ]);
 
-    const totalRevenue = Number(completedAgg._sum.amount ?? 0);
-    const balance = Number(systemWallet.balance);
+    let completedPaymentsCount = 0;
+    let penalty = 0;
+    const contactUnlockByMethod = { mobileMoney: 0, wallet: 0, other: 0 };
+    const walletTopUps = { amount: 0, count: 0 };
+    for (const group of completedGroups) {
+      const amount = Number(group._sum.amount ?? 0);
+      completedPaymentsCount += group._count._all;
+      if (group.type === PaymentType.PENALTY) {
+        penalty += amount;
+      } else if (group.type === PaymentType.WALLET_TOP_UP) {
+        walletTopUps.amount += amount;
+        walletTopUps.count += group._count._all;
+      } else if (group.type === PaymentType.CONTACT_UNLOCK) {
+        if (group.payment_method === PaymentMethod.MOBILE_MONEY) {
+          contactUnlockByMethod.mobileMoney += amount;
+        } else if (group.payment_method === PaymentMethod.WALLET) {
+          contactUnlockByMethod.wallet += amount;
+        } else {
+          contactUnlockByMethod.other += amount;
+        }
+      }
+    }
 
     return {
-      totalRevenue,
-      balance,
+      totalRevenue: Number(completedAgg._sum.amount ?? 0),
+      balance: Number(systemWallet.balance),
       completedCount: completedAgg._count,
+      completedPaymentsCount,
       pendingCount,
       failedCount,
       revenueByType: {
-        penalty: Number(penaltyAgg._sum.amount ?? 0),
-        contactUnlock: Number(contactUnlockAgg._sum.amount ?? 0),
+        penalty,
+        contactUnlock:
+          contactUnlockByMethod.mobileMoney +
+          contactUnlockByMethod.wallet +
+          contactUnlockByMethod.other,
       },
+      contactUnlockByMethod,
+      walletTopUps,
     };
   }
 
