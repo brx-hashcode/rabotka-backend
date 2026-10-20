@@ -31,3 +31,12 @@ export function toAlpha3(alpha2: string | null | undefined): string | null {
   if (!alpha2) return null;
   return ALPHA3[alpha2.trim().toUpperCase()] ?? null;
 }
+
+/**
+ * The currencies Rabotka charges and pays out in. Amounts are CFA francs, and
+ * both CFA francs are pegged to the euro at the same rate by treaty
+ * (655.957), so 1 XAF = 1 XOF: a network in either is used for the same
+ * amount, in its own franc. Floating currencies (RWF, KES…) would need an
+ * exchange rate and are not offered.
+ */
+export const CFA_CURRENCIES = ['XAF', 'XOF'] as const;
