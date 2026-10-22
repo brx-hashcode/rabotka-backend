@@ -17,6 +17,11 @@ import { Server, Socket } from 'socket.io';
 import { socketCorsOrigin } from '../../common/utils/allowed-origins';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import type { JwtPayload } from '../auth/guards/jwt-auth.guard';
+import {
+  SESSION_ENDED,
+  type SessionEndedEvent,
+} from '../../common/events/session-ended.events';
+import { OnEvent } from '@nestjs/event-emitter';
 
 /**
  * Live comments on one claim, for the admin working it and the profile who
@@ -75,6 +80,14 @@ export class ClaimCommentsGateway
 
     const room = `claim:${claimId}`;
     void client.join(room);
+    // Whose socket this is, so an ended session can be found and closed —
+    // this namespace has no per-person room otherwise (#864).
+    const principal = this.verify(client);
+    if (principal?.sub) {
+      void client.join(
+        `${principal.type === 'admin' ? 'admin' : 'profile'}:${principal.sub}`,
+      );
+    }
     this.logger.debug(`Client ${client.id} joined room ${room}`);
   }
 
@@ -151,5 +164,10 @@ export class ClaimCommentsGateway
     }
 
     return undefined;
+  }
+  /** Disconnects the sockets of a session that just ended (#864). */
+  @OnEvent(SESSION_ENDED)
+  evictEndedSession(event: SessionEndedEvent): void {
+    this.server?.in(`${event.kind}:${event.id}`).disconnectSockets(true);
   }
 }

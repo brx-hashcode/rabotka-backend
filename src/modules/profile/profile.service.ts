@@ -101,6 +101,10 @@ import {
   recordMiss,
 } from '../auth/otp-store';
 import { toE164 } from '../whatsapp/contracts/address';
+import {
+  SESSION_ENDED,
+  type SessionEndedEvent,
+} from '../../common/events/session-ended.events';
 
 const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
   [ProfileType.WORKER]: 'Travailleur',
@@ -1826,8 +1830,15 @@ export class ProfileService {
       ids,
       at,
     } satisfies ProfilesArchivedEvent);
-    // Ends their open sessions on the next request (#878).
+    // Ends their open sessions on the next request (#878), and their open
+    // sockets now (#864).
     await markProfilesArchived(this.redis, ids, true);
+    for (const id of ids) {
+      this.eventEmitter.emit(SESSION_ENDED, {
+        kind: 'profile',
+        id,
+      } satisfies SessionEndedEvent);
+    }
     return { count };
   }
 

@@ -13,6 +13,11 @@ import { Server, Socket } from 'socket.io';
 import type { JwtPayload } from '../auth/guards/jwt-auth.guard';
 import type { ProfileNotificationDto } from './profile-notification.service';
 import { socketCorsOrigin } from '../../common/utils/allowed-origins';
+import {
+  SESSION_ENDED,
+  type SessionEndedEvent,
+} from '../../common/events/session-ended.events';
+import { OnEvent } from '@nestjs/event-emitter';
 
 /**
  * Pushes a new notification to the recipient's open tabs, so the bell updates
@@ -99,5 +104,11 @@ export class ProfileNotificationsGateway implements OnGatewayConnection {
     }
 
     return undefined;
+  }
+  /** Disconnects the sockets of a session that just ended (#864). */
+  @OnEvent(SESSION_ENDED)
+  evictEndedSession(event: SessionEndedEvent): void {
+    if (event.kind !== 'profile') return;
+    this.server?.in(`profile:${event.id}`).disconnectSockets(true);
   }
 }
