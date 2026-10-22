@@ -365,6 +365,10 @@ const VERIFICATION_TOKEN_TTL_SECONDS = 1800;
  */
 const PHONE_CHANGE_TTL_SECONDS = 300;
 const PHONE_CHANGE_KEY_PREFIX = `${REDIS_KEY_PREFIX}profile:phone-change:`;
+/** KYC uploads not yet attached to a profile, scored by upload time (#836). */
+const KYC_PENDING_UPLOADS = `${REDIS_KEY_PREFIX}kyc:pending-uploads`;
+const KYC_PENDING_TTL_MS = 24 * 60 * 60 * 1000;
+const KYC_SWEEP_BATCH = 20;
 const PHONE_CHANGE_SENDS_PREFIX = `${REDIS_KEY_PREFIX}profile:phone-change-sends:`;
 const phoneChangeMissKey = (profileId: string) =>
   `${REDIS_KEY_PREFIX}profile:phone-change-misses:${profileId}`;
@@ -2111,12 +2115,48 @@ export class ProfileService {
   async uploadKycFile(
     file: Express.Multer.File,
   ): Promise<{ url: string; key: string }> {
+    const bucket = await kycBucket(this.systemConfig, this.configService);
     const result = await this.fileService.uploadToStorage(file, {
       folder: 'kyc-documents',
       access: 'private',
-      bucket: await kycBucket(this.systemConfig, this.configService),
+      bucket,
     });
+    // Pending until a profile is created with it. Anything still pending a
+    // day later was abandoned mid-signup and is deleted (pentest F4, #836):
+    // identity documents nobody owns must not sit in the bucket forever.
+    await this.redis
+      .zadd(KYC_PENDING_UPLOADS, Date.now(), result.key)
+      .catch(() => undefined);
+    void this.sweepAbandonedKycUploads(bucket).catch((err: unknown) =>
+      this.logger.warn('KYC upload sweep failed', err),
+    );
     return { url: result.url, key: result.key };
+  }
+
+  /**
+   * Deletes a few abandoned KYC uploads. Run on each upload rather than on a
+   * schedule: sign-ups are what create them, so sign-ups keep the set short.
+   * Idempotent, so concurrent instances only repeat a delete.
+   */
+  private async sweepAbandonedKycUploads(bucket?: string): Promise<void> {
+    const cutoff = Date.now() - KYC_PENDING_TTL_MS;
+    const expired = await this.redis.zrangebyscore(
+      KYC_PENDING_UPLOADS,
+      0,
+      cutoff,
+      'LIMIT',
+      0,
+      KYC_SWEEP_BATCH,
+    );
+    for (const key of expired) {
+      const attached = await this.prisma.kycDocument.count({
+        where: { storage_key: key },
+      });
+      if (attached === 0) {
+        await this.fileService.deleteStoredObject(key, bucket);
+      }
+      await this.redis.zrem(KYC_PENDING_UPLOADS, key);
+    }
   }
 
   /**
@@ -2500,6 +2540,8 @@ export class ProfileService {
       data.document_type = documentType;
     }
 
+    // Not removed from the pending set here: this runs inside a transaction
+    // that may still roll back. The sweep checks for a row before deleting.
     return tx.kycDocument.create({ data });
   }
 

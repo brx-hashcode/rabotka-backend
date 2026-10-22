@@ -108,6 +108,7 @@ function makeFileService() {
     // bucket before it writes a row. Default to "it is there"; the tests that
     // care about a missing object override this.
     exists: jest.fn().mockResolvedValue(true),
+    deleteStoredObject: jest.fn().mockResolvedValue(undefined),
     getPresignedUrl: jest
       .fn()
       .mockResolvedValue('https://signed.example.com/x'),
@@ -128,6 +129,9 @@ function makeRedis() {
     ttl: jest.fn().mockResolvedValue(300),
     incr: jest.fn().mockResolvedValue(1),
     expire: jest.fn().mockResolvedValue(1),
+    zadd: jest.fn().mockResolvedValue(1),
+    zrangebyscore: jest.fn().mockResolvedValue([]),
+    zrem: jest.fn().mockResolvedValue(1),
   };
 }
 
@@ -991,6 +995,44 @@ describe('ProfileService', () => {
       await expect(
         service.verifyProfileKyc('missing', 'admin-1', 'VERIFIED', 'Note'),
       ).rejects.toThrow('Profil non trouvé');
+    });
+  });
+
+  // Pentest F4 (#836): uploads from abandoned sign-ups stayed in the bucket
+  // forever — identity documents nobody owns.
+  describe('abandoned KYC uploads', () => {
+    const file = {
+      originalname: 'id.jpg',
+      mimetype: 'image/jpeg',
+      buffer: Buffer.from('id'),
+      size: 2,
+    } as Express.Multer.File;
+
+    it('records each upload as pending', async () => {
+      await service.uploadKycFile(file);
+      expect(redis.zadd).toHaveBeenCalledWith(
+        expect.stringContaining('kyc:pending-uploads'),
+        expect.any(Number),
+        'folder/file.jpg',
+      );
+    });
+
+    it('deletes an upload left unattached for a day, and keeps an attached one', async () => {
+      redis.zrangebyscore.mockResolvedValue(['kyc-documents/old.jpg', 'kyc-documents/used.jpg']);
+      (prisma as any).kycDocument.count = jest
+        .fn()
+        .mockImplementation(({ where }: { where: { storage_key: string } }) =>
+          Promise.resolve(where.storage_key.endsWith('used.jpg') ? 1 : 0),
+        );
+
+      await (service as any).sweepAbandonedKycUploads('rabotka-kyc');
+
+      expect(fileService.deleteStoredObject).toHaveBeenCalledTimes(1);
+      expect(fileService.deleteStoredObject).toHaveBeenCalledWith(
+        'kyc-documents/old.jpg',
+        'rabotka-kyc',
+      );
+      expect(redis.zrem).toHaveBeenCalledTimes(2);
     });
   });
 
