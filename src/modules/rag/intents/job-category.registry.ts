@@ -311,6 +311,20 @@ export class JobCategoryRegistry {
     return best && best.score >= this.minScore ? best : null;
   }
 
+  /**
+   * The names of the trades on one profile — what a colleague would already
+   * know about the person they are talking to. One indexed read, done inside
+   * the assistant's turn rather than in the bot's shared profile query, which
+   * every message pays for.
+   */
+  async namesForProfile(profileId: string): Promise<string[]> {
+    const rows = await this.prisma.profileCategory.findMany({
+      where: { profile_id: profileId },
+      select: { category: { select: { name: true } } },
+    });
+    return rows.map((r) => r.category.name);
+  }
+
   async slugs(): Promise<string[]> {
     return (await this.all()).map((c) => c.slug);
   }
