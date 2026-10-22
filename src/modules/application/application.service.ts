@@ -378,8 +378,9 @@ export class ApplicationService {
       }),
     ]);
 
-    // An offer archived by the team is gone (pentest A2-F02, #858).
-    if (!jobOffer || jobOffer.deleted_at) {
+    // An offer archived by the team is gone (pentest A2-F02, #858), and so is
+    // one whose employer was archived (#870).
+    if (!jobOffer || jobOffer.deleted_at || jobOffer.employer?.deleted_at) {
       throw new NotFoundException('Offre non trouvée');
     }
     if (!worker) {
