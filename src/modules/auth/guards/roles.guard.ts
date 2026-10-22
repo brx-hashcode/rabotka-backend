@@ -67,10 +67,12 @@ export class RolesGuard implements CanActivate {
       (await this.prisma.user
         .findUnique({
           where: { id: userId },
-          select: { role: true, is_active: true },
+          select: { role: true, is_active: true, deleted_at: true },
         })
         .then((row) =>
-          row ? { role: row.role, isActive: row.is_active } : null,
+          row
+            ? { role: row.role, isActive: row.is_active && !row.deleted_at }
+            : null,
         ));
 
     if (!user?.isActive) {

@@ -60,12 +60,14 @@ export class AdminAuthGuard extends JwtAuthGuard {
 
     const account = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { role: true, is_active: true },
+      select: { role: true, is_active: true, deleted_at: true },
     });
 
-    // Same message and status for "no such account" and "deactivated": which of
-    // the two it is, is not something an unauthenticated caller needs to learn.
-    if (!account || !account.is_active) {
+    // Same message and status for "no such account", "deactivated" and
+    // "archived": which it is, is not something an unauthenticated caller
+    // needs to learn. Archived is checked as well as is_active (pentest
+    // A2-F01, #857): archiving used to leave is_active untouched.
+    if (!account || !account.is_active || account.deleted_at) {
       throw new UnauthorizedException('Accès administrateur requis');
     }
 

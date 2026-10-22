@@ -414,7 +414,8 @@ describe('UserService', () => {
       ).resolves.toBeUndefined();
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: USER_ID },
-        data: { deleted_at: expect.any(Date) },
+        // Archiving deactivates: every guard and login path refuses it (#857).
+        data: { deleted_at: expect.any(Date), is_active: false },
       });
     });
 
