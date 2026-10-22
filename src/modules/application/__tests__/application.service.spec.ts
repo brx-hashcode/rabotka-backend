@@ -1057,6 +1057,17 @@ describe('ApplicationService', () => {
       expect(prisma.application.create).not.toHaveBeenCalled();
     });
 
+    it('throws NotFoundException when the employer was archived', async () => {
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
+        ...mockJobOffer,
+        employer: { ...(mockJobOffer as any).employer, deleted_at: new Date() },
+      });
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(mockWorker);
+      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
     it('throws NotFoundException when worker not found', async () => {
       (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue(mockJobOffer);
       (prisma.profile.findUnique as jest.Mock).mockResolvedValue(null);

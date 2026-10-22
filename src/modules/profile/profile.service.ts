@@ -89,6 +89,12 @@ import {
 import { randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { OnboardingAttemptService } from '../onboarding-attempt/onboarding-attempt.service';
 import { markProfilesArchived } from '../auth/session-revocation';
+import {
+  PROFILES_ARCHIVED,
+  PROFILES_RESTORED,
+  type ProfilesArchivedEvent,
+  type ProfilesRestoredEvent,
+} from './profile-lifecycle.events';
 
 const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
   [ProfileType.WORKER]: 'Travailleur',
@@ -1780,14 +1786,37 @@ export class ProfileService {
     await markProfilesArchived(this.redis, ids, false);
   }
 
+  /** When each of these profiles was archived; read BEFORE restoring them. */
+  async archivedAt(ids: string[]): Promise<{ id: string; at: Date }[]> {
+    const rows = await this.prisma.profile.findMany({
+      where: { id: { in: ids }, deleted_at: { not: null } },
+      select: { id: true, deleted_at: true },
+    });
+    return rows.map((r) => ({ id: r.id, at: r.deleted_at as Date }));
+  }
+
+  /** What went with them comes back with them — see PROFILES_ARCHIVED. */
+  announceRestored(restored: { id: string; at: Date }[]): void {
+    if (restored.length === 0) return;
+    this.eventEmitter.emit(PROFILES_RESTORED, {
+      restored,
+    } satisfies ProfilesRestoredEvent);
+  }
+
   /** Archive many profiles at once (admin bulk delete). Returns the count archived. */
   async bulkSoftDeleteProfiles(ids: string[]): Promise<{ count: number }> {
     if (ids.length === 0) return { count: 0 };
+    const at = new Date();
     const { count } = await this.prisma.profile.updateMany({
       where: { id: { in: ids }, deleted_at: null },
-      data: { deleted_at: new Date() },
+      data: { deleted_at: at },
     });
     await this.cache.invalidate('profiles');
+    // An archived employer's open offers go with it (pentest A2-F14, #870).
+    this.eventEmitter.emit(PROFILES_ARCHIVED, {
+      ids,
+      at,
+    } satisfies ProfilesArchivedEvent);
     // Ends their open sessions on the next request (#878).
     await markProfilesArchived(this.redis, ids, true);
     return { count };
