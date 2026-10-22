@@ -99,6 +99,41 @@ describe('ContactedProfilesService', () => {
       expect(prisma.profile.findMany).not.toHaveBeenCalled();
     });
 
+    // Pentest A2-NV04 (#880): paying once was a permanent window onto a worker
+    // the team had since archived or banned.
+    it('leaves out archived and banned workers', async () => {
+      prisma.walletTransaction.findMany.mockResolvedValue([
+        { reference_id: 'w1', created_at: new Date('2026-03-01') },
+      ]);
+
+      await service.listContacts('e1');
+
+      expect(prisma.profile.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: { in: ['w1'] },
+            deleted_at: null,
+            status: { not: 'BANNED' },
+          },
+        }),
+      );
+    });
+
+    it('ignores archived payment rows', async () => {
+      await service.listRecommendationContactIds('e1');
+
+      expect(prisma.walletTransaction.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ deleted_at: null }),
+        }),
+      );
+      expect(prisma.paymentRequest.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ deleted_at: null }),
+        }),
+      );
+    });
+
     it('returns the phone and email for a recommendation unlock', async () => {
       prisma.walletTransaction.findMany.mockResolvedValue([
         { reference_id: 'w1', created_at: new Date('2026-01-02T10:00:00Z') },
@@ -127,7 +162,9 @@ describe('ContactedProfilesService', () => {
       await service.listContacts('e1');
 
       expect(prisma.profile.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: { in: ['w1'] } } }),
+        expect.objectContaining({
+          where: expect.objectContaining({ id: { in: ['w1'] } }),
+        }),
       );
     });
 
