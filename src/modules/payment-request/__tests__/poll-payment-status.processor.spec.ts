@@ -15,7 +15,7 @@ import { inAppNotifications } from '../../profile-notification/__tests__/in-app-
 
 const mockPrisma = {
   paymentRequest: {
-    update: jest.fn().mockResolvedValue({}),
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
   },
   payment: {
     create: jest.fn().mockResolvedValue({}),
@@ -133,8 +133,14 @@ describe('PollPaymentStatusProcessor', () => {
       transactionId: 'tx-1',
     });
     await processor.process({ data: baseJobData });
-    expect(mockPrisma.paymentRequest.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: 'req-1' } }),
+    expect(mockPrisma.paymentRequest.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'req-1',
+          status: 'PROCESSING',
+          gateway_payment_ref: 'gw-1',
+        },
+      }),
     );
     expect(mockPaymentStatusGateway.emitPaymentStatus).toHaveBeenCalledWith(
       'tok-1',
@@ -203,13 +209,55 @@ describe('PollPaymentStatusProcessor', () => {
     await processor.process({
       data: { ...baseJobData, attempt: 3, maxAttempts: 3 },
     });
-    expect(mockPrisma.paymentRequest.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { status: 'PENDING' } }),
-    );
+    expect(mockPrisma.paymentRequest.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'req-1',
+        status: 'PROCESSING',
+        gateway_payment_ref: 'gw-1',
+      },
+      data: { status: 'PENDING' },
+    });
     expect(mockPaymentStatusGateway.emitPaymentStatus).toHaveBeenCalledWith(
       'tok-1',
       'TIMEOUT',
     );
+  });
+
+  /**
+   * Pentest A2-NV05 (#881). The webhook APPROVED the deposit; a late poll then
+   * read PENDING (or FAILED) and overwrote it, reopening a settled payment to
+   * be settled a second time. A request no longer in flight under this job's
+   * reference must be left alone.
+   */
+  describe('when the request was settled meanwhile', () => {
+    beforeEach(() => {
+      mockPrisma.paymentRequest.updateMany.mockResolvedValueOnce({ count: 0 });
+    });
+
+    it('does not reopen it on the final PENDING read', async () => {
+      mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({
+        status: 'PENDING',
+      });
+      await processor.process({
+        data: { ...baseJobData, attempt: 3, maxAttempts: 3 },
+      });
+
+      expect(mockLogService.create).not.toHaveBeenCalled();
+      expect(mockPaymentStatusGateway.emitPaymentStatus).not.toHaveBeenCalled();
+    });
+
+    it('does not turn it into a failure on a late FAILED read', async () => {
+      mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({
+        status: 'FAILED',
+      });
+      await processor.process({ data: baseJobData });
+
+      expect(mockLogService.create).not.toHaveBeenCalled();
+      expect(mockPaymentStatusGateway.emitPaymentStatus).not.toHaveBeenCalled();
+      expect(
+        inAppNotifications(mockEvents.emit, 'PAYMENT_FAILED'),
+      ).toHaveLength(0);
+    });
   });
 
   /**
