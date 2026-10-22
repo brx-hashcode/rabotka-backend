@@ -254,12 +254,14 @@ export class UserController {
     };
   }
 
+  // SUPER_ADMIN, like bulk-delete and DELETE /user/:id: a MANAGER could bring
+  // back archived ADMIN and SUPER_ADMIN accounts (pentest A2-F11, #867).
   @Post('bulk-restore')
-  @Roles(UserRole.MANAGER)
+  @Roles(UserRole.SUPER_ADMIN)
   @ApiOperation({
-    summary: 'Bulk restore archived rows (admin only)',
+    summary: 'Bulk restore archived admin users (SUPER_ADMIN only)',
     description:
-      'Clears deleted_at. Only rows that are currently archived are affected.',
+      'Clears deleted_at. Only rows that are currently archived are affected. Restored accounts stay deactivated until reactivated.',
   })
   @ApiResponse({ status: 201, description: 'Rows restored' })
   async bulkRestore(

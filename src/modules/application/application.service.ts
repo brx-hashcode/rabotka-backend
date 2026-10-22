@@ -378,7 +378,9 @@ export class ApplicationService {
       }),
     ]);
 
-    if (!jobOffer) {
+    // An offer archived by the team is gone (pentest A2-F02, #858), and so is
+    // one whose employer was archived (#870).
+    if (!jobOffer || jobOffer.deleted_at || jobOffer.employer?.deleted_at) {
       throw new NotFoundException('Offre non trouvée');
     }
     if (!worker) {
@@ -414,6 +416,7 @@ export class ApplicationService {
       where: {
         profile_id: workerId,
         paid_at: null,
+        deleted_at: null,
       },
     });
     if (unpaidPenaltiesCount > 0) {
@@ -483,11 +486,12 @@ export class ApplicationService {
       await tx.$executeRaw`SELECT id FROM "job_offers" WHERE id = ${jobOfferId}::uuid FOR UPDATE`;
       const freshOffer = await tx.jobOffer.findUnique({
         where: { id: jobOfferId },
-        select: { status: true },
+        select: { status: true, deleted_at: true },
       });
       if (
-        freshOffer?.status !== JobOfferStatus.ACTIVE &&
-        freshOffer?.status !== JobOfferStatus.PARTIALLY_FILLED
+        freshOffer?.deleted_at ||
+        (freshOffer?.status !== JobOfferStatus.ACTIVE &&
+          freshOffer?.status !== JobOfferStatus.PARTIALLY_FILLED)
       ) {
         throw new BadRequestException("Cette offre n'est plus disponible");
       }
@@ -821,6 +825,10 @@ export class ApplicationService {
       throw new ForbiddenException(
         "Vous n'êtes pas l'employeur de cette offre",
       );
+    }
+    // Archived by the team: nobody is hired on it any more (#858).
+    if (application.job_offer.deleted_at) {
+      throw new BadRequestException("Cette offre n'est plus disponible");
     }
 
     const fees = await this.systemConfigService.getFees();
@@ -1319,7 +1327,7 @@ export class ApplicationService {
       // count × today's `lateCancellationPenaltyFcfa` misquotes the total for
       // anyone holding a penalty from before the last price change.
       const unpaid = await this.prisma.penalty.aggregate({
-        where: { profile_id: workerId, paid_at: null },
+        where: { profile_id: workerId, paid_at: null, deleted_at: null },
         _count: true,
         _sum: { amount: true },
       });
@@ -2713,7 +2721,7 @@ export class ApplicationService {
   ): Promise<void> {
     const db = tx ?? this.prisma;
     const unpaidCount = await db.penalty.count({
-      where: { profile_id: workerId, paid_at: null },
+      where: { profile_id: workerId, paid_at: null, deleted_at: null },
     });
     const fees = await this.systemConfigService.getFees();
     let newStatus: BillingStatus;
@@ -2787,7 +2795,7 @@ export class ApplicationService {
     workerId: string,
   ): Promise<{ count: number; total: number; ids: string[] }> {
     const penalties = await this.prisma.penalty.findMany({
-      where: { profile_id: workerId, paid_at: null },
+      where: { profile_id: workerId, paid_at: null, deleted_at: null },
       select: { id: true, amount: true },
     });
     return {
@@ -2807,7 +2815,7 @@ export class ApplicationService {
     const now = new Date();
     await this.prisma.$transaction([
       this.prisma.penalty.updateMany({
-        where: { profile_id: workerId, paid_at: null },
+        where: { profile_id: workerId, paid_at: null, deleted_at: null },
         data: { paid_at: now },
       }),
     ]);

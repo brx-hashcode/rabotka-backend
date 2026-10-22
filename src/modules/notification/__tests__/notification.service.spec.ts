@@ -4,6 +4,7 @@ import { MailService } from '../../mail/mail.service';
 import { LayoutService } from '../../mail/layout.service';
 import { CalendarLinkService } from '../../calendar/services/calendar-link.service';
 import { IcsGeneratorService } from '../../calendar/services/ics-generator.service';
+import { StorageFetchService } from '../../file/storage-fetch.service';
 
 describe('NotificationService', () => {
   let service: NotificationService;
@@ -29,6 +30,12 @@ describe('NotificationService', () => {
           useValue: { googleCalendarLink: jest.fn().mockReturnValue('') },
         },
         { provide: IcsGeneratorService, useValue: mockIcsGenerator },
+        // The real rule is StorageFetchService's own spec; here it only has to
+        // let the fixture url through to global.fetch.
+        {
+          provide: StorageFetchService,
+          useValue: { fetch: (url: string) => global.fetch(url) },
+        },
       ],
     }).compile();
 

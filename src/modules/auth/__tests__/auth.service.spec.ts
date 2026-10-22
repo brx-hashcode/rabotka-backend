@@ -711,18 +711,22 @@ describe('AuthService', () => {
 
     describe('logoutMobile()', () => {
       it('blocklists the access token and deletes the refresh jti', async () => {
-        (jwtService.decode as jest.Mock)
-          .mockReturnValueOnce({
-            jti: 'access-jti',
-            exp: Math.floor(Date.now() / 1000) + 900,
-          }) // revokeToken decodes the access token
-          .mockReturnValueOnce({ jti: 'refresh-jti-1' }); // refresh token decode
+        // revokeToken VERIFIES the access token (#886)
+        (jwtService as any).verify = jest.fn().mockReturnValueOnce({
+          jti: '11111111-2222-4333-8444-555555555555',
+          exp: Math.floor(Date.now() / 1000) + 900,
+        });
+        (jwtService.decode as jest.Mock).mockReturnValueOnce({
+          jti: 'refresh-jti-1',
+        }); // refresh token decode
 
         await service.logoutMobile('access-token', 'refresh-token');
 
         // access token jti blocklisted
         expect(redis.set).toHaveBeenCalledWith(
-          expect.stringContaining('jwtblocklist:access-jti'),
+          expect.stringContaining(
+            'jwtblocklist:11111111-2222-4333-8444-555555555555',
+          ),
           '1',
           'EX',
           expect.any(Number),
@@ -922,33 +926,87 @@ describe('AuthService', () => {
   });
 
   describe('revokeToken()', () => {
+    const JTI = '11111111-2222-4333-8444-555555555555';
+
     beforeEach(() => {
-      (service as any).jwtService = { decode: jest.fn(), sign: jest.fn() };
+      (service as any).jwtService = {
+        decode: jest.fn(),
+        sign: jest.fn(),
+        verify: jest.fn(),
+      };
     });
 
     it('stores JTI in blocklist', async () => {
-      (service as any).jwtService.decode = jest.fn().mockReturnValue({
-        jti: 'jti-1',
+      (service as any).jwtService.verify = jest.fn().mockReturnValue({
+        jti: JTI,
         exp: Math.floor(Date.now() / 1000) + 3600,
       });
       await service.revokeToken('some-token');
       expect(redis.set).toHaveBeenCalledWith(
-        expect.stringContaining('jti-1'),
+        expect.stringContaining(JTI),
         '1',
         'EX',
         expect.any(Number),
       );
     });
 
+    // Pentest A2-NV10 (#886): logout is public, and a decoded-only token let
+    // anyone write blocklist keys of their choosing into Redis.
+    // Pentest A2-F08 (#864): logging out left the person's sockets open.
+    it('closes the signed-out person’s open sockets', async () => {
+      const emit = jest.fn();
+      (service as any).events = { emit };
+      (service as any).jwtService.verify = jest.fn().mockReturnValue({
+        jti: JTI,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        sub: 'p-1',
+        type: 'profile',
+      });
+
+      await service.revokeToken('some-token');
+
+      expect(emit).toHaveBeenCalledWith('session.ended', {
+        kind: 'profile',
+        id: 'p-1',
+      });
+    });
+
+    it('writes nothing for a token we did not sign', async () => {
+      (service as any).jwtService.verify = jest.fn().mockImplementation(() => {
+        throw new Error('invalid signature');
+      });
+      await service.revokeToken('forged');
+      expect(redis.set).not.toHaveBeenCalled();
+    });
+
+    it('writes nothing for a jti we would never mint', async () => {
+      (service as any).jwtService.verify = jest.fn().mockReturnValue({
+        jti: 'x'.repeat(4000),
+        exp: Math.floor(Date.now() / 1000) + 3600,
+      });
+      await service.revokeToken('odd');
+      expect(redis.set).not.toHaveBeenCalled();
+    });
+
+    it('never keeps a key longer than our longest session', async () => {
+      (service as any).jwtService.verify = jest.fn().mockReturnValue({
+        jti: JTI,
+        exp: Math.floor(Date.now() / 1000) + 50 * 365 * 24 * 3600,
+      });
+      await service.revokeToken('far-future');
+      const ttl = redis.set.mock.calls[0][3] as number;
+      expect(ttl).toBeLessThanOrEqual(90 * 24 * 3600);
+    });
+
     it('does nothing when token has no JTI', async () => {
-      (service as any).jwtService.decode = jest
+      (service as any).jwtService.verify = jest
         .fn()
         .mockReturnValue({ exp: 9999 });
       await expect(service.revokeToken('some-token')).resolves.not.toThrow();
     });
 
     it('swallows decode errors', async () => {
-      (service as any).jwtService.decode = jest.fn().mockImplementation(() => {
+      (service as any).jwtService.verify = jest.fn().mockImplementation(() => {
         throw new Error('bad');
       });
       await expect(service.revokeToken('bad-token')).resolves.not.toThrow();
@@ -1027,18 +1085,22 @@ describe('AuthService', () => {
   });
 
   describe('confirmQrSession()', () => {
+    const pairedAt = new Date();
     const validUser = {
       id: USER_ID,
       is_active: true,
-      phone_paired_at: new Date(),
+      phone_paired_at: pairedAt,
       totp_enabled: false,
     };
 
     beforeEach(() => {
       redis.incr.mockResolvedValue(1);
-      (jwtService as any).verify = jest
-        .fn()
-        .mockReturnValue({ sub: USER_ID, type: 'admin-phone' });
+      // Bound to the current pairing (#868).
+      (jwtService as any).verify = jest.fn().mockReturnValue({
+        sub: USER_ID,
+        type: 'admin-phone',
+        pairedAt: pairedAt.getTime(),
+      });
     });
 
     it('throws when too many attempts', async () => {

@@ -5,6 +5,7 @@ import {
   type WebPushPayload,
   type WebPushTarget,
 } from '../../common/services/web-push/web-push.service';
+import { assertPushEndpoint } from '../../common/services/web-push/push-endpoint';
 
 export type ProfilePushSubscriptionInput = {
   endpoint: string;
@@ -41,6 +42,7 @@ export class ProfileWebPushService {
   }
 
   async subscribe(profileId: string, input: ProfilePushSubscriptionInput) {
+    assertPushEndpoint(input.endpoint);
     // An endpoint belongs to one browser install: if someone else signed in on
     // this phone before, it is theirs no longer.
     await this.prisma.profilePushSubscription.upsert({

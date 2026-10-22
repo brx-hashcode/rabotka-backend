@@ -148,6 +148,8 @@ export class AdminPenaltyController {
     @Req() req: AdminAuthenticatedRequest,
   ): Promise<{ count: number }> {
     const result = await this.archiveService.restore('penalties', dto.ids);
+    // Owed again: the workers' billing status follows (#859).
+    await this.penaltyService.resyncBillingForPenalties(dto.ids);
     await this.logService.create({
       action: 'PENALTY_BULK_RESTORED',
       entityType: 'Penalty',

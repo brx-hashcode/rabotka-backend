@@ -94,7 +94,10 @@ describe('WalletService', () => {
         { provide: PrismaService, useValue: mockPrismaService },
         {
           provide: SystemConfigService,
-          useValue: { get: jest.fn().mockResolvedValue('') },
+          useValue: {
+            get: jest.fn().mockResolvedValue(''),
+            getFees: jest.fn().mockResolvedValue({ billingBlockThreshold: 3 }),
+          },
         },
         {
           provide: InvoiceService,
@@ -138,7 +141,7 @@ describe('WalletService', () => {
     });
   });
 
-  describe('recordPenaltyPayment()', () => {
+  describe('confirmPenaltyPaymentManually() — admin only', () => {
     const dto: { transactionId?: string; paymentMethod: PaymentMethod } = {
       paymentMethod: PaymentMethod.MOBILE_MONEY,
     };
@@ -147,7 +150,7 @@ describe('WalletService', () => {
       payment: { create: jest.Mock };
       walletTransaction: { create: jest.Mock };
       wallet: { update: jest.Mock };
-      penalty: { update: jest.Mock };
+      penalty: { updateMany: jest.Mock };
     };
 
     beforeEach(() => {
@@ -159,7 +162,7 @@ describe('WalletService', () => {
         payment: { create: jest.fn().mockResolvedValue({}) },
         walletTransaction: { create: jest.fn().mockResolvedValue({}) },
         wallet: { update: jest.fn().mockResolvedValue({}) },
-        penalty: { update: jest.fn().mockResolvedValue({}) },
+        penalty: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       };
       (prisma.$transaction as jest.Mock).mockImplementation(
         async (cb: (tx: unknown) => Promise<unknown>) => cb(transactionTx),
@@ -170,7 +173,11 @@ describe('WalletService', () => {
       (prisma.penalty.findUnique as jest.Mock).mockResolvedValue(null);
 
       await expect(
-        service.recordPenaltyPayment(PENALTY_ID, PROFILE_ID, dto),
+        service.confirmPenaltyPaymentManually(
+          PENALTY_ID,
+          PROFILE_ID,
+          dto.paymentMethod,
+        ),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -181,7 +188,11 @@ describe('WalletService', () => {
       });
 
       await expect(
-        service.recordPenaltyPayment(PENALTY_ID, PROFILE_ID, dto),
+        service.confirmPenaltyPaymentManually(
+          PENALTY_ID,
+          PROFILE_ID,
+          dto.paymentMethod,
+        ),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -192,15 +203,19 @@ describe('WalletService', () => {
       });
 
       await expect(
-        service.recordPenaltyPayment(PENALTY_ID, PROFILE_ID, dto),
+        service.confirmPenaltyPaymentManually(
+          PENALTY_ID,
+          PROFILE_ID,
+          dto.paymentMethod,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('runs transaction: creates payment with RBK reference, wallet transaction, updates wallet and penalty', async () => {
-      const result = await service.recordPenaltyPayment(
+      const result = await service.confirmPenaltyPaymentManually(
         PENALTY_ID,
         PROFILE_ID,
-        dto,
+        dto.paymentMethod,
       );
 
       const expectedReference = (generatePaymentReference as jest.Mock)();
@@ -230,10 +245,24 @@ describe('WalletService', () => {
         where: { id: SYSTEM_WALLET_ID },
         data: { balance: { increment: mockPenalty.amount } },
       });
-      expect(transactionTx.penalty.update).toHaveBeenCalledWith({
-        where: { id: PENALTY_ID },
+      // Conditional: only an unpaid penalty is marked paid.
+      expect(transactionTx.penalty.updateMany).toHaveBeenCalledWith({
+        where: { id: PENALTY_ID, paid_at: null, deleted_at: null },
         data: { paid_at: expect.any(Date) },
       });
+    });
+
+    // Two confirmations racing past the paid_at read must not both credit.
+    it('rolls back when the penalty was settled in between', async () => {
+      transactionTx.penalty.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.confirmPenaltyPaymentManually(
+          PENALTY_ID,
+          PROFILE_ID,
+          dto.paymentMethod,
+        ),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -702,7 +731,9 @@ describe('WalletService', () => {
         },
         walletTransaction: { create: jest.fn().mockResolvedValue({}) },
         payment: { create: jest.fn().mockResolvedValue({}) },
+        profile: { update: jest.fn().mockResolvedValue({}) },
       };
+      (txMock.penalty as any).count = jest.fn().mockResolvedValue(0);
       (prisma.$transaction as jest.Mock).mockImplementationOnce((cb: any) =>
         cb(txMock),
       );
@@ -711,6 +742,16 @@ describe('WalletService', () => {
       });
       const result = await service.payPenaltyFromWallet('pen-1', 'p-1');
       expect(result.reference).toBeDefined();
+      // The money actually moves: the profile wallet is debited, guarded.
+      expect(txMock.wallet.updateMany).toHaveBeenCalledWith({
+        where: { id: 'w-profile', balance: { gte: 500 } },
+        data: { balance: { decrement: 500 } },
+      });
+      // And the last penalty paid lifts the block.
+      expect(txMock.profile.update).toHaveBeenCalledWith({
+        where: { id: 'p-1' },
+        data: { billing_status: 'CLEAR' },
+      });
     });
   });
 

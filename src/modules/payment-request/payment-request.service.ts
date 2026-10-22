@@ -11,6 +11,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '@nestjs/config';
 import {
+  AccountStatus,
   BillingStatus,
   ContactRecordOrigin,
   InvoiceReason,
@@ -61,6 +62,7 @@ import { POLL_PAYMENT_STATUS_QUEUE } from '../../common/services/queue/queue.mod
 import type { PollPaymentStatusJobData } from './poll-payment-status.processor';
 import { ListPaymentRequestsDto } from './dto/list-payment-requests.dto';
 import { SubmitPaymentDto } from './dto/submit-payment.dto';
+import { CONTACTABLE_WORKER } from '../recommendation/contactable-worker';
 
 const PAYMENT_REQUEST_SELECT = {
   id: true,
@@ -81,6 +83,7 @@ const PAYMENT_REQUEST_SELECT = {
   request_type: true,
   recommendation_worker_id: true,
   contact_unlock_attempt_id: true,
+  penalty_ids: true,
   profile: {
     select: {
       id: true,
@@ -159,6 +162,8 @@ export class PaymentRequestService {
     options: {
       contactUnlockAttemptId?: string;
       recommendationWorkerId?: string;
+      /** For a penalty request: the penalties its amount was priced for. */
+      penaltyIds?: string[];
     } = {},
   ): Promise<string> {
     const token = randomUUID();
@@ -175,6 +180,7 @@ export class PaymentRequestService {
         ...(options.recommendationWorkerId && {
           recommendation_worker_id: options.recommendationWorkerId,
         }),
+        ...(options.penaltyIds?.length && { penalty_ids: options.penaltyIds }),
       },
     });
     const frontendUrl = this.config.get<string>('FRONTEND_URL', '');
@@ -335,6 +341,8 @@ export class PaymentRequestService {
     if (!request.amount) {
       throw new BadRequestException('Montant non défini pour cette demande');
     }
+
+    await this.assertPenaltiesStillOwed(request);
 
     const network = await this.assertOperatorMatchesGateway(operator, phone);
 
@@ -1060,6 +1068,47 @@ export class PaymentRequestService {
     }
   }
 
+  /**
+   * The money moved but the contact may not be released. The payment and its
+   * ContactRecord stay as they are, for reconciliation; this flags it for the
+   * team to refund and tells the employer, instead of going quiet.
+   */
+  private async withholdRecommendationContact(
+    request: PaymentRequestWithProfile,
+    context: PaymentProcessingContext,
+  ): Promise<void> {
+    this.logger.warn(
+      `Recommendation contact withheld: request ${request.id}, worker ${context.recommendationWorkerId} or employer ${request.profile_id} no longer eligible`,
+    );
+    await this.logService
+      .create({
+        action: 'RECOMMENDATION_CONTACT_WITHHELD',
+        entityType: 'payment_request',
+        entityId: request.id,
+        profileId: request.profile_id,
+        metadata: {
+          reason: 'NOT_ELIGIBLE_AT_DELIVERY',
+          workerId: context.recommendationWorkerId ?? null,
+          amount: context.amount,
+          needsRefund: true,
+        },
+      })
+      .catch((err: unknown) =>
+        this.logger.warn(
+          `Could not log withheld contact for request ${request.id}`,
+          err instanceof Error ? err.message : String(err),
+        ),
+      );
+    if (request.profile.phone) {
+      await this.botNotification
+        .sendMessage(
+          request.profile.phone,
+          'Ce profil n’est plus disponible : son contact ne peut pas vous être transmis. Votre paiement est bien enregistré, l’équipe Rabotka revient vers vous pour le remboursement.',
+        )
+        .catch(() => undefined);
+    }
+  }
+
   private async handleRecommendationContactPostPayment(
     request: PaymentRequestWithProfile,
     context: PaymentProcessingContext,
@@ -1080,16 +1129,31 @@ export class PaymentRequestService {
     });
 
     try {
-      const worker = await this.prisma.profile.findUnique({
-        where: { id: context.recommendationWorkerId },
-        select: {
-          first_name: true,
-          last_name: true,
-          phone: true,
-          email: true,
-        },
-      });
-      if (!worker) return;
+      // Eligibility again, at delivery: a link can be paid long after it was
+      // created, and the worker (or the employer) may have been suspended,
+      // refused or archived since (pentest A2-F18, #874).
+      const [worker, employerOk] = await Promise.all([
+        this.prisma.profile.findFirst({
+          where: { id: context.recommendationWorkerId, ...CONTACTABLE_WORKER },
+          select: {
+            first_name: true,
+            last_name: true,
+            phone: true,
+            email: true,
+          },
+        }),
+        this.prisma.profile.count({
+          where: {
+            id: request.profile_id,
+            status: AccountStatus.ACTIVE,
+            deleted_at: null,
+          },
+        }),
+      ]);
+      if (!worker || employerOk === 0) {
+        await this.withholdRecommendationContact(request, context);
+        return;
+      }
 
       const workerName =
         `${worker.first_name ?? ''} ${worker.last_name ?? ''}`.trim() ||
@@ -1280,6 +1344,63 @@ export class PaymentRequestService {
     }
   }
 
+  /**
+   * The penalties a penalty request pays for — never « every unpaid penalty of
+   * the profile at settlement time ».
+   *
+   * Pentest A2-F04 (#860): settlement used to clear every unpaid penalty of
+   * the profile, so a link priced for one small penalty, paid later, also
+   * cleared every penalty issued in between. A request now carries the ids it
+   * was priced for. Requests created before that column have none: they are
+   * bounded to penalties that already existed when the request was created.
+   */
+  private pricedPenalties(
+    request: Pick<PaymentRequestWithProfile, 'profile_id' | 'penalty_ids'> & {
+      created_at: Date;
+    },
+  ): Prisma.PenaltyWhereInput {
+    const base: Prisma.PenaltyWhereInput = {
+      profile_id: request.profile_id,
+      paid_at: null,
+      deleted_at: null,
+    };
+    return request.penalty_ids.length
+      ? { ...base, id: { in: request.penalty_ids } }
+      : { ...base, created_at: { lte: request.created_at } };
+  }
+
+  /**
+   * Refuses to start a penalty payment whose priced set is no longer what is
+   * owed — one of its penalties paid another way or archived since. Charging
+   * the stored amount then would take money for nothing.
+   */
+  private async assertPenaltiesStillOwed(request: {
+    request_type: PaymentRequestType | null;
+    penalty_ids: string[];
+    profile_id: string;
+  }): Promise<void> {
+    if (
+      request.request_type !== PaymentRequestType.PENALTY_BATCH &&
+      request.request_type !== PaymentRequestType.PENALTY_RESOLUTION
+    )
+      return;
+    if (request.penalty_ids.length === 0) return;
+
+    const stillOwed = await this.prisma.penalty.count({
+      where: {
+        id: { in: request.penalty_ids },
+        profile_id: request.profile_id,
+        paid_at: null,
+        deleted_at: null,
+      },
+    });
+    if (stillOwed !== request.penalty_ids.length) {
+      throw new BadRequestException(
+        'Vos pénalités ont changé depuis la création de ce paiement. Relancez le règlement depuis l’application.',
+      );
+    }
+  }
+
   private async handlePenaltyPostPayment(
     request: PaymentRequestWithProfile,
   ): Promise<void> {
@@ -1297,12 +1418,12 @@ export class PaymentRequestService {
 
       const newStatus = await this.prisma.$transaction(async (tx) => {
         await tx.penalty.updateMany({
-          where: { profile_id: workerId, paid_at: null },
+          where: this.pricedPenalties(request),
           data: { paid_at: now },
         });
 
         const unpaidCount = await tx.penalty.count({
-          where: { profile_id: workerId, paid_at: null },
+          where: { profile_id: workerId, paid_at: null, deleted_at: null },
         });
 
         let status: BillingStatus;

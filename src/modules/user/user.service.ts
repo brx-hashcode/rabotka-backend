@@ -4,6 +4,7 @@ import {
   ConflictException,
   ForbiddenException,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { deletedAtFilter } from '../../common/utils/soft-delete.util';
@@ -17,13 +18,30 @@ import { UpdateAdminDto } from './dto/update-admin.dto';
 import { AdminListUsersDto } from './dto/admin-list-users.dto';
 import { NotificationService } from '../notification/notification.service';
 import { canReviewKyc } from './kyc-reviewer';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  SESSION_ENDED,
+  type SessionEndedEvent,
+} from '../../common/events/session-ended.events';
 
 @Injectable()
 export class UserService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notification: NotificationService,
+    // Optional: specs build this service positionally. Closes a removed
+    // admin's open sockets (#864).
+    @Optional() private readonly events?: EventEmitter2,
   ) {}
+
+  private endAdminSessions(ids: string[]): void {
+    for (const id of ids) {
+      this.events?.emit(SESSION_ENDED, {
+        kind: 'admin',
+        id,
+      } satisfies SessionEndedEvent);
+    }
+  }
 
   /**
    * The acting admin's current role, read fresh.
@@ -249,6 +267,7 @@ export class UserService {
       throw new NotFoundException('Utilisateur non trouvé');
     }
 
+    this.endAdminSessions([id]);
     return this.prisma.user.update({
       where: { id },
       data: { is_active: false },
@@ -367,11 +386,15 @@ export class UserService {
       throw new NotFoundException('Utilisateur non trouvé');
     }
 
-    // Soft delete (archive) — reversible.
+    // Soft delete (archive) — reversible. Deactivated in the same write: every
+    // guard and login path already refuses an inactive account, and an
+    // archived admin kept its sessions and could log in again by OTP
+    // (pentest A2-F01, #857). Restoring does not reactivate.
     await this.prisma.user.update({
       where: { id },
-      data: { deleted_at: new Date() },
+      data: { deleted_at: new Date(), is_active: false },
     });
+    this.endAdminSessions([id]);
   }
 
   /** Archive many team members at once (admin bulk delete). Returns the count archived. */
@@ -379,8 +402,10 @@ export class UserService {
     if (ids.length === 0) return { count: 0 };
     const { count } = await this.prisma.user.updateMany({
       where: { id: { in: ids }, deleted_at: null },
-      data: { deleted_at: new Date() },
+      // Deactivated too — see deleteAdmin.
+      data: { deleted_at: new Date(), is_active: false },
     });
+    this.endAdminSessions(ids);
     return { count };
   }
 

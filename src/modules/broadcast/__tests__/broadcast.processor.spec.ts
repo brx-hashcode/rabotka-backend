@@ -194,6 +194,28 @@ describe('BroadcastProcessor', () => {
     expect(update.data.error).toContain('131047');
   });
 
+  // Pentest A2-F20 (#876): the audience is a snapshot, and delivery can come
+  // much later. Someone archived or opted out since must get nothing.
+  it.each([
+    ['archived', { deleted_at: new Date() }],
+    ['opted out', { marketing_opt_out_at: new Date() }],
+  ])('sends nothing to a recipient %s since scheduling', async (_why, gone) => {
+    deps.prisma.broadcastRecipient.findMany.mockResolvedValue([
+      recipient({
+        profile: { ...recipient().profile, ...gone },
+      }),
+    ]);
+
+    await run();
+
+    expect(deps.dispatcher.send).not.toHaveBeenCalled();
+    const update = deps.prisma.broadcastRecipient.update.mock.calls[0][0] as {
+      data: { status: BroadcastRecipientStatus; error: string };
+    };
+    expect(update.data.status).toBe(BroadcastRecipientStatus.FAILED);
+    expect(update.data.error).toBe('Profil archivé ou désinscrit');
+  });
+
   it('skips a recipient with no phone rather than failing the page', async () => {
     deps.prisma.broadcastRecipient.findMany.mockResolvedValue([
       recipient({ profile: { id: 'p-1', phone: null, first_name: 'Alice' } }),

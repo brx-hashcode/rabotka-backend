@@ -49,6 +49,32 @@ export class LoginLinkController {
       return this.landOrFallback(req, res, meta);
     }
 
+    // Pentest A2-F15 (#871): a link used to replace whatever session the
+    // browser held, on a GET anyone can make it load. A browser already
+    // signed in keeps its session: the same account just goes where the link
+    // points, another account's link is left unspent.
+    const current = await this.authService.resolveSessionProfile(
+      readAuthCookie(req, this.configService),
+    );
+    if (current) {
+      const grant = await this.authService.peekWhatsAppCode(code);
+      if (grant?.profileId === current) {
+        await this.authService.burnWhatsAppCode(code);
+        res.redirect(`${this.frontendUrl()}/${grant.path}`);
+        return;
+      }
+      await this.logService
+        .create({
+          action: 'auth.whatsapp_link.session_kept',
+          entityType: 'Profile',
+          entityId: current,
+          ...meta,
+        })
+        .catch(() => undefined);
+      res.redirect(`${this.frontendUrl()}/${DEFAULT_LOGIN_LANDING}`);
+      return;
+    }
+
     try {
       const result = await this.authService.loginWithWhatsAppCode(code);
       setAuthCookie(res, this.configService, result.token);

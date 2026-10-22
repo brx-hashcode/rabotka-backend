@@ -4,6 +4,7 @@ import {
   WebPushService,
   type WebPushPayload,
 } from '../../common/services/web-push/web-push.service';
+import { assertPushEndpoint } from '../../common/services/web-push/push-endpoint';
 
 export type AgentPushPayload = WebPushPayload;
 
@@ -32,6 +33,7 @@ export class AgentWebPushService {
   }
 
   async subscribe(agentId: string, input: AgentPushSubscriptionInput) {
+    assertPushEndpoint(input.endpoint);
     // An endpoint belongs to one browser install: if another agent signed in
     // on it before, it is theirs no longer.
     await this.prisma.agentPushSubscription.upsert({

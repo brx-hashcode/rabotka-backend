@@ -40,6 +40,7 @@ import { sendOtpEmail } from '../mail/templates';
 import {
   WhatsAppLoginLinkService,
   canMintLoginCode,
+  type WhatsAppLoginGrant,
 } from './whatsapp-login-link.service';
 import * as otplib from 'otplib';
 import { JWT_BLOCKLIST_PREFIX } from './session-revocation';
@@ -49,14 +50,25 @@ import {
   consumeOtp,
   generateOtp,
   storeOtp,
+  consumeOtpWithLockout,
 } from './otp-store';
 import * as QRCode from 'qrcode';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  SESSION_ENDED,
+  type SessionEndedEvent,
+} from '../../common/events/session-ended.events';
 
 const TOTP_PENDING_PREFIX = `${REDIS_KEY_PREFIX}admin:totp:pending:`;
 const TOTP_PENDING_TTL = 300;
 
 const OTP_KEY_PREFIX = `${REDIS_KEY_PREFIX}otp:`;
 const MOBILE_REFRESH_PREFIX = `${REDIS_KEY_PREFIX}mobile:refresh:`;
+/** The jti shape we mint (randomUUID). Anything else was not issued here. */
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Longer than any session we issue (30 days by default), never unbounded. */
+const MAX_REVOCATION_TTL_SECONDS = 90 * 24 * 60 * 60;
 const DEFAULT_REFRESH_TTL_SECONDS = 24 * 60 * 60;
 const ADMIN_OTP_KEY_PREFIX = `${REDIS_KEY_PREFIX}admin:otp:`;
 const RESEND_COOLDOWN_SECONDS = 60;
@@ -99,6 +111,31 @@ export interface MobileTokens {
   user: MobileSessionUser;
 }
 
+/**
+ * Whether an admin-phone token belongs to the pairing currently on the user.
+ *
+ * Pentest A2-F12 (#868): confirmation only checked that SOME phone was paired,
+ * so pairing a replacement brought an old phone's revoked token back to life.
+ * Tokens now carry `pairedAt`, which must equal `phone_paired_at`.
+ *
+ * Tokens issued before the claim existed have only `iat`, signed in the same
+ * second as `phone_paired_at` was written; such a token is accepted only if it
+ * was issued for that pairing, within a few seconds of it.
+ */
+const LEGACY_PAIRING_SKEW_MS = 5_000;
+export function isCurrentPairing(
+  token: { pairedAt?: number; iat?: number },
+  phonePairedAt: Date,
+): boolean {
+  if (typeof token.pairedAt === 'number') {
+    return token.pairedAt === phonePairedAt.getTime();
+  }
+  if (typeof token.iat !== 'number') return false;
+  return (
+    Math.abs(token.iat * 1000 - phonePairedAt.getTime()) <=
+    LEGACY_PAIRING_SKEW_MS
+  );
+}
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -118,6 +155,9 @@ export class AuthService {
     // drop-off tracking is never something a sign-up may depend on.
     @Optional()
     private readonly onboardingAttempts?: OnboardingAttemptService,
+    // Appended and optional for the same reason: closes the signed-out
+    // person's open sockets (#864).
+    @Optional() private readonly events?: EventEmitter2,
   ) {}
 
   /**
@@ -271,7 +311,8 @@ export class AuthService {
       ? await this.findProfileByEmail(normalized)
       : await this.findProfileByPhone(normalized);
 
-    if (!profile) {
+    // An archived profile cannot log in (#878) — answered as unknown.
+    if (!profile || profile.deleted_at) {
       throw new NotFoundException(
         'Aucun compte trouvé pour cet email ou téléphone',
       );
@@ -315,7 +356,8 @@ export class AuthService {
       ? await this.findProfileByEmail(normalized)
       : await this.findProfileByPhone(normalized);
 
-    if (!profile) {
+    // An archived profile cannot log in (#878) — answered as unknown.
+    if (!profile || profile.deleted_at) {
       throw new NotFoundException(
         'Aucun compte trouvé pour cet email ou téléphone',
       );
@@ -383,7 +425,8 @@ export class AuthService {
       ? await this.findProfileByEmail(normalized)
       : await this.findProfileByPhone(normalized);
 
-    if (!profile) {
+    // An archived profile cannot log in (#878) — answered as unknown.
+    if (!profile || profile.deleted_at) {
       throw new NotFoundException(
         'Aucun compte trouvé pour cet email ou téléphone',
       );
@@ -397,6 +440,16 @@ export class AuthService {
    * session — same payload, same expiry, same `jti` revocation as OTP login.
    * The code is consumed here, so a forwarded link only ever works once.
    */
+  /** Who a one-tap code is for, without spending it — see LoginLinkController. */
+  peekWhatsAppCode(code: string): Promise<WhatsAppLoginGrant | null> {
+    return this.whatsAppLoginLink.peek(code);
+  }
+
+  /** Spends a one-tap code without issuing anything. */
+  async burnWhatsAppCode(code: string): Promise<void> {
+    await this.whatsAppLoginLink.consume(code);
+  }
+
   async loginWithWhatsAppCode(
     code: string,
   ): Promise<{ token: string; profileId: string; path: string }> {
@@ -408,7 +461,7 @@ export class AuthService {
 
     const profile = await this.prisma.profile.findUnique({
       where: { id: grant.profileId },
-      select: { id: true, status: true },
+      select: { id: true, status: true, deleted_at: true },
     });
 
     // Status is re-checked at consume time: the account may have changed in
@@ -423,7 +476,7 @@ export class AuthService {
     //
     // What makes this safe is not the login gate but `ActiveProfileGuard`: a
     // non-ACTIVE session can read and nothing else.
-    if (!profile || !canMintLoginCode(profile.status)) {
+    if (!profile || profile.deleted_at || !canMintLoginCode(profile.status)) {
       throw new UnauthorizedException('Compte indisponible');
     }
 
@@ -532,9 +585,10 @@ export class AuthService {
 
     const profile = await this.prisma.profile.findUnique({
       where: { id: payload.sub },
-      select: { id: true },
+      select: { id: true, deleted_at: true },
     });
-    if (!profile) {
+    // Archived since the last rotation: no new tokens (#878).
+    if (!profile || profile.deleted_at) {
       throw new UnauthorizedException('Compte introuvable');
     }
 
@@ -864,7 +918,8 @@ export class AuthService {
     attemptsKey: string,
     otp: string,
   ): Promise<boolean> {
-    return consumeOtp(this.redis, otpKey, attemptsKey, otp);
+    // With the day-long lockout on top of the per-code limit (#885).
+    return consumeOtpWithLockout(this.redis, otpKey, attemptsKey, otp);
   }
 
   /**
@@ -935,7 +990,13 @@ export class AuthService {
   private async findProfileByEmail(email: string) {
     return this.prisma.profile.findUnique({
       where: { email },
-      select: { id: true, email: true, phone: true, first_name: true },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        first_name: true,
+        deleted_at: true,
+      },
     });
   }
 
@@ -948,6 +1009,7 @@ export class AuthService {
         phone: true,
         first_name: true,
         whatsapp_connected: true,
+        deleted_at: true,
       },
     });
   }
@@ -1076,7 +1138,7 @@ export class AuthService {
       throw new UnauthorizedException('QR session already used');
     }
 
-    let payload: { sub: string; type: string };
+    let payload: { sub: string; type: string; pairedAt?: number; iat?: number };
     try {
       payload = this.jwtService.verify(phoneToken);
     } catch {
@@ -1098,7 +1160,10 @@ export class AuthService {
     if (!user?.is_active) {
       throw new UnauthorizedException('Admin account not found or inactive');
     }
-    if (!user.phone_paired_at) {
+    if (
+      !user.phone_paired_at ||
+      !isCurrentPairing(payload, user.phone_paired_at)
+    ) {
       throw new UnauthorizedException(
         'Phone pairing has been reset. Please re-pair your phone.',
       );
@@ -1189,11 +1254,34 @@ export class AuthService {
   private pairCooldownKey = (userId: string) => `admin:pair:resend:${userId}`;
   private pairAttemptKey = (userId: string) => `admin:pair:attempts:${userId}`;
 
+  /**
+   * Blocklists a token's jti until it would have expired.
+   *
+   * Verified, not just decoded (pentest A2-NV10, #886): logout is public, and
+   * a decoded-only token let anyone write blocklist keys of their choosing —
+   * any jti, any expiry year — into Redis. Only our own signature counts; an
+   * expired one is fine (it simply writes nothing), the TTL is clamped to the
+   * longest session we issue, and the jti must look like the uuids we mint.
+   */
   async revokeToken(token: string): Promise<void> {
     try {
-      const payload = this.jwtService.decode(token);
-      if (!payload?.jti || !payload.exp) return;
-      const ttl = payload.exp - Math.floor(Date.now() / 1000);
+      const payload = this.jwtService.verify<{
+        jti?: string;
+        exp?: number;
+        sub?: string;
+        type?: string;
+      }>(token, { ignoreExpiration: true });
+      if (payload?.sub) {
+        this.endSession(
+          payload.type === 'admin' ? 'admin' : 'profile',
+          payload.sub,
+        );
+      }
+      if (!payload?.jti || !payload.exp || !UUID_RE.test(payload.jti)) return;
+      const ttl = Math.min(
+        payload.exp - Math.floor(Date.now() / 1000),
+        MAX_REVOCATION_TTL_SECONDS,
+      );
       if (ttl > 0) {
         await this.redis.set(
           `${JWT_BLOCKLIST_PREFIX}${payload.jti}`,
@@ -1203,8 +1291,13 @@ export class AuthService {
         );
       }
     } catch {
-      // Ignore decode errors — token is already invalid
+      // Not ours, malformed: nothing to revoke, and nothing is written.
     }
+  }
+
+  /** The person's open sockets close with the session (#864). */
+  private endSession(kind: 'profile' | 'admin', id: string): void {
+    this.events?.emit(SESSION_ENDED, { kind, id } satisfies SessionEndedEvent);
   }
 
   async unpairPhone(userId: string): Promise<void> {
@@ -1291,15 +1384,23 @@ export class AuthService {
 
     await this.redis.del(this.pairOtpKey(userId));
 
+    // The pairing time is both the column and a claim: a token is only good
+    // for the pairing that issued it (#868).
+    const pairedAt = new Date();
     const token = this.jwtService.sign(
-      { sub: userId, type: 'admin-phone', phoneName: stored.phoneName },
+      {
+        sub: userId,
+        type: 'admin-phone',
+        phoneName: stored.phoneName,
+        pairedAt: pairedAt.getTime(),
+      },
       { expiresIn: '7d' },
     );
 
     await this.prisma.user.update({
       where: { id: userId },
       data: {
-        phone_paired_at: new Date(),
+        phone_paired_at: pairedAt,
         phone_name: stored.phoneName,
       },
     });

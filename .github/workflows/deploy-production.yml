@@ -72,9 +72,67 @@ jobs:
   # the VPS. No secrets are passed over SSH env vars.
   # On failure, the VPS rolls back to the previous container state.
   # ───────────────────────────────────────────────────────────────────────────
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 2: Build the RELEASED commit and push it under an immutable tag.
+  #
+  # Production used to pull :latest — whatever develop built last, which can
+  # carry code never released to main (pentest A2-NV07, #883). It now builds
+  # the main commit this run is for, tags it release-<sha>, and deploys exactly
+  # that. Never tagged :latest, so develop's tags are untouched. Same GHCR layer
+  # cache as develop, so a release whose code develop already built reuses it.
+  # ───────────────────────────────────────────────────────────────────────────
+  build-and-push:
+    name: Build and Push Release Image
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.tag.outputs.image }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: image=moby/buildkit:v0.19.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release tag
+        id: tag
+        run: echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:release-$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
+      # Same reason as in deploy-develop: the image is several GB.
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          sudo docker image prune -af || true
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: production
+          push: true
+          tags: ${{ steps.tag.outputs.image }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max,ignore-error=true
+
   deploy:
     name: Deploy to VPS (production)
-    needs: test
+    needs: [test, build-and-push]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -109,7 +167,7 @@ jobs:
 
       - name: Pull image on VPS
         run: |
-          IMAGE="ghcr.io/${{ github.repository_owner }}/rabotka-backend:latest"
+          IMAGE="${{ needs.build-and-push.outputs.image }}"
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             -o ServerAliveInterval=60 \
             -o ServerAliveCountMax=10 \
@@ -238,7 +296,7 @@ jobs:
           LANGFUSE_BASE_URL=https://cloud.langfuse.com
           LANGFUSE_TRACING_ENVIRONMENT=production
           # --- static values ---
-          BACKEND_IMAGE=ghcr.io/${{ github.repository_owner }}/rabotka-backend:latest
+          BACKEND_IMAGE=${{ needs.build-and-push.outputs.image }}
           NODE_ENV=production
           AUTH_COOKIE_NAME=access_token
           LOG_LEVEL=info
@@ -372,7 +430,10 @@ jobs:
           TWILIO_WEBHOOK_BASE_URL=$(echo "$VAULT_SECRET" | jq -r '.TWILIO_WEBHOOK_BASE_URL')
           QDRANT_URL=$(echo "$VAULT_SECRET" | jq -r '.QDRANT_URL')
           QDRANT_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.QDRANT_API_KEY')
-          IS_PROD=$(echo "$VAULT_SECRET" | jq -r '.IS_PROD // "false"')
+          # This IS production. Read from Vault with a "false" default, a missing
+          # key put production's Redis, BullMQ and Qdrant namespaces on
+          # develop's prefix (pentest A2-NV06, #882).
+          IS_PROD=true
           CLOUDFLARE_PUBLIC_BASE_URL=$(echo "$VAULT_SECRET" | jq -r '.CLOUDFLARE_PUBLIC_BASE_URL // ""')
           PAYMENT_GATEWAY_DRIVER=$(echo "$VAULT_SECRET" | jq -r '.PAYMENT_GATEWAY_DRIVER')
           PAWAPAY_BASE_URL=$(echo "$VAULT_SECRET" | jq -r '.PAWAPAY_BASE_URL // ""')

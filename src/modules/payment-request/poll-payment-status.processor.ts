@@ -5,6 +5,7 @@ import {
   PaymentStatus,
   PaymentMethod,
   type PaymentRequestType,
+  type Prisma,
 } from '@prisma/client';
 import { resolvePaymentType } from './payment-type';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -102,13 +103,19 @@ export class PollPaymentStatusProcessor {
     }
 
     if (status === 'FAILED' || status === 'CANCELLED') {
-      await this.prisma.paymentRequest.update({
-        where: { id: requestId },
+      const rejected = await this.prisma.paymentRequest.updateMany({
+        where: this.stillPolledBy(requestId, gatewayRef),
         data: {
           status: PaymentRequestStatus.REJECTED,
           ...(transactionId && { gateway_tx_id: transactionId }),
         },
       });
+      if (rejected.count === 0) {
+        this.logger.warn(
+          `Poll saw ${status} for request ${requestId} but it is no longer in flight under ${gatewayRef} — left as is`,
+        );
+        return;
+      }
       await this.recordFailure(job.data, {
         reason: status === 'FAILED' ? 'GATEWAY_FAILED' : 'GATEWAY_CANCELLED',
         gatewayStatus: status,
@@ -144,15 +151,43 @@ export class PollPaymentStatusProcessor {
     this.logger.warn(
       `Polling timed out for request ${requestId} after ${maxAttempts} attempts — reverting to PENDING`,
     );
-    await this.prisma.paymentRequest.update({
-      where: { id: requestId },
+    const reverted = await this.prisma.paymentRequest.updateMany({
+      where: this.stillPolledBy(requestId, gatewayRef),
       data: { status: PaymentRequestStatus.PENDING },
     });
+    if (reverted.count === 0) {
+      // Settled meanwhile (webhook) or retried under a new gateway reference:
+      // nothing of this attempt is left to time out.
+      return;
+    }
     await this.recordFailure(job.data, {
       reason: 'POLL_TIMEOUT',
       attempt,
     });
     this.paymentStatusGateway.emitPaymentStatus(token, 'TIMEOUT');
+  }
+
+  /**
+   * The only row this poll may still write: the same request, still
+   * PROCESSING, under the gateway reference this job polls.
+   *
+   * Pentest A2-NV05 (#881): both writes used to be an unconditional
+   * `update({ id })`. A stale PENDING or FAILED read after the webhook had
+   * APPROVED the deposit turned it back into PENDING (or REJECTED), reopening
+   * a settled payment to be settled again. The webhook and
+   * `persistApprovedPayment` already claim with a status predicate; this is
+   * the poller's equivalent, plus the reference so an old job cannot touch a
+   * retry.
+   */
+  private stillPolledBy(
+    requestId: string,
+    gatewayRef: string,
+  ): Prisma.PaymentRequestWhereInput {
+    return {
+      id: requestId,
+      status: PaymentRequestStatus.PROCESSING,
+      gateway_payment_ref: gatewayRef,
+    };
   }
 
   private async recordFailure(

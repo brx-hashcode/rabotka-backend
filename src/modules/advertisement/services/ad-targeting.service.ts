@@ -76,6 +76,10 @@ export class AdTargetingService {
       SELECT p.id, p.first_name, p.last_name, p.email, p.phone, p.whatsapp_connected
       FROM profiles p
       WHERE p.status = 'ACTIVE'::"AccountStatus"
+        -- Archived profiles and anyone who replied STOP get no third-party
+        -- ads (pentest A2-F19, #875) — the same rule as broadcast audiences.
+        AND p.deleted_at IS NULL
+        AND p.marketing_opt_out_at IS NULL
         AND p.profile_type IN (${profileTypesLiteral})
         ${excludedIdsLiteral}
       ORDER BY RANDOM()

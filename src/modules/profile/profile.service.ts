@@ -88,6 +88,23 @@ import {
 } from '@prisma/client';
 import { randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { OnboardingAttemptService } from '../onboarding-attempt/onboarding-attempt.service';
+import { markProfilesArchived } from '../auth/session-revocation';
+import {
+  PROFILES_ARCHIVED,
+  PROFILES_RESTORED,
+  type ProfilesArchivedEvent,
+  type ProfilesRestoredEvent,
+} from './profile-lifecycle.events';
+import {
+  assertCanSendOtp,
+  assertNotLockedOut,
+  recordMiss,
+} from '../auth/otp-store';
+import { toE164 } from '../whatsapp/contracts/address';
+import {
+  SESSION_ENDED,
+  type SessionEndedEvent,
+} from '../../common/events/session-ended.events';
 
 const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
   [ProfileType.WORKER]: 'Travailleur',
@@ -348,6 +365,13 @@ const VERIFICATION_TOKEN_TTL_SECONDS = 1800;
  */
 const PHONE_CHANGE_TTL_SECONDS = 300;
 const PHONE_CHANGE_KEY_PREFIX = `${REDIS_KEY_PREFIX}profile:phone-change:`;
+/** KYC uploads not yet attached to a profile, scored by upload time (#836). */
+const KYC_PENDING_UPLOADS = `${REDIS_KEY_PREFIX}kyc:pending-uploads`;
+const KYC_PENDING_TTL_MS = 24 * 60 * 60 * 1000;
+const KYC_SWEEP_BATCH = 20;
+const PHONE_CHANGE_SENDS_PREFIX = `${REDIS_KEY_PREFIX}profile:phone-change-sends:`;
+const phoneChangeMissKey = (profileId: string) =>
+  `${REDIS_KEY_PREFIX}profile:phone-change-misses:${profileId}`;
 /**
  * Attempts before the pending change is discarded outright.
  *
@@ -481,7 +505,9 @@ export class ProfileService {
     }
 
     const [unpaidPenaltiesCount, walletBalance] = await Promise.all([
-      this.prisma.penalty.count({ where: { profile_id: id, paid_at: null } }),
+      this.prisma.penalty.count({
+        where: { profile_id: id, paid_at: null, deleted_at: null },
+      }),
       this.walletService.getProfileWalletBalance(id),
     ]);
 
@@ -914,7 +940,7 @@ export class ProfileService {
     }
 
     const unpaidPenaltiesCount = await this.prisma.penalty.count({
-      where: { profile_id: id, paid_at: null },
+      where: { profile_id: id, paid_at: null, deleted_at: null },
     });
     const cancellations = await this.cancellationStanding(
       id,
@@ -1713,7 +1739,11 @@ export class ProfileService {
     if (profiles.length > 0) {
       const grouped = await this.prisma.penalty.groupBy({
         by: ['profile_id'],
-        where: { profile_id: { in: profiles.map((p) => p.id) }, paid_at: null },
+        where: {
+          profile_id: { in: profiles.map((p) => p.id) },
+          paid_at: null,
+          deleted_at: null,
+        },
         _count: { _all: true },
       });
       for (const row of grouped) {
@@ -1768,14 +1798,51 @@ export class ProfileService {
     return { data, total, page, limit };
   }
 
+  /** Lets a restored profile's sessions through again — see bulkSoftDeleteProfiles. */
+  async clearArchivedSessions(ids: string[]): Promise<void> {
+    await markProfilesArchived(this.redis, ids, false);
+  }
+
+  /** When each of these profiles was archived; read BEFORE restoring them. */
+  async archivedAt(ids: string[]): Promise<{ id: string; at: Date }[]> {
+    const rows = await this.prisma.profile.findMany({
+      where: { id: { in: ids }, deleted_at: { not: null } },
+      select: { id: true, deleted_at: true },
+    });
+    return rows.map((r) => ({ id: r.id, at: r.deleted_at as Date }));
+  }
+
+  /** What went with them comes back with them — see PROFILES_ARCHIVED. */
+  announceRestored(restored: { id: string; at: Date }[]): void {
+    if (restored.length === 0) return;
+    this.eventEmitter.emit(PROFILES_RESTORED, {
+      restored,
+    } satisfies ProfilesRestoredEvent);
+  }
+
   /** Archive many profiles at once (admin bulk delete). Returns the count archived. */
   async bulkSoftDeleteProfiles(ids: string[]): Promise<{ count: number }> {
     if (ids.length === 0) return { count: 0 };
+    const at = new Date();
     const { count } = await this.prisma.profile.updateMany({
       where: { id: { in: ids }, deleted_at: null },
-      data: { deleted_at: new Date() },
+      data: { deleted_at: at },
     });
     await this.cache.invalidate('profiles');
+    // An archived employer's open offers go with it (pentest A2-F14, #870).
+    this.eventEmitter.emit(PROFILES_ARCHIVED, {
+      ids,
+      at,
+    } satisfies ProfilesArchivedEvent);
+    // Ends their open sessions on the next request (#878), and their open
+    // sockets now (#864).
+    await markProfilesArchived(this.redis, ids, true);
+    for (const id of ids) {
+      this.eventEmitter.emit(SESSION_ENDED, {
+        kind: 'profile',
+        id,
+      } satisfies SessionEndedEvent);
+    }
     return { count };
   }
 
@@ -2048,12 +2115,48 @@ export class ProfileService {
   async uploadKycFile(
     file: Express.Multer.File,
   ): Promise<{ url: string; key: string }> {
+    const bucket = await kycBucket(this.systemConfig, this.configService);
     const result = await this.fileService.uploadToStorage(file, {
       folder: 'kyc-documents',
       access: 'private',
-      bucket: await kycBucket(this.systemConfig, this.configService),
+      bucket,
     });
+    // Pending until a profile is created with it. Anything still pending a
+    // day later was abandoned mid-signup and is deleted (pentest F4, #836):
+    // identity documents nobody owns must not sit in the bucket forever.
+    await this.redis
+      .zadd(KYC_PENDING_UPLOADS, Date.now(), result.key)
+      .catch(() => undefined);
+    void this.sweepAbandonedKycUploads(bucket).catch((err: unknown) =>
+      this.logger.warn('KYC upload sweep failed', err),
+    );
     return { url: result.url, key: result.key };
+  }
+
+  /**
+   * Deletes a few abandoned KYC uploads. Run on each upload rather than on a
+   * schedule: sign-ups are what create them, so sign-ups keep the set short.
+   * Idempotent, so concurrent instances only repeat a delete.
+   */
+  private async sweepAbandonedKycUploads(bucket?: string): Promise<void> {
+    const cutoff = Date.now() - KYC_PENDING_TTL_MS;
+    const expired = await this.redis.zrangebyscore(
+      KYC_PENDING_UPLOADS,
+      0,
+      cutoff,
+      'LIMIT',
+      0,
+      KYC_SWEEP_BATCH,
+    );
+    for (const key of expired) {
+      const attached = await this.prisma.kycDocument.count({
+        where: { storage_key: key },
+      });
+      if (attached === 0) {
+        await this.fileService.deleteStoredObject(key, bucket);
+      }
+      await this.redis.zrem(KYC_PENDING_UPLOADS, key);
+    }
   }
 
   /**
@@ -2437,6 +2540,8 @@ export class ProfileService {
       data.document_type = documentType;
     }
 
+    // Not removed from the pending set here: this runs inside a transaction
+    // that may still roll back. The sweep checks for a row before deleting.
     return tx.kycDocument.create({ data });
   }
 
@@ -2529,7 +2634,10 @@ export class ProfileService {
       throw new NotFoundException('Profil non trouvé');
     }
 
-    const phone = newPhone.trim().toLowerCase();
+    // One canonical form before anything is compared or stored: « 242… » and
+    // « +242… » are the same number, and the uniqueness check must see that
+    // (pentest A2-F10, #866).
+    const phone = toE164(newPhone);
     if (phone === profile.phone) {
       throw new BadRequestException('Ce numéro est déjà celui de votre compte');
     }
@@ -2552,6 +2660,19 @@ export class ProfileService {
         "Le service WhatsApp n'est pas configuré",
       );
     }
+
+    // The shared send cap, per account and per target number (#866): there
+    // was none, and every request also reset the five-guess limit. Each code
+    // is a paid WhatsApp template to a number the caller chooses.
+    await assertCanSendOtp(
+      this.redis,
+      `${PHONE_CHANGE_SENDS_PREFIX}profile:${profileId}`,
+    );
+    await assertCanSendOtp(
+      this.redis,
+      `${PHONE_CHANGE_SENDS_PREFIX}phone:${phone}`,
+    );
+    await assertNotLockedOut(this.redis, phoneChangeMissKey(profileId));
 
     const code = randomInt(100000, 1000000).toString();
 
@@ -2595,6 +2716,9 @@ export class ProfileService {
     code: string,
   ): Promise<{ success: boolean; phone: string }> {
     const key = `${PHONE_CHANGE_KEY_PREFIX}${profileId}`;
+    // Wrong guesses add up across codes for a day; a new request does not
+    // reset them (#866).
+    await assertNotLockedOut(this.redis, phoneChangeMissKey(profileId));
     const raw = await this.redis.get(key);
     if (!raw) {
       throw new BadRequestException(
@@ -2609,6 +2733,7 @@ export class ProfileService {
     };
 
     if (!this.codesMatch(pending.code, code)) {
+      await recordMiss(this.redis, phoneChangeMissKey(profileId));
       const attempts = pending.attempts + 1;
       if (attempts >= PHONE_CHANGE_MAX_ATTEMPTS) {
         await this.redis.del(key);

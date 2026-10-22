@@ -14,7 +14,7 @@ import { UserRole } from '@prisma/client';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator.js';
 import { clearAuthCookie, readAuthCookie } from '../auth-cookie.util';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
-import { isSessionRevoked } from '../session-revocation';
+import { isProfileArchived, isSessionRevoked } from '../session-revocation';
 
 export interface JwtPayload {
   sub: string;
@@ -92,6 +92,13 @@ export class JwtAuthGuard implements CanActivate {
       }
 
       const tokenType = payload.type || 'profile';
+
+      if (
+        tokenType === 'profile' &&
+        (await isProfileArchived(this.redis, payload.sub))
+      ) {
+        throw new UnauthorizedException('Session invalide ou expirée');
+      }
 
       // Signed with the same secret, so it verifies — but an agent is neither a
       // profile nor an admin, and must not be mapped onto either. Covers the

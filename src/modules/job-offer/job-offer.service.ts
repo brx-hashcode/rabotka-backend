@@ -24,7 +24,7 @@ import {
 import { MailService } from '../mail/mail.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { MIN_HOURS_FROM_NOW } from './job-offer.constants';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
@@ -70,6 +70,12 @@ import {
   InteractionObject,
   InteractionSource,
 } from '@prisma/client';
+import {
+  PROFILES_ARCHIVED,
+  PROFILES_RESTORED,
+  type ProfilesArchivedEvent,
+  type ProfilesRestoredEvent,
+} from '../profile/profile-lifecycle.events';
 
 const REFERENCE_MAX_ATTEMPTS = 5;
 
@@ -1963,13 +1969,68 @@ export class JobOfferService {
     return restored;
   }
 
+  /**
+   * An archived employer's recruiting offers are archived with it, at the same
+   * instant so a restore can find exactly those (pentest A2-F14, #870). Offers
+   * with someone already hired (FILLED, IN_PROGRESS) are left alone.
+   */
+  @OnEvent(PROFILES_ARCHIVED)
+  async archiveOffersOfArchivedEmployers(
+    event: ProfilesArchivedEvent,
+  ): Promise<void> {
+    const offers = await this.prisma.jobOffer.findMany({
+      where: {
+        employer_id: { in: event.ids },
+        deleted_at: null,
+        status: {
+          in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
+        },
+      },
+      select: { id: true },
+    });
+    if (offers.length === 0) return;
+    await this.bulkSoftDeleteByAdmin(
+      offers.map((o) => o.id),
+      event.at,
+    );
+  }
+
+  /** Brings back the offers archived together with their employer. */
+  @OnEvent(PROFILES_RESTORED)
+  async restoreOffersOfRestoredEmployers(
+    event: ProfilesRestoredEvent,
+  ): Promise<void> {
+    for (const { id, at } of event.restored) {
+      await this.prisma.jobOffer.updateMany({
+        where: { employer_id: id, deleted_at: at },
+        data: { deleted_at: null },
+      });
+    }
+    await this.cache.invalidate('jobs');
+  }
+
   /** Archive many offers at once (admin bulk delete). Returns the count archived. */
-  async bulkSoftDeleteByAdmin(ids: string[]): Promise<{ count: number }> {
+  async bulkSoftDeleteByAdmin(
+    ids: string[],
+    at: Date = new Date(),
+  ): Promise<{ count: number }> {
     if (ids.length === 0) return { count: 0 };
     const { count } = await this.prisma.jobOffer.updateMany({
       where: { id: { in: ids }, deleted_at: null },
-      data: { deleted_at: new Date() },
+      data: { deleted_at: at },
     });
+    // Its waiting applicants are told it is over, as when the employer deletes
+    // it — not left pending on an offer nobody can act on (#858).
+    const closedIds: string[] = [];
+    for (const id of ids) {
+      closedIds.push(
+        ...(await this.rejectWaitingApplicants(this.prisma, id, [
+          ApplicationStatus.PENDING,
+          ApplicationStatus.VIEWED,
+        ])),
+      );
+    }
+    this.notifyClosedApplicants(closedIds, 'bulkSoftDeleteByAdmin');
     await this.unlinkOfferNotifications(this.prisma, ids);
     await this.cache.invalidate('jobs');
     // Remove each from the vector index so archived offers stop being matched.

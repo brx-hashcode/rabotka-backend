@@ -6,7 +6,11 @@ import { UserRole } from '@prisma/client';
 import { AdminAuthGuard } from '../guards/admin-auth.guard';
 import type { PrismaService } from '../../../common/services/prisma/prisma.service';
 
-type AdminRow = { role: UserRole; is_active: boolean } | null;
+type AdminRow = {
+  role: UserRole;
+  is_active: boolean;
+  deleted_at?: Date | null;
+} | null;
 
 /**
  * `account` is what the database returns for the token's subject: a row, or
@@ -154,7 +158,17 @@ describe('AdminAuthGuard', () => {
 
     expect(findUnique).toHaveBeenCalledWith({
       where: { id: 'admin-1' },
-      select: { role: true, is_active: true },
+      select: { role: true, is_active: true, deleted_at: true },
     });
+  });
+
+  // Pentest A2-F01 (#857): archiving left is_active untouched, so an archived
+  // admin's token kept working.
+  it('refuses an archived admin even if still marked active', async () => {
+    const { guard, ctx } = buildGuardAndContext(
+      { sub: 'admin-1', type: 'admin' },
+      { role: UserRole.ADMIN, is_active: true, deleted_at: new Date() },
+    );
+    await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
   });
 });

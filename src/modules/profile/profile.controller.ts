@@ -323,7 +323,7 @@ export class ProfileController {
   @ApiOperation({
     summary: 'Pay a penalty for the current profile',
     description:
-      'Records the penalty payment, credits the system wallet, and marks the penalty as paid. Returns the generated RBK reference (e.g. RBK-2025-20250304-abc123).',
+      'Pays the penalty from the profile wallet: debits the wallet, credits the system wallet and marks the penalty paid, atomically. 400 when the balance is short. The body is accepted for compatibility and ignored. Returns the RBK reference (e.g. RBK-2025-20250304-abc123).',
   })
   @ApiBody({ type: PayPenaltyDto })
   @ApiResponse({
@@ -337,18 +337,23 @@ export class ProfileController {
       },
     },
   })
-  @ApiResponse({ status: 400, description: 'Penalty already paid' })
+  @ApiResponse({
+    status: 400,
+    description: 'Penalty already paid, or wallet balance too low',
+  })
   @ApiResponse({ status: 401, description: 'Unauthorized - no valid token' })
   @ApiResponse({ status: 404, description: 'Penalty not found' })
   async payPenalty(
     @Req() req: ProfileAuthenticatedRequest,
     @Param('id') id: string,
-    @Body() body: PayPenaltyDto,
+    // Still validated so the mobile app's existing body is accepted, but its
+    // content decides nothing: the client used to choose the payment method of
+    // a payment that never happened (pentest A2-F05, #861).
+    @Body() _body: PayPenaltyDto,
   ): Promise<{ success: boolean; reference: string }> {
-    const { reference } = await this.walletService.recordPenaltyPayment(
+    const { reference } = await this.walletService.payPenaltyFromWallet(
       id,
       req.user.profileId,
-      body,
     );
     return { success: true, reference };
   }

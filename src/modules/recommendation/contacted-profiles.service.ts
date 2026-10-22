@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import {
+  AccountStatus,
   PaymentRequestStatus,
   PaymentRequestType,
   ProfileType,
@@ -73,6 +74,8 @@ export class ContactedProfilesService {
           reference_type: 'recommendation_contact',
           reference_id: { not: null },
           wallet: { profile_id: employerId },
+          // An archived ledger row is no longer a purchase (#880).
+          deleted_at: null,
         },
         select: { reference_id: true, created_at: true },
       }),
@@ -82,6 +85,7 @@ export class ContactedProfilesService {
           request_type: PaymentRequestType.RECOMMENDATION_CONTACT,
           status: PaymentRequestStatus.APPROVED,
           recommendation_worker_id: { not: null },
+          deleted_at: null,
         },
         select: { recommendation_worker_id: true, updated_at: true },
       }),
@@ -148,8 +152,16 @@ export class ContactedProfilesService {
     ]);
     if (workerIds.size === 0) return [];
 
+    // Pentest A2-NV04 (#880): a worker archived or banned by the team leaves
+    // every employer's contact list — paying once must not be a permanent
+    // window onto someone the platform has removed. A suspension is temporary
+    // and keeps the contact.
     const profiles = await this.prisma.profile.findMany({
-      where: { id: { in: [...workerIds] } },
+      where: {
+        id: { in: [...workerIds] },
+        deleted_at: null,
+        status: { not: AccountStatus.BANNED },
+      },
       select: CONTACT_PROFILE_SELECT,
     });
 

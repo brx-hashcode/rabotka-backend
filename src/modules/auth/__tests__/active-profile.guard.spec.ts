@@ -105,7 +105,7 @@ describe('ActiveProfileGuard', () => {
     );
   });
 
-  it('reads only the two columns it needs', async () => {
+  it('reads only the columns it needs', async () => {
     // Keeps the guard a single cheap indexed lookup on a hot POST path.
     mockPrisma.profile.findUnique.mockResolvedValue({
       status: AccountStatus.ACTIVE,
@@ -116,7 +116,21 @@ describe('ActiveProfileGuard', () => {
 
     expect(mockPrisma.profile.findUnique).toHaveBeenCalledWith({
       where: { id: 'p1' },
-      select: { status: true, suspension_reason: true },
+      select: { status: true, suspension_reason: true, deleted_at: true },
     });
+  });
+
+  // Pentest A2-NV02 (#878): an archived profile kept acting while its status
+  // was still ACTIVE.
+  it('refuses an archived profile even if still ACTIVE', async () => {
+    mockPrisma.profile.findUnique.mockResolvedValue({
+      status: AccountStatus.ACTIVE,
+      suspension_reason: null,
+      deleted_at: new Date(),
+    });
+
+    await expect(guard.canActivate(makeContext('p1'))).rejects.toThrow(
+      'Profil introuvable',
+    );
   });
 });

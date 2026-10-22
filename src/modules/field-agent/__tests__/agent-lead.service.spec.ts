@@ -446,6 +446,18 @@ describe('AgentLeadService', () => {
       expect(applications.create).not.toHaveBeenCalled();
     });
 
+    // Pentest A2-F13 (#869): another agent's « Intéressé » let the next
+    // claimer place the worker and take the commission.
+    it('only counts this agent’s own call as consent', async () => {
+      await service.place('agent-1', 'lead-1');
+
+      expect(prisma.agentCallLog.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { lead_id: 'lead-1', agent_id: 'agent-1' },
+        }),
+      );
+    });
+
     it('refuses, in the agent’s voice, when the worker already applied', async () => {
       prisma.application.count.mockResolvedValue(1);
       await expect(service.place('agent-1', 'lead-1')).rejects.toThrow(

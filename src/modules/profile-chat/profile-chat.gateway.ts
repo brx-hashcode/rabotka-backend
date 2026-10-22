@@ -26,6 +26,11 @@ import { PresenceService } from './presence.service';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { TypingDto } from './dto/profile-chat.dto';
 import { socketCorsOrigin } from '../../common/utils/allowed-origins';
+import {
+  SESSION_ENDED,
+  type SessionEndedEvent,
+} from '../../common/events/session-ended.events';
+import { OnEvent } from '@nestjs/event-emitter';
 
 /** Well under the 90s TTL, so one missed tick never drops somebody offline. */
 const PRESENCE_REFRESH_MS = 45_000;
@@ -341,5 +346,11 @@ export class ProfileChatGateway
     }
 
     return undefined;
+  }
+  /** Disconnects the sockets of a session that just ended (#864). */
+  @OnEvent(SESSION_ENDED)
+  evictEndedSession(event: SessionEndedEvent): void {
+    if (event.kind !== 'profile') return;
+    this.server?.in(`profile:${event.id}`).disconnectSockets(true);
   }
 }

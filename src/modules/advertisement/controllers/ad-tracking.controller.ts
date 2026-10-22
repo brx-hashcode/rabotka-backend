@@ -2,6 +2,7 @@ import { Controller, Get, Param, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { Public } from '../../auth/decorators/public.decorator';
 import { AdLinkTrackingService } from '../services/ad-link-tracking.service';
+import { clientIp } from '../../../common/utils/request-meta.util';
 
 @Public()
 @Controller('r')
@@ -14,11 +15,9 @@ export class AdTrackingController {
     @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
-    const forwarded = req.headers['x-forwarded-for'];
-    const ip =
-      typeof forwarded === 'string' ? forwarded.split(',')[0]?.trim() : req.ip;
+    // The shared rule, not the client-written X-Forwarded-For (#879).
     const target = await this.tracking.resolveAndTrackClick(hash, {
-      ip,
+      ip: clientIp(req),
       userAgent: req.get('user-agent') ?? undefined,
     });
     res.redirect(target);

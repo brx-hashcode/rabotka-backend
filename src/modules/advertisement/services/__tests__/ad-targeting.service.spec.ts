@@ -60,6 +60,21 @@ describe('AdTargetingService', () => {
     expect(result).toEqual(mockProfiles);
   });
 
+  // Pentest A2-F19 (#875): third-party ads went to archived profiles and to
+  // people who had replied STOP.
+  it('never targets archived or opted-out profiles', async () => {
+    mockPrisma.$queryRaw
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(mockProfiles);
+    await service.resolveRecipients(makeAd('WORKER'));
+
+    const sql = (mockPrisma.$queryRaw.mock.calls.at(-1) as [string[]])[0].join(
+      '?',
+    );
+    expect(sql).toContain('p.deleted_at IS NULL');
+    expect(sql).toContain('p.marketing_opt_out_at IS NULL');
+  });
+
   it('excludes already sent profiles', async () => {
     mockPrisma.$queryRaw
       .mockResolvedValueOnce([{ profile_id: 'p-already' }]) // excluded

@@ -16,6 +16,7 @@ import {
   HttpStatus,
   NotFoundException,
   ServiceUnavailableException,
+  Optional,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
@@ -33,8 +34,15 @@ import { LogService } from '../log/log.service';
 import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
 import { fetchWithTimeout } from '../../common/utils/fetch-with-timeout.util';
+import { StorageFetchService } from '../file/storage-fetch.service';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 
+/** What the public policy may be shown as, inline, from the API origin. */
+const INLINE_POLICY_TYPES = new Set([
+  'application/pdf',
+  'text/plain',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]);
 @ApiTags('Admin – Documents')
 @Controller('admin/documents')
 @UseGuards(AdminAuthGuard, RolesGuard)
@@ -248,7 +256,11 @@ export class DocumentController {
 @ApiTags('Public Documents')
 @Controller('public/documents')
 export class PublicDocumentController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // Appended and optional: specs construct this controller positionally.
+    @Optional() private readonly storageFetch?: StorageFetchService,
+  ) {}
 
   @Public()
   @Get('policy')
@@ -269,13 +281,17 @@ export class PublicDocumentController {
     // means the policy file was never uploaded properly.
     assertStorageUrl(policy.file_url);
 
-    const upstream = await fetchWithTimeout(policy.file_url, {}, 10_000).catch(
-      () => {
-        throw new ServiceUnavailableException(
-          'Policy file is unreachable. Re-upload the policy document.',
-        );
-      },
-    );
+    // Our storage only, redirects refused, checked again here because a row
+    // stored before the check may hold any url (pentest A2-F07, #863).
+    const upstream = await (
+      this.storageFetch
+        ? this.storageFetch.fetch(policy.file_url, 10_000)
+        : fetchWithTimeout(policy.file_url, { redirect: 'error' }, 10_000)
+    ).catch(() => {
+      throw new ServiceUnavailableException(
+        'Policy file is unreachable. Re-upload the policy document.',
+      );
+    });
     if (!upstream.ok) {
       throw new ServiceUnavailableException(
         'Policy file could not be fetched from storage.',
@@ -293,16 +309,27 @@ export class PublicDocumentController {
 
     // Stream the actual file content for every other type (pdf, docx, …) using
     // its stored mime type — never return JSON metadata as "the content".
-    const contentType =
-      policy.mime_type ||
-      upstream.headers.get('content-type') ||
-      'application/octet-stream';
+    // Pentest A2-NV11 (#887): the stored mime type is free text chosen by a
+    // MANAGER, and this is the API's own origin. Only a document type is shown
+    // inline; anything else is a download, never sniffed, never scripted.
+    const declared = (policy.mime_type || '')
+      .split(';')[0]
+      .trim()
+      .toLowerCase();
+    const inline = INLINE_POLICY_TYPES.has(declared);
+    const contentType = inline ? declared : 'application/octet-stream';
     const buffer = Buffer.from(await upstream.arrayBuffer());
-    const filename =
-      policy.file_url.split('/').pop()?.split('?')[0] || 'policy';
+    const filename = (
+      policy.file_url.split('/').pop()?.split('?')[0] || 'policy'
+    ).replace(/[^\w.-]/g, '_');
     return res
       .setHeader('Content-Type', contentType)
-      .setHeader('Content-Disposition', `inline; filename="${filename}"`)
+      .setHeader('X-Content-Type-Options', 'nosniff')
+      .setHeader('Content-Security-Policy', "sandbox; default-src 'none'")
+      .setHeader(
+        'Content-Disposition',
+        `${inline ? 'inline' : 'attachment'}; filename="${filename}"`,
+      )
       .send(buffer);
   }
 }

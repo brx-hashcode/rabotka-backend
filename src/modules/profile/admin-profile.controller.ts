@@ -180,7 +180,12 @@ export class AdminProfileController {
     @Body() dto: BulkDeleteDto,
     @Req() req: AdminAuthenticatedRequest,
   ): Promise<{ count: number }> {
+    const archived = await this.profileService.archivedAt(dto.ids);
     const result = await this.archiveService.restore('profiles', dto.ids);
+    // Their sessions work again once restored (#878).
+    await this.profileService.clearArchivedSessions(dto.ids);
+    // And the offers archived with them come back (#870).
+    this.profileService.announceRestored(archived);
     await this.logService.create({
       action: 'PROFILE_BULK_RESTORED',
       entityType: 'Profile',

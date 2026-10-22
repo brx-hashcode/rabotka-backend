@@ -675,6 +675,46 @@ describe('JobOfferService (extended)', () => {
     });
   });
 
+  // Pentest A2-F14 (#870): archiving an employer left its offers open,
+  // indexed, recommended and taking applications.
+  describe('archived employers', () => {
+    const at = new Date('2026-10-22T10:00:00Z');
+
+    it('archives their recruiting offers, at the same instant', async () => {
+      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValueOnce([
+        { id: 'o-1' },
+      ]);
+      (prisma.jobOffer.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+
+      await service.archiveOffersOfArchivedEmployers({ ids: ['e-1'], at });
+
+      expect(prisma.jobOffer.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            employer_id: { in: ['e-1'] },
+            deleted_at: null,
+            status: { in: ['ACTIVE', 'PARTIALLY_FILLED'] },
+          }),
+        }),
+      );
+      expect(prisma.jobOffer.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['o-1'] }, deleted_at: null },
+        data: { deleted_at: at },
+      });
+    });
+
+    it('restores exactly the offers archived with them', async () => {
+      await service.restoreOffersOfRestoredEmployers({
+        restored: [{ id: 'e-1', at }],
+      });
+
+      expect(prisma.jobOffer.updateMany).toHaveBeenCalledWith({
+        where: { employer_id: 'e-1', deleted_at: at },
+        data: { deleted_at: null },
+      });
+    });
+  });
+
   describe('bulkSoftDeleteByAdmin()', () => {
     it('archives the given offers and returns the count', async () => {
       (prisma.jobOffer.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
@@ -686,6 +726,24 @@ describe('JobOfferService (extended)', () => {
         where: { id: { in: ['a', 'b'] }, deleted_at: null },
         data: { deleted_at: expect.any(Date) },
       });
+    });
+
+    // Pentest A2-F02 (#858): archiving left applicants waiting on an offer
+    // nobody could act on any more.
+    it('closes the applicants still waiting on the archived offers', async () => {
+      (prisma.jobOffer.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (prisma.application.findMany as jest.Mock).mockResolvedValueOnce([
+        { id: 'app-1' },
+      ]);
+
+      await service.bulkSoftDeleteByAdmin(['a']);
+
+      expect(prisma.application.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: ['app-1'] } },
+          data: expect.objectContaining({ status: 'REJECTED' }),
+        }),
+      );
     });
 
     it('is a no-op for an empty id list', async () => {
