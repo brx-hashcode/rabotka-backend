@@ -181,6 +181,8 @@ export class AdminProfileController {
     @Req() req: AdminAuthenticatedRequest,
   ): Promise<{ count: number }> {
     const result = await this.archiveService.restore('profiles', dto.ids);
+    // Their sessions work again once restored (#878).
+    await this.profileService.clearArchivedSessions(dto.ids);
     await this.logService.create({
       action: 'PROFILE_BULK_RESTORED',
       entityType: 'Profile',

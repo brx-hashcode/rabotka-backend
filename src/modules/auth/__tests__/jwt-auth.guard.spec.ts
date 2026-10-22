@@ -83,6 +83,32 @@ describe('JwtAuthGuard', () => {
     expect(req.user.type).toBe('profile');
   });
 
+  // Pentest A2-NV02 (#878): a profile archived by the team kept a working
+  // session until the token expired.
+  it('refuses the session of an archived profile', async () => {
+    (jwtService.verify as jest.Mock).mockReturnValue({
+      sub: 'profile-1',
+      type: 'profile',
+    });
+    const redis = {
+      get: jest.fn((key: string) =>
+        Promise.resolve(
+          key.endsWith('profile-archived:profile-1') ? '1' : null,
+        ),
+      ),
+    } as any;
+    const archivedGuard = new JwtAuthGuard(
+      jwtService,
+      configService,
+      reflector,
+      redis,
+    );
+
+    await expect(
+      archivedGuard.canActivate(makeContext('valid-token')),
+    ).rejects.toThrow('Session invalide ou expirée');
+  });
+
   it('authenticates admin user from bearer token', async () => {
     (jwtService.verify as jest.Mock).mockReturnValue({
       sub: 'admin-1',

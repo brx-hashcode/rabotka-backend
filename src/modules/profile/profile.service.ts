@@ -88,6 +88,7 @@ import {
 } from '@prisma/client';
 import { randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { OnboardingAttemptService } from '../onboarding-attempt/onboarding-attempt.service';
+import { markProfilesArchived } from '../auth/session-revocation';
 
 const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
   [ProfileType.WORKER]: 'Travailleur',
@@ -1768,6 +1769,11 @@ export class ProfileService {
     return { data, total, page, limit };
   }
 
+  /** Lets a restored profile's sessions through again — see bulkSoftDeleteProfiles. */
+  async clearArchivedSessions(ids: string[]): Promise<void> {
+    await markProfilesArchived(this.redis, ids, false);
+  }
+
   /** Archive many profiles at once (admin bulk delete). Returns the count archived. */
   async bulkSoftDeleteProfiles(ids: string[]): Promise<{ count: number }> {
     if (ids.length === 0) return { count: 0 };
@@ -1776,6 +1782,8 @@ export class ProfileService {
       data: { deleted_at: new Date() },
     });
     await this.cache.invalidate('profiles');
+    // Ends their open sessions on the next request (#878).
+    await markProfilesArchived(this.redis, ids, true);
     return { count };
   }
 
