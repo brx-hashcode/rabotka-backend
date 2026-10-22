@@ -29,6 +29,19 @@ import {
   type TurnHandle,
 } from './observability/tracing';
 
+/** Why a turn did or did not produce a reply — see `handleOutcome`. */
+export type VovaOutcome =
+  | { kind: 'reply'; messages: string[] }
+  | { kind: 'skipped' }
+  | { kind: 'failed' };
+
+const SKIPPED: VovaOutcome = { kind: 'skipped' };
+const FAILED: VovaOutcome = { kind: 'failed' };
+const toReply = (messages: string[]): VovaOutcome => ({
+  kind: 'reply',
+  messages,
+});
+
 /**
  * What the assistant said to a stranger, and whether the signup card follows.
  *
@@ -268,11 +281,35 @@ export class VovaService {
     }
   }
 
+  /**
+   * The assistant's reply, or `null` when the caller should answer itself.
+   * Kept for callers that do not care WHY there is no reply; the bot uses
+   * `handleOutcome`, which tells a skipped turn from a failed one.
+   */
   async handle(
     profile: VovaBotProfile,
     text: string,
     correlationId?: string,
   ): Promise<string[] | null> {
+    const outcome = await this.handleOutcome(profile, text, correlationId);
+    return outcome.kind === 'reply' ? outcome.messages : null;
+  }
+
+  /**
+   * Like `handle`, but says why there is no reply.
+   *
+   * `skipped` — the assistant was never meant to answer this one (off, out of
+   * the rollout, shadow mode, walled budget spent): the caller's own default is
+   * the right answer. `failed` — it was meant to and could not (out of time,
+   * threw). The person asked something and is owed at least « je n'ai pas pu
+   * répondre », not a card that looks like an answer to another question: on
+   * 21 Oct « Chauffeur personnel » was answered with the brand card.
+   */
+  async handleOutcome(
+    profile: VovaBotProfile,
+    text: string,
+    correlationId?: string,
+  ): Promise<VovaOutcome> {
     let shadow = true;
 
     try {
@@ -285,7 +322,7 @@ export class VovaService {
           this.systemConfig.get(VOVA_CONFIG_KEYS.WALLED_DAILY_LIMIT, '10'),
         ]);
 
-      if (enabled !== 'true') return null;
+      if (enabled !== 'true') return SKIPPED;
 
       shadow = shadowRaw !== 'false';
       const percent = clampPercent(Number(percentRaw));
@@ -293,7 +330,7 @@ export class VovaService {
       // Stable hash, not a coin flip: a user who gets the assistant must keep
       // getting it. Alternating between an agent and a menu across messages
       // would be a worse experience than either one alone.
-      if (!shadow && bucketOf(profile.id) >= percent) return null;
+      if (!shadow && bucketOf(profile.id) >= percent) return SKIPPED;
 
       // « Oui » to an offer made a moment ago. Answered without a model at
       // all: the question was already asked, the destination already chosen,
@@ -306,8 +343,8 @@ export class VovaService {
             `vova.offer accepted profile=${profile.id} destination=${pending}`,
           );
           return shadow
-            ? null
-            : ['Voilà, c’est juste ici 👇', this.card(pending)];
+            ? SKIPPED
+            : toReply(['Voilà, c’est juste ici 👇', this.card(pending)]);
         }
       }
 
@@ -321,7 +358,7 @@ export class VovaService {
       // question and must reach the model.
       if (isPureGreeting(text)) {
         this.logger.log(`vova.greeting profile=${profile.id}`);
-        return shadow ? null : [refusal('salutation')];
+        return shadow ? SKIPPED : toReply([refusal('salutation')]);
       }
 
       // « merci », « non merci », « je vois », « non laisse » — the person is
@@ -337,7 +374,9 @@ export class VovaService {
       // `isPureGreeting` above is the same trade, made for the same reason.
       if (isAcknowledgement(text)) {
         this.logger.log(`vova.acknowledgement profile=${profile.id}`);
-        return shadow ? null : [acknowledgementReply(profile.first_name)];
+        return shadow
+          ? SKIPPED
+          : toReply([acknowledgementReply(profile.first_name)]);
       }
 
       // Meter a profile behind a wall before the model runs.
@@ -364,7 +403,7 @@ export class VovaService {
             `vova.walled_limit profile=${profile.id} status=${profile.status} ` +
               `verification=${profile.verification_status}`,
           );
-          return null;
+          return SKIPPED;
         }
       }
 
@@ -460,7 +499,7 @@ export class VovaService {
           `vova.shadow profile=${profile.id} in=${JSON.stringify(text)} ` +
             `out=${JSON.stringify(reply.text)}`,
         );
-        return null;
+        return SKIPPED;
       }
 
       // What this turn taught us about the person, folded in for the next one.
@@ -488,7 +527,7 @@ export class VovaService {
       // Otherwise the reply stands on its own and the destination is
       // remembered, so a following « oui » opens it.
       if (isNavigationRequest(text)) {
-        return [answer, this.card(reply.destination)];
+        return toReply([answer, this.card(reply.destination)]);
       }
 
       // Only remember a destination when the reply actually proposed to open
@@ -498,13 +537,14 @@ export class VovaService {
       if (offersNavigation(reply.text)) {
         await this.offers.remember(profile.id, reply.destination);
       }
-      return [answer];
+      return toReply([answer]);
     } catch (err) {
       this.report(
         err,
         `profile ${profile.id} (mode=${shadow ? 'shadow' : 'live'}) — falling back`,
       );
-      return null;
+      // Shadow mode never shows a reply, so it never owes an apology either.
+      return shadow ? SKIPPED : FAILED;
     }
   }
 }
