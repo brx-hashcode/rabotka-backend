@@ -282,3 +282,45 @@ export function offersNavigation(reply: string): boolean {
   const folded = foldText(reply);
   return NAVIGATION_OFFERS.some((phrase) => folded.includes(phrase));
 }
+
+/**
+ * A stranger saying they want in — the moment the signup card is worth showing
+ * again. Substring on the folded text, like the navigation phrases above.
+ */
+const JOIN_INTENT = [
+  'inscri',
+  'creer un compte',
+  'creer mon compte',
+  'ouvrir un compte',
+  'avoir un compte',
+  'enregistrer',
+  'rejoindre',
+  'comment commencer',
+  'je veux commencer',
+  'sign up',
+  'register',
+  'create an account',
+];
+
+export function wantsToJoin(text: string): boolean {
+  const folded = foldText(text);
+  return JOIN_INTENT.some((phrase) => folded.includes(phrase));
+}
+
+/**
+ * The reply itself said the number has no account yet — the prompt asks for
+ * that on the first answer and whenever an account becomes the point, so the
+ * card follows the model's own judgement rather than a second, separate one.
+ */
+const MISSING_ACCOUNT = [
+  'pas encore de compte',
+  'pas de compte',
+  'no account',
+  'don t have an account',
+  'do not have an account',
+];
+
+export function mentionsMissingAccount(reply: string): boolean {
+  const folded = foldText(reply);
+  return MISSING_ACCOUNT.some((phrase) => folded.includes(phrase));
+}

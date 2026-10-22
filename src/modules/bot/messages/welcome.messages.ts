@@ -99,6 +99,27 @@ export function welcomePlatformMessage(
 }
 
 /**
+ * The line that goes before the signup card when a stranger types « start »
+ * or « menu » — usually what an ad or a shared link told them to send. The
+ * card alone answered them like a machine; this says hello first. The greeting
+ * word comes from the caller (the time in Brazzaville), since « Bonjour » at
+ * 21h is the slip users already corrected once.
+ */
+export function welcomeUnregisteredIntro(greeting: string): string {
+  return `${greeting} 👋 Pour commencer sur Rabotka, il vous faut un compte : c’est juste ici.`;
+}
+
+/**
+ * The signup card's words. « Ce numéro n’est pas encore enregistré » read like
+ * a system notice; this says what Rabotka is for and what to do next.
+ */
+const UNREGISTERED_CARD_BODY = [
+  '*Bienvenue sur Rabotka* 👋',
+  'Des missions près de chez vous, et des gens de confiance pour les faire.',
+  'Votre numéro n’a pas encore de compte : créez-le en quelques étapes.',
+];
+
+/**
  * Sent to a number with no profile. Same card, different button — there is no
  * account to open yet, so it points at onboarding.
  *
@@ -112,21 +133,14 @@ export function welcomePlatformMessage(
  */
 export function welcomeUnregisteredMessage(): string {
   return ctaReply({
-    body: [
-      '*Bienvenue sur Rabotka*',
-      'L’endroit où compétences et opportunités se rencontrent.',
-      'Ce numéro n’est pas encore enregistré.',
-    ].join('\n'),
+    body: UNREGISTERED_CARD_BODY.join('\n'),
     buttonText: 'Créer mon compte',
     path: ONBOARDING_PATH,
     imageUrl: coverImageUrl(),
     fallbackText: [
-      '*Bienvenue sur Rabotka*',
-      'L’endroit où compétences et opportunités se rencontrent.',
-      'Ce numéro n’est pas encore enregistré.',
+      ...UNREGISTERED_CARD_BODY,
       '',
       appUrlFor(ONBOARDING_PATH),
     ].join('\n'),
   });
 }
-
