@@ -57,6 +57,11 @@ const TOTP_PENDING_TTL = 300;
 
 const OTP_KEY_PREFIX = `${REDIS_KEY_PREFIX}otp:`;
 const MOBILE_REFRESH_PREFIX = `${REDIS_KEY_PREFIX}mobile:refresh:`;
+/** The jti shape we mint (randomUUID). Anything else was not issued here. */
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Longer than any session we issue (30 days by default), never unbounded. */
+const MAX_REVOCATION_TTL_SECONDS = 90 * 24 * 60 * 60;
 const DEFAULT_REFRESH_TTL_SECONDS = 24 * 60 * 60;
 const ADMIN_OTP_KEY_PREFIX = `${REDIS_KEY_PREFIX}admin:otp:`;
 const RESEND_COOLDOWN_SECONDS = 60;
@@ -1228,11 +1233,26 @@ export class AuthService {
   private pairCooldownKey = (userId: string) => `admin:pair:resend:${userId}`;
   private pairAttemptKey = (userId: string) => `admin:pair:attempts:${userId}`;
 
+  /**
+   * Blocklists a token's jti until it would have expired.
+   *
+   * Verified, not just decoded (pentest A2-NV10, #886): logout is public, and
+   * a decoded-only token let anyone write blocklist keys of their choosing —
+   * any jti, any expiry year — into Redis. Only our own signature counts; an
+   * expired one is fine (it simply writes nothing), the TTL is clamped to the
+   * longest session we issue, and the jti must look like the uuids we mint.
+   */
   async revokeToken(token: string): Promise<void> {
     try {
-      const payload = this.jwtService.decode(token);
-      if (!payload?.jti || !payload.exp) return;
-      const ttl = payload.exp - Math.floor(Date.now() / 1000);
+      const payload = this.jwtService.verify<{ jti?: string; exp?: number }>(
+        token,
+        { ignoreExpiration: true },
+      );
+      if (!payload?.jti || !payload.exp || !UUID_RE.test(payload.jti)) return;
+      const ttl = Math.min(
+        payload.exp - Math.floor(Date.now() / 1000),
+        MAX_REVOCATION_TTL_SECONDS,
+      );
       if (ttl > 0) {
         await this.redis.set(
           `${JWT_BLOCKLIST_PREFIX}${payload.jti}`,
@@ -1242,7 +1262,7 @@ export class AuthService {
         );
       }
     } catch {
-      // Ignore decode errors — token is already invalid
+      // Not ours, malformed: nothing to revoke, and nothing is written.
     }
   }
 
