@@ -79,4 +79,46 @@ describe('RecommendationContactService — employer account status', () => {
     );
     expect(prisma.profile.findFirst).toHaveBeenCalled();
   });
+
+  // Pentest A2-F09 (#865): the worker lookup had no profile_type or
+  // deleted_at, so an employer's or an archived worker's phone could be bought.
+  it('only lets an active, verified, non-archived WORKER be paid for', async () => {
+    prisma.profile.findUnique.mockResolvedValue({
+      status: AccountStatus.ACTIVE,
+      suspension_reason: null,
+      deleted_at: null,
+    });
+    prisma.profile.findFirst.mockResolvedValue(null);
+
+    await expect(makeService().payWithWallet('emp-1', 'emp-2')).rejects.toThrow(
+      /plus actif/,
+    );
+    expect(prisma.profile.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'emp-2',
+          profile_type: 'WORKER',
+          status: 'ACTIVE',
+          verification_status: 'VERIFIED',
+          deleted_at: null,
+        },
+      }),
+    );
+    // Refused before any charge.
+    expect(systemConfig.getRecommendationContactFee).not.toHaveBeenCalled();
+    expect(wallet.getOrCreateProfileWallet).not.toHaveBeenCalled();
+  });
+
+  it('refuses an archived employer', async () => {
+    prisma.profile.findUnique.mockResolvedValue({
+      status: AccountStatus.ACTIVE,
+      suspension_reason: null,
+      deleted_at: new Date(),
+    });
+
+    await expect(
+      makeService().createMobilePaymentUrl('emp-1', 'w-1'),
+    ).rejects.toThrow(/introuvable/);
+    expect(prisma.profile.findFirst).not.toHaveBeenCalled();
+  });
 });

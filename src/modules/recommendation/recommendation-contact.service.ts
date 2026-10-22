@@ -34,6 +34,7 @@ import { WhatsAppFeedbackService } from '../whatsapp/feedback/whatsapp-feedback.
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { InteractionEventService } from '../recommendation-engine/interaction-event.service';
 import { assertAccountActive } from '../../common/exceptions/account-not-active.exception';
+import { CONTACTABLE_WORKER } from './contactable-worker';
 
 /**
  * EMPLOYER pays to unlock a RECOMMENDED worker's contact. Stateless / single-sided
@@ -239,9 +240,10 @@ export class RecommendationContactService {
   private async assertEmployerActive(employerId: string) {
     const employer = await this.prisma.profile.findUnique({
       where: { id: employerId },
-      select: { status: true, suspension_reason: true },
+      select: { status: true, suspension_reason: true, deleted_at: true },
     });
-    if (!employer) {
+    // An archived employer is gone, whatever its status says.
+    if (!employer || employer.deleted_at) {
       throw new NotFoundException('Employeur introuvable');
     }
     assertAccountActive(employer.status, employer.suspension_reason);
@@ -249,11 +251,7 @@ export class RecommendationContactService {
 
   private async getActiveWorker(workerId: string) {
     const worker = await this.prisma.profile.findFirst({
-      where: {
-        id: workerId,
-        status: 'ACTIVE',
-        verification_status: 'VERIFIED',
-      },
+      where: { id: workerId, ...CONTACTABLE_WORKER },
       select: {
         first_name: true,
         last_name: true,
