@@ -42,9 +42,10 @@ function makeLayoutService() {
 
 function makeWalletService() {
   return {
-    recordPenaltyPayment: jest
+    payPenaltyFromWallet: jest
       .fn()
       .mockResolvedValue({ reference: 'RBK-2026-abc123' }),
+    confirmPenaltyPaymentManually: jest.fn(),
   };
 }
 
@@ -246,16 +247,37 @@ describe('ProfileController', () => {
   // ─── PATCH /penalties/:id/pay ─────────────────────────────────────────────
 
   describe('payPenalty()', () => {
-    it('records payment and returns reference', async () => {
+    // Pentest A2-F05 (#861): this route used to mark the penalty paid with no
+    // money moving, on the owner's say-so. It must pay from the wallet.
+    it('pays from the profile wallet and returns the reference', async () => {
       const result = await controller.payPenalty(makeReq(), 'pen-1', {
         paymentMethod: 'CASH',
       } as any);
-      expect(walletService.recordPenaltyPayment).toHaveBeenCalledWith(
+      expect(walletService.payPenaltyFromWallet).toHaveBeenCalledWith(
         'pen-1',
         'p-1',
-        { paymentMethod: 'CASH' },
       );
       expect(result).toEqual({ success: true, reference: 'RBK-2026-abc123' });
+    });
+
+    it('never settles a penalty without a payment', async () => {
+      await controller.payPenalty(makeReq(), 'pen-1', {
+        paymentMethod: 'CASH',
+      } as any);
+      expect(
+        walletService.confirmPenaltyPaymentManually,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('surfaces a short balance instead of settling', async () => {
+      walletService.payPenaltyFromWallet.mockRejectedValueOnce(
+        new BadRequestException('Solde insuffisant pour régler cette pénalité'),
+      );
+      await expect(
+        controller.payPenalty(makeReq(), 'pen-1', {
+          paymentMethod: 'CASH',
+        } as any),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 

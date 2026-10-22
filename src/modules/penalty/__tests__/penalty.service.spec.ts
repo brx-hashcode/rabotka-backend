@@ -89,7 +89,7 @@ describe('PenaltyService', () => {
           provide: WalletService,
           useValue: {
             getProfileWalletBalance: jest.fn().mockResolvedValue(0),
-            recordPenaltyPayment: jest.fn().mockResolvedValue({}),
+            confirmPenaltyPaymentManually: jest.fn().mockResolvedValue({}),
           },
         },
       ],
