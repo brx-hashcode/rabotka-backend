@@ -283,6 +283,23 @@ describe('UserService', () => {
       expect(result.is_active).toBe(false);
     });
 
+    // Pentest A2-F08 (#864): a deactivated admin's sockets stayed open.
+    it('closes the deactivated admin’s open sockets', async () => {
+      const emit = jest.fn();
+      (service as any).events = { emit };
+      (prisma.user.update as jest.Mock).mockResolvedValue({
+        ...mockUser,
+        is_active: false,
+      });
+
+      await service.deactivate(USER_ID, ACTOR_ID);
+
+      expect(emit).toHaveBeenCalledWith('session.ended', {
+        kind: 'admin',
+        id: USER_ID,
+      });
+    });
+
     it('throws NotFoundException when user not found', async () => {
       stubUsers(prisma.user.findUnique as jest.Mock, { target: null });
 

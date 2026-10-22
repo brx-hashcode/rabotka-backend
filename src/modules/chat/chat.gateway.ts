@@ -22,6 +22,11 @@ import {
   type ChatConversationItem,
   type ChatMessageItem,
 } from './chat.service';
+import {
+  SESSION_ENDED,
+  type SessionEndedEvent,
+} from '../../common/events/session-ended.events';
+import { OnEvent } from '@nestjs/event-emitter';
 
 type AdminJwtPayload = { sub: string; type?: string; jti?: string };
 
@@ -308,5 +313,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   onlineUserIds(): string[] {
     return [...this.presence.keys()];
+  }
+  /** Disconnects the sockets of a session that just ended (#864). */
+  @OnEvent(SESSION_ENDED)
+  evictEndedSession(event: SessionEndedEvent): void {
+    if (event.kind !== 'admin') return;
+    this.server?.in(`user:${event.id}`).disconnectSockets(true);
   }
 }

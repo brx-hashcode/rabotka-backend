@@ -13,6 +13,11 @@ import { ConfigService } from '@nestjs/config';
 import { Server, Socket } from 'socket.io';
 import type { JwtPayload } from '../auth/guards/jwt-auth.guard';
 import { socketCorsOrigin } from '../../common/utils/allowed-origins';
+import {
+  SESSION_ENDED,
+  type SessionEndedEvent,
+} from '../../common/events/session-ended.events';
+import { OnEvent } from '@nestjs/event-emitter';
 
 /** What moved. The client turns this into the query keys it needs to drop. */
 export type JobEvent = {
@@ -133,5 +138,11 @@ export class JobEventsGateway
     }
 
     return undefined;
+  }
+  /** Disconnects the sockets of a session that just ended (#864). */
+  @OnEvent(SESSION_ENDED)
+  evictEndedSession(event: SessionEndedEvent): void {
+    if (event.kind !== 'profile') return;
+    this.server?.in(`profile:${event.id}`).disconnectSockets(true);
   }
 }

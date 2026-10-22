@@ -53,6 +53,11 @@ import {
   consumeOtpWithLockout,
 } from './otp-store';
 import * as QRCode from 'qrcode';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  SESSION_ENDED,
+  type SessionEndedEvent,
+} from '../../common/events/session-ended.events';
 
 const TOTP_PENDING_PREFIX = `${REDIS_KEY_PREFIX}admin:totp:pending:`;
 const TOTP_PENDING_TTL = 300;
@@ -150,6 +155,9 @@ export class AuthService {
     // drop-off tracking is never something a sign-up may depend on.
     @Optional()
     private readonly onboardingAttempts?: OnboardingAttemptService,
+    // Appended and optional for the same reason: closes the signed-out
+    // person's open sockets (#864).
+    @Optional() private readonly events?: EventEmitter2,
   ) {}
 
   /**
@@ -1257,10 +1265,18 @@ export class AuthService {
    */
   async revokeToken(token: string): Promise<void> {
     try {
-      const payload = this.jwtService.verify<{ jti?: string; exp?: number }>(
-        token,
-        { ignoreExpiration: true },
-      );
+      const payload = this.jwtService.verify<{
+        jti?: string;
+        exp?: number;
+        sub?: string;
+        type?: string;
+      }>(token, { ignoreExpiration: true });
+      if (payload?.sub) {
+        this.endSession(
+          payload.type === 'admin' ? 'admin' : 'profile',
+          payload.sub,
+        );
+      }
       if (!payload?.jti || !payload.exp || !UUID_RE.test(payload.jti)) return;
       const ttl = Math.min(
         payload.exp - Math.floor(Date.now() / 1000),
@@ -1277,6 +1293,11 @@ export class AuthService {
     } catch {
       // Not ours, malformed: nothing to revoke, and nothing is written.
     }
+  }
+
+  /** The person's open sockets close with the session (#864). */
+  private endSession(kind: 'profile' | 'admin', id: string): void {
+    this.events?.emit(SESSION_ENDED, { kind, id } satisfies SessionEndedEvent);
   }
 
   async unpairPhone(userId: string): Promise<void> {

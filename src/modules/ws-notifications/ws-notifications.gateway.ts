@@ -16,6 +16,11 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { isSessionRevoked } from '../auth/session-revocation';
 import type { JwtPayload } from '../auth/guards/jwt-auth.guard';
 import { socketCorsOrigin } from '../../common/utils/allowed-origins';
+import {
+  SESSION_ENDED,
+  type SessionEndedEvent,
+} from '../../common/events/session-ended.events';
+import { OnEvent } from '@nestjs/event-emitter';
 
 @WebSocketGateway({
   namespace: '/admin-notifications',
@@ -147,5 +152,11 @@ export class WsNotificationsGateway
     }
 
     return undefined;
+  }
+  /** Disconnects the sockets of a session that just ended (#864). */
+  @OnEvent(SESSION_ENDED)
+  evictEndedSession(event: SessionEndedEvent): void {
+    if (event.kind !== 'admin') return;
+    this.server?.in(`admin-${event.id}`).disconnectSockets(true);
   }
 }

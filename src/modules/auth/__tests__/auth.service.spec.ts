@@ -952,6 +952,25 @@ describe('AuthService', () => {
 
     // Pentest A2-NV10 (#886): logout is public, and a decoded-only token let
     // anyone write blocklist keys of their choosing into Redis.
+    // Pentest A2-F08 (#864): logging out left the person's sockets open.
+    it('closes the signed-out person’s open sockets', async () => {
+      const emit = jest.fn();
+      (service as any).events = { emit };
+      (service as any).jwtService.verify = jest.fn().mockReturnValue({
+        jti: JTI,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        sub: 'p-1',
+        type: 'profile',
+      });
+
+      await service.revokeToken('some-token');
+
+      expect(emit).toHaveBeenCalledWith('session.ended', {
+        kind: 'profile',
+        id: 'p-1',
+      });
+    });
+
     it('writes nothing for a token we did not sign', async () => {
       (service as any).jwtService.verify = jest.fn().mockImplementation(() => {
         throw new Error('invalid signature');
