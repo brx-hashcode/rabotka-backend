@@ -110,6 +110,16 @@ export function accountSuspendedBotMessage(contact: ContactInfo): string {
  * kind rather than the expensive one — but free beats cheap on every reply.
  */
 /**
+ * Said when the assistant was meant to answer and could not — out of time, or
+ * a provider down. Plain text, and always followed by a card: the person asked
+ * something, and a card alone read as the answer to some other question (on
+ * 21 Oct « Chauffeur personnel » got the brand card and nothing else).
+ */
+export function vovaUnavailableMessage(): string {
+  return 'Désolé, je n’ai pas pu traiter votre message à temps. Réessayez dans un instant, ou retrouvez tout dans l’application 👇';
+}
+
+/**
  * What a REFUSED dossier gets when the assistant has nothing to say.
  *
  * The generic door (`openAppBotMessage`) is deliberately mute about why an

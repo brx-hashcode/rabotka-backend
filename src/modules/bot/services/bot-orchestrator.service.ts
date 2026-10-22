@@ -29,6 +29,7 @@ import {
   hasPenaltiesBotMessage,
   kycRejectedHelpMessage,
   openAppBotMessage,
+  vovaUnavailableMessage,
 } from '../messages/menu.messages';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowContext, FlowResult } from '../types/flow.types';
@@ -231,7 +232,14 @@ export class BotOrchestratorService {
     // deterministic words return the suspension card, whose button opens the
     // app. `/support` is already handled above, in every account state.
     if (profile.status === AccountStatus.SUSPENDED) {
-      const vovaReply = await this.vovaReplyOrNull(profile, text);
+      const answered = await this.vovaReplyOrNull(profile, text);
+      // A refused dossier is better served by the fixed help text below than
+      // by an apology when the assistant fails: it says what to do next.
+      const vovaReply =
+        answered?.failed &&
+        profile.verification_status === VerificationStatus.REJECTED
+          ? null
+          : answered?.messages;
       // The card FOLLOWS the answer rather than replacing it. The prompt used
       // to make the model close with « tapez */start* », so the door was
       // already offered on every reply — this offers the same door as a button
@@ -316,7 +324,7 @@ export class BotOrchestratorService {
     // The deterministic words keep their card; everything else is free text,
     // and free text is what the assistant is for.
     if (profile.verification_status !== VerificationStatus.VERIFIED) {
-      const vovaReply = await this.vovaReplyOrNull(profile, text);
+      const vovaReply = (await this.vovaReplyOrNull(profile, text))?.messages;
 
       // The same door for both, and it now rides WITH the assistant's answer
       // rather than only instead of it. Which wall they are behind, and why, is
@@ -435,7 +443,7 @@ export class BotOrchestratorService {
   private async vovaReplyOrNull(
     profile: NonNullable<Awaited<ReturnType<typeof this.loadProfile>>>,
     text: string,
-  ): Promise<string[] | null> {
+  ): Promise<{ messages: string[]; failed?: true } | null> {
     if (
       isDeterministicCommand(
         stripChatFormattingChars(text).trim().toLowerCase(),
@@ -443,7 +451,7 @@ export class BotOrchestratorService {
     ) {
       return null;
     }
-    return this.vova.handle(
+    const outcome = await this.vova.handleOutcome(
       {
         id: profile.id,
         first_name: profile.first_name,
@@ -455,6 +463,13 @@ export class BotOrchestratorService {
       },
       text,
     );
+    if (outcome.kind === 'reply') return { messages: outcome.messages };
+    // Meant to answer and could not: say so. Every caller puts its card after
+    // it, so the person still has the door.
+    if (outcome.kind === 'failed') {
+      return { messages: [vovaUnavailableMessage()], failed: true };
+    }
+    return null;
   }
 
   /**
@@ -570,7 +585,7 @@ export class BotOrchestratorService {
     await this.releaseChatPaymentState(profileId);
 
     const card = hasPenaltiesBotMessage(profile.first_name);
-    const vovaReply = await this.vovaReplyOrNull(profile, text);
+    const vovaReply = (await this.vovaReplyOrNull(profile, text))?.messages;
     return vovaReply ? [...vovaReply, card] : [card];
   }
 
@@ -616,7 +631,14 @@ export class BotOrchestratorService {
       // Nothing recognised and no live flow. Before this, the welcome card was
       // the whole answer — so a worker typing « j'ai un problème » got a menu.
       const vovaReply = await this.vovaReplyOrNull(profile, text);
-      if (vovaReply) return vovaReply;
+      if (vovaReply) {
+        // A failed turn is only an apology: it needs the door after it, and
+        // the account door rather than the brand card, which says nothing to
+        // somebody who just asked a question.
+        return vovaReply.failed
+          ? [...vovaReply.messages, this.openAppCard(profile.first_name)]
+          : vovaReply.messages;
+      }
 
       return [welcomePlatformMessage()];
     } catch (err) {
