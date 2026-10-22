@@ -53,6 +53,7 @@ function makeRequest(
     payment_reference: null,
     proof_images: [],
     rejection_note: null,
+    penalty_ids: [],
     created_at: new Date(),
     updated_at: new Date(),
     profile: mockProfile,
@@ -70,6 +71,7 @@ describe('PaymentRequestService', () => {
   beforeEach(async () => {
     const mockPrismaService = {
       profile: { findUnique: jest.fn(), update: jest.fn() },
+      penalty: { count: jest.fn() },
       paymentRequest: {
         create: jest.fn(),
         findUnique: jest.fn(),
@@ -833,6 +835,100 @@ describe('PaymentRequestService', () => {
       // Another thread won the claim and notifies; this one must not.
       const emit = (service as any).eventEmitter.emit as jest.Mock;
       expect(inAppNotifications(emit, 'PAYMENT_SUCCEEDED')).toHaveLength(0);
+    });
+  });
+
+  /**
+   * Pentest A2-F04 (#860): a penalty link priced for one penalty, paid later,
+   * cleared every penalty the profile had by then — including those issued
+   * after the link was created.
+   */
+  describe('penalty settlement scope', () => {
+    const settle = async (overrides: Record<string, unknown>) => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue({
+        ...makeRequest(PaymentRequestStatus.PROCESSING),
+        amount: 500,
+        request_type: PaymentRequestType.PENALTY_RESOLUTION,
+        contact_unlock_attempt_id: null,
+        recommendation_worker_id: null,
+        description: 'Règlement de pénalités',
+        gateway_payment_ref: null,
+        profile: { ...mockProfile, phone: null, email: null },
+        ...overrides,
+      });
+      const txMock = {
+        paymentRequest: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        payment: { create: jest.fn().mockResolvedValue({}) },
+        walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+        wallet: { update: jest.fn().mockResolvedValue({}) },
+        penalty: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          count: jest.fn().mockResolvedValue(1),
+        },
+        profile: { update: jest.fn().mockResolvedValue({}) },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementation((cb) =>
+        typeof cb === 'function' ? cb(txMock) : Promise.resolve([]),
+      );
+      (service as any).systemConfig.getFees = jest
+        .fn()
+        .mockResolvedValue({ billingBlockThreshold: 3 });
+
+      await service.processApprovedPaymentById(REQUEST_ID);
+      return txMock.penalty.updateMany;
+    };
+
+    it('marks paid only the penalties the request was priced for', async () => {
+      const updateMany = await settle({ penalty_ids: ['pen-old'] });
+
+      expect(updateMany).toHaveBeenCalledWith({
+        where: {
+          profile_id: PROFILE_ID,
+          paid_at: null,
+          deleted_at: null,
+          id: { in: ['pen-old'] },
+        },
+        data: { paid_at: expect.any(Date) },
+      });
+    });
+
+    it('bounds an older request to penalties that existed when it was created', async () => {
+      const createdAt = new Date('2026-10-01T10:00:00Z');
+      const updateMany = await settle({
+        penalty_ids: [],
+        created_at: createdAt,
+      });
+
+      expect(updateMany).toHaveBeenCalledWith({
+        where: {
+          profile_id: PROFILE_ID,
+          paid_at: null,
+          deleted_at: null,
+          created_at: { lte: createdAt },
+        },
+        data: { paid_at: expect.any(Date) },
+      });
+    });
+  });
+
+  describe('initiatePayment() - penalties changed since the link', () => {
+    it('refuses to charge for penalties no longer owed', async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING, {
+          amount: 1000,
+          request_type: PaymentRequestType.PENALTY_RESOLUTION,
+          penalty_ids: ['pen-a', 'pen-b'],
+        }),
+      );
+      // pen-b was paid from the wallet (or archived) in the meantime.
+      (prisma.penalty.count as jest.Mock).mockResolvedValue(1);
+
+      await expect(
+        service.initiatePayment(TOKEN, '+242001', 'MTN_MOMO_COG'),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.paymentRequest.updateMany).not.toHaveBeenCalled();
     });
   });
 

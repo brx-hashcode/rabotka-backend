@@ -84,9 +84,11 @@ export class MobilePenaltyController {
   @ApiResponse({ status: 400, description: 'No unpaid penalties' })
   async payWithLink(@Req() req: ProfileAuthenticatedRequest) {
     const profileId = req.user.profileId;
+    // Archived penalties are not owed. And the ids go with the request, so
+    // settling it pays exactly these (pentest A2-F04, #860).
     const unpaid = await this.prisma.penalty.findMany({
-      where: { profile_id: profileId, paid_at: null },
-      select: { amount: true },
+      where: { profile_id: profileId, paid_at: null, deleted_at: null },
+      select: { id: true, amount: true },
     });
     if (unpaid.length === 0) {
       throw new BadRequestException('Aucune pénalité impayée');
@@ -97,6 +99,7 @@ export class MobilePenaltyController {
       totalAmount,
       `Règlement de pénalités (${unpaid.length} pénalité(s))`,
       PaymentRequestType.PENALTY_RESOLUTION,
+      { penaltyIds: unpaid.map((p) => p.id) },
     );
     const token = url.split('/pay/')[1] ?? '';
     return { token };

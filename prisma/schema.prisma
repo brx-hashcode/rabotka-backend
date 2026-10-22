@@ -1956,6 +1956,9 @@ model PaymentRequest {
   request_type              PaymentRequestType?
   recommendation_worker_id  String?              @db.Uuid
   contact_unlock_attempt_id String?              @db.Uuid
+  /// The penalties a PENALTY_RESOLUTION / PENALTY_BATCH request was priced for.
+  /// Settling it marks exactly these paid (pentest A2-F04, #860).
+  penalty_ids               String[]             @default([]) @db.Uuid
 
   profile    Profile   @relation(fields: [profile_id], references: [id], onDelete: Cascade)
   invoice    Invoice?

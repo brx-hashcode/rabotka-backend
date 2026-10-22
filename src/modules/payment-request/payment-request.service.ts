@@ -81,6 +81,7 @@ const PAYMENT_REQUEST_SELECT = {
   request_type: true,
   recommendation_worker_id: true,
   contact_unlock_attempt_id: true,
+  penalty_ids: true,
   profile: {
     select: {
       id: true,
@@ -159,6 +160,8 @@ export class PaymentRequestService {
     options: {
       contactUnlockAttemptId?: string;
       recommendationWorkerId?: string;
+      /** For a penalty request: the penalties its amount was priced for. */
+      penaltyIds?: string[];
     } = {},
   ): Promise<string> {
     const token = randomUUID();
@@ -175,6 +178,7 @@ export class PaymentRequestService {
         ...(options.recommendationWorkerId && {
           recommendation_worker_id: options.recommendationWorkerId,
         }),
+        ...(options.penaltyIds?.length && { penalty_ids: options.penaltyIds }),
       },
     });
     const frontendUrl = this.config.get<string>('FRONTEND_URL', '');
@@ -335,6 +339,8 @@ export class PaymentRequestService {
     if (!request.amount) {
       throw new BadRequestException('Montant non défini pour cette demande');
     }
+
+    await this.assertPenaltiesStillOwed(request);
 
     const network = await this.assertOperatorMatchesGateway(operator, phone);
 
@@ -1280,6 +1286,63 @@ export class PaymentRequestService {
     }
   }
 
+  /**
+   * The penalties a penalty request pays for — never « every unpaid penalty of
+   * the profile at settlement time ».
+   *
+   * Pentest A2-F04 (#860): settlement used to clear every unpaid penalty of
+   * the profile, so a link priced for one small penalty, paid later, also
+   * cleared every penalty issued in between. A request now carries the ids it
+   * was priced for. Requests created before that column have none: they are
+   * bounded to penalties that already existed when the request was created.
+   */
+  private pricedPenalties(
+    request: Pick<PaymentRequestWithProfile, 'profile_id' | 'penalty_ids'> & {
+      created_at: Date;
+    },
+  ): Prisma.PenaltyWhereInput {
+    const base: Prisma.PenaltyWhereInput = {
+      profile_id: request.profile_id,
+      paid_at: null,
+      deleted_at: null,
+    };
+    return request.penalty_ids.length
+      ? { ...base, id: { in: request.penalty_ids } }
+      : { ...base, created_at: { lte: request.created_at } };
+  }
+
+  /**
+   * Refuses to start a penalty payment whose priced set is no longer what is
+   * owed — one of its penalties paid another way or archived since. Charging
+   * the stored amount then would take money for nothing.
+   */
+  private async assertPenaltiesStillOwed(request: {
+    request_type: PaymentRequestType | null;
+    penalty_ids: string[];
+    profile_id: string;
+  }): Promise<void> {
+    if (
+      request.request_type !== PaymentRequestType.PENALTY_BATCH &&
+      request.request_type !== PaymentRequestType.PENALTY_RESOLUTION
+    )
+      return;
+    if (request.penalty_ids.length === 0) return;
+
+    const stillOwed = await this.prisma.penalty.count({
+      where: {
+        id: { in: request.penalty_ids },
+        profile_id: request.profile_id,
+        paid_at: null,
+        deleted_at: null,
+      },
+    });
+    if (stillOwed !== request.penalty_ids.length) {
+      throw new BadRequestException(
+        'Vos pénalités ont changé depuis la création de ce paiement. Relancez le règlement depuis l’application.',
+      );
+    }
+  }
+
   private async handlePenaltyPostPayment(
     request: PaymentRequestWithProfile,
   ): Promise<void> {
@@ -1297,7 +1360,7 @@ export class PaymentRequestService {
 
       const newStatus = await this.prisma.$transaction(async (tx) => {
         await tx.penalty.updateMany({
-          where: { profile_id: workerId, paid_at: null },
+          where: this.pricedPenalties(request),
           data: { paid_at: now },
         });
 
