@@ -193,10 +193,41 @@ describe('JobCategoryRegistry — semantic matching', () => {
     };
   }
 
+  /** Every passage sent to the embedder, across all its calls. */
+  function embeddedTexts(embeddings: ReturnType<typeof makeEmbeddings>) {
+    return embeddings.embedPassages.mock.calls.flatMap(([texts]) => texts);
+  }
+
+  /** Just enough of ioredis: MGET and a SET pipeline. */
+  function makeRedis(stored: Record<string, string> = {}) {
+    const store = new Map(Object.entries(stored));
+    return {
+      store,
+      mget: jest.fn((keys: string[]) =>
+        Promise.resolve(keys.map((k) => store.get(k) ?? null)),
+      ),
+      pipeline: jest.fn(() => {
+        const ops: [string, string][] = [];
+        const pipe = {
+          set: (k: string, v: string) => {
+            ops.push([k, v]);
+            return pipe;
+          },
+          exec: () => {
+            ops.forEach(([k, v]) => store.set(k, v));
+            return Promise.resolve([]);
+          },
+        };
+        return pipe;
+      }),
+    };
+  }
+
   function buildSemantic(
     queryVector: number[],
     minScore = 0.82,
     rows = SEMANTIC_ROWS,
+    redis?: ReturnType<typeof makeRedis>,
   ) {
     const service = {
       jobCategory: { findMany: jest.fn(() => Promise.resolve(rows)) },
@@ -211,13 +242,15 @@ describe('JobCategoryRegistry — semantic matching', () => {
       service as never,
       config as never,
       embeddings as never,
+      redis as never,
     );
-    return { registry, embeddings, service };
+    return { registry, embeddings, service, redis };
   }
 
   it('resolves a job title that shares no word with any category', async () => {
     // Pointing at the gardiennage vector: a perfect 1.0 cosine.
     const { registry } = buildSemantic([1, 0, 0]);
+    await registry.prebuild();
 
     const found = await registry.resolve('agent de sécurité');
 
@@ -264,28 +297,31 @@ describe('JobCategoryRegistry — semantic matching', () => {
 
   it('embeds each category once, however many lookups follow', async () => {
     const { registry, embeddings } = buildSemantic([1, 0, 0]);
+    await registry.prebuild();
 
     await registry.resolve('agent de sécurité');
     await registry.resolve('vigile');
     await registry.resolve('surveillant');
 
-    // Three categories, embedded in one batch, once.
-    expect(embeddings.embedPassages).toHaveBeenCalledTimes(1);
+    // Three categories, each embedded once — in small chunks, never again.
+    expect(embeddedTexts(embeddings)).toHaveLength(3);
     expect(embeddings.embedQuery).toHaveBeenCalledTimes(3);
   });
 
   it('re-embeds only the category an admin actually edited', async () => {
     const rows = SEMANTIC_ROWS.map((r) => ({ ...r }));
     const { registry, embeddings } = buildSemantic([1, 0, 0], 0.82, rows);
-    await registry.resolve('agent de sécurité');
+    await registry.prebuild();
+    const before = embeddedTexts(embeddings).length;
 
     rows[1].description = 'Fuites, robinetterie, chauffe-eau';
     registry.invalidate();
-    await registry.resolve('agent de sécurité');
+    await registry.prebuild();
 
-    expect(embeddings.embedPassages).toHaveBeenCalledTimes(2);
-    // The second batch carries the edited category and nothing else.
-    expect(embeddings.embedPassages.mock.calls[1][0]).toHaveLength(1);
+    // The second build carries the edited category and nothing else.
+    expect(embeddedTexts(embeddings).slice(before)).toEqual([
+      'Plomberie. Fuites, robinetterie, chauffe-eau',
+    ]);
   });
 
   it('falls back to literal matching when the embedder fails', async () => {
@@ -309,5 +345,64 @@ describe('JobCategoryRegistry — semantic matching', () => {
 
     expect((await registry.resolve('plomberie'))?.slug).toBe('plomberie');
     expect(await registry.suggest('agent de sécurité')).toEqual([]);
+  });
+
+  // 21 Oct: « Chauffeur personnel » made the first lookup after a deploy build
+  // all 92 vectors inside the turn — 104s with the whole API frozen.
+  it('never makes a lookup wait for the vectors to be built', async () => {
+    const { registry, embeddings } = buildSemantic([1, 0, 0]);
+    let release: () => void = () => undefined;
+    embeddings.embedPassages.mockImplementation(
+      (texts: string[]) =>
+        new Promise((resolve) => {
+          release = () => resolve(texts.map(() => [1, 0, 0]));
+        }),
+    );
+
+    // Answers now, literal-only, while the build is still pending.
+    expect(await registry.suggest('agent de sécurité')).toEqual([]);
+    expect(await registry.resolve('agent de sécurité')).toBeNull();
+    // Two lookups, one build.
+    expect(embeddings.embedPassages).toHaveBeenCalledTimes(1);
+    release();
+  });
+
+  it('reloads stored vectors instead of embedding them again', async () => {
+    const first = buildSemantic([1, 0, 0], 0.82, SEMANTIC_ROWS, makeRedis());
+    await first.registry.prebuild();
+    const stored = Object.fromEntries(first.redis!.store);
+    expect(Object.keys(stored)).toHaveLength(3);
+
+    // A restart: empty memory, same Redis.
+    const second = buildSemantic(
+      [1, 0, 0],
+      0.82,
+      SEMANTIC_ROWS,
+      makeRedis(stored),
+    );
+    await second.registry.prebuild();
+
+    expect(second.embeddings.embedPassages).not.toHaveBeenCalled();
+    expect((await second.registry.resolve('agent de sécurité'))?.slug).toBe(
+      'gardiennage-surveillance',
+    );
+  });
+
+  it('embeds and stores only what Redis does not have', async () => {
+    const seed = buildSemantic([1, 0, 0], 0.82, SEMANTIC_ROWS, makeRedis());
+    await seed.registry.prebuild();
+    const all = Object.entries(Object.fromEntries(seed.redis!.store));
+    const partial = makeRedis(Object.fromEntries(all.slice(0, 2)));
+
+    const { registry, embeddings } = buildSemantic(
+      [1, 0, 0],
+      0.82,
+      SEMANTIC_ROWS,
+      partial,
+    );
+    await registry.prebuild();
+
+    expect(embeddedTexts(embeddings)).toHaveLength(1);
+    expect(partial.store.size).toBe(3);
   });
 });

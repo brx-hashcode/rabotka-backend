@@ -195,6 +195,66 @@ describe('VovaService', () => {
     expect(await service.handle(PROFILE, 'comment ca marche')).toBeNull();
   });
 
+  // `handle` hides why there is no reply; the bot needs to know, because a
+  // turn that failed owes the person an apology and a skipped one does not.
+  describe('handleOutcome', () => {
+    const live = {
+      'vova.enabled': 'true',
+      'vova.shadow_mode': 'false',
+      'vova.rollout_percent': '100',
+    };
+
+    it('is a failure when a live turn runs out of time', async () => {
+      const agent = { handle: jest.fn(() => new Promise(() => {})) };
+      const service = build(agent as never, {
+        ...live,
+        'vova.timeout_ms': '30',
+      });
+
+      expect(
+        await service.handleOutcome(PROFILE, 'Chauffeur personnel'),
+      ).toEqual({ kind: 'failed' });
+    });
+
+    it('is a failure when a live turn throws', async () => {
+      const agent = { handle: jest.fn().mockRejectedValue(new Error('boom')) };
+
+      expect(
+        await build(agent as never, live).handleOutcome(
+          PROFILE,
+          'une question',
+        ),
+      ).toEqual({ kind: 'failed' });
+    });
+
+    it('is only skipped in shadow mode, even when the turn fails', async () => {
+      const agent = { handle: jest.fn().mockRejectedValue(new Error('boom')) };
+      const service = build(agent as never, {
+        'vova.enabled': 'true',
+        'vova.shadow_mode': 'true',
+      });
+
+      expect(await service.handleOutcome(PROFILE, 'une question')).toEqual({
+        kind: 'skipped',
+      });
+    });
+
+    it('is skipped when the assistant is off', async () => {
+      expect(
+        await build(makeAgent()).handleOutcome(PROFILE, 'une question'),
+      ).toEqual({ kind: 'skipped' });
+    });
+
+    it('carries the messages of a reply', async () => {
+      expect(
+        await build(makeAgent('Bien sûr.'), live).handleOutcome(
+          PROFILE,
+          'une question',
+        ),
+      ).toEqual({ kind: 'reply', messages: ['Bien sûr.'] });
+    });
+  });
+
   it('treats a nonsense rollout percentage as zero rather than everyone', async () => {
     const agent = makeAgent();
     const service = build(agent, {
