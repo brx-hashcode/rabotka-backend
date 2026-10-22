@@ -172,7 +172,9 @@ describe('PublicDocumentController', () => {
     );
   });
 
-  it('getActivePolicy streams non-pdf/md files with their mime type', async () => {
+  // Pentest A2-NV11 (#887): a MANAGER-chosen text/html policy was served
+  // inline from the API origin. Anything but a document type is a download.
+  it('getActivePolicy never serves an HTML policy inline', async () => {
     prisma.document.findFirst.mockResolvedValue({
       id: 'doc-1',
       title: 'Policy',
@@ -193,8 +195,53 @@ describe('PublicDocumentController', () => {
     } as any;
     await controller.getActivePolicy(res);
     expect(res.json).not.toHaveBeenCalled();
-    expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'text/html');
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Type',
+      'application/octet-stream',
+    );
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Disposition',
+      'attachment; filename="policy.html"',
+    );
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'X-Content-Type-Options',
+      'nosniff',
+    );
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Security-Policy',
+      "sandbox; default-src 'none'",
+    );
     expect(res.send).toHaveBeenCalledWith(expect.any(Buffer));
+  });
+
+  it('getActivePolicy shows a PDF policy inline', async () => {
+    prisma.document.findFirst.mockResolvedValue({
+      id: 'doc-1',
+      title: 'Policy',
+      category: 'POLICY',
+      mime_type: 'application/pdf',
+      file_url: 'https://storage/policy.pdf',
+      created_at: new Date(),
+    });
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'application/pdf' },
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(10)),
+    }) as any;
+    const res = {
+      setHeader: jest.fn().mockReturnThis(),
+      send: jest.fn(),
+      json: jest.fn(),
+    } as any;
+    await controller.getActivePolicy(res);
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Type',
+      'application/pdf',
+    );
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Disposition',
+      'inline; filename="policy.pdf"',
+    );
   });
 
   it('getActivePolicy fetches and returns markdown content', async () => {

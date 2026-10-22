@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { StorageFetchService } from '../file/storage-fetch.service';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import {
@@ -23,7 +24,6 @@ import {
 } from '../advertisement/services/ad-analytics.service';
 import { CalendarLinkService } from '../calendar/services/calendar-link.service';
 import { IcsGeneratorService } from '../calendar/services/ics-generator.service';
-import { fetchWithTimeout } from '../../common/utils/fetch-with-timeout.util';
 import type { RecurrenceLabelInput } from '../../common/utils/recurrence-label.util';
 
 /**
@@ -53,6 +53,8 @@ export class NotificationService {
     private readonly layout: LayoutService,
     private readonly calendarLink: CalendarLinkService,
     private readonly icsGenerator: IcsGeneratorService,
+    // Appended and optional: specs construct this service positionally.
+    @Optional() private readonly storageFetch?: StorageFetchService,
   ) {}
 
   async notifyAdminCreated(to: string, name: string): Promise<void> {
@@ -303,9 +305,11 @@ export class NotificationService {
     content: Buffer;
     contentType?: string;
   } | null> {
-    if (!imageUrl) return null;
+    // Our storage only, redirects refused (pentest A2-F07, #863). Without the
+    // checker the image is simply left out, never fetched blind.
+    if (!imageUrl || !this.storageFetch) return null;
     try {
-      const res = await fetchWithTimeout(imageUrl, {}, 10_000);
+      const res = await this.storageFetch.fetch(imageUrl, 10_000);
       if (!res.ok) return null;
 
       const contentType = res.headers.get('content-type') ?? undefined;

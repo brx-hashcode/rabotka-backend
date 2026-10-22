@@ -55,6 +55,7 @@ import { FeedbackModule } from './modules/feedback/feedback.module';
 import { OnboardingAttemptAdminModule } from './modules/onboarding-attempt/onboarding-attempt-admin.module';
 import { ClientErrorsModule } from './modules/client-errors/client-errors.module';
 import { SystemConfigModule } from './modules/system-config/system-config.module';
+import { StorageFetchModule } from './modules/file/storage-fetch.service';
 import { QdrantModule } from './modules/qdrant/qdrant.module';
 import { LlmModule } from './modules/rag/llm/llm.module';
 import { IntentsModule } from './modules/rag/intents/intents.module';
@@ -189,6 +190,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     PenaltyModule,
     PaymentRequestModule,
     SystemConfigModule,
+    StorageFetchModule,
     StorageModule,
     PaymentGatewayModule,
     ImageWatermarkModule,
