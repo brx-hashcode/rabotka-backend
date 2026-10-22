@@ -296,6 +296,8 @@ export function isAbusive(text: string): boolean {
   return ABUSE_PATTERNS.some((p) => folded.includes(p));
 }
 
+/** The in-band send markers the outbound queue decodes — see sanitize(). */
+const CONTROL_MARKER = /\[(?:CTA|TPL|IMG):[^\]]*\]?/gi;
 @Injectable()
 export class GuardService {
   private readonly logger = new Logger(GuardService.name);
@@ -425,6 +427,18 @@ export class GuardService {
   ): SanitizeResult {
     const blocked: string[] = [];
     let text = reply ?? '';
+
+    // Bot replies carry their send instructions in-band — `[CTA:]{…}` for a
+    // button, `[TPL:key]` for an approved template, `[IMG:` for media — and the
+    // outbound queue decodes them from ANY reply string. Model text must never
+    // carry one: a planted job description could otherwise steer the model
+    // into emitting a button to an outside url, or a billed template
+    // (pentest A2-NV12, #888). Only replies the bot builds itself may.
+    const withoutControl = text.replace(CONTROL_MARKER, '');
+    if (withoutControl !== text) {
+      blocked.push('control_marker');
+      text = withoutControl;
+    }
 
     if (stripIdentityPrefix) {
       const trimmed = removeIdentityOpening(text);
