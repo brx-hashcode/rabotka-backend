@@ -247,7 +247,7 @@ describe('WalletService', () => {
       });
       // Conditional: only an unpaid penalty is marked paid.
       expect(transactionTx.penalty.updateMany).toHaveBeenCalledWith({
-        where: { id: PENALTY_ID, paid_at: null },
+        where: { id: PENALTY_ID, paid_at: null, deleted_at: null },
         data: { paid_at: expect.any(Date) },
       });
     });

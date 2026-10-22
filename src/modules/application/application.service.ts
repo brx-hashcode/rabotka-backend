@@ -415,6 +415,7 @@ export class ApplicationService {
       where: {
         profile_id: workerId,
         paid_at: null,
+        deleted_at: null,
       },
     });
     if (unpaidPenaltiesCount > 0) {
@@ -1325,7 +1326,7 @@ export class ApplicationService {
       // count × today's `lateCancellationPenaltyFcfa` misquotes the total for
       // anyone holding a penalty from before the last price change.
       const unpaid = await this.prisma.penalty.aggregate({
-        where: { profile_id: workerId, paid_at: null },
+        where: { profile_id: workerId, paid_at: null, deleted_at: null },
         _count: true,
         _sum: { amount: true },
       });
@@ -2719,7 +2720,7 @@ export class ApplicationService {
   ): Promise<void> {
     const db = tx ?? this.prisma;
     const unpaidCount = await db.penalty.count({
-      where: { profile_id: workerId, paid_at: null },
+      where: { profile_id: workerId, paid_at: null, deleted_at: null },
     });
     const fees = await this.systemConfigService.getFees();
     let newStatus: BillingStatus;
@@ -2793,7 +2794,7 @@ export class ApplicationService {
     workerId: string,
   ): Promise<{ count: number; total: number; ids: string[] }> {
     const penalties = await this.prisma.penalty.findMany({
-      where: { profile_id: workerId, paid_at: null },
+      where: { profile_id: workerId, paid_at: null, deleted_at: null },
       select: { id: true, amount: true },
     });
     return {
@@ -2813,7 +2814,7 @@ export class ApplicationService {
     const now = new Date();
     await this.prisma.$transaction([
       this.prisma.penalty.updateMany({
-        where: { profile_id: workerId, paid_at: null },
+        where: { profile_id: workerId, paid_at: null, deleted_at: null },
         data: { paid_at: now },
       }),
     ]);

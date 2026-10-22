@@ -19,6 +19,7 @@ export async function isWorkerHardBlocked(
     where: {
       profile_id: workerId,
       paid_at: null,
+      deleted_at: null,
       applied_at: { lte: threshold },
     },
   });

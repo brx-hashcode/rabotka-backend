@@ -798,6 +798,7 @@ export class CandidateSourceService {
         where: {
           profile_id: { in: workerIds },
           paid_at: null,
+          deleted_at: null,
           applied_at: { lte: threshold },
         },
         select: { profile_id: true },

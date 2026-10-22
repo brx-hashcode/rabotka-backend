@@ -139,7 +139,7 @@ export class PenaltyService {
     );
 
     const unpaidCount = await this.prisma.penalty.count({
-      where: { profile_id: penalty.profile_id, paid_at: null },
+      where: { profile_id: penalty.profile_id, paid_at: null, deleted_at: null },
     });
     const newBillingStatus =
       unpaidCount === 0 ? BillingStatus.CLEAR : BillingStatus.PENDING_PAYMENT;
@@ -182,7 +182,7 @@ export class PenaltyService {
     await this.cache.invalidate('penalties');
 
     const unpaidCount = await this.prisma.penalty.count({
-      where: { profile_id: penalty.profile_id, paid_at: null },
+      where: { profile_id: penalty.profile_id, paid_at: null, deleted_at: null },
     });
     const newBillingStatus =
       unpaidCount === 0 ? BillingStatus.CLEAR : BillingStatus.PENDING_PAYMENT;
@@ -213,7 +213,27 @@ export class PenaltyService {
     await this.cache.invalidate('penalties');
 
     // Recompute billing status for each affected profile.
-    const profileIds = [...new Set(affected.map((p) => p.profile_id))];
+    await this.resyncBillingStatus(affected.map((p) => p.profile_id));
+
+    return { count: affected.length };
+  }
+
+  /**
+   * After an admin restores archived penalties: they are owed again, so the
+   * profiles' billing status must say so (pentest A2-F03, #859).
+   */
+  async resyncBillingForPenalties(penaltyIds: string[]): Promise<void> {
+    if (penaltyIds.length === 0) return;
+    const rows = await this.prisma.penalty.findMany({
+      where: { id: { in: penaltyIds } },
+      select: { profile_id: true },
+    });
+    await this.resyncBillingStatus(rows.map((r) => r.profile_id));
+  }
+
+  /** CLEAR or PENDING_PAYMENT from the unpaid, non-archived penalties left. */
+  private async resyncBillingStatus(ids: string[]): Promise<void> {
+    const profileIds = [...new Set(ids)];
     await Promise.all(
       profileIds.map(async (profileId) => {
         const unpaidCount = await this.prisma.penalty.count({
@@ -230,8 +250,6 @@ export class PenaltyService {
         });
       }),
     );
-
-    return { count: affected.length };
   }
 
   async getPenaltyDetailForAdmin(
