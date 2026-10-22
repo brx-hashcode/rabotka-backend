@@ -151,8 +151,20 @@ describe('ConversationService', () => {
         const result = await service.handleIncomingMessage(PHONE, command);
 
         expect(vova.handleAnonymous).not.toHaveBeenCalled();
-        expect(result.replies[0]).toContain('"fallbackText"');
+        // A hello first, then the card: « start » is what an ad told them to
+        // send, not a request for a card.
+        expect(result.replies[0]).toMatch(/^(Bonjour|Bonsoir) 👋/);
+        expect(result.replies[1]).toContain('"fallbackText"');
       }
+    });
+
+    it('sends the card alone to someone who asked for an account', async () => {
+      (botOrchestrator.loadProfileByPhone as jest.Mock).mockResolvedValue(null);
+
+      const result = await service.handleIncomingMessage(PHONE, 'inscription');
+
+      expect(result.replies).toHaveLength(1);
+      expect(result.replies[0]).toContain('"fallbackText"');
     });
 
     it('still falls back to the card when the assistant declines a greeting', async () => {

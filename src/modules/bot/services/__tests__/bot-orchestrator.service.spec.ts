@@ -4,6 +4,7 @@ import { PrismaService } from '../../../../common/services/prisma/prisma.service
 import { BotStateService } from '../bot-state.service';
 import { BotRouterService } from '../../router/bot-router.service';
 import { welcomePlatformMessage } from '../../messages/welcome.messages';
+import { vovaUnavailableMessage } from '../../messages/menu.messages';
 import { BotNotificationService } from '../bot-notification.service';
 import { BotInboxService } from '../bot-inbox.service';
 import { BotDraftService } from '../bot-draft.service';
@@ -52,11 +53,25 @@ const mockEmployerProfile = {
   status: 'ACTIVE',
 };
 
+/**
+ * `handle` is what most tests stub; `handleOutcome` — what the orchestrator
+ * calls — wraps it, so a `string[]` is a reply and `null` a skipped turn.
+ * A failed turn is stubbed on `handleOutcome` directly.
+ */
+function makeVova() {
+  const handle = jest.fn().mockResolvedValue(null);
+  const handleOutcome = jest.fn(async (...args: unknown[]) => {
+    const messages = (await handle(...args)) as string[] | null;
+    return messages ? { kind: 'reply', messages } : { kind: 'skipped' };
+  });
+  return { handle, handleOutcome };
+}
+
 function makeDeps() {
   return {
     // Null is "I did not answer this" — the assistant's default state, and what
     // every expectation in this file assumes.
-    vova: { handle: jest.fn().mockResolvedValue(null) },
+    vova: makeVova(),
     events: { emit: jest.fn() },
     prisma: {
       $transaction: jest.fn().mockResolvedValue([]),
@@ -289,9 +304,7 @@ describe('BotOrchestratorService', () => {
       // card goes out, which is how the old text-only welcome survived the
       // switch to this one.
       expect(result[0]).toContain('[CTA:]');
-      expect(result[0]).toContain(
-        '"fallbackText"',
-      );
+      expect(result[0]).toContain('"fallbackText"');
       // And it points at onboarding, not at the app: there is no account yet.
       expect(result[0]).toContain('"path":"onboarding"');
     });
@@ -459,6 +472,32 @@ describe('BotOrchestratorService', () => {
       const result = await service.handle(PROFILE_ID, PHONE, 'une question');
 
       expect(result).toEqual(['réponse de Vova']);
+    });
+
+    // « Chauffeur personnel », 21 Oct: the assistant ran out of time and the
+    // brand card went out alone, reading as an answer to some other question.
+    it('apologises, then opens the account, when the assistant fails', async () => {
+      deps.router.route.mockReturnValue({ type: 'unknown' });
+      deps.vova.handleOutcome.mockResolvedValueOnce({ kind: 'failed' });
+
+      const result = await service.handle(
+        PROFILE_ID,
+        PHONE,
+        'Chauffeur personnel',
+      );
+
+      expect(result).toHaveLength(2);
+      expect(result[0]).toBe(vovaUnavailableMessage());
+      expect(result[1]).toContain('"fallbackTemplate":"openApp"');
+      expect(result).not.toContain(welcomePlatformMessage());
+    });
+
+    it('keeps the welcome card when the assistant only skipped', async () => {
+      deps.router.route.mockReturnValue({ type: 'unknown' });
+
+      const result = await service.handle(PROFILE_ID, PHONE, 'une question');
+
+      expect(result).toEqual([welcomePlatformMessage()]);
     });
 
     it('answers the welcome card when the input looks like flow input but no flow is live', async () => {
@@ -667,6 +706,16 @@ describe('BotOrchestratorService', () => {
       const result = await service.handle(PROFILE_ID, PHONE, 'une question');
 
       expect(result[0]).toContain('"fallbackTemplate":"openApp"');
+    });
+
+    it('apologises before the door card when the assistant fails', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue(suspendedProfile);
+      deps.vova.handleOutcome.mockResolvedValueOnce({ kind: 'failed' });
+
+      const result = await service.handle(PROFILE_ID, PHONE, 'une question');
+
+      expect(result[0]).toBe(vovaUnavailableMessage());
+      expect(result[1]).toContain('"fallbackTemplate":"openApp"');
     });
 
     // The assistant must not offer to apply or publish to someone who cannot,

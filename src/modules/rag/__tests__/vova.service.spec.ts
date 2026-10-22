@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
+import { vovaUnavailableMessage } from '../../bot/messages/menu.messages';
 import { VovaService } from '../vova.service';
 import { bucketOf } from '../../recommendation-engine/engine-rollout.service';
 
@@ -195,6 +196,66 @@ describe('VovaService', () => {
     expect(await service.handle(PROFILE, 'comment ca marche')).toBeNull();
   });
 
+  // `handle` hides why there is no reply; the bot needs to know, because a
+  // turn that failed owes the person an apology and a skipped one does not.
+  describe('handleOutcome', () => {
+    const live = {
+      'vova.enabled': 'true',
+      'vova.shadow_mode': 'false',
+      'vova.rollout_percent': '100',
+    };
+
+    it('is a failure when a live turn runs out of time', async () => {
+      const agent = { handle: jest.fn(() => new Promise(() => {})) };
+      const service = build(agent as never, {
+        ...live,
+        'vova.timeout_ms': '30',
+      });
+
+      expect(
+        await service.handleOutcome(PROFILE, 'Chauffeur personnel'),
+      ).toEqual({ kind: 'failed' });
+    });
+
+    it('is a failure when a live turn throws', async () => {
+      const agent = { handle: jest.fn().mockRejectedValue(new Error('boom')) };
+
+      expect(
+        await build(agent as never, live).handleOutcome(
+          PROFILE,
+          'une question',
+        ),
+      ).toEqual({ kind: 'failed' });
+    });
+
+    it('is only skipped in shadow mode, even when the turn fails', async () => {
+      const agent = { handle: jest.fn().mockRejectedValue(new Error('boom')) };
+      const service = build(agent as never, {
+        'vova.enabled': 'true',
+        'vova.shadow_mode': 'true',
+      });
+
+      expect(await service.handleOutcome(PROFILE, 'une question')).toEqual({
+        kind: 'skipped',
+      });
+    });
+
+    it('is skipped when the assistant is off', async () => {
+      expect(
+        await build(makeAgent()).handleOutcome(PROFILE, 'une question'),
+      ).toEqual({ kind: 'skipped' });
+    });
+
+    it('carries the messages of a reply', async () => {
+      expect(
+        await build(makeAgent('Bien sûr.'), live).handleOutcome(
+          PROFILE,
+          'une question',
+        ),
+      ).toEqual({ kind: 'reply', messages: ['Bien sûr.'] });
+    });
+  });
+
   it('treats a nonsense rollout percentage as zero rather than everyone', async () => {
     const agent = makeAgent();
     const service = build(agent, {
@@ -316,10 +377,8 @@ describe('VovaService.handleAnonymous', () => {
 
     expect(
       await service.handleAnonymous('+242060000001', 'c’est quoi Rabotka ?'),
-      // `offerAccount` is true on every real answer now: a stranger's only next
-      // step is creating an account, and the bot staples the card that does it.
-      // The prompt used to end each reply with « Tapez */compte* » — same
-      // frequency, one tap instead of a typed command.
+      // The FIRST real answer carries the card: a stranger's only next step is
+      // creating an account.
     ).toEqual({ text: 'Rabotka met en relation…', offerAccount: true });
   });
 
@@ -383,14 +442,51 @@ describe('VovaService.handleAnonymous', () => {
     );
   });
 
-  it('falls back to the card when the agent throws', async () => {
+  // The card alone under somebody's question read as an answer to another one.
+  it('apologises before the card when the agent throws', async () => {
     const agent = makeAgent();
     agent.handleAnonymous.mockRejectedValue(new Error('providers down'));
     const service = build(agent, ON);
 
     expect(
       await service.handleAnonymous('+242060000001', 'comment ca marche ?'),
-    ).toBeNull();
+    ).toEqual({
+      text: vovaUnavailableMessage('stranger'),
+      offerAccount: true,
+    });
+  });
+
+  describe('the signup card, once rather than every time', () => {
+    const PAST = [{ user: 'c’est quoi Rabotka ?', assistant: 'Rabotka…' }];
+    const later = (reply: string) =>
+      build(
+        makeAgent(reply),
+        ON,
+        makeOffers(),
+        makeAnonymous({ history: jest.fn(() => Promise.resolve(PAST)) }),
+      );
+
+    it('is left off a later answer that does not need it', async () => {
+      const result = await later(
+        'Oui, la plomberie en fait partie.',
+      ).handleAnonymous('+242060000001', 'il y a de la plomberie ?');
+      expect(result?.offerAccount).toBe(false);
+    });
+
+    it('comes back when the person wants to sign up', async () => {
+      const result = await later('C’est rapide.').handleAnonymous(
+        '+242060000001',
+        'je veux m’inscrire',
+      );
+      expect(result?.offerAccount).toBe(true);
+    });
+
+    it('comes back when the reply says the number has no account', async () => {
+      const result = await later(
+        'Pour voir un solde, il faut un compte. Votre numéro n’a pas encore de compte Rabotka.',
+      ).handleAnonymous('+242060000001', 'mon solde ?');
+      expect(result?.offerAccount).toBe(true);
+    });
   });
 
   // THE guard against noise. Every real answer now carries the signup card, so

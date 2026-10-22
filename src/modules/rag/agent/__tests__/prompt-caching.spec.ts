@@ -138,7 +138,7 @@ describe('prompt caching — the stable half', () => {
     });
 
     for (const line of [
-      'Tu es VoVa AI',
+      "Tu es VoVa, l'assistant de Rabotka",
       'Rends la salutation EN PREMIER',
       'Bonsoir *Marie* !',
       'Tu parles à Marie, travailleur',

@@ -192,9 +192,16 @@ describe('« Bonjour, je cherche du travail »', () => {
     expect(anonymous).toContain("n'a pas encore de compte Rabotka");
   });
 
-  it('rend la sortie vers /compte systématique, pas optionnelle', () => {
-    expect(anonymous).toContain('TOUTE réponse à quelqu');
+  it('dit l’absence de compte dès la première réponse, pas en option', () => {
+    expect(anonymous).toContain('Ta PREMIÈRE vraie réponse');
     expect(anonymous).toContain('pas une conclusion polie');
+  });
+
+  // Trois questions avaient reçu trois fois la même phrase de fin et la même
+  // carte : la sortie est dite au bon moment, pas à chaque message.
+  it('ne la répète pas à chaque message', () => {
+    expect(anonymous).toContain('ne le répète pas à chaque message');
+    expect(anonymous).not.toContain('TOUTE réponse à quelqu');
   });
 
   it('interdit de redemander ce que la personne vient de dire', () => {

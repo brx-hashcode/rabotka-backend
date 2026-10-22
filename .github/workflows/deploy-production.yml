@@ -312,6 +312,13 @@ jobs:
           # A comma list, NOT a boolean: the SDKs are imported lazily because
           # loading all six costs ~83MB and broke the 150MB terminus limit.
           # Name only what the race uses; Mistral alone is 67MB.
+          # Load the e5 embedder and the category vectors at boot (background,
+          # never blocks it). Off, the first message after a deploy paid an 18.8s
+          # model load and lost its turn. Native memory, so the heap check is
+          # unaffected. Measured 2026-10-22: api_prod already sat at 4.6GiB with
+          # the model loaded on first use (3.7GiB host headroom) — warming moves
+          # that load to boot, it does not add to it.
+          VOVA_WARMUP=true
           VOVA_WARMUP_PROVIDERS=google,openai
           VOVA_HEDGE_ENABLED=false
           # Head start for the leading provider; 0 races everyone at once.
