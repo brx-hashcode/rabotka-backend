@@ -47,10 +47,11 @@ export class ActiveProfileGuard implements CanActivate {
     // a suspension for as long as the TTL, which is the bug this guard fixes.
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
-      select: { status: true, suspension_reason: true },
+      select: { status: true, suspension_reason: true, deleted_at: true },
     });
 
-    if (!profile) {
+    // Archived by the team: gone, whatever its status says (#878).
+    if (!profile || profile.deleted_at) {
       throw new ForbiddenException('Profil introuvable');
     }
 

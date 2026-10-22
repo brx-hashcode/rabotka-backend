@@ -271,7 +271,8 @@ export class AuthService {
       ? await this.findProfileByEmail(normalized)
       : await this.findProfileByPhone(normalized);
 
-    if (!profile) {
+    // An archived profile cannot log in (#878) — answered as unknown.
+    if (!profile || profile.deleted_at) {
       throw new NotFoundException(
         'Aucun compte trouvé pour cet email ou téléphone',
       );
@@ -315,7 +316,8 @@ export class AuthService {
       ? await this.findProfileByEmail(normalized)
       : await this.findProfileByPhone(normalized);
 
-    if (!profile) {
+    // An archived profile cannot log in (#878) — answered as unknown.
+    if (!profile || profile.deleted_at) {
       throw new NotFoundException(
         'Aucun compte trouvé pour cet email ou téléphone',
       );
@@ -383,7 +385,8 @@ export class AuthService {
       ? await this.findProfileByEmail(normalized)
       : await this.findProfileByPhone(normalized);
 
-    if (!profile) {
+    // An archived profile cannot log in (#878) — answered as unknown.
+    if (!profile || profile.deleted_at) {
       throw new NotFoundException(
         'Aucun compte trouvé pour cet email ou téléphone',
       );
@@ -408,7 +411,7 @@ export class AuthService {
 
     const profile = await this.prisma.profile.findUnique({
       where: { id: grant.profileId },
-      select: { id: true, status: true },
+      select: { id: true, status: true, deleted_at: true },
     });
 
     // Status is re-checked at consume time: the account may have changed in
@@ -423,7 +426,7 @@ export class AuthService {
     //
     // What makes this safe is not the login gate but `ActiveProfileGuard`: a
     // non-ACTIVE session can read and nothing else.
-    if (!profile || !canMintLoginCode(profile.status)) {
+    if (!profile || profile.deleted_at || !canMintLoginCode(profile.status)) {
       throw new UnauthorizedException('Compte indisponible');
     }
 
@@ -532,9 +535,10 @@ export class AuthService {
 
     const profile = await this.prisma.profile.findUnique({
       where: { id: payload.sub },
-      select: { id: true },
+      select: { id: true, deleted_at: true },
     });
-    if (!profile) {
+    // Archived since the last rotation: no new tokens (#878).
+    if (!profile || profile.deleted_at) {
       throw new UnauthorizedException('Compte introuvable');
     }
 
@@ -935,7 +939,13 @@ export class AuthService {
   private async findProfileByEmail(email: string) {
     return this.prisma.profile.findUnique({
       where: { email },
-      select: { id: true, email: true, phone: true, first_name: true },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        first_name: true,
+        deleted_at: true,
+      },
     });
   }
 
@@ -948,6 +958,7 @@ export class AuthService {
         phone: true,
         first_name: true,
         whatsapp_connected: true,
+        deleted_at: true,
       },
     });
   }

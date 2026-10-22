@@ -24,3 +24,33 @@ export async function isSessionRevoked(
   if (!jti) return false;
   return (await redis.get(`${JWT_BLOCKLIST_PREFIX}${jti}`)) !== null;
 }
+
+/**
+ * Profiles archived by the team. Profile sessions are stateless JWTs, so
+ * archiving could not end them: an archived user kept reading their account
+ * until the token expired (pentest A2-NV02, #878). Set when a profile is
+ * archived, removed when it is restored; checked by the HTTP guard.
+ */
+export const ARCHIVED_PROFILE_PREFIX = `${REDIS_KEY_PREFIX}profile-archived:`;
+
+export async function isProfileArchived(
+  redis: Pick<Redis, 'get'>,
+  profileId: string | undefined,
+): Promise<boolean> {
+  if (!profileId) return false;
+  return (await redis.get(`${ARCHIVED_PROFILE_PREFIX}${profileId}`)) !== null;
+}
+
+export async function markProfilesArchived(
+  redis: Pick<Redis, 'pipeline'>,
+  profileIds: readonly string[],
+  archived: boolean,
+): Promise<void> {
+  if (profileIds.length === 0) return;
+  const pipeline = redis.pipeline();
+  for (const id of profileIds) {
+    if (archived) pipeline.set(`${ARCHIVED_PROFILE_PREFIX}${id}`, '1');
+    else pipeline.del(`${ARCHIVED_PROFILE_PREFIX}${id}`);
+  }
+  await pipeline.exec();
+}
