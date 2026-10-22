@@ -99,6 +99,31 @@ export interface MobileTokens {
   user: MobileSessionUser;
 }
 
+/**
+ * Whether an admin-phone token belongs to the pairing currently on the user.
+ *
+ * Pentest A2-F12 (#868): confirmation only checked that SOME phone was paired,
+ * so pairing a replacement brought an old phone's revoked token back to life.
+ * Tokens now carry `pairedAt`, which must equal `phone_paired_at`.
+ *
+ * Tokens issued before the claim existed have only `iat`, signed in the same
+ * second as `phone_paired_at` was written; such a token is accepted only if it
+ * was issued for that pairing, within a few seconds of it.
+ */
+const LEGACY_PAIRING_SKEW_MS = 5_000;
+export function isCurrentPairing(
+  token: { pairedAt?: number; iat?: number },
+  phonePairedAt: Date,
+): boolean {
+  if (typeof token.pairedAt === 'number') {
+    return token.pairedAt === phonePairedAt.getTime();
+  }
+  if (typeof token.iat !== 'number') return false;
+  return (
+    Math.abs(token.iat * 1000 - phonePairedAt.getTime()) <=
+    LEGACY_PAIRING_SKEW_MS
+  );
+}
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -1087,7 +1112,7 @@ export class AuthService {
       throw new UnauthorizedException('QR session already used');
     }
 
-    let payload: { sub: string; type: string };
+    let payload: { sub: string; type: string; pairedAt?: number; iat?: number };
     try {
       payload = this.jwtService.verify(phoneToken);
     } catch {
@@ -1109,7 +1134,10 @@ export class AuthService {
     if (!user?.is_active) {
       throw new UnauthorizedException('Admin account not found or inactive');
     }
-    if (!user.phone_paired_at) {
+    if (
+      !user.phone_paired_at ||
+      !isCurrentPairing(payload, user.phone_paired_at)
+    ) {
       throw new UnauthorizedException(
         'Phone pairing has been reset. Please re-pair your phone.',
       );
@@ -1302,15 +1330,23 @@ export class AuthService {
 
     await this.redis.del(this.pairOtpKey(userId));
 
+    // The pairing time is both the column and a claim: a token is only good
+    // for the pairing that issued it (#868).
+    const pairedAt = new Date();
     const token = this.jwtService.sign(
-      { sub: userId, type: 'admin-phone', phoneName: stored.phoneName },
+      {
+        sub: userId,
+        type: 'admin-phone',
+        phoneName: stored.phoneName,
+        pairedAt: pairedAt.getTime(),
+      },
       { expiresIn: '7d' },
     );
 
     await this.prisma.user.update({
       where: { id: userId },
       data: {
-        phone_paired_at: new Date(),
+        phone_paired_at: pairedAt,
         phone_name: stored.phoneName,
       },
     });
