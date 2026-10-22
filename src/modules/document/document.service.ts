@@ -6,6 +6,7 @@ import {
   UnprocessableEntityException,
   InternalServerErrorException,
   HttpException,
+  Optional,
 } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import PizZip from 'pizzip';
@@ -16,6 +17,7 @@ import { FileService } from '../file/file.service';
 import { RedisService } from '../../common/services/redis/redis.service';
 import { REDIS_KEY_PREFIX } from '../../common/services/redis/redis.constants';
 import { GoogleDocsService } from './google-docs.service';
+import { StorageFetchService } from '../file/storage-fetch.service';
 import { fetchWithTimeout } from '../../common/utils/fetch-with-timeout.util';
 import { launchBrowser } from '../../common/utils/puppeteer';
 import { protectPdf } from './pdf-protection';
@@ -107,7 +109,31 @@ export class DocumentService {
     private readonly fileService: FileService,
     private readonly redis: RedisService,
     private readonly googleDocs: GoogleDocsService,
+    // Appended and optional: specs construct this service positionally. It is
+    // global (StorageFetchModule), so it is always there in the app.
+    @Optional() private readonly storageFetch?: StorageFetchService,
   ) {}
+
+  /**
+   * A document url must be on our own storage — checked before it is stored,
+   * not only when fetched (pentest A2-F07, #863).
+   */
+  private async assertStoredUrl(url: string): Promise<void> {
+    assertStorageUrl(url);
+    if (!this.storageFetch) return;
+    await this.storageFetch.assertAllowed(url).catch(() => {
+      throw new BadRequestException(
+        'The file URL must point to Rabotka storage. Re-upload the file.',
+      );
+    });
+  }
+
+  /** Our storage only, redirects refused — see StorageFetchService. */
+  private fetchStored(url: string): Promise<Response> {
+    return this.storageFetch
+      ? this.storageFetch.fetch(url)
+      : fetchWithTimeout(url, { redirect: 'error' }, 15_000);
+  }
 
   private async mapDocument(doc: any): Promise<AdminDocumentItem> {
     return {
@@ -233,11 +259,11 @@ export class DocumentService {
     mimeType: string;
     createdBy?: string;
   }): Promise<AdminDocumentItem> {
-    assertStorageUrl(opts.fileUrl);
+    await this.assertStoredUrl(opts.fileUrl);
 
     let docxBuffer: Buffer;
     try {
-      const res = await fetchWithTimeout(opts.fileUrl, {}, 15_000);
+      const res = await this.fetchStored(opts.fileUrl);
       if (!res.ok) throw new Error('Could not fetch uploaded file');
       docxBuffer = Buffer.from(await res.arrayBuffer());
     } catch {
@@ -278,11 +304,11 @@ export class DocumentService {
     const existing = await this.prisma.document.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Document not found');
 
-    assertStorageUrl(opts.fileUrl);
+    await this.assertStoredUrl(opts.fileUrl);
 
     let variables: string[] = existing.variables ?? [];
     try {
-      const res = await fetchWithTimeout(opts.fileUrl, {}, 15_000);
+      const res = await this.fetchStored(opts.fileUrl);
       if (res.ok) {
         const buffer = Buffer.from(await res.arrayBuffer());
         if (buffer.length > 0) variables = extractVariables(buffer);
@@ -379,8 +405,8 @@ export class DocumentService {
    * actionable error (the template file needs re-uploading).
    */
   private async fetchTemplateSnapshot(doc: Document): Promise<Buffer> {
-    assertStorageUrl(doc.file_url);
-    const res = await fetchWithTimeout(doc.file_url, {}, 15_000).catch(() => {
+    await this.assertStoredUrl(doc.file_url);
+    const res = await this.fetchStored(doc.file_url).catch(() => {
       throw new BadRequestException(
         'Template file is unreachable. Re-upload the template file.',
       );
