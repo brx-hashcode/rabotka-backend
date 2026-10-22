@@ -23,6 +23,7 @@ import type { ClaimStatusValue } from '../profile-notification/notification-cata
 import { ClaimAttachmentService } from './claim-attachment.service';
 import { NotificationDispatcher } from '../notification-dispatch/notification-dispatcher.service';
 import { claimCommentedFreeForm } from '../bot/messages/notifications.messages';
+import { ProfileCreateClaimDto } from './dto/profile-create-claim.dto';
 
 export type AdminClaimItem = {
   id: string;
@@ -758,7 +759,7 @@ export class ClaimService {
    */
   async createForProfile(
     profileId: string,
-    dto: CreateClaimDto,
+    dto: ProfileCreateClaimDto,
     options?: { notifyProfile?: boolean },
   ): Promise<AdminClaimItem> {
     await this.attachments.assertValidUrls(dto.attachment_urls);
@@ -769,7 +770,8 @@ export class ClaimService {
         description: dto.description,
         profile_id: profileId,
         attachment_urls: dto.attachment_urls ?? [],
-        assigned_user_id: dto.assigned_user_id ?? null,
+        // Never from the complainant: staff assign claims (#872).
+        assigned_user_id: null,
       },
       include: claimInclude,
     });
