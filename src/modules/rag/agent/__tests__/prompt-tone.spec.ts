@@ -277,3 +277,64 @@ describe('l’heure de Brazzaville', () => {
     );
   });
 });
+
+/**
+ * Écrire comme une personne. Les règles interdisaient des tics un par un ; il
+ * manquait l'image de ce qu'il fallait faire, et le modèle la remplissait avec
+ * le registre d'un standard téléphonique.
+ */
+describe('le ton humain', () => {
+  it('décrit la façon d’écrire d’une personne, dans les deux prompts', () => {
+    expect(verified).toContain('## Écrire comme une personne');
+    expect(verified).toContain('Calque-toi sur la personne');
+  });
+
+  it('montre le registre à éviter, et le bon', () => {
+    expect(verified).toContain('Dans quel domaine souhaitez-vous travailler ?');
+    expect(verified).toContain('Vous faites quel métier ?');
+  });
+
+  it('limite le gras au lieu de le mettre partout', () => {
+    expect(verified).toContain('Deux ou trois par message au plus');
+    expect(verified).not.toContain('sans exception : le nom exact');
+  });
+
+  it('laisse varier la proposition d’ouvrir, en gardant les mots qui comptent', () => {
+    expect(verified).not.toContain('termine EXACTEMENT par');
+    expect(verified).toContain('« je vous ouvre »');
+  });
+});
+
+/**
+ * Sathy, 21/10 : « J'ai besoin d'un travail » → « Dans quel domaine… ? ». Le
+ * prompt affirmait « Aucun domaine déclaré » à tout le monde, parce que la
+ * requête de profil du bot ne porte pas les catégories.
+ */
+describe('les métiers du profil', () => {
+  const withNames = (categoryNames?: string[]) =>
+    buildSystemPrompt({
+      ...base,
+      verificationStatus: VerificationStatus.VERIFIED,
+      categoryNames,
+    });
+
+  it('les donne par leur nom quand on les connaît', () => {
+    expect(withNames(['Transport & Conduite'])).toContain(
+      'Métiers sur son profil : Transport & Conduite.',
+    );
+  });
+
+  it('ne prétend pas qu’il n’y en a aucun quand on ne les a pas lus', () => {
+    const prompt = withNames(undefined);
+    expect(prompt).not.toContain('Aucun métier');
+    expect(prompt).not.toContain('Aucun domaine déclaré');
+  });
+
+  it('dit « aucun » seulement quand c’est vrai', () => {
+    expect(withNames([])).toContain('Aucun métier sur son profil.');
+  });
+
+  it('ne redemande pas un métier déjà connu', () => {
+    expect(verified).toContain('Si tu le connais, ne le redemande pas');
+  });
+});

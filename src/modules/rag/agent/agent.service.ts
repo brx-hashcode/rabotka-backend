@@ -969,13 +969,19 @@ export class VovaAgentService {
       // primary-key lookup — it is in the budget because it is that cheap, and
       // it stays out of `history`'s phase so a slow one is attributed honestly.
       this.assertTime(request.deadline, 'history');
-      const [past, memory] = await this.timePhase(
+      const [past, memory, categoryNames] = await this.timePhase(
         request.deadline,
         'history',
         () =>
           Promise.all([
             this.history.recent(request.profileId),
             this.memory.read(request.profileId),
+            // The person's trades, so a plumber is not asked which field he
+            // works in. Optional context: a failed read leaves the prompt
+            // silent on it rather than costing the turn.
+            Promise.resolve()
+              .then(() => this.categories.namesForProfile(request.profileId))
+              .catch(() => undefined),
           ]),
       );
       const language = resolveLanguage(request.text, past);
@@ -1014,6 +1020,7 @@ export class VovaAgentService {
             verificationStatus: request.verificationStatus,
             accountStatus: request.accountStatus,
             categorySlugs: request.categorySlugs,
+            categoryNames,
             language,
             memory: VovaMemoryService.render(memory),
             grounding: grounding.hits.map((hit) => ({
