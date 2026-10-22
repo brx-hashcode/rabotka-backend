@@ -29,6 +29,8 @@ const WHATSAPP_PACE_MS = 120;
 /** Longest error text kept on a recipient row. */
 const ERROR_MAX = 300;
 
+/** Why a recipient got nothing: the profile left after the audience was taken. */
+const GONE_SINCE_SCHEDULING = 'Profil archivé ou désinscrit';
 @Injectable()
 export class BroadcastProcessor {
   private readonly logger = new Logger(BroadcastProcessor.name);
@@ -105,6 +107,8 @@ export class BroadcastProcessor {
             email: true,
             first_name: true,
             whatsapp_connected: true,
+            deleted_at: true,
+            marketing_opt_out_at: true,
           },
         },
       },
@@ -117,9 +121,22 @@ export class BroadcastProcessor {
       return;
     }
 
+    // The audience was a snapshot taken when the broadcast was scheduled, and
+    // delivery can come much later. Anyone archived or who replied STOP since
+    // gets nothing (pentest A2-F20, #876): settled FAILED with the reason, and
+    // left out of every channel below.
+    const gone = recipients.filter(
+      (r) => r.profile.deleted_at || r.profile.marketing_opt_out_at,
+    );
+    for (const r of gone) {
+      await this.settle(r.id, GONE_SINCE_SCHEDULING);
+    }
+    const goneIds = new Set(gone.map((r) => r.id));
+    const live = recipients.filter((r) => !goneIds.has(r.id));
+
     // In-app first, and in one insert: it is free, it never fails for a missing
     // phone or address, and it is the record the other channels point back to.
-    const inAppIds = recipients
+    const inAppIds = live
       .filter((r) => r.channel === DeliveryChannel.IN_APP)
       .map((r) => r.profile_id);
     if (inAppIds.length) {
@@ -129,7 +146,7 @@ export class BroadcastProcessor {
     // One batched window read for the whole page — the reason
     // `Profile.last_inbound_at` exists. Doing this per recipient would put a
     // query in front of every message.
-    const whatsappRecipients = recipients.filter(
+    const whatsappRecipients = live.filter(
       (r) => r.channel === DeliveryChannel.WHATSAPP,
     );
     const openWindows = whatsappRecipients.length
@@ -138,7 +155,7 @@ export class BroadcastProcessor {
         )
       : new Set<string>();
 
-    for (const recipient of recipients) {
+    for (const recipient of live) {
       if (recipient.channel === DeliveryChannel.IN_APP) continue;
 
       try {
