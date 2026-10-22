@@ -30,23 +30,37 @@ describe('ProfileWebPushService', () => {
     service = new ProfileWebPushService(prisma as never, webPush as never);
   });
 
+  // Pentest A2-NV08 (#884): any https url was stored as a push endpoint.
+  it('refuses an endpoint that is not a push service', async () => {
+    await expect(
+      service.subscribe('p-1', {
+        endpoint: 'https://10.0.0.5/admin',
+        keys: { p256dh: 'p', auth: 'a' },
+      }),
+    ).rejects.toThrow('service de notification inconnu');
+    expect(prisma.profilePushSubscription.upsert).not.toHaveBeenCalled();
+  });
+
   it('gives a device to whoever subscribes from it last', async () => {
     await service.subscribe('p-2', {
-      endpoint: 'https://push.example/1',
+      endpoint: 'https://fcm.googleapis.com/fcm/send/1',
       keys: { p256dh: 'p', auth: 'a' },
     });
     expect(prisma.profilePushSubscription.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { endpoint: 'https://push.example/1' },
+        where: { endpoint: 'https://fcm.googleapis.com/fcm/send/1' },
         update: expect.objectContaining({ profile_id: 'p-2' }),
       }),
     );
   });
 
   it('only unsubscribes the caller’s own device', async () => {
-    await service.unsubscribe('p-1', 'https://push.example/1');
+    await service.unsubscribe('p-1', 'https://fcm.googleapis.com/fcm/send/1');
     expect(prisma.profilePushSubscription.deleteMany).toHaveBeenCalledWith({
-      where: { profile_id: 'p-1', endpoint: 'https://push.example/1' },
+      where: {
+        profile_id: 'p-1',
+        endpoint: 'https://fcm.googleapis.com/fcm/send/1',
+      },
     });
   });
 

@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import webpush from 'web-push';
 import { PrismaService } from '../prisma/prisma.service';
+import { isAllowedPushEndpoint } from './push-endpoint';
+import { resolvesToPrivateAddress } from '../../utils/private-address.util';
 
 const KEY_PAIR_ID = 'default';
 
@@ -79,6 +81,18 @@ export class WebPushService {
 
     await Promise.all(
       targets.map(async (t) => {
+        // Checked again here: rows stored before the subscribe check may name
+        // anything (#884). Not a push service: dropped for good. Resolving
+        // inside our network (or not at all, maybe a DNS blip): skipped this
+        // time only.
+        if (!isAllowedPushEndpoint(t.endpoint)) {
+          outcome.gone.push(t.id);
+          return;
+        }
+        if (await resolvesToPrivateAddress(new URL(t.endpoint).hostname)) {
+          this.logger.warn('Web Push target resolves privately — skipped');
+          return;
+        }
         try {
           await webpush.sendNotification(
             { endpoint: t.endpoint, keys: { p256dh: t.p256dh, auth: t.auth } },
