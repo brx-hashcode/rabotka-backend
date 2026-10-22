@@ -12,7 +12,9 @@ import {
   isNavigationRequest,
   isAcknowledgement,
   isPureGreeting,
+  mentionsMissingAccount,
   offersNavigation,
+  wantsToJoin,
 } from './agent/offer';
 import { VovaOfferStore } from './agent/offer.store';
 import { VovaAnonymousStore } from './agent/anonymous.store';
@@ -23,6 +25,7 @@ import { correctSalutation, isWalled } from './agent/prompts';
 import { VOVA_CONFIG_KEYS } from './vova.constants';
 import { acknowledgementReply, refusal } from './agent/refusals';
 import { welcomePlatformMessage } from '../bot/messages/welcome.messages';
+import { vovaUnavailableMessage } from '../bot/messages/menu.messages';
 import {
   anonymousTraceUser,
   traceVovaTurn,
@@ -143,8 +146,9 @@ export class VovaService {
    * Answer a number with no profile.
    *
    * Returns `null` for "not handled" exactly like `handle()`, and the caller
-   * falls back to the signup card. Disabled, over budget, timed out, thrown —
-   * the stranger gets the card they would have got before this existed.
+   * falls back to the signup card: disabled, or the config unreadable. A turn
+   * that was MEANT to answer and ran out of time or threw says so instead —
+   * the card alone, under somebody's question, read as an answer to another one.
    *
    * No shadow mode and no rollout bucket here. Both key off a profile id, which
    * this caller does not have; and the population is self-selecting rather than
@@ -156,6 +160,9 @@ export class VovaService {
     text: string,
     correlationId?: string,
   ): Promise<AnonymousReply | null> {
+    // Set once a real turn starts: past this point a failure owes the person an
+    // apology, not a silent card.
+    let attempted = false;
     try {
       const [enabled, anonymous, limitRaw, timeoutRaw] = await Promise.all([
         this.systemConfig.get(VOVA_CONFIG_KEYS.ENABLED, 'false'),
@@ -209,6 +216,7 @@ export class VovaService {
       // is what lets each layer stop cleanly, the race is what protects the
       // WhatsApp reply if something ignores the signal entirely.
       let reply: AnonymousAgentReply;
+      attempted = true;
       try {
         reply = await withTimeout(
           () =>
@@ -265,19 +273,25 @@ export class VovaService {
       // a question in history that the next message would answer twice.
       await this.anonymous.remember(phone, text, reply.text);
 
-      // The card follows every real answer, because the person's only next step
-      // IS creating an account — the prompt already asserted as much, ending
-      // every reply with « Tapez */compte* ». That instruction is now gone from
-      // the prompt and the card carries it instead: same frequency, one tap
-      // instead of a typed slash command.
+      // The card goes with the FIRST real answer, then only when it is the
+      // point again: the person says they want in, or the reply itself says
+      // the number has no account (the prompt asks for that exactly then). It
+      // used to follow every answer — three questions, three identical picture
+      // cards, each under a reply that also ended « pas encore de compte ».
       //
       // The greeting above stays `false` deliberately. It ends with a question
       // and hands the turn back; a card stapled to « bonjour » answers a
       // question nobody asked yet.
-      return { text: reply.text, offerAccount: true };
+      const offerAccount =
+        history.length === 0 ||
+        wantsToJoin(text) ||
+        mentionsMissingAccount(reply.text);
+      return { text: reply.text, offerAccount };
     } catch (err) {
       this.report(err, `anonymous ${phone} — falling back to the signup card`);
-      return null;
+      return attempted
+        ? { text: vovaUnavailableMessage('stranger'), offerAccount: true }
+        : null;
     }
   }
 

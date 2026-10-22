@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
+import { vovaUnavailableMessage } from '../../bot/messages/menu.messages';
 import { VovaService } from '../vova.service';
 import { bucketOf } from '../../recommendation-engine/engine-rollout.service';
 
@@ -376,10 +377,8 @@ describe('VovaService.handleAnonymous', () => {
 
     expect(
       await service.handleAnonymous('+242060000001', 'c’est quoi Rabotka ?'),
-      // `offerAccount` is true on every real answer now: a stranger's only next
-      // step is creating an account, and the bot staples the card that does it.
-      // The prompt used to end each reply with « Tapez */compte* » — same
-      // frequency, one tap instead of a typed command.
+      // The FIRST real answer carries the card: a stranger's only next step is
+      // creating an account.
     ).toEqual({ text: 'Rabotka met en relation…', offerAccount: true });
   });
 
@@ -443,14 +442,51 @@ describe('VovaService.handleAnonymous', () => {
     );
   });
 
-  it('falls back to the card when the agent throws', async () => {
+  // The card alone under somebody's question read as an answer to another one.
+  it('apologises before the card when the agent throws', async () => {
     const agent = makeAgent();
     agent.handleAnonymous.mockRejectedValue(new Error('providers down'));
     const service = build(agent, ON);
 
     expect(
       await service.handleAnonymous('+242060000001', 'comment ca marche ?'),
-    ).toBeNull();
+    ).toEqual({
+      text: vovaUnavailableMessage('stranger'),
+      offerAccount: true,
+    });
+  });
+
+  describe('the signup card, once rather than every time', () => {
+    const PAST = [{ user: 'c’est quoi Rabotka ?', assistant: 'Rabotka…' }];
+    const later = (reply: string) =>
+      build(
+        makeAgent(reply),
+        ON,
+        makeOffers(),
+        makeAnonymous({ history: jest.fn(() => Promise.resolve(PAST)) }),
+      );
+
+    it('is left off a later answer that does not need it', async () => {
+      const result = await later(
+        'Oui, la plomberie en fait partie.',
+      ).handleAnonymous('+242060000001', 'il y a de la plomberie ?');
+      expect(result?.offerAccount).toBe(false);
+    });
+
+    it('comes back when the person wants to sign up', async () => {
+      const result = await later('C’est rapide.').handleAnonymous(
+        '+242060000001',
+        'je veux m’inscrire',
+      );
+      expect(result?.offerAccount).toBe(true);
+    });
+
+    it('comes back when the reply says the number has no account', async () => {
+      const result = await later(
+        'Pour voir un solde, il faut un compte. Votre numéro n’a pas encore de compte Rabotka.',
+      ).handleAnonymous('+242060000001', 'mon solde ?');
+      expect(result?.offerAccount).toBe(true);
+    });
   });
 
   // THE guard against noise. Every real answer now carries the signup card, so

@@ -665,7 +665,10 @@ export function buildAnonymousSystemPromptParts(
     // réponse complète — salutation, présentation, description — qui ne dit
     // NULLE PART que le numéro n'a pas de compte, et ne propose rien. La
     // personne n'a plus qu'à redemander, et la conversation tourne.
-    "TOUTE réponse à quelqu'un sans compte se termine de la même façon : tu dis que son numéro n'a pas encore de compte Rabotka. Ce n'est pas une conclusion polie — c'est la seule chose qu'il puisse faire ensuite. NE dis PAS comment le créer : le bot joint un bouton sous ta réponse, et lui répéter un mot à taper le contredit.",
+    // Plus « TOUTE réponse » : trois questions, trois fois la même phrase de fin,
+    // et la même carte en dessous à chaque fois. Le bot joint désormais la
+    // carte quand cette phrase apparaît — la dire au bon moment suffit.
+    "Ta PREMIÈRE vraie réponse se termine en disant que son numéro n'a pas encore de compte Rabotka. Ce n'est pas une conclusion polie — c'est la seule chose qu'il puisse faire ensuite. Ensuite, ne le répète pas à chaque message : redis-le seulement quand la personne veut s'inscrire, quand elle a dit ce qu'elle cherche, ou quand elle demande quelque chose qui suppose un compte. NE dis PAS comment le créer : le bot joint un bouton sous ta réponse, et lui répéter un mot à taper le contredit.",
     "Dès que tu sais ce que la personne veut — chercher du travail, ou recruter — tu as TERMINÉ de poser des questions. Une phrase sur ce qui l'attend, puis : « Votre numéro n'a pas encore de compte Rabotka. » Tu t'arrêtes là : le bouton en dessous ouvre l'inscription.",
     // Même capture : « Bonjour, je cherche du travail » a reçu « Vous cherchez
     // une mission dans quel domaine ? ». La personne avait DÉJÀ dit ce qu'elle

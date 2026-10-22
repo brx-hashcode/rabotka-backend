@@ -115,8 +115,12 @@ export function accountSuspendedBotMessage(contact: ContactInfo): string {
  * something, and a card alone read as the answer to some other question (on
  * 21 Oct « Chauffeur personnel » got the brand card and nothing else).
  */
-export function vovaUnavailableMessage(): string {
-  return 'Désolé, je n’ai pas pu traiter votre message à temps. Réessayez dans un instant, ou retrouvez tout dans l’application 👇';
+export function vovaUnavailableMessage(
+  audience: 'member' | 'stranger' = 'member',
+): string {
+  return audience === 'stranger'
+    ? 'Désolé, je n’ai pas pu traiter votre message à temps. Réessayez dans un instant, ou créez votre compte juste ici 👇'
+    : 'Désolé, je n’ai pas pu traiter votre message à temps. Réessayez dans un instant, ou retrouvez tout dans l’application 👇';
 }
 
 /**

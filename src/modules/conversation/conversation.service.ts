@@ -15,7 +15,11 @@ import {
   expandSlashCommand,
   stripChatFormattingChars,
 } from '../bot/utils/chat-input';
-import { welcomeUnregisteredMessage } from '../bot/messages/welcome.messages';
+import {
+  welcomeUnregisteredIntro,
+  welcomeUnregisteredMessage,
+} from '../bot/messages/welcome.messages';
+import { brazzavilleClock } from '../rag/agent/prompts';
 import { CMD_ACCOUNT, CMD_NAVIGATION } from '../bot/bot.constants';
 import { VovaService } from '../rag/vova.service';
 
@@ -185,11 +189,17 @@ export class ConversationService {
     // `CMD_NAVIGATION` is narrower than `CMD_MENU` on purpose — « bonjour »
     // reaches the assistant, because a stranger opening a conversation deserves
     // an answer rather than a card. See the note on that constant.
-    if (
-      CMD_ACCOUNT.includes(normalized) ||
-      CMD_NAVIGATION.includes(normalized)
-    ) {
+    // « compte », « inscription »: they asked for the card, so it comes alone.
+    if (CMD_ACCOUNT.includes(normalized)) {
       return [welcomeUnregisteredMessage()];
+    }
+    // « start », « menu »: what they were told to send, not a request for a
+    // card — so a hello first.
+    if (CMD_NAVIGATION.includes(normalized)) {
+      return [
+        welcomeUnregisteredIntro(brazzavilleClock().greeting),
+        welcomeUnregisteredMessage(),
+      ];
     }
 
     // Same guard as the registered path, keyed by phone since there is no id.

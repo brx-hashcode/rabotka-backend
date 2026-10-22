@@ -99,6 +99,17 @@ export function welcomePlatformMessage(
 }
 
 /**
+ * The line that goes before the signup card when a stranger types « start »
+ * or « menu » — usually what an ad or a shared link told them to send. The
+ * card alone answered them like a machine; this says hello first. The greeting
+ * word comes from the caller (the time in Brazzaville), since « Bonjour » at
+ * 21h is the slip users already corrected once.
+ */
+export function welcomeUnregisteredIntro(greeting: string): string {
+  return `${greeting} 👋 Pour commencer sur Rabotka, il vous faut un compte : c’est juste ici.`;
+}
+
+/**
  * Sent to a number with no profile. Same card, different button — there is no
  * account to open yet, so it points at onboarding.
  *
@@ -129,4 +140,3 @@ export function welcomeUnregisteredMessage(): string {
     ].join('\n'),
   });
 }
-
