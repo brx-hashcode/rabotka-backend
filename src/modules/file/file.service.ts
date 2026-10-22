@@ -240,6 +240,11 @@ export class FileService {
     };
   }
 
+  /** Removes one stored object by key, in `bucket` when given. */
+  async deleteStoredObject(key: string, bucket?: string): Promise<void> {
+    await this.storageService.delete(key, bucket ? { bucket } : undefined);
+  }
+
   async deleteFile(id: string) {
     const file = await this.prisma.file.findUnique({
       where: { id },
