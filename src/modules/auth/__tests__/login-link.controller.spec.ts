@@ -12,6 +12,8 @@ describe('LoginLinkController', () => {
   let authService: {
     loginWithWhatsAppCode: jest.Mock;
     resolveSessionProfile: jest.Mock;
+    peekWhatsAppCode: jest.Mock;
+    burnWhatsAppCode: jest.Mock;
   };
   let res: { cookie: jest.Mock; redirect: jest.Mock };
   let req: { headers: object; ip: string; cookies: Record<string, string> };
@@ -28,6 +30,8 @@ describe('LoginLinkController', () => {
         path: 'applications/42',
       }),
       resolveSessionProfile: jest.fn().mockResolvedValue(null),
+      peekWhatsAppCode: jest.fn().mockResolvedValue(null),
+      burnWhatsAppCode: jest.fn().mockResolvedValue(undefined),
     };
     res = { cookie: jest.fn(), redirect: jest.fn() };
     req = { headers: {}, ip: '10.0.0.1', cookies: {} };
@@ -113,6 +117,42 @@ describe('LoginLinkController', () => {
 
       expect(authService.loginWithWhatsAppCode).not.toHaveBeenCalled();
       expect(res.redirect).toHaveBeenCalledWith(`${FRONTEND}/home`);
+    });
+  });
+
+  // Pentest A2-F15 (#871): a link replaced whatever session the browser
+  // held, on a GET any page can make it load.
+  describe('when the browser is already signed in', () => {
+    beforeEach(() => {
+      authService.resolveSessionProfile.mockResolvedValue('p-B');
+    });
+
+    it('keeps the session when the link is for another account', async () => {
+      authService.peekWhatsAppCode.mockResolvedValue({
+        profileId: 'p-A',
+        path: 'wallet',
+      });
+
+      await controller.open(VALID_CODE, res as never, withCookie('b-jwt'));
+
+      expect(res.cookie).not.toHaveBeenCalled();
+      expect(authService.loginWithWhatsAppCode).not.toHaveBeenCalled();
+      // Left unspent: its owner can still use it.
+      expect(authService.burnWhatsAppCode).not.toHaveBeenCalled();
+      expect(res.redirect).toHaveBeenCalledWith(`${FRONTEND}/home`);
+    });
+
+    it('goes where the link points for the same account, without a new cookie', async () => {
+      authService.peekWhatsAppCode.mockResolvedValue({
+        profileId: 'p-B',
+        path: 'applications/42',
+      });
+
+      await controller.open(VALID_CODE, res as never, withCookie('b-jwt'));
+
+      expect(res.cookie).not.toHaveBeenCalled();
+      expect(authService.burnWhatsAppCode).toHaveBeenCalledWith(VALID_CODE);
+      expect(res.redirect).toHaveBeenCalledWith(`${FRONTEND}/applications/42`);
     });
   });
 

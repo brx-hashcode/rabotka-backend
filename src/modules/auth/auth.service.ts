@@ -40,6 +40,7 @@ import { sendOtpEmail } from '../mail/templates';
 import {
   WhatsAppLoginLinkService,
   canMintLoginCode,
+  type WhatsAppLoginGrant,
 } from './whatsapp-login-link.service';
 import * as otplib from 'otplib';
 import { JWT_BLOCKLIST_PREFIX } from './session-revocation';
@@ -431,6 +432,16 @@ export class AuthService {
    * session — same payload, same expiry, same `jti` revocation as OTP login.
    * The code is consumed here, so a forwarded link only ever works once.
    */
+  /** Who a one-tap code is for, without spending it — see LoginLinkController. */
+  peekWhatsAppCode(code: string): Promise<WhatsAppLoginGrant | null> {
+    return this.whatsAppLoginLink.peek(code);
+  }
+
+  /** Spends a one-tap code without issuing anything. */
+  async burnWhatsAppCode(code: string): Promise<void> {
+    await this.whatsAppLoginLink.consume(code);
+  }
+
   async loginWithWhatsAppCode(
     code: string,
   ): Promise<{ token: string; profileId: string; path: string }> {
