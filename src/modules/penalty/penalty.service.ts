@@ -132,10 +132,10 @@ export class PenaltyService {
     if (penalty.paid_at)
       throw new BadRequestException('Cette pénalité a déjà été réglée');
 
-    await this.walletService.recordPenaltyPayment(
+    await this.walletService.confirmPenaltyPaymentManually(
       penaltyId,
       penalty.profile_id,
-      { paymentMethod: PaymentMethod.OTHER },
+      PaymentMethod.OTHER,
     );
 
     const unpaidCount = await this.prisma.penalty.count({

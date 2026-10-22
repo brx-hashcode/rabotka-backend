@@ -27,7 +27,6 @@ import {
 } from '@prisma/client';
 import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import { randomUUID } from 'crypto';
-import type { PayPenaltyDto } from './dto/pay-penalty.dto';
 
 /**
  * The payment types that are actually Rabotka's revenue.
@@ -442,9 +441,10 @@ export class WalletService {
       throw new NotFoundException('Pénalité introuvable');
     }
 
-    const [profileWallet, systemWallet] = await Promise.all([
+    const [profileWallet, systemWallet, fees] = await Promise.all([
       this.getOrCreateProfileWallet(profileId),
       this.getOrCreateSystemWallet(),
+      this.systemConfig.getFees(),
     ]);
     const reference = generatePaymentReference();
 
@@ -495,13 +495,19 @@ export class WalletService {
           type: PaymentType.PENALTY,
           profile_id: profileId,
           amount: penalty.amount,
-          payment_method: PaymentMethod.OTHER,
+          payment_method: PaymentMethod.WALLET,
           transaction_id: reference,
           status: PaymentStatus.COMPLETED,
           paid_at: new Date(),
           description: `Penalty ${penaltyId} paid via wallet`,
         },
       });
+      // Settling the last penalty must lift the block, as paying them all does.
+      await this.recomputeBillingStatus(
+        tx,
+        profileId,
+        fees.billingBlockThreshold,
+      );
     });
 
     // Create payment request and invoice outside transaction (non-critical)
@@ -527,10 +533,18 @@ export class WalletService {
     return { reference };
   }
 
-  async recordPenaltyPayment(
+  /**
+   * Mark a penalty paid WITHOUT moving any money — ADMIN ONLY (manual
+   * confirmation of a payment made outside the platform).
+   *
+   * Pentest A2-F05 (#861): this was reachable by the penalty's own profile
+   * through PATCH /profile/penalties/:id/pay, so anyone could clear their
+   * penalties for free. A profile now pays through `payPenaltyFromWallet`.
+   */
+  async confirmPenaltyPaymentManually(
     penaltyId: string,
     profileId: string,
-    dto: PayPenaltyDto,
+    paymentMethod: PaymentMethod,
   ): Promise<{ reference: string }> {
     const penalty = await this.prisma.penalty.findUnique({
       where: { id: penaltyId },
@@ -551,7 +565,7 @@ export class WalletService {
           type: PaymentType.PENALTY,
           profile_id: profileId,
           amount: penalty.amount,
-          payment_method: dto.paymentMethod,
+          payment_method: paymentMethod,
           transaction_id: reference,
           status: PaymentStatus.COMPLETED,
           paid_at: new Date(),
@@ -571,10 +585,15 @@ export class WalletService {
         where: { id: systemWallet.id },
         data: { balance: { increment: penalty.amount } },
       });
-      await tx.penalty.update({
-        where: { id: penaltyId },
+      // Conditional, inside the transaction: two confirmations racing past
+      // the paid_at check above must not both credit the system wallet.
+      const settled = await tx.penalty.updateMany({
+        where: { id: penaltyId, paid_at: null },
         data: { paid_at: new Date() },
       });
+      if (settled.count === 0) {
+        throw new BadRequestException('Cette pénalité a déjà été réglée');
+      }
     });
 
     const paymentRequest = await this.prisma.paymentRequest.create({
@@ -606,6 +625,29 @@ export class WalletService {
    * pay-penalties wallet sub-flow. Throws if there is nothing to pay or the
    * balance is short (checked atomically inside the debit).
    */
+  /** CLEAR, BLOCKED or PENDING_PAYMENT, from what is still unpaid. */
+  private async recomputeBillingStatus(
+    tx: Prisma.TransactionClient,
+    profileId: string,
+    blockThreshold: number,
+  ): Promise<void> {
+    const stillUnpaid = await tx.penalty.count({
+      where: { profile_id: profileId, paid_at: null },
+    });
+    let billingStatus: BillingStatus;
+    if (stillUnpaid === 0) {
+      billingStatus = BillingStatus.CLEAR;
+    } else if (stillUnpaid >= blockThreshold) {
+      billingStatus = BillingStatus.BLOCKED;
+    } else {
+      billingStatus = BillingStatus.PENDING_PAYMENT;
+    }
+    await tx.profile.update({
+      where: { id: profileId },
+      data: { billing_status: billingStatus },
+    });
+  }
+
   async payAllPenaltiesWithWallet(
     profileId: string,
   ): Promise<{ paidCount: number; totalAmount: number; reference: string }> {
@@ -649,21 +691,11 @@ export class WalletService {
           description: `Paiement de ${unpaid.length} pénalité(s) via portefeuille`,
         },
       });
-      const stillUnpaid = await tx.penalty.count({
-        where: { profile_id: profileId, paid_at: null },
-      });
-      let billingStatus: BillingStatus;
-      if (stillUnpaid === 0) {
-        billingStatus = BillingStatus.CLEAR;
-      } else if (stillUnpaid >= fees.billingBlockThreshold) {
-        billingStatus = BillingStatus.BLOCKED;
-      } else {
-        billingStatus = BillingStatus.PENDING_PAYMENT;
-      }
-      await tx.profile.update({
-        where: { id: profileId },
-        data: { billing_status: billingStatus },
-      });
+      await this.recomputeBillingStatus(
+        tx,
+        profileId,
+        fees.billingBlockThreshold,
+      );
     });
 
     const paymentRequest = await this.prisma.paymentRequest.create({
