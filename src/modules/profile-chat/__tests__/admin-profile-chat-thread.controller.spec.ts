@@ -43,7 +43,8 @@ const thread = {
 
 const request = {
   user: { userId: ADMIN },
-  headers: { 'x-forwarded-for': '41.2.3.4' },
+  // The address Cloudflare saw (#879), not a client-written X-Forwarded-For.
+  headers: { 'cf-connecting-ip': '41.2.3.4' },
   ip: '10.0.0.1',
   get: (header: string) =>
     header.toLowerCase() === 'user-agent' ? 'Firefox' : undefined,
