@@ -126,6 +126,8 @@ function makeRedis() {
     setex: jest.fn().mockResolvedValue('OK'),
     del: jest.fn().mockResolvedValue(1),
     ttl: jest.fn().mockResolvedValue(300),
+    incr: jest.fn().mockResolvedValue(1),
+    expire: jest.fn().mockResolvedValue(1),
   };
 }
 
@@ -591,6 +593,59 @@ describe('ProfileService', () => {
       const stored = redis.set.mock.calls.at(-1)?.[1] as string;
       return (JSON.parse(stored) as { code: string }).code;
     }
+
+    // Pentest A2-F10 (#866): no send cap, and each request reset the
+    // five-guess limit.
+    describe('limits', () => {
+      it('refuses a 6th code request within the window', async () => {
+        givenProfile();
+        redis.incr.mockResolvedValueOnce(6);
+
+        await expect(
+          service.requestPhoneChange('p-1', NEW),
+        ).rejects.toThrow('Trop de codes demandés');
+        expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+      });
+
+      it('locks the flow once wrong guesses add up across codes', async () => {
+        redis.get.mockImplementation((key: string) =>
+          Promise.resolve(key.includes('phone-change-misses') ? '20' : null),
+        );
+
+        await expect(
+          service.confirmPhoneChange('p-1', '123456'),
+        ).rejects.toThrow('Trop de codes incorrects');
+      });
+
+      it('counts a wrong guess towards the day, outside the code', async () => {
+        redis.get.mockImplementation((key: string) =>
+          Promise.resolve(
+            key.includes('phone-change-misses')
+              ? null
+              : JSON.stringify({ phone: NEW, code: '111111', attempts: 0 }),
+          ),
+        );
+
+        await expect(
+          service.confirmPhoneChange('p-1', '999999'),
+        ).rejects.toThrow('Code incorrect');
+        expect(redis.incr).toHaveBeenCalledWith(
+          expect.stringContaining('phone-change-misses:p-1'),
+        );
+      });
+
+      it('compares the number in one canonical form', async () => {
+        prisma.profile.findUnique.mockReset();
+        prisma.profile.findUnique
+          .mockResolvedValueOnce({ id: 'p-1', phone: CURRENT })
+          .mockResolvedValueOnce(null);
+
+        // Same number as the account, typed without the +.
+        await expect(
+          service.requestPhoneChange('p-1', CURRENT.slice(1)),
+        ).rejects.toThrow('déjà celui de votre compte');
+      });
+    });
 
     describe('requestPhoneChange()', () => {
       it('sends the code to the NEW number, not the one being replaced', async () => {

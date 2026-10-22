@@ -49,6 +49,7 @@ import {
   consumeOtp,
   generateOtp,
   storeOtp,
+  consumeOtpWithLockout,
 } from './otp-store';
 import * as QRCode from 'qrcode';
 
@@ -898,7 +899,8 @@ export class AuthService {
     attemptsKey: string,
     otp: string,
   ): Promise<boolean> {
-    return consumeOtp(this.redis, otpKey, attemptsKey, otp);
+    // With the day-long lockout on top of the per-code limit (#885).
+    return consumeOtpWithLockout(this.redis, otpKey, attemptsKey, otp);
   }
 
   /**

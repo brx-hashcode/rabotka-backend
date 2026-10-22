@@ -95,6 +95,12 @@ import {
   type ProfilesArchivedEvent,
   type ProfilesRestoredEvent,
 } from './profile-lifecycle.events';
+import {
+  assertCanSendOtp,
+  assertNotLockedOut,
+  recordMiss,
+} from '../auth/otp-store';
+import { toE164 } from '../whatsapp/contracts/address';
 
 const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
   [ProfileType.WORKER]: 'Travailleur',
@@ -355,6 +361,9 @@ const VERIFICATION_TOKEN_TTL_SECONDS = 1800;
  */
 const PHONE_CHANGE_TTL_SECONDS = 300;
 const PHONE_CHANGE_KEY_PREFIX = `${REDIS_KEY_PREFIX}profile:phone-change:`;
+const PHONE_CHANGE_SENDS_PREFIX = `${REDIS_KEY_PREFIX}profile:phone-change-sends:`;
+const phoneChangeMissKey = (profileId: string) =>
+  `${REDIS_KEY_PREFIX}profile:phone-change-misses:${profileId}`;
 /**
  * Attempts before the pending change is discarded outright.
  *
@@ -2572,7 +2581,10 @@ export class ProfileService {
       throw new NotFoundException('Profil non trouvé');
     }
 
-    const phone = newPhone.trim().toLowerCase();
+    // One canonical form before anything is compared or stored: « 242… » and
+    // « +242… » are the same number, and the uniqueness check must see that
+    // (pentest A2-F10, #866).
+    const phone = toE164(newPhone);
     if (phone === profile.phone) {
       throw new BadRequestException('Ce numéro est déjà celui de votre compte');
     }
@@ -2595,6 +2607,19 @@ export class ProfileService {
         "Le service WhatsApp n'est pas configuré",
       );
     }
+
+    // The shared send cap, per account and per target number (#866): there
+    // was none, and every request also reset the five-guess limit. Each code
+    // is a paid WhatsApp template to a number the caller chooses.
+    await assertCanSendOtp(
+      this.redis,
+      `${PHONE_CHANGE_SENDS_PREFIX}profile:${profileId}`,
+    );
+    await assertCanSendOtp(
+      this.redis,
+      `${PHONE_CHANGE_SENDS_PREFIX}phone:${phone}`,
+    );
+    await assertNotLockedOut(this.redis, phoneChangeMissKey(profileId));
 
     const code = randomInt(100000, 1000000).toString();
 
@@ -2638,6 +2663,9 @@ export class ProfileService {
     code: string,
   ): Promise<{ success: boolean; phone: string }> {
     const key = `${PHONE_CHANGE_KEY_PREFIX}${profileId}`;
+    // Wrong guesses add up across codes for a day; a new request does not
+    // reset them (#866).
+    await assertNotLockedOut(this.redis, phoneChangeMissKey(profileId));
     const raw = await this.redis.get(key);
     if (!raw) {
       throw new BadRequestException(
@@ -2652,6 +2680,7 @@ export class ProfileService {
     };
 
     if (!this.codesMatch(pending.code, code)) {
+      await recordMiss(this.redis, phoneChangeMissKey(profileId));
       const attempts = pending.attempts + 1;
       if (attempts >= PHONE_CHANGE_MAX_ATTEMPTS) {
         await this.redis.del(key);

@@ -109,3 +109,52 @@ export async function assertCanSendOtp(
     );
   }
 }
+
+/**
+ * Wrong codes one identifier may submit in a day, across every code it is
+ * sent. The per-code limit and the send cap allowed 25 guesses per 15 minutes,
+ * indefinitely — about 2 400 a day against a 6-digit code (pentest A2-NV09,
+ * #885). This is the long horizon those two lacked.
+ */
+export const OTP_DAILY_MISS_LIMIT = 20;
+export const OTP_DAILY_MISS_WINDOW_SECONDS = 24 * 60 * 60;
+
+/** Throws 429 once `missKey` has reached the daily limit. */
+export async function assertNotLockedOut(
+  redis: Pick<Redis, 'get'>,
+  missKey: string,
+): Promise<void> {
+  const misses = Number((await redis.get(missKey)) ?? 0);
+  if (misses >= OTP_DAILY_MISS_LIMIT) {
+    throw new HttpException(
+      'Trop de codes incorrects. Réessayez demain ou contactez le support.',
+      HttpStatus.TOO_MANY_REQUESTS,
+    );
+  }
+}
+
+/** Counts one wrong code against `missKey`, for a day from the first. */
+export async function recordMiss(
+  redis: Pick<Redis, 'incr' | 'expire'>,
+  missKey: string,
+): Promise<void> {
+  const misses = await redis.incr(missKey);
+  if (misses === 1) await redis.expire(missKey, OTP_DAILY_MISS_WINDOW_SECONDS);
+}
+
+/**
+ * `consumeOtp`, refused outright once the identifier is locked out for the
+ * day, and counting every miss towards that.
+ */
+export async function consumeOtpWithLockout(
+  redis: Pick<Redis, 'eval' | 'get' | 'incr' | 'expire'>,
+  otpKey: string,
+  attemptsKey: string,
+  otp: string,
+): Promise<boolean> {
+  const missKey = `${attemptsKey}:day`;
+  await assertNotLockedOut(redis, missKey);
+  const matched = await consumeOtp(redis, otpKey, attemptsKey, otp);
+  if (!matched) await recordMiss(redis, missKey);
+  return matched;
+}
