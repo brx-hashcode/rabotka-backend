@@ -9,6 +9,11 @@ jest.mock('web-push', () => ({
   },
 }));
 
+// Push hosts are public; the real lookup would need the network.
+jest.mock('../../../utils/private-address.util', () => ({
+  resolvesToPrivateAddress: jest.fn().mockResolvedValue(false),
+}));
+
 const send = webpush.sendNotification as jest.Mock;
 
 const config = (values: Record<string, string | undefined>) =>
@@ -17,7 +22,7 @@ const config = (values: Record<string, string | undefined>) =>
 const PAYLOAD = { id: 'n-1', title: 'T', body: 'B', link: '/x' };
 const target = (id: string) => ({
   id,
-  endpoint: `https://push.example/${id}`,
+  endpoint: `https://fcm.googleapis.com/fcm/send/${id}`,
   p256dh: 'p',
   auth: 'a',
 });
@@ -52,7 +57,10 @@ describe('WebPushService', () => {
 
     expect(outcome).toEqual({ delivered: ['ok'], gone: ['gone'] });
     expect(send).toHaveBeenCalledWith(
-      { endpoint: 'https://push.example/ok', keys: { p256dh: 'p', auth: 'a' } },
+      {
+        endpoint: 'https://fcm.googleapis.com/fcm/send/ok',
+        keys: { p256dh: 'p', auth: 'a' },
+      },
       JSON.stringify(PAYLOAD),
       expect.objectContaining({
         vapidDetails: expect.objectContaining({ publicKey: 'pub' }),
@@ -85,5 +93,19 @@ describe('WebPushService', () => {
       delivered: [],
       gone: [],
     });
+  });
+
+  // Pentest A2-NV08 (#884): the server POSTed to whatever endpoint a
+  // subscription named — an internal service included.
+  it('never sends to an endpoint that is not a push service, and drops it', async () => {
+    send.mockClear();
+
+    const outcome = await withEnvKeys().deliver(
+      [{ ...target('x'), endpoint: 'https://169.254.169.254/latest' }],
+      PAYLOAD,
+    );
+
+    expect(send).not.toHaveBeenCalled();
+    expect(outcome.gone).toEqual(['x']);
   });
 });
