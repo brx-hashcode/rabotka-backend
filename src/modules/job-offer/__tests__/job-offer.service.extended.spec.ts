@@ -688,6 +688,24 @@ describe('JobOfferService (extended)', () => {
       });
     });
 
+    // Pentest A2-F02 (#858): archiving left applicants waiting on an offer
+    // nobody could act on any more.
+    it('closes the applicants still waiting on the archived offers', async () => {
+      (prisma.jobOffer.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (prisma.application.findMany as jest.Mock).mockResolvedValueOnce([
+        { id: 'app-1' },
+      ]);
+
+      await service.bulkSoftDeleteByAdmin(['a']);
+
+      expect(prisma.application.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: ['app-1'] } },
+          data: expect.objectContaining({ status: 'REJECTED' }),
+        }),
+      );
+    });
+
     it('is a no-op for an empty id list', async () => {
       const result = await service.bulkSoftDeleteByAdmin([]);
       expect(result).toEqual({ count: 0 });

@@ -1044,6 +1044,19 @@ describe('ApplicationService', () => {
       (prisma.application.count as jest.Mock).mockResolvedValue(0);
     });
 
+    // Pentest A2-F02 (#858): an archived offer still took applications.
+    it('throws NotFoundException when the offer was archived', async () => {
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
+        ...mockJobOffer,
+        deleted_at: new Date(),
+      });
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(mockWorker);
+      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(prisma.application.create).not.toHaveBeenCalled();
+    });
+
     it('throws NotFoundException when worker not found', async () => {
       (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue(mockJobOffer);
       (prisma.profile.findUnique as jest.Mock).mockResolvedValue(null);
@@ -1143,6 +1156,18 @@ describe('ApplicationService', () => {
   });
 
   describe('accept() - additional branches', () => {
+    // Pentest A2-F02 (#858): an employer could still hire on an archived offer.
+    it('refuses to accept on an archived offer', async () => {
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        ...mockApplication,
+        job_offer: { ...mockJobOffer, deleted_at: new Date() },
+      });
+      await expect(service.accept(APPLICATION_ID, EMPLOYER_ID)).rejects.toThrow(
+        "Cette offre n'est plus disponible",
+      );
+      expect(prisma.jobOffer.update).not.toHaveBeenCalled();
+    });
+
     beforeEach(() => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue(
         mockApplication,

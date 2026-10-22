@@ -444,9 +444,13 @@ export class ContactUnlockService {
         quantity: true,
         employer_unlock_paid: true,
         scheduled_at: true,
+        deleted_at: true,
       },
     });
-    if (!jobOffer) throw new NotFoundException('Offre introuvable');
+    // Archived by the team: no contact is unlocked on it (#858).
+    if (!jobOffer || jobOffer.deleted_at) {
+      throw new NotFoundException('Offre introuvable');
+    }
 
     const fees = await this.systemConfig.getContactUnlockFees();
     // Hard deadline: 2h before job starts (so both parties can exchange contacts in time).
@@ -593,6 +597,14 @@ export class ContactUnlockService {
     );
     await this.assertPayUnlockAccountAllowsPayment(profileId);
     this.assertPayUnlockPartyNotAlreadyPaid(attempt, isEmployer, isWorker);
+    // Nothing is charged for an offer archived since the attempt (#858).
+    const offer = await this.prisma.jobOffer.findUnique({
+      where: { id: attempt.job_offer_id },
+      select: { deleted_at: true },
+    });
+    if (!offer || offer.deleted_at) {
+      throw new NotFoundException('Offre introuvable');
+    }
 
     const amount = isEmployer
       ? Number(attempt.employer_amount)

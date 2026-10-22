@@ -378,7 +378,8 @@ export class ApplicationService {
       }),
     ]);
 
-    if (!jobOffer) {
+    // An offer archived by the team is gone (pentest A2-F02, #858).
+    if (!jobOffer || jobOffer.deleted_at) {
       throw new NotFoundException('Offre non trouvée');
     }
     if (!worker) {
@@ -483,11 +484,12 @@ export class ApplicationService {
       await tx.$executeRaw`SELECT id FROM "job_offers" WHERE id = ${jobOfferId}::uuid FOR UPDATE`;
       const freshOffer = await tx.jobOffer.findUnique({
         where: { id: jobOfferId },
-        select: { status: true },
+        select: { status: true, deleted_at: true },
       });
       if (
-        freshOffer?.status !== JobOfferStatus.ACTIVE &&
-        freshOffer?.status !== JobOfferStatus.PARTIALLY_FILLED
+        freshOffer?.deleted_at ||
+        (freshOffer?.status !== JobOfferStatus.ACTIVE &&
+          freshOffer?.status !== JobOfferStatus.PARTIALLY_FILLED)
       ) {
         throw new BadRequestException("Cette offre n'est plus disponible");
       }
@@ -821,6 +823,10 @@ export class ApplicationService {
       throw new ForbiddenException(
         "Vous n'êtes pas l'employeur de cette offre",
       );
+    }
+    // Archived by the team: nobody is hired on it any more (#858).
+    if (application.job_offer.deleted_at) {
+      throw new BadRequestException("Cette offre n'est plus disponible");
     }
 
     const fees = await this.systemConfigService.getFees();

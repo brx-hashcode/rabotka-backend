@@ -180,6 +180,24 @@ describe('ContactUnlockService', () => {
       );
     });
 
+    // Pentest A2-F02 (#858): contacts could still be unlocked on an archived offer.
+    it('throws NotFoundException when the offer was archived', async () => {
+      prisma.contactUnlockAttempt.findUnique.mockResolvedValue(null);
+      prisma.application.findUnique.mockResolvedValue({
+        worker_id: 'w-1',
+        job_offer_id: 'jo-1',
+      });
+      prisma.jobOffer.findUnique.mockResolvedValue({
+        quantity: 1,
+        employer_unlock_paid: false,
+        scheduled_at: null,
+        deleted_at: new Date(),
+      });
+      await expect(service.initiateUnlock('app-1', 'emp-1')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
     it('creates a new attempt for single-person job', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(null);
       prisma.application.findUnique.mockResolvedValue({
