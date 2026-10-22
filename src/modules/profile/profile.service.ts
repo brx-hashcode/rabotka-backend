@@ -482,7 +482,9 @@ export class ProfileService {
     }
 
     const [unpaidPenaltiesCount, walletBalance] = await Promise.all([
-      this.prisma.penalty.count({ where: { profile_id: id, paid_at: null } }),
+      this.prisma.penalty.count({
+        where: { profile_id: id, paid_at: null, deleted_at: null },
+      }),
       this.walletService.getProfileWalletBalance(id),
     ]);
 
@@ -915,7 +917,7 @@ export class ProfileService {
     }
 
     const unpaidPenaltiesCount = await this.prisma.penalty.count({
-      where: { profile_id: id, paid_at: null },
+      where: { profile_id: id, paid_at: null, deleted_at: null },
     });
     const cancellations = await this.cancellationStanding(
       id,
@@ -1714,7 +1716,11 @@ export class ProfileService {
     if (profiles.length > 0) {
       const grouped = await this.prisma.penalty.groupBy({
         by: ['profile_id'],
-        where: { profile_id: { in: profiles.map((p) => p.id) }, paid_at: null },
+        where: {
+          profile_id: { in: profiles.map((p) => p.id) },
+          paid_at: null,
+          deleted_at: null,
+        },
         _count: { _all: true },
       });
       for (const row of grouped) {

@@ -47,7 +47,7 @@ export class MobilePenaltyController {
     const profileId = req.user.profileId;
     const [unpaid, walletBalance] = await Promise.all([
       this.prisma.penalty.findMany({
-        where: { profile_id: profileId, paid_at: null },
+        where: { profile_id: profileId, paid_at: null, deleted_at: null },
         select: { amount: true },
       }),
       this.wallet.getProfileWalletBalance(profileId),

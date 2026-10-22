@@ -129,6 +129,21 @@ describe('PenaltyNotificationProcessor', () => {
     expect(mockWhatsApp.sendInteractiveCta).not.toHaveBeenCalled();
   });
 
+  // Pentest A2-F03 (#859): an archived penalty kept being reminded.
+  it('process(notify_penalty) skips archived penalties', async () => {
+    mockPrisma.penalty.findUnique.mockResolvedValueOnce({
+      id: 'pen-1',
+      paid_at: null,
+      deleted_at: new Date(),
+      notification_count: 0,
+      profile: { phone: '+242', first_name: 'Bob' },
+    });
+    await processor.process({
+      data: { type: 'notify_penalty', penaltyId: 'pen-1' },
+    });
+    expect(mockWhatsApp.sendInteractiveCta).not.toHaveBeenCalled();
+  });
+
   it('process(notify_penalty) skips when max notifications reached', async () => {
     mockPrisma.penalty.findUnique.mockResolvedValueOnce({
       id: 'pen-1',

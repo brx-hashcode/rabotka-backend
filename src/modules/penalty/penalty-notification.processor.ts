@@ -58,6 +58,7 @@ export class PenaltyNotificationProcessor {
     const penalties = await this.prisma.penalty.findMany({
       where: {
         paid_at: null,
+        deleted_at: null,
         notification_count: { lt: maxNotifications },
         applied_at: { gte: cutoff },
         OR: [
@@ -105,6 +106,11 @@ export class PenaltyNotificationProcessor {
       this.logger.debug(`Penalty ${penaltyId} already paid, skipping`);
       return;
     }
+    // Archived by the team between the scan and this job (pentest A2-F03, #859).
+    if (penalty.deleted_at) {
+      this.logger.debug(`Penalty ${penaltyId} archived, skipping`);
+      return;
+    }
     if (penalty.notification_count >= maxNotifications) {
       this.logger.debug(
         `Penalty ${penaltyId} already at max notifications, skipping`,
@@ -117,7 +123,11 @@ export class PenaltyNotificationProcessor {
     }
 
     const totalUnpaid = await this.prisma.penalty.aggregate({
-      where: { profile_id: penalty.profile_id, paid_at: null },
+      where: {
+        profile_id: penalty.profile_id,
+        paid_at: null,
+        deleted_at: null,
+      },
       _sum: { amount: true },
     });
 

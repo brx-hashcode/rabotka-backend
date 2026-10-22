@@ -267,12 +267,12 @@ export class PaymentService {
 
   async handlePenaltyPaymentSuccess(profileId: string): Promise<void> {
     await this.prisma.penalty.updateMany({
-      where: { profile_id: profileId, paid_at: null },
+      where: { profile_id: profileId, paid_at: null, deleted_at: null },
       data: { paid_at: new Date() },
     });
 
     const remaining = await this.prisma.penalty.count({
-      where: { profile_id: profileId, paid_at: null },
+      where: { profile_id: profileId, paid_at: null, deleted_at: null },
     });
 
     const penaltyProfile = await this.prisma.profile.findUnique({

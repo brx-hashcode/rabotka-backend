@@ -1423,7 +1423,7 @@ export class PaymentRequestService {
         });
 
         const unpaidCount = await tx.penalty.count({
-          where: { profile_id: workerId, paid_at: null },
+          where: { profile_id: workerId, paid_at: null, deleted_at: null },
         });
 
         let status: BillingStatus;

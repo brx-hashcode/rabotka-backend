@@ -452,7 +452,7 @@ export class WalletService {
       // Atomic idempotency guard + balance check: only proceeds if penalty unpaid and balance sufficient
       const [penaltyUpdate, walletUpdate] = await Promise.all([
         tx.penalty.updateMany({
-          where: { id: penaltyId, paid_at: null },
+          where: { id: penaltyId, paid_at: null, deleted_at: null },
           data: { paid_at: new Date() },
         }),
         tx.wallet.updateMany({
@@ -588,7 +588,7 @@ export class WalletService {
       // Conditional, inside the transaction: two confirmations racing past
       // the paid_at check above must not both credit the system wallet.
       const settled = await tx.penalty.updateMany({
-        where: { id: penaltyId, paid_at: null },
+        where: { id: penaltyId, paid_at: null, deleted_at: null },
         data: { paid_at: new Date() },
       });
       if (settled.count === 0) {
@@ -632,7 +632,7 @@ export class WalletService {
     blockThreshold: number,
   ): Promise<void> {
     const stillUnpaid = await tx.penalty.count({
-      where: { profile_id: profileId, paid_at: null },
+      where: { profile_id: profileId, paid_at: null, deleted_at: null },
     });
     let billingStatus: BillingStatus;
     if (stillUnpaid === 0) {
@@ -652,7 +652,7 @@ export class WalletService {
     profileId: string,
   ): Promise<{ paidCount: number; totalAmount: number; reference: string }> {
     const unpaid = await this.prisma.penalty.findMany({
-      where: { profile_id: profileId, paid_at: null },
+      where: { profile_id: profileId, paid_at: null, deleted_at: null },
       select: { id: true, amount: true },
     });
     if (unpaid.length === 0) {
