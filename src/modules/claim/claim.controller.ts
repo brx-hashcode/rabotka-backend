@@ -33,6 +33,7 @@ import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { LogService } from '../log/log.service';
 import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
+import { ProfileCreateClaimDto } from './dto/profile-create-claim.dto';
 
 @Controller('admin/claims')
 @UseGuards(AdminAuthGuard, RolesGuard)
@@ -225,7 +226,7 @@ export class ProfileClaimController {
   }
 
   @Post()
-  create(@Req() req: any, @Body() dto: CreateClaimDto) {
+  create(@Req() req: any, @Body() dto: ProfileCreateClaimDto) {
     return this.claimService.createForProfile(req.user.profileId, dto);
   }
 
