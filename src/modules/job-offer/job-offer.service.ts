@@ -1970,6 +1970,18 @@ export class JobOfferService {
       where: { id: { in: ids }, deleted_at: null },
       data: { deleted_at: new Date() },
     });
+    // Its waiting applicants are told it is over, as when the employer deletes
+    // it — not left pending on an offer nobody can act on (#858).
+    const closedIds: string[] = [];
+    for (const id of ids) {
+      closedIds.push(
+        ...(await this.rejectWaitingApplicants(this.prisma, id, [
+          ApplicationStatus.PENDING,
+          ApplicationStatus.VIEWED,
+        ])),
+      );
+    }
+    this.notifyClosedApplicants(closedIds, 'bulkSoftDeleteByAdmin');
     await this.unlinkOfferNotifications(this.prisma, ids);
     await this.cache.invalidate('jobs');
     // Remove each from the vector index so archived offers stop being matched.
