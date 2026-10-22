@@ -94,6 +94,18 @@ const LEAD_SELECT = {
   },
 } as const satisfies Prisma.AgentLeadSelect;
 
+/**
+ * A lead as one agent may see it: only their OWN latest call. A lead changes
+ * hands when a claim lapses, and the previous agent's outcome and notes are
+ * theirs, not the next claimer's (pentest A2-F13, #869).
+ */
+function leadSelect(agentId: string) {
+  return {
+    ...LEAD_SELECT,
+    calls: { ...LEAD_SELECT.calls, where: { agent_id: agentId } },
+  } satisfies Prisma.AgentLeadSelect;
+}
+
 type LeadRow = Prisma.AgentLeadGetPayload<{ select: typeof LEAD_SELECT }>;
 
 /**
@@ -247,7 +259,7 @@ export class AgentLeadService {
     });
     const rows = await this.prisma.agentLead.findMany({
       where: { job_offer_id: jobOfferId, worker_id: { in: workerIds } },
-      select: LEAD_SELECT,
+      select: leadSelect(agentId),
     });
     const now = new Date();
     return new Map(rows.map((r) => [r.worker.id, leadView(r, agentId, now)]));
@@ -512,8 +524,11 @@ export class AgentLeadService {
   ) {
     const lead = await this.requireClaim(agentId, leadId);
 
+    // The consent is THIS agent's own call. A lead changes hands when a claim
+    // lapses, and another agent's « Intéressé » let the new claimer place the
+    // worker and take the commission (pentest A2-F13, #869).
     const lastCall = await this.prisma.agentCallLog.findFirst({
-      where: { lead_id: leadId },
+      where: { lead_id: leadId, agent_id: agentId },
       orderBy: { created_at: 'desc' },
       select: { outcome: true },
     });
@@ -1020,7 +1035,7 @@ export class AgentLeadService {
       this.prisma.agentLead.count({ where }),
       this.prisma.agentLead.findMany({
         where,
-        select: LEAD_SELECT,
+        select: leadSelect(agentId),
         orderBy: { updated_at: 'desc' },
         skip: (params.page - 1) * params.limit,
         take: params.limit,
@@ -1158,7 +1173,7 @@ export class AgentLeadService {
   private async view(agentId: string, leadId: string) {
     const row = await this.prisma.agentLead.findUnique({
       where: { id: leadId },
-      select: LEAD_SELECT,
+      select: leadSelect(agentId),
     });
     if (!row) throw new NotFoundException('Candidat introuvable');
     return leadView(row, agentId);
