@@ -36,6 +36,10 @@ import {
   EditMessageDto,
   AddMembersDto,
 } from './dto/chat.dto';
+import {
+  ACCEPTED_UPLOAD_EXTENSIONS,
+  resolveUploadType,
+} from '../file/upload-types';
 
 /**
  * Roles, which this controller declared none of.
@@ -50,6 +54,9 @@ import {
  * is capped at MANAGER by `RolesGuard`, and removing an abusive message is
  * support's job, not an escalation.
  */
+
+/** Chat attachments: the /file/upload ceiling. */
+const CHAT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 @ApiTags('Admin – Chat')
 @Controller('admin/chat')
 @UseGuards(AdminAuthGuard, RolesGuard)
@@ -248,21 +255,40 @@ export class ChatController {
   }
 
   @Post('attachments')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: CHAT_ATTACHMENT_MAX_BYTES },
+    }),
+  )
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Upload a chat attachment (image/file)' })
   async uploadAttachment(
     @UploadedFile() file: Express.Multer.File,
   ): Promise<ChatAttachment> {
     if (!file) throw new BadRequestException('No file provided');
-    const uploaded = await this.fileService.uploadToStorage(file, {
-      folder: 'chat',
-      access: 'public',
-    });
+    // Pentest A2-NV01 (#877): any file went to the public bucket under the
+    // client's own Content-Type and extension — an .html or .svg served from
+    // our storage host. Same allowlist as /file/upload, and the stored type
+    // and extension come from it, never from the client.
+    const type = resolveUploadType(file.originalname ?? '', file.mimetype);
+    if (!type) {
+      throw new BadRequestException(
+        `Type de fichier non accepté. Formats acceptés : ${ACCEPTED_UPLOAD_EXTENSIONS.join(', ')}`,
+      );
+    }
+    const uploaded = await this.fileService.uploadToStorage(
+      {
+        ...file,
+        mimetype: type.contentType,
+        originalname: `attachment.${type.extension}`,
+      },
+      { folder: 'chat', access: 'public' },
+    );
     return {
       url: uploaded.url,
       key: uploaded.key,
-      name: uploaded.originalFilename,
+      // What the person picked, for display only: it named nothing stored.
+      name: file.originalname,
       mime: uploaded.mimeType,
       size: uploaded.size ?? file.size,
     };
