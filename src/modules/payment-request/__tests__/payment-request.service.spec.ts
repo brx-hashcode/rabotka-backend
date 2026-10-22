@@ -1092,6 +1092,94 @@ describe('PaymentRequestService', () => {
       }
       await service.processApprovedPaymentById(REQUEST_ID);
     });
+
+    /**
+     * Pentest A2-F18 (#874): a recommendation link paid after the worker was
+     * suspended, refused or archived still delivered their phone and email.
+     */
+    describe('contact delivery re-checks eligibility', () => {
+      const settleRecommendation = async (
+        worker: unknown,
+        employerActive: number,
+      ) => {
+        (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue({
+          ...makeRequest(PaymentRequestStatus.PENDING),
+          amount: 5000,
+          request_type: PaymentRequestType.RECOMMENDATION_CONTACT,
+          contact_unlock_attempt_id: null,
+          recommendation_worker_id: 'worker-1',
+          description: null,
+          gateway_payment_ref: null,
+          profile: { ...mockProfile, phone: '+242', email: null },
+        });
+        (prisma.profile as any).findFirst = jest.fn().mockResolvedValue(worker);
+        (prisma.profile as any).count = jest
+          .fn()
+          .mockResolvedValue(employerActive);
+        (prisma.$transaction as jest.Mock).mockImplementation((cb) =>
+          typeof cb === 'function'
+            ? cb({
+                paymentRequest: {
+                  updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+                },
+                payment: { create: jest.fn().mockResolvedValue({}) },
+                walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+                wallet: { update: jest.fn().mockResolvedValue({}) },
+              })
+            : Promise.resolve([]),
+        );
+        const bot = (service as any).botNotification;
+        bot.sendContactUnlockedRecommendation = jest
+          .fn()
+          .mockResolvedValue(undefined);
+        bot.sendMessage = jest.fn().mockResolvedValue(undefined);
+        await service.processApprovedPaymentById(REQUEST_ID);
+        return bot;
+      };
+
+      it('delivers the contact of a still-eligible worker', async () => {
+        const bot = await settleRecommendation(
+          { first_name: 'Bob', last_name: 'S', phone: '+2420', email: null },
+          1,
+        );
+        expect(bot.sendContactUnlockedRecommendation).toHaveBeenCalled();
+        expect((prisma.profile as any).findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: {
+              id: 'worker-1',
+              profile_type: 'WORKER',
+              status: 'ACTIVE',
+              verification_status: 'VERIFIED',
+              deleted_at: null,
+            },
+          }),
+        );
+      });
+
+      it.each([
+        ['the worker is no longer eligible', null, 1],
+        [
+          'the employer is suspended or archived',
+          { first_name: 'Bob', last_name: 'S', phone: '+2420', email: null },
+          0,
+        ],
+      ])('withholds the contact when %s', async (_why, worker, employer) => {
+        const bot = await settleRecommendation(worker, employer);
+
+        expect(bot.sendContactUnlockedRecommendation).not.toHaveBeenCalled();
+        expect(log.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: 'RECOMMENDATION_CONTACT_WITHHELD',
+            entityId: REQUEST_ID,
+          }),
+        );
+        // Told, not left wondering where the contact went.
+        expect(bot.sendMessage).toHaveBeenCalledWith(
+          '+242',
+          expect.stringContaining('remboursement'),
+        );
+      });
+    });
   });
 
   describe('getByProfileId()', () => {
