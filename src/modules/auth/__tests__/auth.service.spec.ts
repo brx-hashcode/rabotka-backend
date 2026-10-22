@@ -1027,18 +1027,22 @@ describe('AuthService', () => {
   });
 
   describe('confirmQrSession()', () => {
+    const pairedAt = new Date();
     const validUser = {
       id: USER_ID,
       is_active: true,
-      phone_paired_at: new Date(),
+      phone_paired_at: pairedAt,
       totp_enabled: false,
     };
 
     beforeEach(() => {
       redis.incr.mockResolvedValue(1);
-      (jwtService as any).verify = jest
-        .fn()
-        .mockReturnValue({ sub: USER_ID, type: 'admin-phone' });
+      // Bound to the current pairing (#868).
+      (jwtService as any).verify = jest.fn().mockReturnValue({
+        sub: USER_ID,
+        type: 'admin-phone',
+        pairedAt: pairedAt.getTime(),
+      });
     });
 
     it('throws when too many attempts', async () => {
