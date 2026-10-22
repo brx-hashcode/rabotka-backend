@@ -367,10 +367,13 @@ export class UserService {
       throw new NotFoundException('Utilisateur non trouvé');
     }
 
-    // Soft delete (archive) — reversible.
+    // Soft delete (archive) — reversible. Deactivated in the same write: every
+    // guard and login path already refuses an inactive account, and an
+    // archived admin kept its sessions and could log in again by OTP
+    // (pentest A2-F01, #857). Restoring does not reactivate.
     await this.prisma.user.update({
       where: { id },
-      data: { deleted_at: new Date() },
+      data: { deleted_at: new Date(), is_active: false },
     });
   }
 
@@ -379,7 +382,8 @@ export class UserService {
     if (ids.length === 0) return { count: 0 };
     const { count } = await this.prisma.user.updateMany({
       where: { id: { in: ids }, deleted_at: null },
-      data: { deleted_at: new Date() },
+      // Deactivated too — see deleteAdmin.
+      data: { deleted_at: new Date(), is_active: false },
     });
     return { count };
   }
