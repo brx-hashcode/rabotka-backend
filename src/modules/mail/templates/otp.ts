@@ -1,7 +1,11 @@
 import { escapeHtml } from './layout';
 
 export function sendOtpEmail(code: string, first_name?: string): string {
-  const greeting = first_name ? `Bonjour ${first_name},` : 'Bonjour,';
+  // The name is whatever the profile typed, and this mail can go to an address
+  // the profile chose — escaped like every other template (pentest A2-F17, #873).
+  const greeting = first_name
+    ? `Bonjour ${escapeHtml(first_name)},`
+    : 'Bonjour,';
   return `
     <p>${greeting}</p>
 
