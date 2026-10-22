@@ -160,4 +160,30 @@ describe('MobileRecommendationController — workerDetail()', () => {
     expect(result.recommendationFee).toBe(1000);
     expect(result.walletBalance).toBe(2000);
   });
+
+  // Pentest A2-F06 (#862): the detail skipped every eligibility check and
+  // returned any profile by id — another employer, an archived account —
+  // with their address, then minted a slug and notified them.
+  it('only ever looks up a live, non-archived WORKER', async () => {
+    build();
+    prisma.profile.findMany.mockResolvedValue([]);
+
+    await expect(
+      controller.workerDetail(req as never, 'someone-else'),
+    ).rejects.toThrow('Travailleur introuvable');
+
+    expect(prisma.profile.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: { in: ['someone-else'] },
+          profile_type: 'WORKER',
+          deleted_at: null,
+          status: 'ACTIVE',
+        },
+      }),
+    );
+    // Refused before anything is written or anyone is told.
+    expect(portfolio.ensurePortfolioSlug).not.toHaveBeenCalled();
+    expect(profileNotifications.notifyProfileView).not.toHaveBeenCalled();
+  });
 });

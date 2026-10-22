@@ -52,10 +52,14 @@ describe('MobileRecommendationController — worker-feed tiers', () => {
       type ? { profile_type: type } : null,
     );
 
-  // profile.findMany serves two distinct queries: the eligibility scan (keyed by
-  // `profile_type`) and hydrate's lookup by id. Tests must not conflate them.
-  const isEligibilityQuery = (where: { profile_type?: unknown }) =>
-    where.profile_type !== undefined;
+  // profile.findMany serves two distinct queries: the eligibility scan and
+  // hydrate's lookup by id (`id: { in }`). Tests must not conflate them. Both
+  // name `profile_type` now — hydrate enforces it too (#862) — so the id list
+  // is what tells them apart.
+  const isEligibilityQuery = (where: {
+    profile_type?: unknown;
+    id?: { in?: unknown };
+  }) => where.profile_type !== undefined && where.id?.in === undefined;
 
   const eligibilityWheres = () =>
     prisma.profile.findMany.mock.calls
