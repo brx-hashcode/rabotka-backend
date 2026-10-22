@@ -148,19 +148,16 @@ export class WhatsAppLoginLinkService {
       `${WA_LOGIN_KEY_PREFIX}${code}`,
     )) as string | null;
 
-    if (!stored) return null;
+    return parseGrant(stored);
+  }
 
-    try {
-      const parsed = JSON.parse(stored) as { p?: string; d?: string };
-      if (!parsed.p) return null;
-      return {
-        profileId: parsed.p,
-        path: normalizePath(parsed.d ?? DEFAULT_LOGIN_LANDING),
-      };
-    } catch {
-      // Codes minted before destinations existed stored a bare profile id.
-      return { profileId: stored, path: DEFAULT_LOGIN_LANDING };
-    }
+  /**
+   * Who a code is for, WITHOUT spending it — so a browser already signed in
+   * as someone else can be left as it is (pentest A2-F15, #871).
+   */
+  async peek(code: string): Promise<WhatsAppLoginGrant | null> {
+    if (!code || code.trim().length === 0) return null;
+    return parseGrant(await this.redis.get(`${WA_LOGIN_KEY_PREFIX}${code}`));
   }
 
   /**
@@ -218,5 +215,21 @@ export class WhatsAppLoginLinkService {
       );
       return target;
     }
+  }
+}
+
+/** A stored code's value: `{ p, d }` JSON, or a bare profile id from before. */
+function parseGrant(stored: string | null): WhatsAppLoginGrant | null {
+  if (!stored) return null;
+  try {
+    const parsed = JSON.parse(stored) as { p?: string; d?: string };
+    if (!parsed.p) return null;
+    return {
+      profileId: parsed.p,
+      path: normalizePath(parsed.d ?? DEFAULT_LOGIN_LANDING),
+    };
+  } catch {
+    // Codes minted before destinations existed stored a bare profile id.
+    return { profileId: stored, path: DEFAULT_LOGIN_LANDING };
   }
 }
