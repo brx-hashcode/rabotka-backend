@@ -579,18 +579,27 @@ export class MobileRecommendationController {
     if (hits.length === 0) return [];
     const ids = hits.map((h) => h.id);
 
+    // Whatever the caller: a WORKER that is live and not archived. The detail
+    // route skips only the feed's quality bar (verification, reliability) —
+    // it used to skip everything, and returned any profile by id, employers
+    // and archived accounts included, address and all (pentest A2-F06, #862).
+    const always = {
+      id: { in: ids },
+      profile_type: 'WORKER' as const,
+      deleted_at: null,
+      status: 'ACTIVE' as const,
+    };
     const where = opts.skipEligibility
-      ? { id: { in: ids } }
+      ? always
       : {
-          id: { in: ids },
+          ...always,
           // Archiving a profile only writes `deleted_at` — it leaves `status`
           // and `verification_status` untouched (`bulkSoftDeleteProfiles`). The
           // SQL fallback tiers filter on it, but tier 1's ids come from Qdrant,
           // where a point outlives the profile until the next sweep. Without
           // this an archived worker keeps being recommended, and the employer
-          // pays a contact fee to reach someone who is gone.
-          deleted_at: null,
-          status: 'ACTIVE' as const,
+          // pays a contact fee to reach someone who is gone. (`deleted_at` and
+          // `status` now come from `always` above.)
           verification_status: 'VERIFIED' as const,
           reliability_score: {
             gte: (await this.systemConfig.getFees()).reliabilityScoreMin,
