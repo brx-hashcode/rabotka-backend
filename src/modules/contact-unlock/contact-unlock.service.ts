@@ -6,6 +6,7 @@ import {
   ForbiddenException,
   forwardRef,
   Inject,
+  Optional,
 } from '@nestjs/common';
 import {
   ApplicationCancelledBy,
@@ -45,6 +46,7 @@ import { BotNotificationService } from '../bot/services/bot-notification.service
 import { InteractionEventService } from '../recommendation-engine/interaction-event.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { randomUUID } from 'node:crypto';
+import { BusinessSubscriptionService } from '../business/subscription/business-subscription.service';
 
 export type ContactDetails = {
   name: string;
@@ -87,7 +89,32 @@ export class ContactUnlockService {
     private readonly botNotification: BotNotificationService,
     private readonly interactionEvents: InteractionEventService,
     private readonly contactRecords: ContactRecordService,
+    // Appended and optional: the specs build this service positionally.
+    @Optional()
+    private readonly subscriptions?: BusinessSubscriptionService,
   ) {}
+
+  /**
+   * Gives the employer back what its side of an attempt cost: a business's
+   * plan quota unit when the unlock was covered by its subscription, else the
+   * fee as wallet credit. Returns the francs refunded (0 for a quota unit).
+   */
+  private async refundEmployerSide(
+    attempt: { id: string; employer_id: string; employer_amount: unknown },
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    if (await this.subscriptions?.releaseUnlock(attempt.id, tx)) return 0;
+    const amount = Number(attempt.employer_amount);
+    if (amount <= 0) return 0;
+    await this.walletService.refundProfileWallet(
+      attempt.employer_id,
+      amount,
+      WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
+      'contact_unlock_attempt',
+      attempt.id,
+    );
+    return amount;
+  }
 
   /**
    * Which attempts a `payUnlock` actually completed.
@@ -472,29 +499,49 @@ export class ContactUnlockService {
         : configWindow;
     const expiresAt = preferredExpiry > minExpiry ? preferredExpiry : minExpiry;
 
-    const employerAlreadyPaid = isEmployerCoveredAtJobLevel(
+    const now = new Date();
+    const attemptId = randomUUID();
+
+    const coveredAtJobLevel = isEmployerCoveredAtJobLevel(
       jobOffer.quantity,
       jobOffer.employer_unlock_paid,
     );
+    // A business's plan covers the employer side while its quota lasts;
+    // past it (or without a plan) the fee applies, as for any employer.
+    const coveredByPlan =
+      !coveredAtJobLevel &&
+      ((await this.subscriptions?.consumeUnlock(employerId, attemptId, tx)) ??
+        false);
+    const employerAlreadyPaid = coveredAtJobLevel || coveredByPlan;
 
-    const now = new Date();
-
-    return db.contactUnlockAttempt.create({
-      data: {
-        application_id: applicationId,
-        job_offer_id: app.job_offer_id,
-        worker_id: app.worker_id,
-        employer_id: employerId,
-        status: employerAlreadyPaid
-          ? ContactUnlockStatus.PENDING_WORKER
-          : ContactUnlockStatus.PENDING_BOTH,
-        employer_paid: employerAlreadyPaid,
-        employer_paid_at: employerAlreadyPaid ? now : null,
-        employer_amount: fees.employerFeeFcfa,
-        worker_amount: fees.workerFeeFcfa,
-        expires_at: expiresAt,
-      },
-    });
+    try {
+      return await db.contactUnlockAttempt.create({
+        data: {
+          id: attemptId,
+          application_id: applicationId,
+          job_offer_id: app.job_offer_id,
+          worker_id: app.worker_id,
+          employer_id: employerId,
+          status: employerAlreadyPaid
+            ? ContactUnlockStatus.PENDING_WORKER
+            : ContactUnlockStatus.PENDING_BOTH,
+          employer_paid: employerAlreadyPaid,
+          employer_paid_at: employerAlreadyPaid ? now : null,
+          employer_amount: coveredByPlan ? 0 : fees.employerFeeFcfa,
+          worker_amount: fees.workerFeeFcfa,
+          expires_at: expiresAt,
+        },
+      });
+    } catch (err) {
+      // Inside a transaction the rollback undoes the quota use with the rest;
+      // outside one, give the unit back by hand.
+      if (coveredByPlan && !tx) {
+        await this.subscriptions
+          ?.releaseUnlock(attemptId)
+          .catch(() => undefined);
+      }
+      throw err;
+    }
   }
 
   /**
@@ -1022,13 +1069,7 @@ export class ContactUnlockService {
 
     await this.prisma.$transaction(async (tx) => {
       if (attempt.employer_paid && !employerPaidAtJobLevel) {
-        await this.walletService.refundProfileWallet(
-          attempt.employer_id,
-          Number(attempt.employer_amount),
-          WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
-          'contact_unlock_attempt',
-          attempt.id,
-        );
+        await this.refundEmployerSide(attempt, tx);
       }
       if (attempt.worker_paid) {
         await this.walletService.refundProfileWallet(
@@ -1169,13 +1210,7 @@ export class ContactUnlockService {
     );
     await this.prisma.$transaction(async (tx) => {
       if (attempt.employer_paid && !employerPaidAtJobLevel) {
-        await this.walletService.refundProfileWallet(
-          attempt.employer_id,
-          Number(attempt.employer_amount),
-          WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
-          'contact_unlock_attempt',
-          attempt.id,
-        );
+        await this.refundEmployerSide(attempt, tx);
       }
       if (attempt.worker_paid) {
         await this.walletService.refundProfileWallet(
@@ -1296,15 +1331,8 @@ export class ContactUnlockService {
 
         if (!isMultiPerson && attempt.employer_paid && attempt.worker_paid) {
           // Standard job — both paid but unlock expired: refund both.
-          const employerAmount = Number(attempt.employer_amount);
+          const employerAmount = await this.refundEmployerSide(attempt);
           const workerAmount = Number(attempt.worker_amount);
-          await this.walletService.refundProfileWallet(
-            attempt.employer_id,
-            employerAmount,
-            WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
-            'contact_unlock_attempt',
-            attempt.id,
-          );
           await this.walletService.refundProfileWallet(
             attempt.worker_id,
             workerAmount,
@@ -1313,10 +1341,13 @@ export class ContactUnlockService {
             attempt.id,
           );
           newStatus = ContactUnlockStatus.CONVERTED_TO_CREDIT;
-          conversions.push({
-            profileId: attempt.employer_id,
-            amount: employerAmount,
-          });
+          // A quota unit given back is not a conversion to credit.
+          if (employerAmount > 0) {
+            conversions.push({
+              profileId: attempt.employer_id,
+              amount: employerAmount,
+            });
+          }
           conversions.push({
             profileId: attempt.worker_id,
             amount: workerAmount,
@@ -1343,16 +1374,11 @@ export class ContactUnlockService {
           !attempt.worker_paid
         ) {
           // Standard: employer paid, worker did not — refund employer.
-          const amount = Number(attempt.employer_amount);
-          await this.walletService.refundProfileWallet(
-            attempt.employer_id,
-            amount,
-            WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
-            'contact_unlock_attempt',
-            attempt.id,
-          );
+          const amount = await this.refundEmployerSide(attempt);
           newStatus = ContactUnlockStatus.CONVERTED_TO_CREDIT;
-          conversions.push({ profileId: attempt.employer_id, amount });
+          if (amount > 0) {
+            conversions.push({ profileId: attempt.employer_id, amount });
+          }
         }
         // Neither paid → newStatus stays EXPIRED, no money moved.
 

@@ -13,6 +13,7 @@ import { AdminContactRecordController } from './admin-contact-record.controller'
 import { ContactUnlockScheduler } from './contact-unlock.scheduler';
 import { MatchingModule } from '../matching/matching.module';
 import { RecommendationEngineModule } from '../recommendation-engine/recommendation-engine.module';
+import { BusinessSubscriptionModule } from '../business/subscription/business-subscription.module';
 
 @Module({
   imports: [
@@ -23,6 +24,8 @@ import { RecommendationEngineModule } from '../recommendation-engine/recommendat
     InvoiceModule,
     MatchingModule,
     RecommendationEngineModule,
+    // A business's plan covers the employer side of an unlock (quota).
+    BusinessSubscriptionModule,
     AdminCacheModule,
     // For AdminAuthGuard/RolesGuard on AdminContactRecordController — the guard
     // needs JwtService, which only AuthModule provides.

@@ -37,6 +37,9 @@ export function resolvePaymentType(
     case PaymentRequestType.WALLET_TOP_UP:
       return PaymentType.WALLET_TOP_UP;
 
+    case PaymentRequestType.BUSINESS_SUBSCRIPTION:
+      return PaymentType.BUSINESS_SUBSCRIPTION;
+
     case PaymentRequestType.CONTACT_UNLOCK:
     case PaymentRequestType.RECOMMENDATION_CONTACT:
       return PaymentType.CONTACT_UNLOCK;

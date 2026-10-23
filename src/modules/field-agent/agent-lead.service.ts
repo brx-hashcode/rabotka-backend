@@ -1,3 +1,4 @@
+import { fieldAgentsEligibleWhere } from '../business/subscription/subscription-where';
 import {
   BadRequestException,
   ConflictException,
@@ -523,6 +524,9 @@ export class AgentLeadService {
     options: { offList?: boolean } = {},
   ) {
     const lead = await this.requireClaim(agentId, leadId);
+    if (!(await this.agentsAllowedOn(lead.job_offer_id))) {
+      throw new ForbiddenException('Cette offre n’est pas ouverte aux agents.');
+    }
 
     // The consent is THIS agent's own call. A lead changes hands when a claim
     // lapses, and another agent's « Intéressé » let the new claimer place the
@@ -797,6 +801,14 @@ export class AgentLeadService {
    * the checks ApplicationService would fail, asked up front so the agent
    * sees them before confirming. Null when nothing stands in the way.
    */
+  /** A business's offer is open to agents only while its plan includes them. */
+  private async agentsAllowedOn(jobOfferId: string): Promise<boolean> {
+    const count = await this.prisma.jobOffer.count({
+      where: { id: jobOfferId, ...fieldAgentsEligibleWhere() },
+    });
+    return count > 0;
+  }
+
   private async placementBlocker(
     agentId: string,
     jobOfferId: string,
@@ -811,6 +823,9 @@ export class AgentLeadService {
     }
     if (worker.verification_status !== VerificationStatus.VERIFIED) {
       return 'L’identité de ce travailleur n’est pas encore vérifiée.';
+    }
+    if (!(await this.agentsAllowedOn(jobOfferId))) {
+      return 'Cette offre n’est pas ouverte aux agents.';
     }
     const [applied, heldElsewhere] = await Promise.all([
       this.prisma.application.count({

@@ -201,6 +201,7 @@ enum PaymentType {
   PENALTY
   CONTACT_UNLOCK
   WALLET_TOP_UP
+  BUSINESS_SUBSCRIPTION
 }
 
 enum PaymentFlow {
@@ -306,6 +307,8 @@ enum PaymentRequestType {
   CONTACT_UNLOCK
   RECOMMENDATION_CONTACT
   WALLET_TOP_UP
+  /// A period of a business plan (BusinessSubscription).
+  BUSINESS_SUBSCRIPTION
 }
 
 enum ClaimStatus {
@@ -1365,6 +1368,9 @@ model JobOffer {
   note                    String?
   quantity                Int            @default(1)
   status                  JobOfferStatus @default(ACTIVE)
+  /// Shown before other offers until then: the employer's business plan
+  /// includes priority visibility (set on activation, cleared on expiry).
+  priority_until          DateTime?      @db.Timestamptz
   employer_unlock_paid    Boolean        @default(false)
   employer_unlock_paid_at DateTime?
   vector_indexed_at       DateTime?
@@ -1965,6 +1971,10 @@ model PaymentRequest {
   /// The penalties a PENALTY_RESOLUTION / PENALTY_BATCH request was priced for.
   /// Settling it marks exactly these paid (pentest A2-F04, #860).
   penalty_ids               String[]             @default([]) @db.Uuid
+  /// BUSINESS_SUBSCRIPTION: the plan and period this payment buys, priced
+  /// when the request was created (a later price change does not touch it).
+  business_plan_id          String?              @db.Uuid
+  business_billing_period   BusinessBillingPeriod?
 
   profile    Profile   @relation(fields: [profile_id], references: [id], onDelete: Cascade)
   invoice    Invoice?
@@ -2203,6 +2213,11 @@ enum ProfileNotificationType {
   BUSINESS_REJECTED
   /// One business paper refused on its own: replace it from the dashboard.
   BUSINESS_DOCUMENT_REJECTED
+  /// Business subscriptions (email + in-app only).
+  BUSINESS_TRIAL_STARTED
+  BUSINESS_SUBSCRIPTION_ACTIVE
+  BUSINESS_SUBSCRIPTION_EXPIRING
+  BUSINESS_SUBSCRIPTION_EXPIRED
 }
 
 /// The in-app feed behind the bell in rabotka-client.
@@ -2301,6 +2316,7 @@ enum InvoiceReason {
   CONTACT_UNLOCK
   PENALTY
   WALLET_TOP_UP
+  BUSINESS_SUBSCRIPTION
   OTHER
 }
 
@@ -3366,8 +3382,9 @@ model Business {
   rejection_reason    String?
   deleted_at          DateTime?          @db.Timestamptz
 
-  profile   Profile            @relation(fields: [profile_id], references: [id], onDelete: Cascade)
-  documents BusinessDocument[]
+  profile       Profile                @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  documents     BusinessDocument[]
+  subscriptions BusinessSubscription[]
 
   @@index([verification_status], name: "idx_business_verification_status")
   @@index([category], name: "idx_business_category")
@@ -3401,4 +3418,88 @@ model BusinessDocument {
 
   @@index([business_id], name: "idx_business_document_business")
   @@map("business_documents")
+}
+
+enum BusinessSubscriptionStatus {
+  TRIAL
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum BusinessBillingPeriod {
+  TRIAL
+  MONTHLY
+  ANNUAL
+}
+
+/// A business plan, edited in admin: prices, quotas and what it includes.
+/// Never hard-coded — the catalog is this table.
+model BusinessPlan {
+  id                    String   @id @default(uuid()) @db.Uuid
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+  code                  String   @unique
+  name                  String
+  description           String?  @db.Text
+  monthly_price_fcfa    Int
+  annual_price_fcfa     Int
+  /// Contact unlocks covered per period (employer side). Null: unlimited.
+  unlocks_per_period    Int?
+  /// Job offers active at once. Null: unlimited.
+  active_offers_limit   Int?
+  includes_preselection Boolean  @default(false)
+  includes_field_agents Boolean  @default(false)
+  priority_visibility   Boolean  @default(false)
+  is_active             Boolean  @default(true)
+  sort_order            Int      @default(0)
+
+  subscriptions BusinessSubscription[]
+
+  @@map("business_plans")
+}
+
+/// One period of a plan, bought, granted or given as the trial. At most one
+/// TRIAL/ACTIVE row covers a moment; a renewal bought early starts when the
+/// running one ends. One trial per business, ever (partial unique index).
+model BusinessSubscription {
+  id                  String                     @id @default(uuid()) @db.Uuid
+  created_at          DateTime                   @default(now())
+  updated_at          DateTime                   @updatedAt
+  business_id         String                     @db.Uuid
+  plan_id             String                     @db.Uuid
+  status              BusinessSubscriptionStatus
+  billing_period      BusinessBillingPeriod
+  starts_at           DateTime                   @db.Timestamptz
+  ends_at             DateTime                   @db.Timestamptz
+  unlocks_used        Int                        @default(0)
+  payment_request_id  String?                    @unique @db.Uuid
+  /// The admin who granted or cancelled it by hand.
+  granted_by          String?                    @db.Uuid
+  reminded_at         DateTime?                  @db.Timestamptz
+  /// Set once the expiry has been handled (status, offers, messages).
+  expired_notified_at DateTime?                  @db.Timestamptz
+
+  business Business             @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  plan     BusinessPlan         @relation(fields: [plan_id], references: [id])
+  usages   BusinessQuotaUsage[]
+
+  @@index([business_id, ends_at], name: "idx_business_subscription_business_end")
+  @@index([status, ends_at], name: "idx_business_subscription_status_end")
+  @@map("business_subscriptions")
+}
+
+/// A contact unlock covered by a subscription's quota. Released (and the unit
+/// given back) when the unlock expires or is cancelled.
+model BusinessQuotaUsage {
+  id                        String    @id @default(uuid()) @db.Uuid
+  created_at                DateTime  @default(now())
+  subscription_id           String    @db.Uuid
+  contact_unlock_attempt_id String    @unique @db.Uuid
+  released_at               DateTime? @db.Timestamptz
+
+  subscription BusinessSubscription @relation(fields: [subscription_id], references: [id], onDelete: Cascade)
+
+  @@index([subscription_id], name: "idx_business_quota_usage_subscription")
+  @@map("business_quota_usages")
 }

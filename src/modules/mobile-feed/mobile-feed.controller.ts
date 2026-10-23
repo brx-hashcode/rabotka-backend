@@ -1,3 +1,4 @@
+import { PRIORITY_FIRST } from '../business/subscription/subscription-where';
 import {
   CHATTABLE_APPLICATION_ORDER,
   CHATTABLE_APPLICATION_SELECT,
@@ -856,7 +857,8 @@ export class MobileFeedController {
         { id: 'asc' },
       ];
     }
-    return [{ created_at: 'desc' }, { id: 'asc' }];
+    // Default order: a business plan with priority visibility first.
+    return [PRIORITY_FIRST, { created_at: 'desc' }, { id: 'asc' }];
   }
 
   private async assertProfileType(

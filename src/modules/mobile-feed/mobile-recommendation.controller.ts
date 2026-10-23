@@ -1,3 +1,4 @@
+import { BusinessSubscriptionService } from '../business/subscription/business-subscription.service';
 import {
   Controller,
   ForbiddenException,
@@ -9,6 +10,7 @@ import {
   Query,
   Req,
   UseGuards,
+  Optional,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -150,6 +152,8 @@ export class MobileRecommendationController {
     private readonly portfolio: PortfolioService,
     // Appended: the specs construct this controller positionally.
     private readonly profileNotifications: ProfileNotificationService,
+    @Optional()
+    private readonly subscriptions?: BusinessSubscriptionService,
   ) {}
 
   @Get('worker-feed')
@@ -730,5 +734,7 @@ export class MobileRecommendationController {
     if (profile.profile_type !== ProfileType.EMPLOYER) {
       throw new ForbiddenException('Réservé aux employeurs');
     }
+    // A business uses the preselection when its plan includes it.
+    await this.subscriptions?.assertFeature(profileId, 'preselection');
   }
 }

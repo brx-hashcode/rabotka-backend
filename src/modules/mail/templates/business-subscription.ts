@@ -1,0 +1,122 @@
+import { emailButton, escapeHtml } from './layout';
+
+/**
+ * Business subscription messages. By email (and in-app), never WhatsApp;
+ * sent with the layout's « Business » label, signed by Rabotka Business.
+ */
+
+const SIGN_OFF = `
+    <p>
+      Merci de votre confiance,<br />
+      <strong>L'équipe Rabotka Business</strong>
+    </p>`;
+
+function frDate(date: Date): string {
+  return date.toLocaleDateString('fr-FR', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'Africa/Brazzaville',
+  });
+}
+
+export function businessTrialStartedEmail(
+  name: string,
+  p: { businessName: string; planName: string; endsAt: Date; url: string },
+): string {
+  return `
+    <p>Bonjour ${escapeHtml(name)},</p>
+
+    <p>
+      <strong>${escapeHtml(p.businessName)}</strong> est vérifiée : votre essai
+      gratuit de la formule <strong>${escapeHtml(p.planName)}</strong> commence
+      aujourd'hui, jusqu'au <strong>${frDate(p.endsAt)}</strong>.
+    </p>
+
+    <p>
+      Publiez vos offres et recrutez dès maintenant. Vous pourrez choisir votre
+      formule à tout moment depuis votre espace, rubrique « Abonnement ».
+    </p>
+
+    ${emailButton(p.url, 'Découvrir mon abonnement')}
+    ${SIGN_OFF}
+  `;
+}
+
+export function businessSubscriptionActiveEmail(
+  name: string,
+  p: {
+    planName: string;
+    periodLabel: string;
+    startsAt: Date;
+    endsAt: Date;
+    url: string;
+  },
+): string {
+  const later = p.startsAt.getTime() > Date.now() + 60_000;
+  return `
+    <p>Bonjour ${escapeHtml(name)},</p>
+
+    <p>
+      Votre paiement est confirmé : votre abonnement
+      <strong>${escapeHtml(p.planName)}</strong> (${escapeHtml(p.periodLabel)})
+      ${
+        later
+          ? `prendra le relais le <strong>${frDate(p.startsAt)}</strong>, à la fin de la période en cours,`
+          : 'est actif'
+      }
+      jusqu'au <strong>${frDate(p.endsAt)}</strong>.
+    </p>
+
+    <p>Votre facture vous est envoyée dans un e-mail séparé.</p>
+
+    ${emailButton(p.url, 'Voir mon abonnement')}
+    ${SIGN_OFF}
+  `;
+}
+
+export function businessSubscriptionExpiringEmail(
+  name: string,
+  p: { planName: string; endsAt: Date; trial: boolean; url: string },
+): string {
+  return `
+    <p>Bonjour ${escapeHtml(name)},</p>
+
+    <p>
+      ${p.trial ? 'Votre essai gratuit' : `Votre abonnement <strong>${escapeHtml(p.planName)}</strong>`}
+      se termine le <strong>${frDate(p.endsAt)}</strong>.
+    </p>
+
+    <p>
+      ${p.trial ? 'Choisissez une formule' : 'Renouvelez-le'} pour garder vos
+      offres actives, vos contacts inclus et vos avantages. Un renouvellement
+      anticipé s'ajoute à la période en cours : vous ne perdez aucun jour.
+    </p>
+
+    ${emailButton(p.url, p.trial ? 'Choisir ma formule' : 'Renouveler')}
+    ${SIGN_OFF}
+  `;
+}
+
+export function businessSubscriptionExpiredEmail(
+  name: string,
+  p: { planName: string; trial: boolean; url: string },
+): string {
+  return `
+    <p>Bonjour ${escapeHtml(name)},</p>
+
+    <p>
+      ${p.trial ? 'Votre essai gratuit' : `Votre abonnement <strong>${escapeHtml(p.planName)}</strong>`}
+      est terminé.
+    </p>
+
+    <p>
+      Vos offres publiées restent visibles, mais vous ne pouvez plus en publier
+      de nouvelles, et chaque contact débloqué est désormais payé à l'unité.
+      Choisissez une formule pour retrouver vos avantages.
+    </p>
+
+    ${emailButton(p.url, 'Choisir ma formule')}
+    ${SIGN_OFF}
+  `;
+}
