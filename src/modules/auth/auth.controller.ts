@@ -13,6 +13,7 @@ import {
   HttpStatus,
   UseGuards,
   UnauthorizedException,
+  BadRequestException,
   Headers,
 } from '@nestjs/common';
 import {
@@ -50,6 +51,20 @@ import { SIGNUP_TOKEN_HEADER } from './guards/signup-upload.guard';
 import { QrGateway } from '../ws-notifications/qr.gateway';
 import { WsNotificationsGateway } from '../ws-notifications/ws-notifications.gateway';
 
+/**
+ * The one identity a sign-up proves: the phone, or a business's email. Both at
+ * once is refused rather than picked from — which was proven decides whether
+ * the account is a business.
+ */
+function signupTarget(dto: { phone?: string; email?: string }): string {
+  if (dto.phone !== undefined && dto.email !== undefined) {
+    throw new BadRequestException(
+      'Donnez un numéro de téléphone ou une adresse e-mail, pas les deux.',
+    );
+  }
+  return (dto.email ?? dto.phone) as string;
+}
+
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
@@ -79,9 +94,9 @@ export class AuthController {
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @ApiOperation({
     summary:
-      'Signup step 1: send a WhatsApp code to the number being registered',
+      'Signup step 1: send a WhatsApp code to the number being registered, or an email code to a business address',
     description:
-      'Refused (409) when an account already exists for the number. The code proves the number belongs to whoever signs up; see signup/verify-otp.',
+      'Refused (409) when an account already exists for the number or address. The code proves it belongs to whoever signs up; see signup/verify-otp. A sign-up proven by email is a business sign-up.',
   })
   @ApiBody({ type: SignupSendOtpDto })
   @ApiResponse({ status: 200, description: 'Code sent' })
@@ -91,7 +106,7 @@ export class AuthController {
   })
   @ApiResponse({ status: 429, description: 'Too many codes for this number' })
   async sendSignupOtp(@Body() dto: SignupSendOtpDto) {
-    return this.authService.sendSignupOtp(dto.phone, {
+    return this.authService.sendSignupOtp(signupTarget(dto), {
       firstName: dto.firstName,
       lastName: dto.lastName,
       profileType: dto.profileType,
@@ -111,7 +126,7 @@ export class AuthController {
   @ApiResponse({ status: 200, description: '{ signupToken, expiresIn }' })
   @ApiResponse({ status: 400, description: 'Wrong or expired code' })
   async verifySignupOtp(@Body() dto: SignupVerifyOtpDto) {
-    return this.authService.verifySignupOtp(dto.phone, dto.code);
+    return this.authService.verifySignupOtp(signupTarget(dto), dto.code);
   }
 
   @Public()

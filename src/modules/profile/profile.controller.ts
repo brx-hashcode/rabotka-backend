@@ -12,7 +12,6 @@ import {
   Res,
   Query,
   BadRequestException,
-  ForbiddenException,
   Inject,
   Param,
   Logger,
@@ -21,10 +20,8 @@ import type Redis from 'ioredis';
 import { Throttle } from '@nestjs/throttler';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { sniffFileType } from '../../common/utils/file-signature.util';
-import {
-  consumeSignupToken,
-  phoneForSignupToken,
-} from '../auth/signup-token';
+import { consumeSignupToken, readSignupToken } from '../auth/signup-token';
+import { signupEntryFor } from '../business/business-signup';
 import { SignupUploadGuard } from '../auth/guards/signup-upload.guard';
 import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -143,18 +140,18 @@ export class ProfileController {
     @Res({ passthrough: true }) res: Response,
   ) {
     // The number must have been verified by WhatsApp code, by this caller,
-    // within the hour — or anyone could register someone else's number.
-    const verifiedPhone = await phoneForSignupToken(
-      this.redis,
-      createProfileDto.signupToken,
+    // within the hour — or anyone could register someone else's number. A
+    // business proves its email instead, and that is what makes it a business
+    // (signupEntryFor).
+    const entry = signupEntryFor(
+      await readSignupToken(this.redis, createProfileDto.signupToken),
+      createProfileDto,
     );
-    if (!verifiedPhone || verifiedPhone !== createProfileDto.phone) {
-      throw new ForbiddenException(
-        'Vérifiez votre numéro de téléphone avant de créer votre compte.',
-      );
-    }
 
-    const result = await this.profileService.createProfile(createProfileDto);
+    const result = await this.profileService.createProfile(
+      createProfileDto,
+      entry,
+    );
     // Spent: one verified number, one account.
     await consumeSignupToken(this.redis, createProfileDto.signupToken);
 
@@ -183,23 +180,28 @@ export class ProfileController {
     // Role decides the closing line: workers are pointed at offers that match
     // them, employers at profiles that match them. Both land on /home, which is
     // already role-aware.
+    // Not for a business: its phone was never proven, so it is not a
+    // WhatsApp line we write to (whatsapp_connected = false); the email above
+    // is its welcome.
     const profileCreatedKey =
       createProfileDto.profileType === ProfileType.EMPLOYER
         ? ('profileCreatedEmployer' as const)
         : ('profileCreatedWorker' as const);
-    void this.whatsApp
-      .sendTemplateMessage(
-        createProfileDto.phone,
-        profileCreatedKey,
-        createProfileDto.firstName,
-        result.profileId,
-      )
-      .catch((err: unknown) =>
-        this.logger.warn(
-          `Failed to send profile_created WhatsApp template to ${createProfileDto.phone}`,
-          err,
-        ),
-      );
+    if (entry === 'whatsapp') {
+      void this.whatsApp
+        .sendTemplateMessage(
+          createProfileDto.phone,
+          profileCreatedKey,
+          createProfileDto.firstName,
+          result.profileId,
+        )
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `Failed to send profile_created WhatsApp template to ${createProfileDto.phone}`,
+            err,
+          ),
+        );
+    }
 
     // Sign a JWT and set the auth cookie so the user is logged in immediately.
     // Through `setAuthCookie` rather than an inline `res.cookie`: it is the one

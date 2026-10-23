@@ -3,7 +3,7 @@ import {
   consumeSignupToken,
   countSignupUpload,
   issueSignupToken,
-  phoneForSignupToken,
+  readSignupToken,
   SIGNUP_MAX_UPLOADS,
 } from '../signup-token';
 import { SignupUploadGuard } from '../guards/signup-upload.guard';
@@ -32,37 +32,66 @@ function fakeRedis() {
   };
 }
 
+const WHATSAPP = { entry: 'whatsapp', phone: '+242061234567' } as const;
+
 describe('signup token', () => {
   it('stands for the verified number until it is spent', async () => {
     const redis = fakeRedis();
-    const token = await issueSignupToken(redis as never, '+242061234567');
+    const token = await issueSignupToken(redis as never, WHATSAPP);
 
-    expect(await phoneForSignupToken(redis as never, token)).toBe(
-      '+242061234567',
-    );
+    expect(await readSignupToken(redis as never, token)).toEqual(WHATSAPP);
     await consumeSignupToken(redis as never, token);
-    expect(await phoneForSignupToken(redis as never, token)).toBeNull();
+    expect(await readSignupToken(redis as never, token)).toBeNull();
+  });
+
+  it('remembers a business sign-up, proven by email', async () => {
+    const redis = fakeRedis();
+    const token = await issueSignupToken(redis as never, {
+      entry: 'business',
+      email: 'contact@ecole.cg',
+    });
+
+    expect(await readSignupToken(redis as never, token)).toEqual({
+      entry: 'business',
+      email: 'contact@ecole.cg',
+    });
+  });
+
+  it('reads a token issued before the record, a bare number, as WhatsApp', async () => {
+    const redis = fakeRedis();
+    const token = await issueSignupToken(redis as never, WHATSAPP);
+    const [key] = [...redis.data.keys()];
+    redis.data.set(key, '+242061234567');
+
+    expect(await readSignupToken(redis as never, token)).toEqual(WHATSAPP);
+  });
+
+  it('knows nothing of a record it cannot read', async () => {
+    const redis = fakeRedis();
+    const token = await issueSignupToken(redis as never, WHATSAPP);
+    const [key] = [...redis.data.keys()];
+    redis.data.set(key, '{"entry":"business"}');
+
+    expect(await readSignupToken(redis as never, token)).toBeNull();
   });
 
   it('is stored hashed, never in clear', async () => {
     const redis = fakeRedis();
-    const token = await issueSignupToken(redis as never, '+242061234567');
+    const token = await issueSignupToken(redis as never, WHATSAPP);
 
     expect([...redis.data.keys()].join()).not.toContain(token);
   });
 
   it('knows nothing of an unknown, empty or oversized token', async () => {
     const redis = fakeRedis();
-    expect(await phoneForSignupToken(redis as never, 'nope')).toBeNull();
-    expect(await phoneForSignupToken(redis as never, '')).toBeNull();
-    expect(
-      await phoneForSignupToken(redis as never, 'x'.repeat(200)),
-    ).toBeNull();
+    expect(await readSignupToken(redis as never, 'nope')).toBeNull();
+    expect(await readSignupToken(redis as never, '')).toBeNull();
+    expect(await readSignupToken(redis as never, 'x'.repeat(200))).toBeNull();
   });
 
   it('allows a bounded number of uploads per signup', async () => {
     const redis = fakeRedis();
-    const token = await issueSignupToken(redis as never, '+242061234567');
+    const token = await issueSignupToken(redis as never, WHATSAPP);
 
     for (let i = 0; i < SIGNUP_MAX_UPLOADS; i++) {
       expect(await countSignupUpload(redis as never, token)).toBe(true);
@@ -85,7 +114,7 @@ describe('SignupUploadGuard', () => {
 
   it('lets an upload through with a verified token', async () => {
     const redis = fakeRedis();
-    const token = await issueSignupToken(redis as never, '+242061234567');
+    const token = await issueSignupToken(redis as never, WHATSAPP);
     const guard = new SignupUploadGuard(redis as never);
 
     await expect(

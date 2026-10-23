@@ -41,6 +41,7 @@ export class OnboardingAttemptAdminController {
       limit: query.limit,
       q: query.q,
       stage: query.stage,
+      entry: query.entry,
       incomplete: query.incomplete === 'true',
       contacted:
         query.contacted === undefined ? undefined : query.contacted === 'true',
