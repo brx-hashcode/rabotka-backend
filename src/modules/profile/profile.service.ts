@@ -118,6 +118,11 @@ import {
   missingRequiredDocuments,
 } from '../business/business-catalog';
 import type { SignupIdentity } from '../auth/signup-token';
+import {
+  changedReviewedFields,
+  legalFormAfterEdit,
+} from '../business/business-edit';
+import type { UpdateBusinessDto } from '../business/dto/update-business.dto';
 
 const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
   [ProfileType.WORKER]: 'Travailleur',
@@ -389,19 +394,28 @@ export type AdminBusinessDetail = {
   verifiedAt: string | null;
   rejectionReason: string | null;
   createdAt: string;
-  documents: {
-    id: string;
-    documentType: BusinessDocumentType;
-    label: string;
-    fileName: string | null;
-    mimeType: string | null;
-    verificationStatus: VerificationStatus;
-    rejectionReason: string | null;
-    createdAt: string;
-  }[];
+  /** The current papers; each carries the versions it replaced. */
+  documents: (BusinessDocumentView & {
+    /** Sent to replace a refused or pending paper. */
+    resubmitted: boolean;
+    /** What was sent before, newest first — kept for the reviewer. */
+    previousVersions: BusinessDocumentView[];
+  })[];
   /** « One of » groups the type must provide, and those not yet covered. */
   requiredDocuments: { type: BusinessDocumentType; label: string }[][];
   missingDocuments: { type: BusinessDocumentType; label: string }[][];
+};
+
+type BusinessDocumentView = {
+  id: string;
+  documentType: BusinessDocumentType;
+  label: string;
+  fileName: string | null;
+  mimeType: string | null;
+  verificationStatus: VerificationStatus;
+  rejectionReason: string | null;
+  createdAt: string;
+  verifiedAt: string | null;
 };
 
 type PrismaTransactionClient = Parameters<
@@ -426,6 +440,56 @@ const KYC_PENDING_TTL_MS = 24 * 60 * 60 * 1000;
 const KYC_SWEEP_BATCH = 20;
 
 /** The content type of an uploaded KYC object, from the extension its key carries. */
+type BusinessDocumentRow = {
+  id: string;
+  document_type: BusinessDocumentType;
+  file_name: string | null;
+  mime_type: string | null;
+  verification_status: VerificationStatus;
+  rejection_reason: string | null;
+  created_at: Date;
+  verified_at: Date | null;
+  replaces_id: string | null;
+};
+
+function documentView(d: BusinessDocumentRow): BusinessDocumentView {
+  return {
+    id: d.id,
+    documentType: d.document_type,
+    label: BUSINESS_DOCUMENT_LABELS[d.document_type],
+    fileName: d.file_name,
+    mimeType: d.mime_type,
+    verificationStatus: d.verification_status,
+    rejectionReason: d.rejection_reason,
+    createdAt: d.created_at.toISOString(),
+    verifiedAt: d.verified_at?.toISOString() ?? null,
+  };
+}
+
+/** The chain a paper replaced, newest first (bounded: a cycle cannot loop). */
+function previousVersionsOf<T extends BusinessDocumentRow>(
+  doc: T,
+  byId: Map<string, T>,
+): T[] {
+  const chain: T[] = [];
+  let next = doc.replaces_id ? byId.get(doc.replaces_id) : undefined;
+  while (next && chain.length < 50) {
+    chain.push(next);
+    next = next.replaces_id ? byId.get(next.replaces_id) : undefined;
+  }
+  return chain;
+}
+
+/** Back to « en attente »: the last decision no longer holds. */
+function reopenedReview() {
+  return {
+    verification_status: VerificationStatus.PENDING,
+    verified_at: null,
+    verified_by: null,
+    rejection_reason: null,
+  };
+}
+
 function mimeTypeOfKey(key: string): string | null {
   const ext = key.slice(key.lastIndexOf('.') + 1).toLowerCase();
   return (
@@ -2157,6 +2221,8 @@ export class ProfileService {
       throw new NotFoundException("Ce profil n'a pas d'organisation.");
     }
     const requirement = DOCUMENTS_BY_CATEGORY[business.category];
+    const current = business.documents.filter((d) => !d.superseded_at);
+    const byId = new Map(business.documents.map((d) => [d.id, d]));
     return {
       id: business.id,
       name: business.name,
@@ -2182,22 +2248,26 @@ export class ProfileService {
       verifiedAt: business.verified_at?.toISOString() ?? null,
       rejectionReason: business.rejection_reason,
       createdAt: business.created_at.toISOString(),
-      documents: business.documents.map((d) => ({
-        id: d.id,
-        documentType: d.document_type,
-        label: BUSINESS_DOCUMENT_LABELS[d.document_type],
-        fileName: d.file_name,
-        mimeType: d.mime_type,
-        verificationStatus: d.verification_status,
-        rejectionReason: d.rejection_reason,
-        createdAt: d.created_at.toISOString(),
-      })),
+      // A replacement keeps the place of the paper it replaced: ordered by
+      // when the first version was sent.
+      documents: current
+        .map((d) => ({ doc: d, previous: previousVersionsOf(d, byId) }))
+        .sort(
+          (a, b) =>
+            (a.previous.at(-1) ?? a.doc).created_at.getTime() -
+            (b.previous.at(-1) ?? b.doc).created_at.getTime(),
+        )
+        .map(({ doc, previous }) => ({
+          ...documentView(doc),
+          resubmitted: doc.replaces_id !== null,
+          previousVersions: previous.map(documentView),
+        })),
       requiredDocuments: requirement.required.map((group) =>
         group.map((t) => ({ type: t, label: BUSINESS_DOCUMENT_LABELS[t] })),
       ),
       missingDocuments: missingRequiredDocuments(
         business.category,
-        business.documents.map((d) => d.document_type),
+        current.map((d) => d.document_type),
       ).map((group) =>
         group.map((t) => ({ type: t, label: BUSINESS_DOCUMENT_LABELS[t] })),
       ),
@@ -2236,7 +2306,12 @@ export class ProfileService {
       throw new BadRequestException('Indiquez le motif du refus.');
     }
     const { count } = await this.prisma.businessDocument.updateMany({
-      where: { id: documentId, business: { profile_id: profileId } },
+      // A superseded version is history: only the current paper is decided.
+      where: {
+        id: documentId,
+        superseded_at: null,
+        business: { profile_id: profileId },
+      },
       data: {
         verification_status: decision,
         verified_by: adminUserId === 'system' ? null : adminUserId,
@@ -2297,6 +2372,7 @@ export class ProfileService {
               where: {
                 business_id: business.id,
                 verification_status: 'PENDING',
+                superseded_at: null,
               },
               data: {
                 verification_status: 'VERIFIED',
@@ -2341,6 +2417,208 @@ export class ProfileService {
     }
 
     return this.getBusinessForAdmin(profileId);
+  }
+
+  /**
+   * Edits an organisation. By the business itself (`by: 'owner'`), changing
+   * what the review checked (name, type, legal form, RCCM, NIU, SCIEN) sends
+   * it back to review — a verified business would otherwise rename itself
+   * after the check. An admin's correction (`by: 'admin'`) is the review, and
+   * reopens nothing. Contact details never do.
+   */
+  async updateBusiness(
+    profileId: string,
+    dto: UpdateBusinessDto,
+    by: 'owner' | 'admin',
+  ): Promise<{ business: AdminBusinessDetail; reopened: boolean }> {
+    const business = await this.prisma.business.findUnique({
+      where: { profile_id: profileId },
+    });
+    if (!business || business.deleted_at) {
+      throw new NotFoundException("Ce profil n'a pas d'organisation.");
+    }
+
+    const category = dto.category ?? business.category;
+    const legalForm = legalFormAfterEdit(category, business.legal_form, dto);
+    const changed = changedReviewedFields(
+      {
+        name: business.name,
+        category: business.category,
+        legalForm: business.legal_form,
+        registrationNumber: business.registration_number,
+        taxId: business.tax_id,
+        statisticalId: business.statistical_id,
+      },
+      { ...dto, legalForm },
+    );
+    const reopened =
+      by === 'owner' &&
+      changed.length > 0 &&
+      business.verification_status !== VerificationStatus.PENDING;
+
+    const location =
+      dto.countryCode !== undefined || dto.city !== undefined
+        ? this.geo.resolveLocation({
+            countryCode: dto.countryCode ?? business.country_code ?? undefined,
+            city: dto.city ?? undefined,
+          })
+        : {};
+
+    await this.prisma.$transaction([
+      this.prisma.business.update({
+        where: { id: business.id },
+        data: {
+          name: dto.name,
+          category: dto.category,
+          legal_form: legalForm,
+          size: dto.size,
+          registration_number: dto.registrationNumber,
+          tax_id: dto.taxId,
+          statistical_id: dto.statisticalId,
+          address: dto.address,
+          country_code: location.country_code,
+          city: dto.city === null ? null : location.city,
+          email: dto.email,
+          phone: dto.phone,
+          website: dto.website,
+          description: dto.description,
+          ...(reopened ? reopenedReview() : {}),
+        },
+      }),
+      ...(reopened ? [this.reopenProfileReview(profileId)] : []),
+    ]);
+
+    if (reopened) {
+      this.emitBusinessResubmitted(
+        profileId,
+        `${business.name} a modifié ses informations (${changed.join(', ')}) : à revoir.`,
+      );
+    }
+    return { business: await this.getBusinessForAdmin(profileId), reopened };
+  }
+
+  /**
+   * A paper sent from the dashboard: a new one, or the replacement of a
+   * current paper not yet accepted (`replacesId`). The replaced row stays,
+   * superseded, so the reviewer can compare and read why it was refused. A
+   * refused business goes back to review with it.
+   */
+  async uploadBusinessDocument(
+    profileId: string,
+    file: Express.Multer.File,
+    documentType: BusinessDocumentType,
+    replacesId?: string,
+  ): Promise<AdminBusinessDetail> {
+    const business = await this.prisma.business.findUnique({
+      where: { profile_id: profileId },
+      include: { documents: { where: { superseded_at: null } } },
+    });
+    if (!business || business.deleted_at) {
+      throw new NotFoundException("Ce profil n'a pas d'organisation.");
+    }
+    const accepted = DOCUMENTS_BY_CATEGORY[business.category];
+    if (
+      ![...accepted.required.flat(), ...accepted.optional].includes(
+        documentType,
+      )
+    ) {
+      throw new BadRequestException(
+        'Ce document ne correspond pas à votre type d’organisation.',
+      );
+    }
+
+    let replaced: (typeof business.documents)[number] | undefined;
+    if (replacesId) {
+      replaced = business.documents.find((d) => d.id === replacesId);
+      if (!replaced) {
+        throw new NotFoundException('Document introuvable.');
+      }
+      if (replaced.verification_status === VerificationStatus.VERIFIED) {
+        throw new ConflictException('Ce document est déjà validé.');
+      }
+      if (replaced.document_type !== documentType) {
+        throw new BadRequestException(
+          'Le nouveau fichier doit être du même type que celui qu’il remplace.',
+        );
+      }
+    } else if (
+      business.documents.some((d) => d.document_type === documentType)
+    ) {
+      throw new ConflictException(
+        'Ce document est déjà fourni : remplacez-le plutôt.',
+      );
+    }
+
+    const bucket = await kycBucket(this.systemConfig, this.configService);
+    const uploaded = await this.fileService.uploadToStorage(file, {
+      folder: 'kyc-documents',
+      access: 'private',
+      bucket,
+    });
+
+    const reopened =
+      business.verification_status === VerificationStatus.REJECTED;
+    const now = new Date();
+    await this.prisma.$transaction([
+      ...(replaced
+        ? [
+            this.prisma.businessDocument.update({
+              where: { id: replaced.id },
+              data: { superseded_at: now },
+            }),
+          ]
+        : []),
+      this.prisma.businessDocument.create({
+        data: {
+          business_id: business.id,
+          document_type: documentType,
+          storage_key: uploaded.key,
+          file_name: file.originalname?.slice(0, 255) || null,
+          mime_type: file.mimetype,
+          replaces_id: replaced?.id ?? null,
+        },
+      }),
+      ...(reopened
+        ? [
+            this.prisma.business.update({
+              where: { id: business.id },
+              data: reopenedReview(),
+            }),
+            this.reopenProfileReview(profileId),
+          ]
+        : []),
+    ]);
+
+    this.emitBusinessResubmitted(
+      profileId,
+      `${business.name} a ${replaced ? 'renvoyé' : 'ajouté'} : ${BUSINESS_DOCUMENT_LABELS[documentType]}.`,
+    );
+    return this.getBusinessForAdmin(profileId);
+  }
+
+  /** A refused profile goes back to « en attente » with its business. */
+  private reopenProfileReview(profileId: string) {
+    return this.prisma.profile.updateMany({
+      where: {
+        id: profileId,
+        verification_status: VerificationStatus.REJECTED,
+      },
+      data: {
+        verification_status: VerificationStatus.PENDING,
+        rejection_reason: null,
+      },
+    });
+  }
+
+  private emitBusinessResubmitted(profileId: string, message: string): void {
+    this.eventEmitter.emit(AdminNotificationEvent.PROFILE_UPDATED, {
+      event: AdminNotificationEvent.PROFILE_UPDATED,
+      title: 'Organisation à revoir',
+      message,
+      entityType: 'profile',
+      entityId: String(profileId),
+      timestamp: new Date().toISOString(),
+    });
   }
 
   /** The same, for a verification image attached during review. */

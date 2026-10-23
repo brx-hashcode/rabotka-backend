@@ -1,4 +1,9 @@
-export { escapeHtml, wrapEmailHtml, type EmailLayoutOptions, type FooterInfo } from './layout';
+export {
+  escapeHtml,
+  wrapEmailHtml,
+  type EmailLayoutOptions,
+  type FooterInfo,
+} from './layout';
 export { sendWelcomeEmail, WELCOME_EMAIL_PREVIEW } from './welcome';
 export {
   referralRewardedEmail,
@@ -13,7 +18,11 @@ export {
   agentWithdrawalRejectedEmail,
 } from './agent-withdrawal';
 export { adminUpdatedEmail } from './admin-updated';
-export { businessApprovedEmail, businessRejectedEmail } from './business-review';
+export {
+  businessApprovedEmail,
+  businessDocumentRejectedEmail,
+  businessRejectedEmail,
+} from './business-review';
 export { kycApprovedEmail } from './kyc-approved';
 export { kycRejectedEmail } from './kyc-rejected';
 export { kycReviewRequestedEmail } from './kyc-review-requested';

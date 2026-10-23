@@ -52,6 +52,7 @@ import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import {
   businessApprovedEmail,
+  businessDocumentRejectedEmail,
   businessRejectedEmail,
   kycApprovedEmail,
   kycRejectedEmail,
@@ -72,6 +73,7 @@ import {
 } from './dto/admin-verify-profile.dto';
 import { AdminUpdateStatusDto } from './dto/admin-update-status.dto';
 import { AdminVerifyBusinessDto } from './dto/admin-verify-business.dto';
+import { UpdateBusinessDto } from '../business/dto/update-business.dto';
 import { AdminUpdateProfileDto } from './dto/admin-update-profile.dto';
 import { PortfolioService } from '../portfolio/portfolio.service';
 import { UpdatePortfolioItemDto } from '../portfolio/dto/update-portfolio-item.dto';
@@ -371,7 +373,90 @@ export class AdminProfileController {
       profileId: id,
       metadata: { decision: dto.decision, reason: dto.reason },
     });
+
+    // A refused paper is the business's to replace: tell it, by email and
+    // in-app (never WhatsApp). An accepted one waits for the overall decision.
+    if (dto.decision === VerifyDecision.REJECTED) {
+      const doc = result.documents.find((d) => d.id === documentId);
+      if (doc)
+        await this.notifyBusinessDocumentRejected(
+          id,
+          result.name,
+          doc.label,
+          dto.reason,
+        );
+    }
     return result;
+  }
+
+  /** Corrects an organisation's details; an admin's edit reopens no review. */
+  @Patch(':id/business')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({
+    summary: 'Edit the business of a business profile (admin only)',
+  })
+  @ApiResponse({ status: 200, description: 'The business after the edit' })
+  async updateBusiness(
+    @Param('id') id: string,
+    @Body() dto: UpdateBusinessDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
+    const { business } = await this.profileService.updateBusiness(
+      id,
+      dto,
+      'admin',
+    );
+    await this.logService.create({
+      action: 'BUSINESS_UPDATED',
+      entityType: 'Business',
+      entityId: business.id,
+      userId: req.user?.userId ?? 'system',
+      profileId: id,
+      metadata: { fields: Object.keys(dto) },
+    });
+    return business;
+  }
+
+  private async notifyBusinessDocumentRejected(
+    profileId: string,
+    businessName: string,
+    documentLabel: string,
+    reason?: string,
+  ): Promise<void> {
+    notifyProfile(this.events, {
+      recipientId: profileId,
+      input: {
+        type: 'BUSINESS_DOCUMENT_REJECTED',
+        documentLabel,
+        reason: reason ?? null,
+      },
+    });
+    const person = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { first_name: true, last_name: true, email: true },
+    });
+    if (!person?.email) return;
+    const name = `${person.first_name ?? ''} ${person.last_name ?? ''}`.trim();
+    await this.mail
+      .sendMail({
+        to: person.email,
+        subject: `${documentLabel} : document à remplacer`,
+        html: await this.layout.wrap(
+          businessDocumentRejectedEmail(
+            name,
+            businessName,
+            documentLabel,
+            reason,
+            this.businessOrganisationUrl(),
+          ),
+        ),
+      })
+      .catch((err: unknown) =>
+        console.warn(
+          `Failed to send the business document email for ${profileId}:`,
+          err,
+        ),
+      );
   }
 
   /**
@@ -440,7 +525,12 @@ export class AdminProfileController {
                   result.name,
                   this.businessDashboardUrl(),
                 )
-              : businessRejectedEmail(name, result.name, dto.reason),
+              : businessRejectedEmail(
+                  name,
+                  result.name,
+                  dto.reason,
+                  this.businessOrganisationUrl(),
+                ),
           ),
         })
         .catch((err: unknown) =>
@@ -461,6 +551,11 @@ export class AdminProfileController {
         process.env.BUSINESS_DASHBOARD_URL ?? 'https://business.rabotka.work'
       ).replace(/\/+$/, '') + '/espace'
     );
+  }
+
+  /** The dashboard page where a business fixes its details and papers. */
+  private businessOrganisationUrl(): string {
+    return `${this.businessDashboardUrl()}/organisation`;
   }
 
   @Get(':id/verification-images/:imageId/raw')
