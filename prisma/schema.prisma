@@ -473,6 +473,10 @@ model Profile {
   rating_count                      Int                @default(0)
   whatsapp_connected                Boolean            @default(false)
   whatsapp_activation_bonus_granted Boolean            @default(false)
+  /// This employer represents an organisation — see `business`. Always an
+  /// EMPLOYER: enforced by the CHECK constraint profiles_business_is_employer
+  /// (migration 20261023100000_business_accounts), which Prisma cannot model.
+  is_business                       Boolean            @default(false)
 
   /// While this is in the future, the bot says NOTHING to this profile: no
   /// reply to an inbound message, no scheduled reminder or nudge. An admin who
@@ -549,6 +553,7 @@ model Profile {
 
   payment_requests                PaymentRequest[]
   kyc_documents                   KycDocument[]
+  business                        Business?
   kyc_verification_images         KycVerificationImage[]
   applications                    Application[]
   job_offers                      JobOffer[]
@@ -605,6 +610,7 @@ model Profile {
   @@index([reliability_score], name: "idx_profile_reliability")
   @@index([category_id], name: "idx_profile_category")
   @@index([deleted_at], name: "idx_profile_deleted_at")
+  @@index([is_business], name: "idx_profile_is_business")
   @@index([country_code, city], name: "idx_profile_country_city")
   @@index([last_inbound_at(sort: Desc)], name: "idx_profile_last_inbound")
   @@map("profiles")
@@ -3252,4 +3258,129 @@ model OnboardingAttempt {
   @@index([stage, last_activity_at], name: "idx_onboarding_attempt_stage_activity")
   @@index([started_at], name: "idx_onboarding_attempt_started")
   @@map("onboarding_attempts")
+}
+
+/// What an organisation is — asked at business sign-up, in everyday words.
+/// Congo-Brazzaville categories; labels and required documents live in
+/// src/modules/business/business-catalog.ts.
+enum BusinessCategory {
+  INDIVIDUAL_BUSINESS
+  TPE
+  PME
+  LARGE_COMPANY
+  STARTUP
+  COOPERATIVE
+  GIE
+  ASSOCIATION
+  NGO
+  INTERNATIONAL_NGO
+  FOUNDATION
+  RELIGIOUS
+  SCHOOL
+  HIGHER_EDUCATION
+  TRAINING_CENTER
+  HEALTH
+  PUBLIC_ADMINISTRATION
+  PUBLIC_ENTERPRISE
+  INTERNATIONAL_ORG
+  OTHER
+}
+
+/// The OHADA (or other) legal form, when the organisation has one.
+enum BusinessLegalForm {
+  EI
+  SARL
+  SARLU
+  SA
+  SAS
+  SASU
+  SNC
+  SCS
+  GIE
+  SCOOPS
+  COOP_CA
+  BRANCH
+  ASSOCIATION
+  FOUNDATION
+  PUBLIC_ENTITY
+  OTHER
+}
+
+/// The organisation's papers, as issued in Congo-Brazzaville.
+enum BusinessDocumentType {
+  RCCM
+  NIU
+  STATUTS
+  PATENTE
+  CNSS
+  SCIEN_SCIET
+  RECEPISSE
+  AGREMENT
+  AUTORISATION_OUVERTURE
+  ARRETE
+  MANDATE
+  OTHER
+}
+
+/// The organisation behind a business profile (`Profile.is_business`). One per
+/// profile. Reviewed by an admin on its documents — a business has no personal
+/// KYC; approving the business is what verifies and activates the profile.
+model Business {
+  id                  String             @id @default(uuid()) @db.Uuid
+  created_at          DateTime           @default(now())
+  updated_at          DateTime           @updatedAt
+  profile_id          String             @unique @db.Uuid
+  /// Raison sociale.
+  name                String
+  category            BusinessCategory
+  legal_form          BusinessLegalForm?
+  /// Headcount bracket: "1-5", "6-20", "21-100", "100+".
+  size                String?
+  /// RCCM number.
+  registration_number String?
+  /// NIU (tax).
+  tax_id              String?
+  /// SCIEN / SCIET (CNSEE).
+  statistical_id      String?
+  address             String
+  country_code        String?            @db.VarChar(2)
+  city                String?
+  email               String?
+  phone               String?
+  website             String?
+  description         String?            @db.Text
+  verification_status VerificationStatus @default(PENDING)
+  verified_at         DateTime?
+  verified_by         String?            @db.Uuid
+  rejection_reason    String?
+  deleted_at          DateTime?          @db.Timestamptz
+
+  profile   Profile            @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  documents BusinessDocument[]
+
+  @@index([verification_status], name: "idx_business_verification_status")
+  @@index([category], name: "idx_business_category")
+  @@index([deleted_at], name: "idx_business_deleted_at")
+  @@map("businesses")
+}
+
+/// One of a business's papers, in the private KYC bucket like `KycDocument`.
+model BusinessDocument {
+  id                  String               @id @default(uuid()) @db.Uuid
+  created_at          DateTime             @default(now())
+  updated_at          DateTime             @updatedAt
+  business_id         String               @db.Uuid
+  document_type       BusinessDocumentType
+  storage_key         String
+  file_name           String?
+  mime_type           String?
+  verification_status VerificationStatus   @default(PENDING)
+  verified_at         DateTime?
+  verified_by         String?              @db.Uuid
+  rejection_reason    String?
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@index([business_id], name: "idx_business_document_business")
+  @@map("business_documents")
 }

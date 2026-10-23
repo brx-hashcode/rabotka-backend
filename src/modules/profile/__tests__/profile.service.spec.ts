@@ -1423,6 +1423,20 @@ describe('ProfileService', () => {
   });
 
   describe('updateProfileByAdmin() - profile type change', () => {
+    // A business is always an employer: the CHECK constraint would refuse it
+    // with a 500, so the service refuses it first, in words.
+    it('refuses to turn a business into a worker', async () => {
+      prisma.profile.findUnique.mockResolvedValue({
+        ...baseProfile,
+        profile_type: 'EMPLOYER',
+        is_business: true,
+      });
+      await expect(
+        service.updateProfileByAdmin('p-1', { profileType: 'WORKER' }),
+      ).rejects.toThrow('compte entreprise');
+      expect(prisma.profile.update).not.toHaveBeenCalled();
+    });
+
     it('removes from the old collection and indexes into the new one', async () => {
       // Existing profile is a WORKER; admin switches it to EMPLOYER.
       prisma.profile.findUnique.mockResolvedValue({
