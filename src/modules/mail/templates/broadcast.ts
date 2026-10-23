@@ -1,4 +1,5 @@
-import { escapeHtml } from './layout';
+import { emailButton, escapeHtml } from './layout';
+import { appUrlFor, signOff, type EmailAudience } from '../audience';
 
 /**
  * An admin announcement, as an email.
@@ -13,16 +14,24 @@ export function broadcastEmail(p: {
   firstName: string;
   body: string;
   link: string | null;
+  audience?: EmailAudience;
 }): string {
+  const audience = p.audience ?? 'worker';
   const paragraphs = escapeHtml(p.body)
     .split(/\n{2,}/)
     .map((block) => `<p>${block.replace(/\n/g, '<br />')}</p>`)
     .join('\n');
 
-  const appUrl = process.env.FRONTEND_URL ?? 'https://rabotka.work';
-  const cta = p.link
-    ? `<p><a href="${appUrl}/${escapeHtml(p.link.replace(/^\/+/, ''))}">Ouvrir Rabotka</a></p>`
-    : '';
+  // The link is a client-app path: a business has none of those pages, so
+  // its button opens its own space instead.
+  const cta = !p.link
+    ? ''
+    : audience === 'business'
+      ? emailButton(appUrlFor('business'), 'Accéder à mon espace')
+      : emailButton(
+          `${appUrlFor(audience)}/${p.link.replace(/^\/+/, '')}`,
+          'Ouvrir Rabotka',
+        );
 
   // NO TITLE IN THE BODY. The broadcast's title is already the SUBJECT LINE,
   // and repeating it as a heading made every announcement open by saying the
@@ -37,7 +46,7 @@ export function broadcastEmail(p: {
 
     <p>
       Cordialement,<br />
-      <strong>L'équipe Rabotka</strong>
+      <strong>${signOff(audience)}</strong>
     </p>
   `;
 }

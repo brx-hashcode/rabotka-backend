@@ -1,8 +1,9 @@
-import { escapeHtml } from './layout';
+import { emailButton, escapeHtml } from './layout';
 
 /**
  * The business review's decisions. By email, never WhatsApp: a business works
- * from the browser and its phone was never verified.
+ * from its dashboard and its phone was never verified. Sent with the layout's
+ * « Business » label, signed by Rabotka Business.
  */
 export function businessApprovedEmail(
   name: string,
@@ -14,18 +15,19 @@ export function businessApprovedEmail(
 
     <p>
       Bonne nouvelle : <strong>${escapeHtml(businessName)}</strong> est vérifiée.
-      Votre compte entreprise Rabotka est désormais <strong>actif</strong>.
+      Votre compte Rabotka Business est désormais <strong>actif</strong>.
     </p>
 
     <p>
       Vous pouvez publier vos offres et consulter les profils présélectionnés
-      depuis votre espace :
-      <a href="${escapeHtml(dashboardUrl)}">${escapeHtml(dashboardUrl.replace(/^https?:\/\//, ''))}</a>
+      depuis votre espace.
     </p>
+
+    ${emailButton(dashboardUrl, 'Accéder à mon espace')}
 
     <p>
       Merci de votre confiance,<br />
-      <strong>L'équipe Rabotka</strong>
+      <strong>L'équipe Rabotka Business</strong>
     </p>
   `;
 }
@@ -44,7 +46,7 @@ export function businessRejectedEmail(
     <p>Bonjour ${escapeHtml(name)},</p>
 
     <p>
-      Après examen, nous n'avons pas pu valider les documents de
+      Après examen, nous n'avons pas pu valider le dossier de
       <strong>${escapeHtml(businessName)}</strong>.
     </p>
 
@@ -52,14 +54,15 @@ export function businessRejectedEmail(
 
     <p>
       Corrigez vos informations ou envoyez de nouveaux documents depuis votre
-      espace : nous reprendrons la vérification dès leur réception.
-      <br />
-      <a href="${escapeHtml(organisationUrl)}">${escapeHtml(organisationUrl.replace(/^https?:\/\//, ''))}</a>
+      espace, rubrique « Mon organisation » : la vérification reprendra dès
+      leur réception.
     </p>
+
+    ${emailButton(organisationUrl, 'Corriger mon dossier')}
 
     <p>
       Merci de votre compréhension,<br />
-      <strong>L'équipe Rabotka</strong>
+      <strong>L'équipe Rabotka Business</strong>
     </p>
   `;
 }
@@ -88,13 +91,14 @@ export function businessDocumentRejectedEmail(
 
     <p>
       Envoyez-en une nouvelle version depuis votre espace, rubrique
-      Organisation :
-      <a href="${escapeHtml(organisationUrl)}">${escapeHtml(organisationUrl.replace(/^https?:\/\//, ''))}</a>
+      « Mon organisation » : elle sera vérifiée dès réception.
     </p>
+
+    ${emailButton(organisationUrl, 'Remplacer le document')}
 
     <p>
       Merci,<br />
-      <strong>L'équipe Rabotka</strong>
+      <strong>L'équipe Rabotka Business</strong>
     </p>
   `;
 }

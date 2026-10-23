@@ -26,6 +26,19 @@ describe('wrapEmailHtml', () => {
     expect(html).toContain('text-align:left;');
   });
 
+  it('draws the logo at 36px', () => {
+    const html = wrapEmailHtml('<p>hi</p>');
+    expect(html).toContain('width="36" height="36"');
+    expect(html).toContain('width:36px;height:36px;');
+  });
+
+  it('labels a business email « Business » beside the logo, and only that', () => {
+    expect(wrapEmailHtml('<p>hi</p>', { product: 'business' })).toContain(
+      '>Business</span>',
+    );
+    expect(wrapEmailHtml('<p>hi</p>')).not.toContain('>Business</span>');
+  });
+
   it('does not depend on any environment variable', () => {
     // Regression guard: the logo used to come from CLOUDFLARE_PUBLIC_BASE_URL
     // read at module load, which is always unset that early in a real boot.

@@ -53,7 +53,13 @@ import {
   RequestPhoneChangeDto,
   ConfirmPhoneChangeDto,
 } from './dto/change-phone.dto';
-import { sendWelcomeEmail, WELCOME_EMAIL_PREVIEW } from '../mail/templates';
+import {
+  BUSINESS_WELCOME_EMAIL_PREVIEW,
+  businessWelcomeEmail,
+  sendWelcomeEmail,
+  WELCOME_EMAIL_PREVIEW,
+} from '../mail/templates';
+import { businessOrganisationUrl } from '../mail/audience';
 import { setAuthCookie } from '../auth/auth-cookie.util';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
@@ -176,7 +182,21 @@ export class ProfileController {
     // drop this on its own, but rendering the welcome template is wasted work
     // and an unconditional-looking send here misreads as a bug. The WhatsApp
     // confirmation below is the real welcome, and it is not conditional.
-    if (createProfileDto.email) {
+    // A business gets its own welcome: its dashboard, by email only — the
+    // worker/employer one sends to the client app and promises WhatsApp.
+    if (entry === 'business' && createProfileDto.email) {
+      await this.mailService.sendMail({
+        to: createProfileDto.email,
+        subject: 'Bienvenue sur Rabotka Business',
+        html: await this.layoutService.wrap(
+          businessWelcomeEmail(createProfileDto.firstName, {
+            businessName: createProfileDto.business?.name ?? '',
+            organisationUrl: businessOrganisationUrl(),
+          }),
+          { previewText: BUSINESS_WELCOME_EMAIL_PREVIEW, product: 'business' },
+        ),
+      });
+    } else if (createProfileDto.email) {
       await this.mailService.sendMail({
         to: createProfileDto.email,
         subject: 'Bienvenue sur Rabotka',
@@ -662,8 +682,14 @@ export class ProfileController {
   })
   @ApiResponse({ status: 200, description: 'Code sent to the new number' })
   @ApiResponse({ status: 400, description: 'Invalid or unchanged number' })
-  @ApiResponse({ status: 409, description: 'Number already used by another account' })
-  @ApiResponse({ status: 503, description: 'WhatsApp unavailable or number unreachable' })
+  @ApiResponse({
+    status: 409,
+    description: 'Number already used by another account',
+  })
+  @ApiResponse({
+    status: 503,
+    description: 'WhatsApp unavailable or number unreachable',
+  })
   async requestPhoneChange(
     @Body() dto: RequestPhoneChangeDto,
     @Req() req: ProfileAuthenticatedRequest,

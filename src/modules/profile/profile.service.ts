@@ -123,6 +123,7 @@ import {
   legalFormAfterEdit,
 } from '../business/business-edit';
 import type { UpdateBusinessDto } from '../business/dto/update-business.dto';
+import { audienceOf, productOf } from '../mail/audience';
 
 const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
   [ProfileType.WORKER]: 'Travailleur',
@@ -1540,11 +1541,25 @@ export class ProfileService {
     });
     try {
       if (profile.email) {
+        // Read here rather than at every caller: which product's copy.
+        const kind = await this.prisma.profile.findUnique({
+          where: { id: profileId },
+          select: { profile_type: true, is_business: true },
+        });
+        const audience = kind ? audienceOf(kind) : 'worker';
         await this.mailService.sendMail({
           to: profile.email,
-          subject: 'Votre compte a été suspendu',
+          subject:
+            audience === 'business'
+              ? 'Votre compte Rabotka Business a été suspendu'
+              : 'Votre compte a été suspendu',
           html: await this.layoutService.wrap(
-            accountSuspendedEmail(profile.first_name, reason ?? undefined),
+            accountSuspendedEmail(
+              profile.first_name,
+              reason ?? undefined,
+              audience,
+            ),
+            { product: productOf(audience) },
           ),
         });
       }
