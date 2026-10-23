@@ -389,10 +389,14 @@ export class WalletService {
   ): Promise<number> {
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
-      select: { whatsapp_activation_bonus_granted: true },
+      select: { whatsapp_activation_bonus_granted: true, is_business: true },
     });
     if (!profile) throw new NotFoundException('Profil introuvable');
     if (profile.whatsapp_activation_bonus_granted) return 0;
+    // A business starts with a trial subscription on approval, not a wallet
+    // credit — and never before its documents are reviewed. Checked here so
+    // every caller (sign-up, approval, activation, bot) is covered at once.
+    if (profile.is_business) return 0;
 
     const credits = await this.systemConfig.getWelcomeCredits();
     const amount =

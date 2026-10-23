@@ -71,7 +71,7 @@ export const BUSINESS_WELCOME_EMAIL_PREVIEW =
 /**
  * The welcome for a business sign-up. Not the worker/employer one: a business
  * works from its dashboard, by email only — no client app, no WhatsApp, and
- * its welcome credit comes with the verification, not the sign-up.
+ * no welcome credit (a business gets a trial subscription once approved).
  */
 export function businessWelcomeEmail(
   name: string,
