@@ -124,6 +124,10 @@ import {
 } from '../business/business-edit';
 import type { UpdateBusinessDto } from '../business/dto/update-business.dto';
 import { audienceOf, productOf } from '../mail/audience';
+import {
+  BUSINESS_VERIFIED_EVENT,
+  type BusinessVerifiedPayload,
+} from '../business/subscription/subscription.events';
 
 const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
   [ProfileType.WORKER]: 'Travailleur',
@@ -2426,15 +2430,11 @@ export class ProfileService {
     });
 
     if (decision === 'VERIFIED') {
-      // Idempotent, as on the KYC path: no double credit.
-      void this.walletService
-        .grantWelcomeCredit(profileId, business.profile.profile_type)
-        .catch((err) =>
-          this.logger.warn(
-            `Welcome credit grant failed for profile=${profileId}`,
-            err,
-          ),
-        );
+      // No welcome credit for a business (WalletService): its trial
+      // subscription starts instead, in BusinessSubscriptionService.
+      this.eventEmitter.emit(BUSINESS_VERIFIED_EVENT, {
+        businessId: business.id,
+      } satisfies BusinessVerifiedPayload);
     }
 
     return this.getBusinessForAdmin(profileId);

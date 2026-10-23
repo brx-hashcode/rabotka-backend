@@ -406,7 +406,9 @@ describe('MobileFeedController', () => {
       mockType(ProfileType.WORKER);
 
       await controller.jobSearch(reqFor('w1') as never, {});
+      // A business plan with priority visibility first, then the newest.
       expect(lastArgs().orderBy).toEqual([
+        { priority_until: { sort: 'desc', nulls: 'last' } },
         { created_at: 'desc' },
         { id: 'asc' },
       ]);
@@ -422,7 +424,7 @@ describe('MobileFeedController', () => {
       });
 
       await controller.jobSearch(reqFor('w1') as never, { sort: 'nonsense' });
-      expect(lastArgs().orderBy[0]).toEqual({ created_at: 'desc' });
+      expect(lastArgs().orderBy[1]).toEqual({ created_at: 'desc' });
     });
 
     it('applies the filter params', async () => {

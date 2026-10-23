@@ -32,6 +32,7 @@ export const BROADCAST_QUEUE = 'broadcast-queue';
 export const MESSAGING_NUDGE_QUEUE = 'messaging-nudge-queue';
 /** Field agents' commissions: one repeatable sweep that decides and releases them. */
 export const AGENT_COMMISSION_QUEUE = 'agent-commission-queue';
+export const BUSINESS_SUBSCRIPTION_QUEUE = 'business-subscription-queue';
 
 @Module({})
 export class QueueModule {

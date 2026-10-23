@@ -10,7 +10,9 @@ import {
   ForbiddenException,
   InternalServerErrorException,
   Inject,
+  Optional,
 } from '@nestjs/common';
+import { BusinessSubscriptionService } from '../business/subscription/business-subscription.service';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { JobNotificationProcessor } from './notification/job-notification.processor';
@@ -419,6 +421,9 @@ export class JobOfferService {
     private readonly geo: GeoService,
     private readonly jobNotification: JobNotificationProcessor,
     private readonly interactionEvents: InteractionEventService,
+    // Appended and optional: the specs build this service positionally.
+    @Optional()
+    private readonly subscriptions?: BusinessSubscriptionService,
   ) {}
 
   /**
@@ -502,6 +507,10 @@ export class JobOfferService {
     }
 
     this.validateCreateDto(dto);
+    // A business publishes within its plan's active-offer limit.
+    await this.subscriptions?.assertCanPublishOffer(employerId);
+    const priorityUntil =
+      (await this.subscriptions?.priorityUntil(employerId)) ?? null;
 
     const scheduledAt = dto.scheduled_at ? new Date(dto.scheduled_at) : null;
     const now = new Date();
@@ -545,6 +554,7 @@ export class JobOfferService {
       note: dto.note?.trim() ?? null,
       quantity: dto.quantity ?? 1,
       status: JobOfferStatus.ACTIVE,
+      priority_until: priorityUntil,
       ...(dto.category_id ? { category_id: dto.category_id } : {}),
     };
 
@@ -1233,6 +1243,9 @@ export class JobOfferService {
         'Seule une offre expirée peut être republiée',
       );
     }
+    await this.subscriptions?.assertCanPublishOffer(actorProfileId);
+    const priorityUntil =
+      (await this.subscriptions?.priorityUntil(actorProfileId)) ?? null;
     if (Number.isNaN(scheduledAt.getTime())) {
       throw new BadRequestException('Date invalide');
     }
@@ -1246,7 +1259,11 @@ export class JobOfferService {
 
     const updated = await this.prisma.jobOffer.update({
       where: { id },
-      data: { scheduled_at: scheduledAt, status: JobOfferStatus.ACTIVE },
+      data: {
+        scheduled_at: scheduledAt,
+        status: JobOfferStatus.ACTIVE,
+        priority_until: priorityUntil,
+      },
     });
 
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED, {

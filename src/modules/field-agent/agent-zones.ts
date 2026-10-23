@@ -1,3 +1,7 @@
+import {
+  fieldAgentsEligibleWhere,
+  PRIORITY_FIRST,
+} from '../business/subscription/subscription-where';
 import { EmploymentType, JobOfferStatus, Prisma } from '@prisma/client';
 
 /** Offers an agent can still do something about. */
@@ -25,6 +29,7 @@ export function jobsInZonesWhere(zones: Zone[]): Prisma.JobOfferWhereInput {
   return {
     deleted_at: null,
     status: { in: OPEN_STATUSES },
+    AND: [fieldAgentsEligibleWhere()],
     OR: zones.flatMap((z) => [
       {
         country_code: z.country_code,
@@ -70,7 +75,7 @@ export function jobsOrderBy(
 ): Prisma.JobOfferOrderByWithRelationInput[] {
   return sort === 'start'
     ? [{ scheduled_at: { sort: 'asc', nulls: 'last' } }, { created_at: 'desc' }]
-    : [{ created_at: 'desc' }];
+    : [PRIORITY_FIRST, { created_at: 'desc' }];
 }
 
 /**
@@ -141,7 +146,8 @@ export function publicScopeWhere(
   return {
     deleted_at: null,
     status: { in: OPEN_STATUSES },
-    ...(location ? { AND: [location] } : {}),
+    // A business's offers reach agents only when its plan includes them.
+    AND: [fieldAgentsEligibleWhere(), ...(location ? [location] : [])],
   };
 }
 

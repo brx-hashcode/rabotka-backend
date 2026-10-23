@@ -203,6 +203,27 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    key: 'business.trial_days',
+    value: '14',
+    category: ConfigCategory.FEES,
+    label: "Entreprises – Durée de l'essai gratuit (jours, 0 = pas d'essai)",
+    isSecret: false,
+  },
+  {
+    key: 'business.trial_plan_code',
+    value: '',
+    category: ConfigCategory.FEES,
+    label: "Entreprises – Formule offerte pendant l'essai (code)",
+    isSecret: false,
+  },
+  {
+    key: 'business.renewal_reminder_days',
+    value: '7,1',
+    category: ConfigCategory.FEES,
+    label: 'Entreprises – Rappels avant échéance (jours, séparés par des virgules)',
+    isSecret: false,
+  },
+  {
     // Paid to the parrain when their filleul makes their first mobile-money
     // payment for a connection — never at signup, which would be farmable with
     // throwaway accounts.

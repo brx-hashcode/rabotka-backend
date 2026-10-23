@@ -823,6 +823,7 @@ export class WalletService {
       other: number;
     };
     walletTopUps: { amount: number; count: number };
+    businessSubscriptions: { amount: number; count: number };
   }> {
     const systemWallet = await this.getOrCreateSystemWallet();
 
@@ -869,6 +870,7 @@ export class WalletService {
     let penalty = 0;
     const contactUnlockByMethod = { mobileMoney: 0, wallet: 0, other: 0 };
     const walletTopUps = { amount: 0, count: 0 };
+    const businessSubscriptions = { amount: 0, count: 0 };
     for (const group of completedGroups) {
       const amount = Number(group._sum.amount ?? 0);
       completedPaymentsCount += group._count._all;
@@ -877,6 +879,9 @@ export class WalletService {
       } else if (group.type === PaymentType.WALLET_TOP_UP) {
         walletTopUps.amount += amount;
         walletTopUps.count += group._count._all;
+      } else if (group.type === PaymentType.BUSINESS_SUBSCRIPTION) {
+        businessSubscriptions.amount += amount;
+        businessSubscriptions.count += group._count._all;
       } else if (group.type === PaymentType.CONTACT_UNLOCK) {
         if (group.payment_method === PaymentMethod.MOBILE_MONEY) {
           contactUnlockByMethod.mobileMoney += amount;
@@ -904,6 +909,7 @@ export class WalletService {
       },
       contactUnlockByMethod,
       walletTopUps,
+      businessSubscriptions,
     };
   }
 

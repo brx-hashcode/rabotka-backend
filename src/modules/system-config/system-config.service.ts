@@ -1000,6 +1000,31 @@ export class SystemConfigService implements OnModuleInit {
     };
   }
 
+  /**
+   * The business trial and renewal reminders. The plans (prices, quotas) are
+   * the business_plans table. `trialDays` 0 or no `trialPlanCode`: no trial.
+   */
+  async getBusinessSubscriptionSettings(): Promise<{
+    trialDays: number;
+    trialPlanCode: string | null;
+    reminderDays: number[];
+  }> {
+    const [trialDays, trialPlanCode, reminderDays] = await this.mgetBatch([
+      { key: 'business.trial_days', fallback: '14' },
+      { key: 'business.trial_plan_code', fallback: '' },
+      { key: 'business.renewal_reminder_days', fallback: '7,1' },
+    ]);
+    return {
+      trialDays: Math.max(0, Math.floor(Number(trialDays) || 0)),
+      trialPlanCode: trialPlanCode?.trim() || null,
+      reminderDays: (reminderDays ?? '')
+        .split(',')
+        .map((d) => Math.floor(Number(d.trim())))
+        .filter((d) => Number.isFinite(d) && d > 0)
+        .sort((a, b) => b - a),
+    };
+  }
+
   async getWelcomeCredits() {
     const [workerCredit, employerCredit] = await Promise.all([
       this.get('fees.welcome_credit_worker', '100'),

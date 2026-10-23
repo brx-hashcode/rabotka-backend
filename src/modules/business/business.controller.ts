@@ -33,6 +33,10 @@ import { ProfileService } from '../profile/profile.service';
 import { sendPrivateFile } from '../profile/send-private-file';
 import { UpdateBusinessDto } from './dto/update-business.dto';
 import { UploadBusinessDocumentDto } from './dto/upload-business-document.dto';
+import { BusinessCheckoutService } from './subscription/business-checkout.service';
+import { BusinessSubscriptionService } from './subscription/business-subscription.service';
+import { SubscribeDto } from './subscription/dto/business-plan.dto';
+import { planView } from './subscription/plan-view';
 
 /**
  * The business dashboard's own routes. Guarded at class level, so no route
@@ -43,7 +47,45 @@ import { UploadBusinessDocumentDto } from './dto/upload-business-document.dto';
 @Controller('business')
 @UseGuards(ProfileAuthGuard, BusinessProfileGuard)
 export class BusinessController {
-  constructor(private readonly profileService: ProfileService) {}
+  constructor(
+    private readonly profileService: ProfileService,
+    private readonly subscriptions: BusinessSubscriptionService,
+    private readonly checkout: BusinessCheckoutService,
+  ) {}
+
+  @Get('plans')
+  @ApiOperation({ summary: 'The plans a business can choose' })
+  async plans() {
+    return (await this.subscriptions.listPlans(true)).map(planView);
+  }
+
+  @Get('me/subscription')
+  @ApiOperation({
+    summary: 'Current plan, usage, queued periods and history',
+  })
+  async mySubscription(@Req() req: ProfileAuthenticatedRequest) {
+    const businessId = await this.subscriptions.businessOf(req.user.profileId);
+    const overview = await this.subscriptions.overview(businessId!);
+    return { ...overview, plans: overview.plans.map(planView) };
+  }
+
+  @Post('me/subscription')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Buy a period of a plan: returns the token of its payment page',
+    description:
+      'The period starts when the payment succeeds — after the running one, if any (renewing early loses nothing); a running trial is replaced at once.',
+  })
+  async subscribe(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Body() dto: SubscribeDto,
+  ) {
+    return this.checkout.checkout(
+      req.user.profileId,
+      dto.planId,
+      dto.billingPeriod,
+    );
+  }
 
   @Get('me')
   @ApiOperation({

@@ -71,6 +71,25 @@ function worker(id: string) {
   };
 }
 
+
+/** A business's offers reach agents only with field agents in its plan. */
+const ELIGIBLE = {
+  OR: [
+    { employer: { is_business: false } },
+    {
+      employer: {
+        business: {
+          subscriptions: {
+            some: expect.objectContaining({
+              plan: { includes_field_agents: true },
+            }),
+          },
+        },
+      },
+    },
+  ],
+};
+
 describe('jobsInZonesWhere', () => {
   it('matches the offer city, or the employer city when the offer has none', () => {
     const where = jobsInZonesWhere([ZONE]);
@@ -100,7 +119,9 @@ describe('publicScopeWhere', () => {
   it('falls back to the employer city, scoped to the country when given', () => {
     const where = publicScopeWhere({ country: 'cg', city: 'Brazzaville' });
     const city = { equals: 'Brazzaville', mode: 'insensitive' };
+    // First the business-plan eligibility for agents, then the location.
     expect(where.AND).toEqual([
+      ELIGIBLE,
       {
         OR: [
           { country_code: 'CG', city },
@@ -112,6 +133,7 @@ describe('publicScopeWhere', () => {
 
   it('filters by country alone, falling back to the employer country', () => {
     expect(publicScopeWhere({ country: 'CG' }).AND).toEqual([
+      ELIGIBLE,
       {
         OR: [
           { country_code: 'CG' },
@@ -259,7 +281,7 @@ describe('AgentPortalService', () => {
       const result = await service.listJobs('agent-1', { page: 1, limit: 20 });
 
       const where = prisma.jobOffer.findMany.mock.calls[0][0].where;
-      expect(where).toEqual(jobsInZonesWhere([ZONE]));
+      expect(where).toEqual({ ...jobsInZonesWhere([ZONE]), AND: [ELIGIBLE] });
       expect(result.data[0]).toMatchObject({
         id: 'job-1',
         amount: 15000,
@@ -303,6 +325,7 @@ describe('AgentPortalService', () => {
         status: {
           in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
         },
+        AND: [ELIGIBLE],
       });
       expect(args).toMatchObject({ skip: 10, take: 10 });
     });

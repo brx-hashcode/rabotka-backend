@@ -652,7 +652,11 @@ describe('JobOfferService', () => {
       expect(prisma.jobOffer.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: OFFER_ID },
-          data: { scheduled_at: when, status: JobOfferStatus.ACTIVE },
+          data: {
+            scheduled_at: when,
+            status: JobOfferStatus.ACTIVE,
+            priority_until: null,
+          },
         }),
       );
     });

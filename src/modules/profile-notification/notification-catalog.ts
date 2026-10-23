@@ -13,7 +13,11 @@ import { joinFrench } from '../job-offer/utils/job-offer-changes.util';
  */
 
 export type PaymentKind =
-  'WALLET_TOP_UP' | 'PENALTY' | 'CONTACT_UNLOCK' | 'RECOMMENDATION_CONTACT';
+  | 'WALLET_TOP_UP'
+  | 'PENALTY'
+  | 'CONTACT_UNLOCK'
+  | 'RECOMMENDATION_CONTACT'
+  | 'BUSINESS_SUBSCRIPTION';
 
 export function paymentKindOf(
   requestType: PaymentRequestType | null | undefined,
@@ -25,6 +29,8 @@ export function paymentKindOf(
       return 'CONTACT_UNLOCK';
     case PaymentRequestType.RECOMMENDATION_CONTACT:
       return 'RECOMMENDATION_CONTACT';
+    case PaymentRequestType.BUSINESS_SUBSCRIPTION:
+      return 'BUSINESS_SUBSCRIPTION';
     default:
       // Null predates the column and was always a penalty — same fallback as
       // `resolvePaymentType`.
@@ -200,7 +206,16 @@ export type NotificationInput =
       type: 'BUSINESS_DOCUMENT_REJECTED';
       documentLabel: string;
       reason: string | null;
-    };
+    }
+  | { type: 'BUSINESS_TRIAL_STARTED'; planName: string; endsAt: string }
+  | { type: 'BUSINESS_SUBSCRIPTION_ACTIVE'; planName: string; endsAt: string }
+  | {
+      type: 'BUSINESS_SUBSCRIPTION_EXPIRING';
+      planName: string;
+      endsAt: string;
+      trial: boolean;
+    }
+  | { type: 'BUSINESS_SUBSCRIPTION_EXPIRED'; planName: string; trial: boolean };
 
 export type NotificationType = NotificationInput['type'];
 
@@ -222,6 +237,15 @@ export type RenderedNotification = {
   link: string | null;
 };
 
+/** « 23 octobre » — a business period end, read in Congo's time. */
+function shortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('fr-FR', {
+    day: 'numeric',
+    month: 'long',
+    timeZone: 'Africa/Brazzaville',
+  });
+}
+
 function fcfa(amount: number): string {
   // Plain spaces: `toLocaleString('fr-FR')` uses U+202F, which some Android
   // WebView fonts render as a box.
@@ -240,10 +264,13 @@ const PAYMENT_LABEL: Record<PaymentKind, string> = {
   PENALTY: 'le règlement de votre pénalité',
   CONTACT_UNLOCK: 'le déblocage du contact',
   RECOMMENDATION_CONTACT: 'le déblocage du contact',
+  BUSINESS_SUBSCRIPTION: 'votre abonnement Rabotka Business',
 };
 
 function paymentLink(kind: PaymentKind, failed: boolean): string {
   if (kind === 'PENALTY' && failed) return '/penalites/paiement';
+  // The business dashboard's page, not the client app's wallet.
+  if (kind === 'BUSINESS_SUBSCRIPTION') return '/espace/abonnement';
   return '/portefeuille';
 }
 
@@ -500,6 +527,40 @@ export function renderNotification(
         title: 'Vérification de l’organisation refusée',
         body: `Les documents de ${input.businessName} n’ont pas pu être validés. Motif : ${input.reason?.trim() || 'non précisé'}. Corrigez-les depuis votre espace.`,
         link: '/espace/organisation',
+      };
+
+    case 'BUSINESS_TRIAL_STARTED':
+      return {
+        title: 'Essai gratuit activé',
+        body: `Votre essai de la formule ${input.planName} est actif jusqu’au ${shortDate(input.endsAt)}.`,
+        link: '/espace/abonnement',
+      };
+
+    case 'BUSINESS_SUBSCRIPTION_ACTIVE':
+      return {
+        title: 'Abonnement confirmé',
+        body: `Votre abonnement ${input.planName} est actif jusqu’au ${shortDate(input.endsAt)}.`,
+        link: '/espace/abonnement',
+      };
+
+    case 'BUSINESS_SUBSCRIPTION_EXPIRING':
+      return {
+        title: input.trial
+          ? 'Votre essai se termine bientôt'
+          : 'Abonnement bientôt échu',
+        body: input.trial
+          ? `Votre essai gratuit se termine le ${shortDate(input.endsAt)}. Choisissez une formule pour continuer.`
+          : `Votre abonnement ${input.planName} se termine le ${shortDate(input.endsAt)}. Renouvelez-le pour garder vos avantages.`,
+        link: '/espace/abonnement',
+      };
+
+    case 'BUSINESS_SUBSCRIPTION_EXPIRED':
+      return {
+        title: input.trial ? 'Essai terminé' : 'Abonnement terminé',
+        body: input.trial
+          ? 'Votre essai gratuit est terminé. Choisissez une formule pour continuer à publier.'
+          : `Votre abonnement ${input.planName} est terminé. Renouvelez-le pour retrouver vos avantages.`,
+        link: '/espace/abonnement',
       };
 
     case 'BUSINESS_DOCUMENT_REJECTED':

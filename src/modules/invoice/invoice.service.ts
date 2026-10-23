@@ -221,6 +221,7 @@ export class InvoiceService {
       CONTACT_UNLOCK: 'Déverrouillage de contact',
       PENALTY: 'Régularisation',
       WALLET_TOP_UP: 'Recharge de wallet',
+      BUSINESS_SUBSCRIPTION: 'Abonnement Rabotka Business',
       OTHER: 'Autre',
     };
 
@@ -296,6 +297,7 @@ export class InvoiceService {
       CONTACT_UNLOCK: 'Déverrouillage de contact',
       PENALTY: 'Régularisation',
       WALLET_TOP_UP: 'Recharge de wallet',
+      BUSINESS_SUBSCRIPTION: 'Abonnement Rabotka Business',
       OTHER: 'Autre',
     };
 
