@@ -105,6 +105,7 @@ import {
   SESSION_ENDED,
   type SessionEndedEvent,
 } from '../../common/events/session-ended.events';
+import { assertBusinessIsEmployer } from '../business/business-rules';
 
 const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
   [ProfileType.WORKER]: 'Travailleur',
@@ -1465,11 +1466,18 @@ export class ProfileService {
         first_name: true,
         last_name: true,
         profile_type: true,
+        is_business: true,
       },
     });
     if (!profile) {
       throw new NotFoundException('Profil non trouvé');
     }
+    // A business stays an employer: refused here in words, before the
+    // database's CHECK refuses it with a 500.
+    assertBusinessIsEmployer(
+      dto.profileType ?? profile.profile_type,
+      profile.is_business,
+    );
 
     try {
       await this.prisma.profile.update({
