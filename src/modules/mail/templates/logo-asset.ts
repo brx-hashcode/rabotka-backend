@@ -10,8 +10,8 @@
  * logo in every email with no fallback, since a cid: src has nowhere else to
  * point.
  *
- * 112x112 (2x the 56px display size, for retina) and ~5 KB, down from the
- * 1934x1934 / 339 KB original — small enough to ride along on every email.
+ * 112x112 (3x the 36px display size, sharp on retina) and ~5 KB, down from
+ * the 1934x1934 / 339 KB original — small enough to ride along on every email.
  */
 const RABOTKA_LOGO_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAHAAAABwCAMAAADxPgR5AAADAFBMVEVMaXEA7WEO1FcgwE8A/3sB' +

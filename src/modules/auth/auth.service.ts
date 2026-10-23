@@ -36,7 +36,12 @@ import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import { LogService } from '../log/log.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
-import { sendOtpEmail } from '../mail/templates';
+import {
+  otpEmailPreview,
+  otpEmailSubject,
+  sendOtpEmail,
+  type OtpPurpose,
+} from '../mail/templates';
 import {
   WhatsAppLoginLinkService,
   canMintLoginCode,
@@ -258,7 +263,13 @@ export class AuthService {
       otp,
     );
     if (isEmail) {
-      await this.sendOtpByEmail(normalized, otp, who.firstName ?? '');
+      // An email sign-up is a business sign-up (signupEntryFor).
+      await this.sendOtpByEmail(
+        normalized,
+        otp,
+        who.firstName ?? '',
+        'business-signup',
+      );
     } else {
       await this.sendOtpByWhatsApp(normalized, otp);
     }
@@ -362,6 +373,7 @@ export class AuthService {
         normalized,
         otp,
         profile.first_name ?? undefined,
+        profile.is_business ? 'business-login' : 'login',
       );
     } else {
       await this.sendOtpByWhatsApp(normalized, otp, profile.id);
@@ -415,6 +427,7 @@ export class AuthService {
         normalized,
         otp,
         profile.first_name ?? undefined,
+        profile.is_business ? 'business-login' : 'login',
       );
     } else {
       await this.sendOtpByWhatsApp(normalized, otp, profile.id);
@@ -748,7 +761,12 @@ export class AuthService {
       otp,
     );
 
-    await this.sendOtpByEmail(normalized, otp, user.first_name ?? undefined);
+    await this.sendOtpByEmail(
+      normalized,
+      otp,
+      user.first_name ?? undefined,
+      'admin',
+    );
 
     return { success: true };
   }
@@ -791,7 +809,12 @@ export class AuthService {
     );
     await this.redis.set(resendCooldownKey, '1', 'EX', RESEND_COOLDOWN_SECONDS);
 
-    await this.sendOtpByEmail(normalized, otp, user.first_name ?? undefined);
+    await this.sendOtpByEmail(
+      normalized,
+      otp,
+      user.first_name ?? undefined,
+      'admin',
+    );
 
     return { success: true };
   }
@@ -1033,6 +1056,7 @@ export class AuthService {
         email: true,
         phone: true,
         first_name: true,
+        is_business: true,
         deleted_at: true,
       },
     });
@@ -1047,6 +1071,7 @@ export class AuthService {
         phone: true,
         first_name: true,
         whatsapp_connected: true,
+        is_business: true,
         deleted_at: true,
       },
     });
@@ -1064,17 +1089,27 @@ export class AuthService {
     });
   }
 
+  /**
+   * The subject and copy say what the code is for (OtpPurpose): a business
+   * creating its account or logging in reads « Rabotka Business », under the
+   * Business label, never the client app's wording.
+   */
   private async sendOtpByEmail(
     email: string,
     otp: string,
-    first_name: string,
+    first_name: string | undefined,
+    purpose: OtpPurpose,
   ): Promise<void> {
     await this.mailService.sendMail({
       to: email,
-      subject: 'Votre code de vérification Rabotka',
-      html: await this.layoutService.wrap(sendOtpEmail(otp, first_name), {
-        previewText: `Votre code de vérification Rabotka : ${otp}`,
-      }),
+      subject: otpEmailSubject(purpose),
+      html: await this.layoutService.wrap(
+        sendOtpEmail(otp, first_name, purpose),
+        {
+          previewText: otpEmailPreview(purpose, otp),
+          product: purpose.startsWith('business') ? 'business' : undefined,
+        },
+      ),
     });
     this.logger.log(`OTP email sent to ${email}`);
   }

@@ -1,4 +1,5 @@
 import { emailButton, escapeHtml } from './layout';
+import { signOff, type EmailAudience } from '../audience';
 
 export type ReferralRewardedEmailOptions = {
   /** First name of the filleul whose payment triggered the credit. */
@@ -7,6 +8,7 @@ export type ReferralRewardedEmailOptions = {
   creditedAmount: number;
   /** Where the CTA points. Not a one-tap link — those are minted for WhatsApp. */
   appUrl: string;
+  audience?: EmailAudience;
 };
 
 export const REFERRAL_REWARDED_EMAIL_PREVIEW =
@@ -28,7 +30,12 @@ export const REFERRAL_REWARDED_EMAIL_PREVIEW =
  */
 export function referralRewardedEmail(
   name: string,
-  { refereeName, creditedAmount, appUrl }: ReferralRewardedEmailOptions,
+  {
+    refereeName,
+    creditedAmount,
+    appUrl,
+    audience = 'worker',
+  }: ReferralRewardedEmailOptions,
 ): string {
   return `
     <p>Bonjour ${escapeHtml(name)},</p>
@@ -45,7 +52,7 @@ export function referralRewardedEmail(
       pour débloquer un contact.
     </p>
 
-    ${emailButton(appUrl, 'Ouvrir Rabotka')}
+    ${emailButton(appUrl, audience === 'business' ? 'Accéder à mon espace' : 'Ouvrir Rabotka')}
 
     <p>
       Continuez à partager votre code de parrainage avec les personnes de
@@ -54,7 +61,7 @@ export function referralRewardedEmail(
 
     <p>
       Merci de votre confiance,<br />
-      <strong>L'équipe Rabotka</strong>
+      <strong>${signOff(audience)}</strong>
     </p>
   `;
 }

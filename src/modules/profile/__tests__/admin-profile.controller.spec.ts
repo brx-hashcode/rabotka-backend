@@ -600,6 +600,34 @@ describe('AdminProfileController', () => {
     expect(result).toEqual({ id: 'p1' });
   });
 
+  it('verify() refuses a business: its review is the Business tab', async () => {
+    const profileService = makeProfileService();
+    const mail = makeMail();
+    const ctrl = new AdminProfileController(
+      profileService as any,
+      makeLogService() as any,
+      makePaymentRequestService() as any,
+      makePrisma({ is_business: true }) as any,
+      makeWhatsApp() as any,
+      makeLoginLink() as any,
+      mail as any,
+      makeLayout() as any,
+      makeWalletService() as any,
+      makePortfolioService() as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
+      { forProfile: jest.fn() } as any,
+    );
+    await expect(
+      ctrl.verify('p1', { decision: 'VERIFIED' as any }, {
+        user: { userId: 'u1' },
+      } as any),
+    ).rejects.toThrow(
+      "Un compte entreprise se vérifie depuis l'onglet Business.",
+    );
+    expect(profileService.verifyProfileKyc).not.toHaveBeenCalled();
+    expect(mail.sendMail).not.toHaveBeenCalled();
+  });
+
   it('verify() calls profileService.verifyProfileKyc and logs', async () => {
     const profileService = makeProfileService();
     const logService = makeLogService();

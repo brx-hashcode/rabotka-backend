@@ -4,13 +4,23 @@ export {
   type EmailLayoutOptions,
   type FooterInfo,
 } from './layout';
-export { sendWelcomeEmail, WELCOME_EMAIL_PREVIEW } from './welcome';
+export {
+  BUSINESS_WELCOME_EMAIL_PREVIEW,
+  businessWelcomeEmail,
+  sendWelcomeEmail,
+  WELCOME_EMAIL_PREVIEW,
+} from './welcome';
 export {
   referralRewardedEmail,
   REFERRAL_REWARDED_EMAIL_PREVIEW,
   type ReferralRewardedEmailOptions,
 } from './referral-rewarded';
-export { sendOtpEmail } from './otp';
+export {
+  otpEmailPreview,
+  otpEmailSubject,
+  sendOtpEmail,
+  type OtpPurpose,
+} from './otp';
 export { adminCreatedEmail } from './admin-created';
 export { agentCreatedEmail } from './agent-created';
 export {
@@ -27,7 +37,7 @@ export { kycApprovedEmail } from './kyc-approved';
 export { kycRejectedEmail } from './kyc-rejected';
 export { kycReviewRequestedEmail } from './kyc-review-requested';
 export { paymentRejectedEmail } from './payment-rejected';
-export { paymentSuccessEmail } from './payment-success';
+export { invoiceEmail, paymentSuccessEmail } from './payment-success';
 export { accountSuspendedEmail } from './account-suspended';
 export { claimCreatedEmail } from './claim-created';
 export { claimInProgressEmail } from './claim-in-progress';

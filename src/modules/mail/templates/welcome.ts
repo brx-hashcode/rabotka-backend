@@ -64,3 +64,42 @@ ${creditBlock}
     </p>
   `;
 }
+
+export const BUSINESS_WELCOME_EMAIL_PREVIEW =
+  'Le compte de votre organisation est créé. Notre équipe vérifie vos documents.';
+
+/**
+ * The welcome for a business sign-up. Not the worker/employer one: a business
+ * works from its dashboard, by email only — no client app, no WhatsApp, and
+ * its welcome credit comes with the verification, not the sign-up.
+ */
+export function businessWelcomeEmail(
+  name: string,
+  {
+    businessName,
+    organisationUrl,
+  }: { businessName: string; organisationUrl: string },
+): string {
+  return `
+    <p>Bonjour ${escapeHtml(name)},</p>
+
+    <p>
+      Le compte de <strong>${escapeHtml(businessName)}</strong> est créé sur
+      Rabotka Business.
+    </p>
+
+    <p>
+      Notre équipe vérifie maintenant les documents de votre organisation. Vous
+      recevrez le résultat par e-mail et dans votre espace. Si un document doit
+      être remplacé, vous pourrez le faire directement depuis la rubrique
+      « Mon organisation ».
+    </p>
+
+    ${emailButton(organisationUrl, 'Accéder à mon espace')}
+
+    <p>
+      Merci de votre confiance,<br />
+      <strong>L'équipe Rabotka Business</strong>
+    </p>
+  `;
+}

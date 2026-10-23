@@ -73,6 +73,10 @@ import {
 } from './dto/admin-verify-profile.dto';
 import { AdminUpdateStatusDto } from './dto/admin-update-status.dto';
 import { AdminVerifyBusinessDto } from './dto/admin-verify-business.dto';
+import {
+  businessDashboardUrl,
+  businessOrganisationUrl,
+} from '../mail/audience';
 import { UpdateBusinessDto } from '../business/dto/update-business.dto';
 import { AdminUpdateProfileDto } from './dto/admin-update-profile.dto';
 import { PortfolioService } from '../portfolio/portfolio.service';
@@ -447,8 +451,9 @@ export class AdminProfileController {
             businessName,
             documentLabel,
             reason,
-            this.businessOrganisationUrl(),
+            businessOrganisationUrl(),
           ),
+          { product: 'business' },
         ),
       })
       .catch((err: unknown) =>
@@ -516,21 +521,18 @@ export class AdminProfileController {
         .sendMail({
           to,
           subject: approved
-            ? `${result.name} est vérifiée sur Rabotka`
-            : `Vérification de ${result.name} : documents à revoir`,
+            ? `${result.name} est vérifiée sur Rabotka Business`
+            : `Vérification de ${result.name} : dossier à corriger`,
           html: await this.layout.wrap(
             approved
-              ? businessApprovedEmail(
-                  name,
-                  result.name,
-                  this.businessDashboardUrl(),
-                )
+              ? businessApprovedEmail(name, result.name, businessDashboardUrl())
               : businessRejectedEmail(
                   name,
                   result.name,
                   dto.reason,
-                  this.businessOrganisationUrl(),
+                  businessOrganisationUrl(),
                 ),
+            { product: 'business' },
           ),
         })
         .catch((err: unknown) =>
@@ -542,20 +544,6 @@ export class AdminProfileController {
     }
 
     return result;
-  }
-
-  /** Where a business works: its dashboard (BUSINESS_DASHBOARD_URL, else production's). */
-  private businessDashboardUrl(): string {
-    return (
-      (
-        process.env.BUSINESS_DASHBOARD_URL ?? 'https://business.rabotka.work'
-      ).replace(/\/+$/, '') + '/espace'
-    );
-  }
-
-  /** The dashboard page where a business fixes its details and papers. */
-  private businessOrganisationUrl(): string {
-    return `${this.businessDashboardUrl()}/organisation`;
   }
 
   @Get(':id/verification-images/:imageId/raw')
@@ -1218,6 +1206,18 @@ export class AdminProfileController {
     @Body() dto: AdminVerifyProfileDto,
     @Req() req: any,
   ) {
+    // A business has no personal KYC: its review is the Business tab, and the
+    // KYC emails (« vérification d'identité… ouvrez l'application ») and the
+    // WhatsApp agreement send are not written for it.
+    const target = await this.prisma.profile.findUnique({
+      where: { id },
+      select: { is_business: true },
+    });
+    if (target?.is_business) {
+      throw new BadRequestException(
+        "Un compte entreprise se vérifie depuis l'onglet Business.",
+      );
+    }
     const adminUserId = req.user?.userId ?? 'system';
     const result = await this.profileService.verifyProfileKyc(
       id,

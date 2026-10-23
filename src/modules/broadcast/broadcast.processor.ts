@@ -3,6 +3,7 @@ import {
   BroadcastRecipientStatus,
   BroadcastStatus,
   DeliveryChannel,
+  ProfileType,
   type Broadcast,
 } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -14,6 +15,7 @@ import { NotificationDispatcher } from '../notification-dispatch/notification-di
 import { ProfileNotificationService } from '../profile-notification/profile-notification.service';
 import { flattenForTemplateVariable } from '../../common/utils/whatsapp-template-text.util';
 import { broadcastEmail } from '../mail/templates/broadcast';
+import { audienceOf, productOf } from '../mail/audience';
 import { CHUNK_SIZE } from './broadcast.service';
 import type { BroadcastJobData } from './broadcast.types';
 
@@ -109,6 +111,8 @@ export class BroadcastProcessor {
             whatsapp_connected: true,
             deleted_at: true,
             marketing_opt_out_at: true,
+            profile_type: true,
+            is_business: true,
           },
         },
       },
@@ -292,7 +296,12 @@ export class BroadcastProcessor {
 
   private async deliverEmail(
     broadcast: Broadcast,
-    profile: { email: string | null; first_name: string },
+    profile: {
+      email: string | null;
+      first_name: string;
+      profile_type: ProfileType;
+      is_business: boolean;
+    },
   ): Promise<boolean> {
     if (!profile.email) return false;
 
@@ -305,7 +314,9 @@ export class BroadcastProcessor {
           firstName: profile.first_name,
           body: broadcast.body,
           link: broadcast.link,
+          audience: audienceOf(profile),
         }),
+        { product: productOf(audienceOf(profile)) },
       ),
     });
     return true;

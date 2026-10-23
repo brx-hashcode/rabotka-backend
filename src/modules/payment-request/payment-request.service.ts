@@ -43,7 +43,8 @@ import { WhatsAppFeedbackService } from '../whatsapp/feedback/whatsapp-feedback.
 import { ReferralService } from '../referral/referral.service';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
-import { paymentSuccessEmail } from '../mail/templates';
+import { invoiceEmail, paymentSuccessEmail } from '../mail/templates';
+import { audienceOf, productOf } from '../mail/audience';
 import { PaymentGatewayService } from '../../common/services/payment/payment-gateway.service';
 import type {
   PaymentGatewayMetadata,
@@ -93,6 +94,7 @@ const PAYMENT_REQUEST_SELECT = {
       phone: true,
       status: true,
       profile_type: true,
+      is_business: true,
       country_code: true,
     },
   },
@@ -953,7 +955,9 @@ export class PaymentRequestService {
               profileName,
               context.paymentDescription,
               context.amount,
+              audienceOf(request.profile),
             ),
+            { product: productOf(audienceOf(request.profile)) },
           ),
         })
         .catch((err) =>
@@ -1017,7 +1021,15 @@ export class PaymentRequestService {
         .sendMail({
           to: request.profile.email,
           subject: `Votre facture — ${context.paymentDescription}`,
-          html: `<p>Bonjour,</p><p>Veuillez trouver ci-joint votre facture pour le paiement de <strong>${context.amount.toLocaleString('fr-FR')} FCFA</strong>.</p>`,
+          html: await this.layoutService.wrap(
+            invoiceEmail(
+              request.profile.first_name,
+              context.paymentDescription,
+              context.amount,
+              audienceOf(request.profile),
+            ),
+            { product: productOf(audienceOf(request.profile)) },
+          ),
           attachments: [
             {
               filename,
