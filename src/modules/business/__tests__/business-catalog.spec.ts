@@ -7,6 +7,7 @@ import {
   BUSINESS_CATEGORY_LABELS,
   BUSINESS_DOCUMENT_LABELS,
   BUSINESS_LEGAL_FORM_LABELS,
+  businessCatalog,
   DOCUMENTS_BY_CATEGORY,
   LEGAL_FORMS_BY_CATEGORY,
   legalFormFits,
@@ -55,5 +56,28 @@ describe('business catalog (Congo-Brazzaville)', () => {
     expect(legalFormFits('PME', 'SARL')).toBe(true);
     expect(legalFormFits('ASSOCIATION', 'SARL')).toBe(false);
     expect(legalFormFits('GIE', 'GIE')).toBe(true);
+  });
+});
+
+describe('businessCatalog', () => {
+  const catalog = businessCatalog();
+
+  it('lists every category with its forms and documents, as the server checks them', () => {
+    expect(catalog.categories.map((c) => c.value)).toEqual(
+      Object.values(BusinessCategory),
+    );
+    const school = catalog.categories.find((c) => c.value === 'SCHOOL')!;
+    expect(school.documents.required).toEqual([
+      ['AUTORISATION_OUVERTURE', 'AGREMENT'],
+    ]);
+    expect(school.legalForms).toContain('ASSOCIATION');
+  });
+
+  it('labels every legal form and document type', () => {
+    expect(catalog.legalForms).toHaveLength(
+      Object.values(BusinessLegalForm).length,
+    );
+    expect(catalog.documentTypes.every((d) => d.label.length > 0)).toBe(true);
+    expect(catalog.sizes).toEqual(['1-5', '6-20', '21-100', '100+']);
   });
 });

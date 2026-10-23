@@ -14,6 +14,9 @@ import {
  * receive a récépissé.
  */
 
+/** Headcount brackets offered at sign-up. */
+export const BUSINESS_SIZES = ['1-5', '6-20', '21-100', '100+'] as const;
+
 export const BUSINESS_CATEGORY_LABELS: Record<BusinessCategory, string> = {
   INDIVIDUAL_BUSINESS: 'Entreprise individuelle / établissement',
   TPE: 'Très petite entreprise (TPE)',
@@ -199,4 +202,42 @@ export function legalFormFits(
   legalForm: BusinessLegalForm,
 ): boolean {
   return LEGAL_FORMS_BY_CATEGORY[category].includes(legalForm);
+}
+
+export type BusinessCatalog = {
+  categories: {
+    value: BusinessCategory;
+    label: string;
+    legalForms: BusinessLegalForm[];
+    documents: DocumentRequirement;
+  }[];
+  legalForms: { value: BusinessLegalForm; label: string }[];
+  documentTypes: { value: BusinessDocumentType; label: string }[];
+  sizes: readonly string[];
+};
+
+/**
+ * Everything a sign-up form needs, in one answer (GET /public/business/catalog):
+ * the categories in display order, with the legal forms and documents each
+ * one takes. The same tables the server checks a sign-up against, so the form
+ * can never ask for something different.
+ */
+export function businessCatalog(): BusinessCatalog {
+  return {
+    categories: Object.values(BusinessCategory).map((value) => ({
+      value,
+      label: BUSINESS_CATEGORY_LABELS[value],
+      legalForms: LEGAL_FORMS_BY_CATEGORY[value],
+      documents: DOCUMENTS_BY_CATEGORY[value],
+    })),
+    legalForms: Object.values(BusinessLegalForm).map((value) => ({
+      value,
+      label: BUSINESS_LEGAL_FORM_LABELS[value],
+    })),
+    documentTypes: Object.values(BusinessDocumentType).map((value) => ({
+      value,
+      label: BUSINESS_DOCUMENT_LABELS[value],
+    })),
+    sizes: BUSINESS_SIZES,
+  };
 }

@@ -15,6 +15,8 @@ import {
   Inject,
   Param,
   Logger,
+  Headers,
+  Optional,
 } from '@nestjs/common';
 import type Redis from 'ioredis';
 import { Throttle } from '@nestjs/throttler';
@@ -23,6 +25,10 @@ import { sniffFileType } from '../../common/utils/file-signature.util';
 import { consumeSignupToken, readSignupToken } from '../auth/signup-token';
 import { signupEntryFor } from '../business/business-signup';
 import { SignupUploadGuard } from '../auth/guards/signup-upload.guard';
+import { AuthService } from '../auth/auth.service';
+
+/** `bearer` on POST /profile: return the session tokens instead of a cookie. */
+const SESSION_MODE_HEADER = 'x-session';
 import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -33,6 +39,7 @@ import {
   ApiResponse,
   ApiBearerAuth,
   ApiCookieAuth,
+  ApiHeader,
 } from '@nestjs/swagger';
 import {
   ProfileService,
@@ -82,6 +89,9 @@ export class ProfileController {
     private readonly whatsApp: WhatsAppService,
     private readonly contactedProfiles: ContactedProfilesService,
     @Inject(REDIS_CONNECTION) private readonly redis: Redis,
+    // Appended and @Optional(): the specs build this controller positionally.
+    // Only the bearer-session answer of createProfile uses it.
+    @Optional() private readonly authService?: AuthService,
   ) {}
 
   @Get('contacts')
@@ -135,9 +145,16 @@ export class ProfileController {
     status: 409,
     description: 'Conflict - email or phone already exists',
   })
+  @ApiHeader({
+    name: SESSION_MODE_HEADER,
+    required: false,
+    description:
+      '`bearer`: answer with `token` + `refreshToken` (as auth/mobile/verify-otp does) instead of setting the session cookie. For clients that keep the session themselves.',
+  })
   async createProfile(
     @Body() createProfileDto: CreateProfileDto,
     @Res({ passthrough: true }) res: Response,
+    @Headers(SESSION_MODE_HEADER) sessionMode?: string,
   ) {
     // The number must have been verified by WhatsApp code, by this caller,
     // within the hour — or anyone could register someone else's number. A
@@ -201,6 +218,22 @@ export class ProfileController {
             err,
           ),
         );
+    }
+
+    // A client holding its own session (rabotka-business keeps the tokens in
+    // its own httpOnly cookies, on its own domain) gets the bearer pair the
+    // mobile login gives, and no cookie on ours.
+    if (sessionMode === 'bearer' && this.authService) {
+      const session = await this.authService.issueBearerSession(
+        result.profileId,
+      );
+      return {
+        message: result.message,
+        creditedBalance: result.creditedBalance,
+        token: session.token,
+        refreshToken: session.refreshToken,
+        user: session.user,
+      };
     }
 
     // Sign a JWT and set the auth cookie so the user is logged in immediately.

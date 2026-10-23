@@ -642,6 +642,17 @@ export class AuthService {
     }
   }
 
+  /**
+   * A bearer session (access + rotating refresh token) for a profile that has
+   * just proven who it is some other way — a sign-up's verified code. The same
+   * pair the mobile login hands out, so `mobile/refresh` and `mobile/logout`
+   * work on it. For clients that keep tokens themselves rather than the API's
+   * cookie: the mobile app, and rabotka-business's server-side session routes.
+   */
+  issueBearerSession(profileId: string): Promise<MobileTokens> {
+    return this.issueMobileTokens(profileId);
+  }
+
   private async issueMobileTokens(profileId: string): Promise<MobileTokens> {
     const accessToken = this.jwtService.sign(
       { sub: profileId, type: 'profile', jti: randomUUID() },
