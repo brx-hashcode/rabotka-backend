@@ -2198,6 +2198,9 @@ enum ProfileNotificationType {
   KYC_REJECTED
   ACCOUNT_SUSPENDED
   UNLOCK_CONVERTED_TO_CREDIT
+  /// The business review's decisions (business accounts: email + in-app only).
+  BUSINESS_VERIFIED
+  BUSINESS_REJECTED
 }
 
 /// The in-app feed behind the bell in rabotka-client.

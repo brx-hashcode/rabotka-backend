@@ -85,6 +85,9 @@ import {
   ReferralStatus,
   SuspensionSource,
   VerificationStatus,
+  BusinessCategory,
+  BusinessDocumentType,
+  BusinessLegalForm,
 } from '@prisma/client';
 import { randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { OnboardingAttemptService } from '../onboarding-attempt/onboarding-attempt.service';
@@ -107,7 +110,13 @@ import {
 } from '../../common/events/session-ended.events';
 import { assertBusinessIsEmployer } from '../business/business-rules';
 import { assertBusinessSignupComplete } from '../business/business-signup';
-import { BUSINESS_DOCUMENT_LABELS } from '../business/business-catalog';
+import {
+  BUSINESS_CATEGORY_LABELS,
+  BUSINESS_DOCUMENT_LABELS,
+  BUSINESS_LEGAL_FORM_LABELS,
+  DOCUMENTS_BY_CATEGORY,
+  missingRequiredDocuments,
+} from '../business/business-catalog';
 import type { SignupIdentity } from '../auth/signup-token';
 
 const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
@@ -196,6 +205,8 @@ export type ProfileApplicationsResponse = {
 
 export type AdminProfileListItem = {
   id: string;
+  /** A business account: the admin shows its « Entreprise » tab. */
+  isBusiness: boolean;
   firstName: string;
   lastName: string;
   /** Null for the majority, who sign up with a phone and no email. */
@@ -351,6 +362,44 @@ export type AdminProfileDetailResponse = AdminProfileListItem & {
     threshold: number;
     windowDays: number;
   } | null;
+};
+
+/** The « Entreprise » tab of the admin profile page (getBusinessForAdmin). */
+export type AdminBusinessDetail = {
+  id: string;
+  name: string;
+  category: BusinessCategory;
+  categoryLabel: string;
+  legalForm: BusinessLegalForm | null;
+  legalFormLabel: string | null;
+  size: string | null;
+  registrationNumber: string | null;
+  taxId: string | null;
+  statisticalId: string | null;
+  address: string;
+  countryCode: string | null;
+  city: string | null;
+  email: string | null;
+  phone: string | null;
+  website: string | null;
+  description: string | null;
+  verificationStatus: VerificationStatus;
+  verifiedAt: string | null;
+  rejectionReason: string | null;
+  createdAt: string;
+  documents: {
+    id: string;
+    documentType: BusinessDocumentType;
+    label: string;
+    fileName: string | null;
+    mimeType: string | null;
+    verificationStatus: VerificationStatus;
+    rejectionReason: string | null;
+    createdAt: string;
+  }[];
+  /** « One of » groups the type must provide, and those not yet covered. */
+  requiredDocuments: { type: BusinessDocumentType; label: string }[][];
+  missingDocuments: { type: BusinessDocumentType; label: string }[][];
 };
 
 type PrismaTransactionClient = Parameters<
@@ -867,6 +916,7 @@ export class ProfileService {
         description: true,
         status: true,
         profile_type: true,
+        is_business: true,
         whatsapp_connected: true,
         bot_paused_until: true,
         verification_status: true,
@@ -1001,6 +1051,7 @@ export class ProfileService {
       description: profile.description,
       status: profile.status,
       profileType: profile.profile_type,
+      isBusiness: profile.is_business,
       whatsappConnected: profile.whatsapp_connected,
       /**
        * When VoVa stops being silent for this profile, or null when it is not
@@ -1719,6 +1770,7 @@ export class ProfileService {
           description: true,
           status: true,
           profile_type: true,
+          is_business: true,
           whatsapp_connected: true,
           verification_status: true,
           verified_by: true,
@@ -1789,6 +1841,7 @@ export class ProfileService {
       description: p.description,
       status: p.status,
       profileType: p.profile_type,
+      isBusiness: p.is_business,
       whatsappConnected: p.whatsapp_connected,
       verificationStatus: p.verification_status,
       verifiedBy: p.verified_by,
@@ -2086,6 +2139,205 @@ export class ProfileService {
       doc.document_url,
       doc.document_category,
     );
+  }
+
+  /**
+   * The organisation behind a business profile, for the admin's « Entreprise »
+   * tab: its details, its documents (bytes behind `streamBusinessDocument`,
+   * never a url), and which required papers are still missing for its type.
+   */
+  async getBusinessForAdmin(profileId: string): Promise<AdminBusinessDetail> {
+    const business = await this.prisma.business.findUnique({
+      where: { profile_id: profileId },
+      include: { documents: { orderBy: { created_at: 'asc' } } },
+    });
+    if (!business) {
+      throw new NotFoundException("Ce profil n'a pas d'organisation.");
+    }
+    const requirement = DOCUMENTS_BY_CATEGORY[business.category];
+    return {
+      id: business.id,
+      name: business.name,
+      category: business.category,
+      categoryLabel: BUSINESS_CATEGORY_LABELS[business.category],
+      legalForm: business.legal_form,
+      legalFormLabel: business.legal_form
+        ? BUSINESS_LEGAL_FORM_LABELS[business.legal_form]
+        : null,
+      size: business.size,
+      registrationNumber: business.registration_number,
+      taxId: business.tax_id,
+      statisticalId: business.statistical_id,
+      address: business.address,
+      countryCode: business.country_code,
+      city: business.city,
+      email: business.email,
+      phone: business.phone,
+      website: business.website,
+      description: business.description,
+      verificationStatus: business.verification_status,
+      verifiedAt: business.verified_at?.toISOString() ?? null,
+      rejectionReason: business.rejection_reason,
+      createdAt: business.created_at.toISOString(),
+      documents: business.documents.map((d) => ({
+        id: d.id,
+        documentType: d.document_type,
+        label: BUSINESS_DOCUMENT_LABELS[d.document_type],
+        fileName: d.file_name,
+        mimeType: d.mime_type,
+        verificationStatus: d.verification_status,
+        rejectionReason: d.rejection_reason,
+        createdAt: d.created_at.toISOString(),
+      })),
+      requiredDocuments: requirement.required.map((group) =>
+        group.map((t) => ({ type: t, label: BUSINESS_DOCUMENT_LABELS[t] })),
+      ),
+      missingDocuments: missingRequiredDocuments(
+        business.category,
+        business.documents.map((d) => d.document_type),
+      ).map((group) =>
+        group.map((t) => ({ type: t, label: BUSINESS_DOCUMENT_LABELS[t] })),
+      ),
+    };
+  }
+
+  /** One business document's bytes, behind the admin session, like KYC. */
+  async streamBusinessDocument(
+    profileId: string,
+    documentId: string,
+  ): Promise<DownloadResult & { filename: string }> {
+    const doc = await this.prisma.businessDocument.findFirst({
+      where: { id: documentId, business: { profile_id: profileId } },
+      select: { storage_key: true, document_type: true },
+    });
+    if (!doc) {
+      throw new NotFoundException('Document introuvable.');
+    }
+    return this.streamKycObject(
+      doc.storage_key,
+      null,
+      doc.document_type.toLowerCase(),
+    );
+  }
+
+  /** One document accepted or refused, on its own (the business is decided apart). */
+  async verifyBusinessDocument(
+    profileId: string,
+    documentId: string,
+    adminUserId: string,
+    decision: 'VERIFIED' | 'REJECTED',
+    reason?: string,
+  ): Promise<AdminBusinessDetail> {
+    const note = reason?.trim() || null;
+    if (decision === 'REJECTED' && !note) {
+      throw new BadRequestException('Indiquez le motif du refus.');
+    }
+    const { count } = await this.prisma.businessDocument.updateMany({
+      where: { id: documentId, business: { profile_id: profileId } },
+      data: {
+        verification_status: decision,
+        verified_by: adminUserId === 'system' ? null : adminUserId,
+        verified_at: new Date(),
+        rejection_reason: decision === 'REJECTED' ? note : null,
+      },
+    });
+    if (count === 0) {
+      throw new NotFoundException('Document introuvable.');
+    }
+    return this.getBusinessForAdmin(profileId);
+  }
+
+  /**
+   * The business review's decision. A business has no personal KYC (product
+   * decision): approving its organisation is what verifies and activates the
+   * account — the same VERIFIED + ACTIVE transition KYC approval makes, so
+   * every existing guard (KycVerifiedGuard, ActiveProfileGuard) just works.
+   *
+   * Unlike KYC, `whatsapp_connected` is left alone: the business phone was
+   * never verified, and business accounts get no WhatsApp at all.
+   */
+  async verifyBusiness(
+    profileId: string,
+    adminUserId: string,
+    decision: 'VERIFIED' | 'REJECTED',
+    reason?: string,
+  ): Promise<AdminBusinessDetail> {
+    const note = reason?.trim() || null;
+    if (decision === 'REJECTED' && !note) {
+      throw new BadRequestException('Indiquez le motif du refus.');
+    }
+    const business = await this.prisma.business.findUnique({
+      where: { profile_id: profileId },
+      select: { id: true, profile: { select: { profile_type: true } } },
+    });
+    if (!business) {
+      throw new NotFoundException("Ce profil n'a pas d'organisation.");
+    }
+
+    const now = new Date();
+    const by = adminUserId === 'system' ? null : adminUserId;
+    await this.prisma.$transaction([
+      this.prisma.business.update({
+        where: { id: business.id },
+        data: {
+          verification_status: decision,
+          verified_at: now,
+          verified_by: by,
+          rejection_reason: decision === 'REJECTED' ? note : null,
+        },
+      }),
+      // Approving the business approves its papers still waiting; a paper
+      // already refused on its own stays refused.
+      ...(decision === 'VERIFIED'
+        ? [
+            this.prisma.businessDocument.updateMany({
+              where: {
+                business_id: business.id,
+                verification_status: 'PENDING',
+              },
+              data: {
+                verification_status: 'VERIFIED',
+                verified_at: now,
+                verified_by: by,
+              },
+            }),
+          ]
+        : []),
+      this.prisma.profile.update({
+        where: { id: profileId },
+        data: {
+          verification_status: decision,
+          verified_by: adminUserId,
+          verified_at: now,
+          kyc_verification_note: note,
+          rejection_reason: decision === 'REJECTED' ? note : null,
+          ...(decision === 'VERIFIED' ? { status: AccountStatus.ACTIVE } : {}),
+        },
+      }),
+    ]);
+
+    this.eventEmitter.emit(AdminNotificationEvent.PROFILE_KYC_VERIFIED, {
+      event: AdminNotificationEvent.PROFILE_KYC_VERIFIED,
+      title: 'Organisation vérifiée',
+      message: `Organisation du profil ${profileId} : ${decision}`,
+      entityType: 'profile',
+      entityId: String(profileId),
+      timestamp: now.toISOString(),
+    });
+
+    if (decision === 'VERIFIED') {
+      // Idempotent, as on the KYC path: no double credit.
+      void this.walletService
+        .grantWelcomeCredit(profileId, business.profile.profile_type)
+        .catch((err) =>
+          this.logger.warn(
+            `Welcome credit grant failed for profile=${profileId}`,
+            err,
+          ),
+        );
+    }
+
+    return this.getBusinessForAdmin(profileId);
   }
 
   /** The same, for a verification image attached during review. */

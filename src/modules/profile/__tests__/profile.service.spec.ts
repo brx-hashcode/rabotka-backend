@@ -1862,6 +1862,92 @@ describe('ProfileService', () => {
     });
   });
 
+  describe('business review', () => {
+    const businessRow = {
+      id: 'b-1',
+      name: 'École Les Lauriers',
+      category: 'SCHOOL',
+      legal_form: 'ASSOCIATION',
+      size: null,
+      registration_number: null,
+      tax_id: null,
+      statistical_id: null,
+      address: 'Brazzaville',
+      country_code: 'CG',
+      city: 'Brazzaville',
+      email: 'contact@ecole.cg',
+      phone: '+242061234567',
+      website: null,
+      description: null,
+      verification_status: 'PENDING',
+      verified_at: null,
+      rejection_reason: null,
+      created_at: new Date('2026-10-23T10:00:00Z'),
+      profile: { profile_type: 'EMPLOYER' },
+      documents: [
+        {
+          id: 'd-1',
+          document_type: 'AGREMENT',
+          file_name: 'agrement.pdf',
+          mime_type: 'application/pdf',
+          verification_status: 'PENDING',
+          rejection_reason: null,
+          created_at: new Date('2026-10-23T10:00:00Z'),
+        },
+      ],
+    };
+
+    beforeEach(() => {
+      (prisma as any).business = {
+        findUnique: jest.fn().mockResolvedValue(businessRow),
+        update: jest.fn().mockResolvedValue({}),
+      };
+      (prisma as any).businessDocument = {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      };
+      prisma.$transaction.mockImplementation((calls: any) => Promise.resolve(calls));
+    });
+
+    it('shows the business with its papers, and none missing', async () => {
+      const detail = await service.getBusinessForAdmin('p-1');
+      expect(detail).toMatchObject({
+        name: 'École Les Lauriers',
+        categoryLabel: expect.stringContaining('École'),
+        documents: [expect.objectContaining({ documentType: 'AGREMENT', label: expect.any(String) })],
+        missingDocuments: [],
+      });
+    });
+
+    it('approving verifies and activates the account, and leaves WhatsApp unconnected', async () => {
+      await service.verifyBusiness('p-1', 'admin-1', 'VERIFIED');
+
+      expect(prisma.profile.update).toHaveBeenCalledWith({
+        where: { id: 'p-1' },
+        data: expect.objectContaining({ verification_status: 'VERIFIED', status: 'ACTIVE' }),
+      });
+      const data = (prisma.profile.update as jest.Mock).mock.calls.at(-1)[0].data;
+      expect(data).not.toHaveProperty('whatsapp_connected');
+      expect((prisma as any).business.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ verification_status: 'VERIFIED' }) }),
+      );
+    });
+
+    it('refusing needs a reason, and does not activate', async () => {
+      await expect(service.verifyBusiness('p-1', 'admin-1', 'REJECTED')).rejects.toThrow(
+        BadRequestException,
+      );
+      await service.verifyBusiness('p-1', 'admin-1', 'REJECTED', 'RCCM illisible');
+      const data = (prisma.profile.update as jest.Mock).mock.calls.at(-1)[0].data;
+      expect(data).toMatchObject({ verification_status: 'REJECTED', rejection_reason: 'RCCM illisible' });
+      expect(data).not.toHaveProperty('status');
+    });
+
+    it('is a 404 for a profile without a business', async () => {
+      (prisma as any).business.findUnique.mockResolvedValue(null);
+      await expect(service.getBusinessForAdmin('p-2')).rejects.toThrow(NotFoundException);
+    });
+  });
+
   describe('createProfile() - EMPLOYER branch', () => {
     const baseDto = {
       firstName: 'Jean',

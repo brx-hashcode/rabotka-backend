@@ -50,7 +50,12 @@ import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import type { AdminMessageDelivery } from '../whatsapp/whatsapp.service';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
-import { kycApprovedEmail, kycRejectedEmail } from '../mail/templates';
+import {
+  businessApprovedEmail,
+  businessRejectedEmail,
+  kycApprovedEmail,
+  kycRejectedEmail,
+} from '../mail/templates';
 import { MessageDirection, BotPlatform } from '@prisma/client';
 import { KYC_REJECTED_CTA_PATH } from '../../common/constants/whatsapp-templates';
 import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
@@ -66,6 +71,7 @@ import {
   VerifyDecision,
 } from './dto/admin-verify-profile.dto';
 import { AdminUpdateStatusDto } from './dto/admin-update-status.dto';
+import { AdminVerifyBusinessDto } from './dto/admin-verify-business.dto';
 import { AdminUpdateProfileDto } from './dto/admin-update-profile.dto';
 import { PortfolioService } from '../portfolio/portfolio.service';
 import { UpdatePortfolioItemDto } from '../portfolio/dto/update-portfolio-item.dto';
@@ -302,6 +308,159 @@ export class AdminProfileController {
   ): Promise<void> {
     const file = await this.profileService.streamKycDocument(id, documentId);
     this.sendKycFile(res, file);
+  }
+
+  /** The organisation behind a business profile: details, documents, gaps. */
+  @Get(':id/business')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({ summary: 'Business of a business profile (admin only)' })
+  @ApiResponse({ status: 200, description: 'The business and its documents' })
+  @ApiResponse({ status: 404, description: 'Not a business profile' })
+  getBusiness(@Param('id') id: string) {
+    return this.profileService.getBusinessForAdmin(id);
+  }
+
+  /** A business document's bytes, behind the admin session (as KYC). */
+  @Get(':id/business/documents/:documentId/raw')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({ summary: 'Stream a business document (admin only)' })
+  @ApiResponse({ status: 200, description: 'The file bytes' })
+  @ApiResponse({
+    status: 404,
+    description: 'No such document on this business',
+  })
+  async streamBusinessDocument(
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const file = await this.profileService.streamBusinessDocument(
+      id,
+      documentId,
+    );
+    this.sendKycFile(res, file);
+  }
+
+  @Patch(':id/business/documents/:documentId/verify')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({
+    summary: 'Accept or refuse one business document (admin only)',
+  })
+  async verifyBusinessDocument(
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @Body() dto: AdminVerifyBusinessDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
+    const adminUserId = req.user?.userId ?? 'system';
+    const result = await this.profileService.verifyBusinessDocument(
+      id,
+      documentId,
+      adminUserId,
+      dto.decision,
+      dto.reason,
+    );
+    await this.logService.create({
+      action:
+        dto.decision === VerifyDecision.VERIFIED
+          ? 'BUSINESS_DOCUMENT_APPROVED'
+          : 'BUSINESS_DOCUMENT_REJECTED',
+      entityType: 'BusinessDocument',
+      entityId: documentId,
+      userId: adminUserId,
+      profileId: id,
+      metadata: { decision: dto.decision, reason: dto.reason },
+    });
+    return result;
+  }
+
+  /**
+   * The decision on the business itself, which verifies (and activates) the
+   * account or refuses it. Told by email and in-app only: business accounts
+   * get no WhatsApp.
+   */
+  @Patch(':id/business/verify')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Approve or refuse a business (admin only)' })
+  @ApiResponse({ status: 200, description: 'The business after the decision' })
+  async verifyBusiness(
+    @Param('id') id: string,
+    @Body() dto: AdminVerifyBusinessDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
+    const adminUserId = req.user?.userId ?? 'system';
+    const result = await this.profileService.verifyBusiness(
+      id,
+      adminUserId,
+      dto.decision,
+      dto.reason,
+    );
+    await this.logService.create({
+      action:
+        dto.decision === VerifyDecision.VERIFIED
+          ? 'BUSINESS_APPROVED'
+          : 'BUSINESS_REJECTED',
+      entityType: 'Business',
+      entityId: result.id,
+      userId: adminUserId,
+      profileId: id,
+      metadata: { decision: dto.decision, reason: dto.reason },
+    });
+
+    const person = await this.prisma.profile.findUnique({
+      where: { id },
+      select: { first_name: true, last_name: true, email: true },
+    });
+    const name =
+      `${person?.first_name ?? ''} ${person?.last_name ?? ''}`.trim();
+    const to = person?.email ?? result.email;
+    const approved = dto.decision === VerifyDecision.VERIFIED;
+
+    notifyProfile(this.events, {
+      recipientId: id,
+      input: approved
+        ? { type: 'BUSINESS_VERIFIED', businessName: result.name }
+        : {
+            type: 'BUSINESS_REJECTED',
+            businessName: result.name,
+            reason: dto.reason ?? null,
+          },
+    });
+    if (to) {
+      await this.mail
+        .sendMail({
+          to,
+          subject: approved
+            ? `${result.name} est vérifiée sur Rabotka`
+            : `Vérification de ${result.name} : documents à revoir`,
+          html: await this.layout.wrap(
+            approved
+              ? businessApprovedEmail(
+                  name,
+                  result.name,
+                  this.businessDashboardUrl(),
+                )
+              : businessRejectedEmail(name, result.name, dto.reason),
+          ),
+        })
+        .catch((err: unknown) =>
+          console.warn(
+            `Failed to send the business decision email for ${id}:`,
+            err,
+          ),
+        );
+    }
+
+    return result;
+  }
+
+  /** Where a business works: its dashboard (BUSINESS_DASHBOARD_URL, else production's). */
+  private businessDashboardUrl(): string {
+    return (
+      (
+        process.env.BUSINESS_DASHBOARD_URL ?? 'https://business.rabotka.work'
+      ).replace(/\/+$/, '') + '/espace'
+    );
   }
 
   @Get(':id/verification-images/:imageId/raw')

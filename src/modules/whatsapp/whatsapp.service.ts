@@ -306,12 +306,52 @@ export class WhatsAppService {
     }
   }
 
+  /**
+   * Business accounts get no WhatsApp at all — email and in-app only (product
+   * rule). Their phone is required at sign-up but never verified, so it is
+   * not a line we write to. Checked here, at the one place every automated
+   * send passes, so no sender has to remember it.
+   *
+   * A skipped send reports success to its caller, like the duplicate guard:
+   * the queue must not retry a message that is not supposed to exist.
+   * Fails open on a lookup error (a Redis-free DB read; it does not fail in
+   * practice), so a DB blip never silences everyone else.
+   */
+  private async isBusinessRecipient(
+    phone: string,
+    profileId?: string,
+  ): Promise<boolean> {
+    try {
+      const digits = phone.replace(/[^\d]/g, '');
+      const profile = await this.prisma.profile.findFirst({
+        where: profileId
+          ? { id: profileId }
+          : { phone: { in: [phone, digits, `+${digits}`] } },
+        select: { is_business: true },
+      });
+      if (profile?.is_business) {
+        this.logger.log(
+          `WhatsApp skipped for business profile (${profileId ?? 'by phone'})`,
+        );
+        return true;
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Business-recipient check failed, sending anyway: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return false;
+  }
+
   async sendTextMessage(
     phone: string,
     text: string,
     profileId?: string,
     sentById?: string,
   ): Promise<boolean> {
+    // An admin writing by hand (`sentById`) is not a notification.
+    if (!sentById && (await this.isBusinessRecipient(phone, profileId)))
+      return true;
     const sid = await this.attempt(
       'text',
       phone,
@@ -349,6 +389,7 @@ export class WhatsAppService {
     profileId?: string,
     body?: string,
   ): Promise<boolean> {
+    if (await this.isBusinessRecipient(phone, profileId)) return true;
     // `true`, not `false`, when the guard blocks: from the caller's point of
     // view the message WAS delivered, seconds ago. The outbound processor turns
     // a false into a throw so BullMQ retries, so returning false here
@@ -423,6 +464,7 @@ export class WhatsAppService {
     profileId?: string,
     body?: string,
   ): Promise<boolean> {
+    if (await this.isBusinessRecipient(phone, profileId)) return true;
     // See sendTemplateMessage: blocked means already delivered, not failed.
     if (!(await this.claimOutbound(phone, template, variables))) return true;
 
@@ -490,6 +532,7 @@ export class WhatsAppService {
       profileId?: string;
     },
   ): Promise<boolean> {
+    if (await this.isBusinessRecipient(phone, params.profileId)) return true;
     const sid = await this.attempt(
       'flow',
       phone,
@@ -556,6 +599,7 @@ export class WhatsAppService {
       profileId?: string;
     },
   ): Promise<boolean> {
+    if (await this.isBusinessRecipient(phone, params.profileId)) return true;
     const sid = await this.attempt(
       'interactive_cta',
       phone,
@@ -600,6 +644,7 @@ export class WhatsAppService {
     mediaUrl: string,
     caption?: string,
   ): Promise<boolean> {
+    if (await this.isBusinessRecipient(phone)) return true;
     const sid = await this.attempt(
       'media',
       phone,
@@ -639,6 +684,7 @@ export class WhatsAppService {
     filename: string,
     caption?: string,
   ): Promise<boolean> {
+    if (await this.isBusinessRecipient(phone)) return true;
     const sid = await this.attempt(
       'media',
       phone,
