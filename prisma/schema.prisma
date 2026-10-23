@@ -2201,6 +2201,8 @@ enum ProfileNotificationType {
   /// The business review's decisions (business accounts: email + in-app only).
   BUSINESS_VERIFIED
   BUSINESS_REJECTED
+  /// One business paper refused on its own: replace it from the dashboard.
+  BUSINESS_DOCUMENT_REJECTED
 }
 
 /// The in-app feed behind the bell in rabotka-client.
@@ -3387,8 +3389,15 @@ model BusinessDocument {
   verified_at         DateTime?
   verified_by         String?              @db.Uuid
   rejection_reason    String?
+  /// The earlier version this file was sent to replace (a refused paper
+  /// re-uploaded by the business). The old row stays, superseded, as history.
+  replaces_id         String?              @unique @db.Uuid
+  /// Set when a newer version replaced this one; current papers have none.
+  superseded_at       DateTime?            @db.Timestamptz
 
-  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  business     Business          @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  replaces     BusinessDocument? @relation("BusinessDocumentVersions", fields: [replaces_id], references: [id], onDelete: SetNull)
+  replaced_by  BusinessDocument? @relation("BusinessDocumentVersions")
 
   @@index([business_id], name: "idx_business_document_business")
   @@map("business_documents")

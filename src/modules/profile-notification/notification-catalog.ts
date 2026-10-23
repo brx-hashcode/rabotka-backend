@@ -195,7 +195,12 @@ export type NotificationInput =
   | { type: 'ACCOUNT_SUSPENDED'; reason: string | null }
   | { type: 'UNLOCK_CONVERTED_TO_CREDIT'; amount: number }
   | { type: 'BUSINESS_VERIFIED'; businessName: string }
-  | { type: 'BUSINESS_REJECTED'; businessName: string; reason: string | null };
+  | { type: 'BUSINESS_REJECTED'; businessName: string; reason: string | null }
+  | {
+      type: 'BUSINESS_DOCUMENT_REJECTED';
+      documentLabel: string;
+      reason: string | null;
+    };
 
 export type NotificationType = NotificationInput['type'];
 
@@ -493,8 +498,15 @@ export function renderNotification(
     case 'BUSINESS_REJECTED':
       return {
         title: 'Vérification de l’organisation refusée',
-        body: `Les documents de ${input.businessName} n’ont pas pu être validés. Motif : ${input.reason?.trim() || 'non précisé'}.`,
-        link: '/espace',
+        body: `Les documents de ${input.businessName} n’ont pas pu être validés. Motif : ${input.reason?.trim() || 'non précisé'}. Corrigez-les depuis votre espace.`,
+        link: '/espace/organisation',
+      };
+
+    case 'BUSINESS_DOCUMENT_REJECTED':
+      return {
+        title: 'Document à remplacer',
+        body: `${input.documentLabel} n’a pas été accepté. Motif : ${input.reason?.trim() || 'non précisé'}. Envoyez une nouvelle version depuis votre espace.`,
+        link: '/espace/organisation',
       };
 
     case 'UNLOCK_CONVERTED_TO_CREDIT':

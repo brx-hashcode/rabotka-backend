@@ -33,7 +33,8 @@ export function businessApprovedEmail(
 export function businessRejectedEmail(
   name: string,
   businessName: string,
-  reason?: string,
+  reason: string | undefined,
+  organisationUrl: string,
 ): string {
   const reasonBlock = reason
     ? `<p><strong>Motif :</strong> ${escapeHtml(reason)}</p>`
@@ -50,12 +51,49 @@ export function businessRejectedEmail(
     ${reasonBlock}
 
     <p>
-      Répondez à cet email ou contactez notre équipe pour transmettre des pièces
-      complémentaires : nous reprendrons la vérification dès leur réception.
+      Corrigez vos informations ou envoyez de nouveaux documents depuis votre
+      espace : nous reprendrons la vérification dès leur réception.
+      <br />
+      <a href="${escapeHtml(organisationUrl)}">${escapeHtml(organisationUrl.replace(/^https?:\/\//, ''))}</a>
     </p>
 
     <p>
       Merci de votre compréhension,<br />
+      <strong>L'équipe Rabotka</strong>
+    </p>
+  `;
+}
+
+/** One paper refused on its own: the business replaces it from its space. */
+export function businessDocumentRejectedEmail(
+  name: string,
+  businessName: string,
+  documentLabel: string,
+  reason: string | undefined,
+  organisationUrl: string,
+): string {
+  const reasonBlock = reason
+    ? `<p><strong>Motif :</strong> ${escapeHtml(reason)}</p>`
+    : '';
+
+  return `
+    <p>Bonjour ${escapeHtml(name)},</p>
+
+    <p>
+      Le document <strong>${escapeHtml(documentLabel)}</strong> envoyé pour
+      <strong>${escapeHtml(businessName)}</strong> n'a pas été accepté.
+    </p>
+
+    ${reasonBlock}
+
+    <p>
+      Envoyez-en une nouvelle version depuis votre espace, rubrique
+      Organisation :
+      <a href="${escapeHtml(organisationUrl)}">${escapeHtml(organisationUrl.replace(/^https?:\/\//, ''))}</a>
+    </p>
+
+    <p>
+      Merci,<br />
       <strong>L'équipe Rabotka</strong>
     </p>
   `;
