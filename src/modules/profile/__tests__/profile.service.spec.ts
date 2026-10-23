@@ -1912,6 +1912,8 @@ describe('ProfileService', () => {
       const detail = await service.getBusinessForAdmin('p-1');
       expect(detail).toMatchObject({
         name: 'École Les Lauriers',
+        countryCode: 'CG',
+        countryName: 'Congo-Brazzaville',
         categoryLabel: expect.stringContaining('École'),
         documents: [expect.objectContaining({ documentType: 'AGREMENT', label: expect.any(String) })],
         missingDocuments: [],
