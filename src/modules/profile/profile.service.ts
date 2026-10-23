@@ -378,6 +378,8 @@ export type AdminBusinessDetail = {
   statisticalId: string | null;
   address: string;
   countryCode: string | null;
+  /** The country's name, from the same list as the public geo API. */
+  countryName: string | null;
   city: string | null;
   email: string | null;
   phone: string | null;
@@ -2170,6 +2172,7 @@ export class ProfileService {
       statisticalId: business.statistical_id,
       address: business.address,
       countryCode: business.country_code,
+      countryName: this.geo.findCountry(business.country_code)?.name ?? null,
       city: business.city,
       email: business.email,
       phone: business.phone,
