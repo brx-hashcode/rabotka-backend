@@ -373,6 +373,8 @@ export type AdminProfileDetailResponse = AdminProfileListItem & {
 export type AdminBusinessDetail = {
   id: string;
   name: string;
+  /** The organisation's logo: the account's own profile picture. */
+  logoUrl: string | null;
   category: BusinessCategory;
   categoryLabel: string;
   legalForm: BusinessLegalForm | null;
@@ -2215,7 +2217,10 @@ export class ProfileService {
   async getBusinessForAdmin(profileId: string): Promise<AdminBusinessDetail> {
     const business = await this.prisma.business.findUnique({
       where: { profile_id: profileId },
-      include: { documents: { orderBy: { created_at: 'asc' } } },
+      include: {
+        documents: { orderBy: { created_at: 'asc' } },
+        profile: { select: { avatar_url: true } },
+      },
     });
     if (!business) {
       throw new NotFoundException("Ce profil n'a pas d'organisation.");
@@ -2226,6 +2231,7 @@ export class ProfileService {
     return {
       id: business.id,
       name: business.name,
+      logoUrl: business.profile.avatar_url,
       category: business.category,
       categoryLabel: BUSINESS_CATEGORY_LABELS[business.category],
       legalForm: business.legal_form,
