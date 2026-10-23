@@ -106,6 +106,9 @@ import {
   type SessionEndedEvent,
 } from '../../common/events/session-ended.events';
 import { assertBusinessIsEmployer } from '../business/business-rules';
+import { assertBusinessSignupComplete } from '../business/business-signup';
+import { BUSINESS_DOCUMENT_LABELS } from '../business/business-catalog';
+import type { SignupIdentity } from '../auth/signup-token';
 
 const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
   [ProfileType.WORKER]: 'Travailleur',
@@ -370,6 +373,20 @@ const PHONE_CHANGE_KEY_PREFIX = `${REDIS_KEY_PREFIX}profile:phone-change:`;
 const KYC_PENDING_UPLOADS = `${REDIS_KEY_PREFIX}kyc:pending-uploads`;
 const KYC_PENDING_TTL_MS = 24 * 60 * 60 * 1000;
 const KYC_SWEEP_BATCH = 20;
+
+/** The content type of an uploaded KYC object, from the extension its key carries. */
+function mimeTypeOfKey(key: string): string | null {
+  const ext = key.slice(key.lastIndexOf('.') + 1).toLowerCase();
+  return (
+    {
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      webp: 'image/webp',
+      pdf: 'application/pdf',
+    }[ext] ?? null
+  );
+}
 const PHONE_CHANGE_SENDS_PREFIX = `${REDIS_KEY_PREFIX}profile:phone-change-sends:`;
 const phoneChangeMissKey = (profileId: string) =>
   `${REDIS_KEY_PREFIX}profile:phone-change-misses:${profileId}`;
@@ -1854,19 +1871,33 @@ export class ProfileService {
     return { count };
   }
 
-  async createProfile(createProfileDto: CreateProfileDto): Promise<{
+  /**
+   * `entry` is what the signup token proved (ProfileController reads it):
+   * 'business' for an email-verified sign-up, which creates the organisation
+   * with the profile.
+   */
+  async createProfile(
+    createProfileDto: CreateProfileDto,
+    entry: SignupIdentity['entry'] = 'whatsapp',
+  ): Promise<{
     message: string;
     profileId: string;
     profileType: ProfileType;
     creditedBalance: number;
   }> {
     try {
-      const profile = await this.createProfileWithDocuments(createProfileDto);
+      const profile = await this.createProfileWithDocuments(
+        createProfileDto,
+        entry,
+      );
 
       this.logger.log(`Profile created successfully: ${profile.id}`);
-      // The sign-up attempt is done. Not awaited, never throws.
+      // The sign-up attempt is done. Not awaited, never throws. A business's
+      // attempt is keyed by the email it proved.
       void this.onboardingAttempts?.completed(
-        createProfileDto.phone,
+        entry === 'business' && createProfileDto.email
+          ? createProfileDto.email
+          : createProfileDto.phone,
         profile.id,
       );
 
@@ -2157,10 +2188,13 @@ export class ProfileService {
       KYC_SWEEP_BATCH,
     );
     for (const key of expired) {
-      const attached = await this.prisma.kycDocument.count({
-        where: { storage_key: key },
-      });
-      if (attached === 0) {
+      // A business's documents go through the same upload, so a key is
+      // attached when either table holds it.
+      const [personal, business] = await Promise.all([
+        this.prisma.kycDocument.count({ where: { storage_key: key } }),
+        this.prisma.businessDocument.count({ where: { storage_key: key } }),
+      ]);
+      if (personal + business === 0) {
         await this.fileService.deleteStoredObject(key, bucket);
       }
       await this.redis.zrem(KYC_PENDING_UPLOADS, key);
@@ -2365,9 +2399,21 @@ export class ProfileService {
     return key;
   }
 
-  private async createProfileWithDocuments(createProfileDto: CreateProfileDto) {
+  private async createProfileWithDocuments(
+    createProfileDto: CreateProfileDto,
+    entry: SignupIdentity['entry'],
+  ) {
+    if (entry === 'business') {
+      return this.createBusinessProfileWithDocuments(createProfileDto);
+    }
     const { kycDocumentUrl, kycSelfieUrl, kycDocumentBackUrl } =
       createProfileDto;
+    // Required by the DTO for every sign-up but a business one.
+    if (!kycDocumentUrl || !kycSelfieUrl) {
+      throw new BadRequestException(
+        "Le document d'identité et le selfie sont requis.",
+      );
+    }
 
     // Resolved BEFORE the transaction opens. These do network I/O against R2,
     // and holding a Postgres transaction open across it is how a slow bucket
@@ -2408,18 +2454,7 @@ export class ProfileService {
         createProfileDto,
       );
 
-      if (
-        createProfileDto.categoryIds &&
-        createProfileDto.categoryIds.length > 0
-      ) {
-        await tx.profileCategory.createMany({
-          data: createProfileDto.categoryIds.map((categoryId) => ({
-            profile_id: createdProfile.id,
-            category_id: categoryId,
-          })),
-          skipDuplicates: true,
-        });
-      }
+      await this.linkProfileCategories(tx, createdProfile.id, createProfileDto);
 
       // A PASSPORT has no back to photograph, so it gets two rows; every other
       // type gets three. Gating on documentType rather than merely on the URL
@@ -2461,28 +2496,126 @@ export class ProfileService {
         ),
       ]);
 
-      // Snapshot-link all current AGREEMENT/POLICY platform documents to this profile
-      const platformDocs = await tx.document.findMany({
-        where: { category: { in: ['AGREEMENT', 'POLICY'] } },
-        select: { id: true },
-      });
-      if (platformDocs.length > 0) {
-        await tx.profilePlatformDocumentLink.createMany({
-          data: platformDocs.map((doc) => ({
-            profile_id: createdProfile.id,
-            document_id: doc.id,
-          })),
-          skipDuplicates: true,
-        });
-      }
+      await this.linkPlatformDocuments(tx, createdProfile.id);
 
       return createdProfile;
     });
   }
 
+  /**
+   * A business sign-up: the person's profile, flagged `is_business`, and the
+   * organisation with its documents — in ONE transaction, so a profile can
+   * never be flagged without its business, nor a business exist without its
+   * profile. No personal ID or selfie (product decision): the business's own
+   * papers are what the team reviews, and approving them activates the
+   * account.
+   *
+   * The documents are resolved like the personal KYC files — same upload
+   * route, same private bucket, keys derived server-side — and before the
+   * transaction opens, for the same reason (network I/O against R2).
+   */
+  private async createBusinessProfileWithDocuments(
+    createProfileDto: CreateProfileDto,
+  ) {
+    const business = createProfileDto.business;
+    if (!business) {
+      throw new BadRequestException(
+        'Renseignez les informations de votre entreprise.',
+      );
+    }
+    assertBusinessSignupComplete(business);
+
+    const documentKeys = await Promise.all(
+      business.documents.map((doc) =>
+        this.resolveKycObject(
+          BUSINESS_DOCUMENT_LABELS[doc.documentType],
+          doc.url,
+          doc.key,
+        ),
+      ),
+    );
+    const location = this.geo.resolveLocation(createProfileDto);
+
+    return this.prisma.$transaction(async (tx) => {
+      const createdProfile = await this.createProfileRecord(
+        tx,
+        createProfileDto,
+        { isBusiness: true },
+      );
+      await this.linkProfileCategories(tx, createdProfile.id, createProfileDto);
+
+      await tx.business.create({
+        data: {
+          profile_id: createdProfile.id,
+          name: business.name,
+          category: business.category,
+          legal_form: business.legalForm ?? null,
+          size: business.size ?? null,
+          registration_number: business.registrationNumber ?? null,
+          tax_id: business.taxId ?? null,
+          statistical_id: business.statisticalId ?? null,
+          address: business.address,
+          country_code: location.country_code ?? null,
+          city: location.city ?? null,
+          email: business.email ?? createProfileDto.email ?? null,
+          phone: business.phone ?? createProfileDto.phone,
+          website: business.website ?? null,
+          description: business.description ?? null,
+          documents: {
+            create: business.documents.map((doc, i) => ({
+              document_type: doc.documentType,
+              storage_key: documentKeys[i],
+              file_name: doc.fileName ?? null,
+              mime_type: mimeTypeOfKey(documentKeys[i]),
+            })),
+          },
+        },
+      });
+
+      await this.linkPlatformDocuments(tx, createdProfile.id);
+      return createdProfile;
+    });
+  }
+
+  private async linkProfileCategories(
+    tx: PrismaTransactionClient,
+    profileId: string,
+    createProfileDto: CreateProfileDto,
+  ): Promise<void> {
+    if (!createProfileDto.categoryIds?.length) return;
+    await tx.profileCategory.createMany({
+      data: createProfileDto.categoryIds.map((categoryId) => ({
+        profile_id: profileId,
+        category_id: categoryId,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  /** Snapshot-link all current AGREEMENT/POLICY platform documents. */
+  private async linkPlatformDocuments(
+    tx: PrismaTransactionClient,
+    profileId: string,
+  ): Promise<void> {
+    const platformDocs = await tx.document.findMany({
+      where: { category: { in: ['AGREEMENT', 'POLICY'] } },
+      select: { id: true },
+    });
+    if (platformDocs.length > 0) {
+      await tx.profilePlatformDocumentLink.createMany({
+        data: platformDocs.map((doc) => ({
+          profile_id: profileId,
+          document_id: doc.id,
+        })),
+        skipDuplicates: true,
+      });
+    }
+  }
+
   private async createProfileRecord(
     tx: PrismaTransactionClient,
     createProfileDto: CreateProfileDto,
+    { isBusiness = false }: { isBusiness?: boolean } = {},
   ): Promise<{ id: string }> {
     return tx.profile.create({
       data: {
@@ -2513,7 +2646,12 @@ export class ProfileService {
         // This does NOT activate the account — `status` stays
         // PENDING_ACTIVATION until KYC passes. The bot's pre-activation gate
         // keys on `status`, not on this flag, so the KYC wall still holds.
-        whatsapp_connected: true,
+        //
+        // A business proved its email, not its phone: the number is required
+        // but unverified, so nothing that targets connected numbers may treat
+        // it as a WhatsApp line until it is verified.
+        whatsapp_connected: !isBusiness,
+        is_business: isBusiness,
       },
       select: {
         id: true,

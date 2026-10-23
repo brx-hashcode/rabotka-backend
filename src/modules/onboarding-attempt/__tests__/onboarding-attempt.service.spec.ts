@@ -52,6 +52,32 @@ describe('OnboardingAttemptService', () => {
       });
     });
 
+    it('keys a business sign-up by its email, and marks it as one', async () => {
+      prisma.onboardingAttempt.findUnique.mockResolvedValue(null);
+
+      await service.codeSent('contact@ecole.cg');
+
+      expect(prisma.onboardingAttempt.findUnique).toHaveBeenCalledWith({
+        where: { email: 'contact@ecole.cg' },
+      });
+      const { data } = prisma.onboardingAttempt.create.mock.calls[0][0];
+      expect(data).toMatchObject({
+        email: 'contact@ecole.cg',
+        entry: 'business',
+      });
+      expect(data).not.toHaveProperty('phone');
+    });
+
+    it('marks a phone sign-up as WhatsApp', async () => {
+      prisma.onboardingAttempt.findUnique.mockResolvedValue(null);
+
+      await service.codeSent(PHONE);
+
+      expect(prisma.onboardingAttempt.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ phone: PHONE, entry: 'whatsapp' }),
+      });
+    });
+
     it('counts another code on an open attempt, keeping the names it has', async () => {
       prisma.onboardingAttempt.findUnique.mockResolvedValue({
         stage: OnboardingStage.CODE_SENT,

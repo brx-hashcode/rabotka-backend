@@ -33,9 +33,19 @@ type Who = {
   profileType?: ProfileType | null;
 };
 
+/**
+ * An attempt is keyed by what its sign-up proves: the phone for a WhatsApp
+ * sign-up, the email for a business one. A phone never contains '@'.
+ */
+const keyOf = (contact: string): { email: string } | { phone: string } =>
+  contact.includes('@') ? { email: contact } : { phone: contact };
+
 export type AdminOnboardingAttemptItem = {
   id: string;
-  phone: string;
+  phone: string | null;
+  email: string | null;
+  /** 'business' for an email (business) sign-up, 'whatsapp' otherwise. */
+  entry: string;
   firstName: string | null;
   lastName: string | null;
   profileType: ProfileType | null;
@@ -64,19 +74,28 @@ export class OnboardingAttemptService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /** A WhatsApp code went out — a new attempt, or another code for one. */
-  async codeSent(phone: string, who: Who = {}): Promise<void> {
+  /**
+   * A code went out — on WhatsApp to a phone, or by email to a business — a
+   * new attempt, or another code for one.
+   */
+  async codeSent(contact: string, who: Who = {}): Promise<void> {
     await this.safely('codeSent', async () => {
       const now = new Date();
       const names = this.namesOf(who);
       const existing = await this.prisma.onboardingAttempt.findUnique({
-        where: { phone },
+        where: keyOf(contact),
       });
 
       if (!existing) {
         try {
           await this.prisma.onboardingAttempt.create({
-            data: { phone, ...names, started_at: now, last_activity_at: now },
+            data: {
+              ...keyOf(contact),
+              entry: contact.includes('@') ? 'business' : 'whatsapp',
+              ...names,
+              started_at: now,
+              last_activity_at: now,
+            },
           });
           return;
         } catch (err) {
@@ -90,7 +109,7 @@ export class OnboardingAttemptService {
         // number's account was deleted and they are starting over — a new
         // attempt, not the old one's history.
         await this.prisma.onboardingAttempt.update({
-          where: { phone },
+          where: keyOf(contact),
           data: {
             ...names,
             stage: OnboardingStage.CODE_SENT,
@@ -109,7 +128,7 @@ export class OnboardingAttemptService {
       }
 
       await this.prisma.onboardingAttempt.update({
-        where: { phone },
+        where: keyOf(contact),
         data: {
           ...names,
           code_sends: { increment: 1 },
@@ -119,24 +138,25 @@ export class OnboardingAttemptService {
     });
   }
 
-  async phoneVerified(phone: string): Promise<void> {
-    await this.advance(phone, OnboardingStage.PHONE_VERIFIED, {
+  /** The code was right: the phone — or the business's email — is proven. */
+  async phoneVerified(contact: string): Promise<void> {
+    await this.advance(contact, OnboardingStage.PHONE_VERIFIED, {
       phone_verified_at: new Date(),
     });
   }
 
   /** A screen the app reports reaching, past the number check. */
   async reached(
-    phone: string,
+    contact: string,
     stage: ReportableStage,
     who: Who = {},
   ): Promise<void> {
-    await this.advance(phone, stage, this.namesOf(who));
+    await this.advance(contact, stage, this.namesOf(who));
   }
 
   /** The account exists. Called for every account, however it was created. */
-  async completed(phone: string, profileId: string): Promise<void> {
-    await this.advance(phone, OnboardingStage.COMPLETED, {
+  async completed(contact: string, profileId: string): Promise<void> {
+    await this.advance(contact, OnboardingStage.COMPLETED, {
       completed_at: new Date(),
       profile_id: profileId,
     });
@@ -147,6 +167,7 @@ export class OnboardingAttemptService {
     limit?: number;
     q?: string;
     stage?: OnboardingStage[];
+    entry?: 'whatsapp' | 'business';
     /** Only attempts that never became an account. */
     incomplete?: boolean;
     contacted?: boolean;
@@ -257,20 +278,20 @@ export class OnboardingAttemptService {
   }
 
   private async advance(
-    phone: string,
+    contact: string,
     stage: OnboardingStage,
     data: Prisma.OnboardingAttemptUpdateInput,
   ): Promise<void> {
     await this.safely(`advance:${stage}`, async () => {
       const existing = await this.prisma.onboardingAttempt.findUnique({
-        where: { phone },
+        where: keyOf(contact),
         select: { stage: true },
       });
       // No row: an attempt from before this table, or one whose code-sent
       // write failed. Nothing to advance.
       if (!existing) return;
       await this.prisma.onboardingAttempt.update({
-        where: { phone },
+        where: keyOf(contact),
         data: {
           ...data,
           last_activity_at: new Date(),
@@ -284,6 +305,7 @@ export class OnboardingAttemptService {
   private adminWhere(params: {
     q?: string;
     stage?: OnboardingStage[];
+    entry?: 'whatsapp' | 'business';
     incomplete?: boolean;
     contacted?: boolean;
     startedFrom?: string;
@@ -297,12 +319,14 @@ export class OnboardingAttemptService {
         : params.incomplete
           ? { stage: { not: OnboardingStage.COMPLETED } }
           : {}),
+      ...(params.entry ? { entry: params.entry } : {}),
       ...(params.contacted === true ? { contacted_at: { not: null } } : {}),
       ...(params.contacted === false ? { contacted_at: null } : {}),
       ...(q
         ? {
             OR: [
               { phone: { contains: q } },
+              { email: { contains: q, mode: 'insensitive' } },
               { first_name: { contains: q, mode: 'insensitive' } },
               { last_name: { contains: q, mode: 'insensitive' } },
             ],
@@ -333,6 +357,8 @@ export class OnboardingAttemptService {
     return {
       id: row.id,
       phone: row.phone,
+      email: row.email,
+      entry: row.entry,
       firstName: row.first_name,
       lastName: row.last_name,
       profileType: row.profile_type,

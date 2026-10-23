@@ -1018,12 +1018,23 @@ describe('ProfileService', () => {
     });
 
     it('deletes an upload left unattached for a day, and keeps an attached one', async () => {
-      redis.zrangebyscore.mockResolvedValue(['kyc-documents/old.jpg', 'kyc-documents/used.jpg']);
+      redis.zrangebyscore.mockResolvedValue([
+        'kyc-documents/old.jpg',
+        'kyc-documents/used.jpg',
+        'kyc-documents/rccm.pdf',
+      ]);
       (prisma as any).kycDocument.count = jest
         .fn()
         .mockImplementation(({ where }: { where: { storage_key: string } }) =>
           Promise.resolve(where.storage_key.endsWith('used.jpg') ? 1 : 0),
         );
+      (prisma as any).businessDocument = {
+        count: jest
+          .fn()
+          .mockImplementation(({ where }: { where: { storage_key: string } }) =>
+            Promise.resolve(where.storage_key.endsWith('rccm.pdf') ? 1 : 0),
+          ),
+      };
 
       await (service as any).sweepAbandonedKycUploads('rabotka-kyc');
 
@@ -1032,7 +1043,8 @@ describe('ProfileService', () => {
         'kyc-documents/old.jpg',
         'rabotka-kyc',
       );
-      expect(redis.zrem).toHaveBeenCalledTimes(2);
+      // A business document is attached too, and kept.
+      expect(redis.zrem).toHaveBeenCalledTimes(3);
     });
   });
 
@@ -1710,6 +1722,143 @@ describe('ProfileService', () => {
       // credential, so nothing in it can expire or be forwarded.
       expect(JSON.stringify(result)).not.toContain('https://');
       expect(fileService.getPresignedUrl).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createProfile() - business sign-up', () => {
+    const businessDto = {
+      firstName: 'Awa',
+      lastName: 'Mabiala',
+      email: 'contact@ecole.cg',
+      phone: '+242061234567',
+      address: 'Avenue de la Paix, Brazzaville',
+      profileType: 'EMPLOYER' as any,
+      readAndApprovedPolicies: true,
+      signupToken: 't',
+      business: {
+        name: 'École Les Lauriers',
+        category: 'SCHOOL' as any,
+        legalForm: 'ASSOCIATION' as any,
+        address: 'Avenue de la Paix, Brazzaville',
+        documents: [
+          {
+            documentType: 'AUTORISATION_OUVERTURE' as any,
+            url: 'https://cdn.example.com/kyc-documents/autorisation.pdf',
+            key: 'kyc-documents/autorisation.pdf',
+            fileName: 'autorisation.pdf',
+          },
+        ],
+      },
+    };
+
+    const txWithBusiness = () => {
+      const tx = makePrisma() as any;
+      tx.business = { create: jest.fn().mockResolvedValue({ id: 'b-1' }) };
+      prisma.$transaction.mockImplementation((fn: any) => fn(tx));
+      return tx;
+    };
+
+    it('creates the business profile and its documents in one transaction', async () => {
+      const tx = txWithBusiness();
+
+      await service.createProfile(businessDto as any, 'business');
+
+      expect(tx.profile.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            is_business: true,
+            profile_type: 'EMPLOYER',
+            // The phone was never proven.
+            whatsapp_connected: false,
+            status: 'PENDING_ACTIVATION',
+          }),
+        }),
+      );
+      expect(tx.business.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          profile_id: 'new-p-1',
+          name: 'École Les Lauriers',
+          category: 'SCHOOL',
+          email: 'contact@ecole.cg',
+          phone: '+242061234567',
+          documents: {
+            create: [
+              expect.objectContaining({
+                document_type: 'AUTORISATION_OUVERTURE',
+                storage_key: 'kyc-documents/autorisation.pdf',
+                mime_type: 'application/pdf',
+              }),
+            ],
+          },
+        }),
+      });
+      // No personal ID or selfie for a business.
+      expect(tx.kycDocument.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses a business missing a required document, before writing anything', async () => {
+      const tx = txWithBusiness();
+
+      await expect(
+        service.createProfile(
+          {
+            ...businessDto,
+            business: { ...businessDto.business, documents: [] },
+          } as any,
+          'business',
+        ),
+      ).rejects.toThrow(/Autorisation d.ouverture/);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(tx.profile.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses a legal form that does not fit the category', async () => {
+      txWithBusiness();
+
+      await expect(
+        service.createProfile(
+          {
+            ...businessDto,
+            business: { ...businessDto.business, legalForm: 'PUBLIC_ENTITY' },
+          } as any,
+          'business',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('records the attempt as completed under the email it proved', async () => {
+      txWithBusiness();
+      const attempts = { completed: jest.fn().mockResolvedValue(undefined) };
+      (service as any).onboardingAttempts = attempts;
+
+      await service.createProfile(businessDto as any, 'business');
+
+      expect(attempts.completed).toHaveBeenCalledWith(
+        'contact@ecole.cg',
+        'new-p-1',
+      );
+    });
+
+    it('flags nothing for a WhatsApp sign-up', async () => {
+      const tx = txWithBusiness();
+
+      await service.createProfile({
+        ...businessDto,
+        business: undefined,
+        documentType: 'CNI' as any,
+        kycDocumentUrl: 'https://cdn.example.com/kyc-documents/id.jpg',
+        kycSelfieUrl: 'https://cdn.example.com/kyc-documents/selfie.jpg',
+      } as any);
+
+      expect(tx.profile.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            is_business: false,
+            whatsapp_connected: true,
+          }),
+        }),
+      );
+      expect(tx.business.create).not.toHaveBeenCalled();
     });
   });
 

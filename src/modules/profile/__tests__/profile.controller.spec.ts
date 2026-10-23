@@ -127,7 +127,10 @@ describe('ProfileController', () => {
 
     it('creates a profile and sends welcome email', async () => {
       const result = await controller.createProfile(dto as any, mockRes());
-      expect(profileService.createProfile).toHaveBeenCalledWith(dto);
+      expect(profileService.createProfile).toHaveBeenCalledWith(
+        dto,
+        'whatsapp',
+      );
       expect(mailService.sendMail).toHaveBeenCalledWith(
         expect.objectContaining({ to: dto.email }),
       );
@@ -171,6 +174,73 @@ describe('ProfileController', () => {
         dto.firstName,
         expect.any(String),
       );
+    });
+
+    it('refuses a business body with a WhatsApp token', async () => {
+      await expect(
+        controller.createProfile(
+          { ...dto, business: { name: 'X' } } as any,
+          mockRes(),
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(profileService.createProfile).not.toHaveBeenCalled();
+    });
+
+    describe('business sign-up (token proven by email)', () => {
+      const businessDto = {
+        ...dto,
+        email: 'contact@ecole.cg',
+        profileType: 'EMPLOYER' as any,
+        kycDocumentUrl: undefined,
+        kycSelfieUrl: undefined,
+        business: { name: 'École Les Lauriers', category: 'SCHOOL' },
+      };
+      beforeEach(() => {
+        redis.get.mockResolvedValue(
+          JSON.stringify({ entry: 'business', email: 'contact@ecole.cg' }),
+        );
+      });
+
+      it('creates a business profile, welcomed by email and not on WhatsApp', async () => {
+        await controller.createProfile(businessDto as any, mockRes());
+
+        expect(profileService.createProfile).toHaveBeenCalledWith(
+          businessDto,
+          'business',
+        );
+        expect(mailService.sendMail).toHaveBeenCalledWith(
+          expect.objectContaining({ to: 'contact@ecole.cg' }),
+        );
+        expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+      });
+
+      it('refuses an email other than the one proven', async () => {
+        await expect(
+          controller.createProfile(
+            { ...businessDto, email: 'autre@ecole.cg' } as any,
+            mockRes(),
+          ),
+        ).rejects.toThrow(ForbiddenException);
+      });
+
+      it('refuses without the business', async () => {
+        await expect(
+          controller.createProfile(
+            { ...businessDto, business: undefined } as any,
+            mockRes(),
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('refuses a worker account', async () => {
+        await expect(
+          controller.createProfile(
+            { ...businessDto, profileType: 'WORKER' } as any,
+            mockRes(),
+          ),
+        ).rejects.toThrow(BadRequestException);
+        expect(profileService.createProfile).not.toHaveBeenCalled();
+      });
     });
 
     it('still creates the profile when the WhatsApp template send fails', async () => {

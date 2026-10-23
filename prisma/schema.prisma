@@ -3232,8 +3232,14 @@ model OnboardingAttempt {
   created_at        DateTime        @default(now())
   updated_at        DateTime        @updatedAt
   /// Normalised as the signup endpoints normalise it — the same key the
-  /// verification and the account creation use.
-  phone             String          @unique
+  /// verification and the account creation use. Null for a business sign-up,
+  /// which proves an email instead: one of the two is always set (CHECK
+  /// onboarding_attempts_contact).
+  phone             String?         @unique
+  /// The business sign-up's email, normalised the same way.
+  email             String?         @unique
+  /// 'whatsapp' or 'business' — how the sign-up was proven.
+  entry             String          @default("whatsapp")
   first_name        String?
   last_name         String?
   profile_type      ProfileType?
