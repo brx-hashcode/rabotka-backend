@@ -18,12 +18,10 @@ import {
   BusinessDocumentType,
   BusinessLegalForm,
 } from '@prisma/client';
+import { BUSINESS_SIZES } from '../business-catalog';
 
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() || undefined : value;
-
-/** Headcount brackets offered at sign-up. */
-export const BUSINESS_SIZES = ['1-5', '6-20', '21-100', '100+'] as const;
 
 /**
  * One business document, pre-uploaded through POST /profile/kyc-upload with

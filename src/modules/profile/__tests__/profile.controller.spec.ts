@@ -243,6 +243,37 @@ describe('ProfileController', () => {
       });
     });
 
+    it('answers with a bearer session, and no cookie, when asked', async () => {
+      const authService = {
+        issueBearerSession: jest.fn().mockResolvedValue({
+          token: 'access',
+          refreshToken: 'refresh',
+          user: { id: 'p-1' },
+        }),
+      };
+      (controller as any).authService = authService;
+      const res = mockRes();
+
+      const result = await controller.createProfile(dto as any, res, 'bearer');
+
+      expect(authService.issueBearerSession).toHaveBeenCalled();
+      expect(result).toEqual(
+        expect.objectContaining({
+          token: 'access',
+          refreshToken: 'refresh',
+          user: { id: 'p-1' },
+        }),
+      );
+      expect(res.cookie).not.toHaveBeenCalled();
+    });
+
+    it('sets the cookie as before without the header', async () => {
+      const res = mockRes();
+      const result = await controller.createProfile(dto as any, res);
+      expect(res.cookie).toHaveBeenCalled();
+      expect(result).not.toHaveProperty('token');
+    });
+
     it('still creates the profile when the WhatsApp template send fails', async () => {
       whatsApp.sendTemplateMessage.mockRejectedValueOnce(new Error('twilio'));
       await expect(

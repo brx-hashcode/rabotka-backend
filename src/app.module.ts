@@ -28,6 +28,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { OAuthModule } from './modules/oauth/oauth.module';
 import { IdentityCheckModule } from './modules/identity-check/identity-check.module';
 import { ProfileModule } from './modules/profile/profile.module';
+import { BusinessModule } from './modules/business/business.module';
 import { UserModule } from './modules/user/user.module';
 import { ConversationModule } from './modules/conversation/conversation.module';
 import { JobOfferModule } from './modules/job-offer/job-offer.module';
@@ -179,6 +180,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     OAuthModule,
     IdentityCheckModule,
     ProfileModule,
+    BusinessModule,
     UserModule,
     ConversationModule,
     JobOfferModule,
