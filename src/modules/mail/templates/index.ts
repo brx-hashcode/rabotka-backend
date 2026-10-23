@@ -13,6 +13,7 @@ export {
   agentWithdrawalRejectedEmail,
 } from './agent-withdrawal';
 export { adminUpdatedEmail } from './admin-updated';
+export { businessApprovedEmail, businessRejectedEmail } from './business-review';
 export { kycApprovedEmail } from './kyc-approved';
 export { kycRejectedEmail } from './kyc-rejected';
 export { kycReviewRequestedEmail } from './kyc-review-requested';

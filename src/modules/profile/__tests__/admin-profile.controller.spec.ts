@@ -976,3 +976,80 @@ describe('AdminProfileController', () => {
     });
   });
 });
+
+describe('AdminProfileController business review', () => {
+  function build() {
+    const profileService = {
+      verifyBusiness: jest.fn().mockResolvedValue({
+        id: 'b-1',
+        name: 'École Les Lauriers',
+        email: 'contact@ecole.cg',
+      }),
+    };
+    const prisma = {
+      profile: {
+        findUnique: jest.fn().mockResolvedValue({
+          first_name: 'Awa',
+          last_name: 'Mabiala',
+          email: 'awa@ecole.cg',
+        }),
+      },
+    };
+    const whatsApp = makeWhatsApp();
+    const mail = makeMail();
+    const events = { emit: jest.fn() };
+    const ctrl = new AdminProfileController(
+      profileService as any,
+      makeLogService() as any,
+      makePaymentRequestService() as any,
+      prisma as any,
+      whatsApp as any,
+      makeLoginLink() as any,
+      mail as any,
+      makeLayout() as any,
+      makeWalletService() as any,
+      makePortfolioService() as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
+      { forProfile: jest.fn() } as any,
+      undefined,
+      undefined,
+      undefined,
+      events as any,
+    );
+    return { ctrl, profileService, whatsApp, mail, events };
+  }
+
+  it('tells the business by email and in-app, never on WhatsApp', async () => {
+    const { ctrl, mail, events, whatsApp } = build();
+
+    await ctrl.verifyBusiness('p-1', { decision: 'VERIFIED' as any }, {
+      user: { userId: 'admin-1' },
+    } as any);
+
+    expect(mail.sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'awa@ecole.cg',
+        html: expect.stringContaining('École Les Lauriers'),
+      }),
+    );
+    expect(events.emit).toHaveBeenCalled();
+    expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+    expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+  });
+
+  it('sends the refusal reason in the email', async () => {
+    const { ctrl, mail } = build();
+
+    await ctrl.verifyBusiness(
+      'p-1',
+      { decision: 'REJECTED' as any, reason: 'RCCM illisible' },
+      { user: { userId: 'admin-1' } } as any,
+    );
+
+    expect(mail.sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        html: expect.stringContaining('RCCM illisible'),
+      }),
+    );
+  });
+});

@@ -193,7 +193,9 @@ export type NotificationInput =
     }
   | { type: 'KYC_REJECTED'; reason: string | null }
   | { type: 'ACCOUNT_SUSPENDED'; reason: string | null }
-  | { type: 'UNLOCK_CONVERTED_TO_CREDIT'; amount: number };
+  | { type: 'UNLOCK_CONVERTED_TO_CREDIT'; amount: number }
+  | { type: 'BUSINESS_VERIFIED'; businessName: string }
+  | { type: 'BUSINESS_REJECTED'; businessName: string; reason: string | null };
 
 export type NotificationType = NotificationInput['type'];
 
@@ -479,6 +481,20 @@ export function renderNotification(
         title: 'Compte suspendu',
         body: `Votre compte a été suspendu. Motif : ${input.reason?.trim() || 'non précisé'}. Contactez-nous si vous pensez qu’il s’agit d’une erreur.`,
         link: '/claims/new',
+      };
+
+    case 'BUSINESS_VERIFIED':
+      return {
+        title: 'Organisation vérifiée',
+        body: `${input.businessName} est vérifiée : votre compte entreprise est actif. Vous pouvez publier vos offres.`,
+        link: '/espace',
+      };
+
+    case 'BUSINESS_REJECTED':
+      return {
+        title: 'Vérification de l’organisation refusée',
+        body: `Les documents de ${input.businessName} n’ont pas pu être validés. Motif : ${input.reason?.trim() || 'non précisé'}.`,
+        link: '/espace',
       };
 
     case 'UNLOCK_CONVERTED_TO_CREDIT':
