@@ -199,6 +199,7 @@ export class ProfileNotificationService {
     input,
     actorId,
   }: CreateInput): Promise<ProfileNotificationDto> {
+    input = await this.forRecipient(recipientId, input);
     const { title, body, link } = renderNotification(input);
     const row = await this.prisma.profileNotification.create({
       data: {
@@ -218,6 +219,30 @@ export class ProfileNotificationService {
     // slow push service must not hold it up. send() never throws.
     void this.push.send(recipientId, pushPayload(dto));
     return dto;
+  }
+
+  /**
+   * An unlock told to an employer that is a business reads differently (its
+   * space, not WhatsApp). Decided here, once, rather than by each of the
+   * unlock paths that raise it.
+   */
+  private async forRecipient(
+    recipientId: string,
+    input: NotificationInput,
+  ): Promise<NotificationInput> {
+    if (
+      input.type !== 'CONTACT_UNLOCKED' ||
+      input.recipientRole !== 'EMPLOYER'
+    ) {
+      return input;
+    }
+    const recipient = await this.prisma.profile.findUnique({
+      where: { id: recipientId },
+      select: { is_business: true },
+    });
+    return recipient?.is_business
+      ? { ...input, recipientRole: 'BUSINESS' }
+      : input;
   }
 
   /**

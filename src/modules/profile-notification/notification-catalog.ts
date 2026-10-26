@@ -115,7 +115,8 @@ export type NotificationInput =
     }
   | {
       type: 'CONTACT_UNLOCKED';
-      recipientRole: 'WORKER' | 'EMPLOYER';
+      /** BUSINESS: an employer that is a business account — no WhatsApp, its own space. */
+      recipientRole: 'WORKER' | 'EMPLOYER' | 'BUSINESS';
       applicationId: string | null;
       counterpartName: string;
       jobTitle: string | null;
@@ -392,6 +393,16 @@ export function renderNotification(
       };
 
     case 'CONTACT_UNLOCKED':
+      // A business never gets WhatsApp: the details are in its space.
+      if (input.recipientRole === 'BUSINESS') {
+        return {
+          title: 'Contact débloqué',
+          body: `Les coordonnées de ${input.counterpartName}${
+            input.jobTitle ? ` pour${quoted(input.jobTitle)}` : ''
+          } sont disponibles dans vos profils contactés.`,
+          link: '/espace/contacts',
+        };
+      }
       // Informational only: the details are delivered on WhatsApp, and the
       // in-app contacts list is hidden, so there is nowhere useful to open.
       // Worded so a name ending in an initial ("Awa K.") never doubles the
