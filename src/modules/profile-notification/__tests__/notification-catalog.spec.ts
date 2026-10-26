@@ -132,6 +132,19 @@ describe('renderNotification', () => {
     }
   });
 
+  it('sends a business to its own contacts list, never to WhatsApp', () => {
+    const out = renderNotification({
+      type: 'CONTACT_UNLOCKED',
+      recipientRole: 'BUSINESS',
+      applicationId: 'a-1',
+      counterpartName: 'Awa K.',
+      jobTitle: 'Plombier',
+    });
+    expect(out.link).toBe('/espace/contacts');
+    expect(out.body).not.toContain('WhatsApp');
+    expect(out.body).not.toContain('..');
+  });
+
   it('never links to the hidden contacts list', () => {
     for (const input of SAMPLES) {
       expect(renderNotification(input).link ?? '').not.toContain(

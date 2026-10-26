@@ -39,6 +39,7 @@ import { BusinessSubscriptionService } from './subscription/business-subscriptio
 import { SubscribeDto } from './subscription/dto/business-plan.dto';
 import { planView } from './subscription/plan-view';
 import { BusinessStatsService } from './business-stats.service';
+import { BusinessContactsService } from './business-contacts.service';
 import { STATS_PERIODS } from './business-stats';
 
 /**
@@ -55,6 +56,7 @@ export class BusinessController {
     private readonly subscriptions: BusinessSubscriptionService,
     private readonly checkout: BusinessCheckoutService,
     private readonly statsService: BusinessStatsService,
+    private readonly contacts: BusinessContactsService,
   ) {}
 
   @Get('plans')
@@ -100,6 +102,16 @@ export class BusinessController {
   stats(@Req() req: ProfileAuthenticatedRequest, @Query('days') days?: string) {
     const period = STATS_PERIODS.find((d) => String(d) === days) ?? 30;
     return this.statsService.stats(req.user.profileId, period);
+  }
+
+  @Get('me/contacts')
+  @ApiOperation({
+    summary: 'The workers whose contact it unlocked, with their details',
+    description:
+      'A business gets no WhatsApp: this is where the unlocked name, phone and email are read. One row per worker, latest unlock first.',
+  })
+  myContacts(@Req() req: ProfileAuthenticatedRequest) {
+    return this.contacts.list(req.user.profileId);
   }
 
   @Get('me')
