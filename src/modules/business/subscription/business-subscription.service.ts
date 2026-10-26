@@ -29,9 +29,11 @@ import { notifyProfile } from '../../profile-notification/profile-notification.e
 import type { NotificationInput } from '../../profile-notification/notification-catalog';
 import {
   dueReminder,
+  isUpgrade,
   nextPeriodStart,
   periodEnd,
   remaining,
+  upgradedEnd,
 } from './subscription-rules';
 import {
   BUSINESS_SUBSCRIPTION_PAID_EVENT,
@@ -419,7 +421,9 @@ export class BusinessSubscriptionService {
 
   /**
    * One period, after whatever is already running or queued. A paid plan
-   * replaces a running trial at once rather than waiting for it to end.
+   * replaces a running trial at once rather than waiting for it to end, and
+   * a dearer plan replaces the running paid one at once: its unused time
+   * becomes extra days on the new plan, and what was queued follows it.
    */
   private async createPeriod(
     businessId: string,
@@ -448,6 +452,59 @@ export class BusinessSubscriptionService {
             ends_at: trial.starts_at < now ? now : trial.ends_at,
             expired_notified_at: now,
           },
+        });
+      }
+      const running = await tx.businessSubscription.findFirst({
+        where: {
+          business_id: businessId,
+          status: BusinessSubscriptionStatus.ACTIVE,
+          starts_at: { lte: now },
+          ends_at: { gt: now },
+        },
+        include: { plan: true },
+        orderBy: { starts_at: 'desc' },
+      });
+      if (running && isUpgrade(running.plan, plan)) {
+        const ends = upgradedEnd(now, running, { plan, period });
+        await tx.businessSubscription.update({
+          where: { id: running.id },
+          data: {
+            status: BusinessSubscriptionStatus.EXPIRED,
+            ends_at: now,
+            expired_notified_at: now,
+          },
+        });
+        // What was queued after the old period now follows the new one.
+        const shift = ends.getTime() - running.ends_at.getTime();
+        const queued = await tx.businessSubscription.findMany({
+          where: {
+            business_id: businessId,
+            status: BusinessSubscriptionStatus.ACTIVE,
+            starts_at: { gte: running.ends_at },
+          },
+          select: { id: true, starts_at: true, ends_at: true },
+        });
+        for (const q of queued) {
+          await tx.businessSubscription.update({
+            where: { id: q.id },
+            data: {
+              starts_at: new Date(q.starts_at.getTime() + shift),
+              ends_at: new Date(q.ends_at.getTime() + shift),
+            },
+          });
+        }
+        return tx.businessSubscription.create({
+          data: {
+            business_id: businessId,
+            plan_id: plan.id,
+            status: BusinessSubscriptionStatus.ACTIVE,
+            billing_period: period,
+            starts_at: now,
+            ends_at: ends,
+            payment_request_id: by.paymentRequestId ?? null,
+            granted_by: by.grantedBy ?? null,
+          },
+          include: { plan: true },
         });
       }
       const latest = await tx.businessSubscription.findFirst({

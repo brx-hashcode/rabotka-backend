@@ -1,9 +1,11 @@
 import {
   dueReminder,
+  isUpgrade,
   nextPeriodStart,
   periodEnd,
   priceFor,
   remaining,
+  upgradedEnd,
 } from '../subscription-rules';
 
 const d = (iso: string) => new Date(iso);
@@ -81,5 +83,45 @@ describe('dueReminder', () => {
     expect(
       dueReminder(d('2026-11-11T00:00:00Z'), end, [7, 1], null),
     ).toBeNull();
+  });
+});
+
+describe('upgrade', () => {
+  const essentiel = { monthly_price_fcfa: 10000, annual_price_fcfa: 100000 };
+  const pro = { monthly_price_fcfa: 25000, annual_price_fcfa: 250000 };
+  it('is a move to a dearer plan only', () => {
+    expect(isUpgrade(essentiel, pro)).toBe(true);
+    expect(isUpgrade(pro, essentiel)).toBe(false);
+    expect(isUpgrade(pro, pro)).toBe(false);
+  });
+  it('turns the unused half of the old period into days at the new rate', () => {
+    // 30 days of Essentiel (10 000), 15 left: 5 000 of credit, i.e. 6 days of Pro.
+    const now = d('2026-11-16T00:00:00Z');
+    const end = upgradedEnd(
+      now,
+      {
+        starts_at: d('2026-11-01T00:00:00Z'),
+        ends_at: d('2026-12-01T00:00:00Z'),
+        billing_period: 'MONTHLY',
+        plan: essentiel,
+      },
+      { plan: pro, period: 'MONTHLY' },
+    );
+    // A month of Pro (30 days to 16 Dec) plus 6 days.
+    expect(end).toEqual(d('2026-12-22T00:00:00Z'));
+  });
+  it('gives no credit for a period that cost nothing', () => {
+    const now = d('2026-11-16T00:00:00Z');
+    const end = upgradedEnd(
+      now,
+      {
+        starts_at: d('2026-11-01T00:00:00Z'),
+        ends_at: d('2026-12-01T00:00:00Z'),
+        billing_period: 'MONTHLY',
+        plan: { monthly_price_fcfa: 0, annual_price_fcfa: 0 },
+      },
+      { plan: pro, period: 'MONTHLY' },
+    );
+    expect(end).toEqual(d('2026-12-16T00:00:00Z'));
   });
 });

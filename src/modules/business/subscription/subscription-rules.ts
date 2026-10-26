@@ -80,3 +80,37 @@ export function dueReminder(
   }
   return due;
 }
+
+type PricedPlan = { monthly_price_fcfa: number; annual_price_fcfa: number };
+
+/** A move to a dearer plan (by monthly price): it starts at once, not after the running one. */
+export function isUpgrade(current: PricedPlan, next: PricedPlan): boolean {
+  return next.monthly_price_fcfa > current.monthly_price_fcfa;
+}
+
+/**
+ * Upgrading mid-period: what is left of the running period, at what it cost,
+ * becomes extra time on the new plan at the new plan's rate — nothing paid is
+ * lost. Returns the new period's end.
+ */
+export function upgradedEnd(
+  now: Date,
+  running: {
+    starts_at: Date;
+    ends_at: Date;
+    plan: PricedPlan;
+    billing_period: BusinessBillingPeriod;
+  },
+  next: { plan: PricedPlan; period: BusinessBillingPeriod },
+): Date {
+  const end = periodEnd(now, next.period);
+  const spanOld = running.ends_at.getTime() - running.starts_at.getTime();
+  const leftOld = running.ends_at.getTime() - now.getTime();
+  const priceOld = priceFor(running.plan, running.billing_period);
+  const priceNew = priceFor(next.plan, next.period);
+  if (spanOld <= 0 || leftOld <= 0 || priceOld <= 0 || priceNew <= 0)
+    return end;
+  const credit = (priceOld * leftOld) / spanOld;
+  const spanNew = end.getTime() - now.getTime();
+  return new Date(end.getTime() + Math.round((credit / priceNew) * spanNew));
+}
