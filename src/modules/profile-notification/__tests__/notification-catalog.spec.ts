@@ -138,6 +138,21 @@ describe('renderNotification', () => {
     }
   });
 
+  it('invites a worker to apply to an offer, by name', () => {
+    expect(
+      renderNotification({
+        type: 'JOB_INVITATION',
+        jobOfferId: 'o-1',
+        jobTitle: 'Serveuse',
+        businessName: 'Love Life',
+      }),
+    ).toEqual({
+      title: 'Invitation à postuler',
+      body: 'Love Life vous invite à postuler à « Serveuse ».',
+      link: '/offres/o-1',
+    });
+  });
+
   it('sends a business to its own contacts list, never to WhatsApp', () => {
     const out = renderNotification({
       type: 'CONTACT_UNLOCKED',

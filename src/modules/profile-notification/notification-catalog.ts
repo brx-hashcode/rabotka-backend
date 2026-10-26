@@ -585,7 +585,7 @@ export function renderNotification(
       // recommended offer, where applying is one tap.
       return {
         title: 'Invitation à postuler',
-        body: `${input.businessName} vous invite à postuler${quoted(input.jobTitle)}.`,
+        body: `${input.businessName} vous invite à postuler à${quoted(input.jobTitle)}.`,
         link: `/offres/${input.jobOfferId}`,
       };
 
