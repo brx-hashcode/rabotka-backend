@@ -7,6 +7,7 @@ import { PaymentRequestModule } from '../payment-request/payment-request.module'
 import { LogModule } from '../log/log.module';
 import { BusinessSubscriptionModule } from './subscription/business-subscription.module';
 import { BusinessCheckoutService } from './subscription/business-checkout.service';
+import { BusinessStatsService } from './business-stats.service';
 import { AdminBusinessSubscriptionController } from './subscription/admin-business-subscription.controller';
 
 /** Business accounts: the public catalog and the dashboard's own routes. */
@@ -24,6 +25,6 @@ import { AdminBusinessSubscriptionController } from './subscription/admin-busine
     BusinessController,
     AdminBusinessSubscriptionController,
   ],
-  providers: [BusinessCheckoutService],
+  providers: [BusinessCheckoutService, BusinessStatsService],
 })
 export class BusinessModule {}

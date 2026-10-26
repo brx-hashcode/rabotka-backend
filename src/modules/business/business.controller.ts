@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
   Res,
   UploadedFile,
@@ -37,6 +38,8 @@ import { BusinessCheckoutService } from './subscription/business-checkout.servic
 import { BusinessSubscriptionService } from './subscription/business-subscription.service';
 import { SubscribeDto } from './subscription/dto/business-plan.dto';
 import { planView } from './subscription/plan-view';
+import { BusinessStatsService } from './business-stats.service';
+import { STATS_PERIODS } from './business-stats';
 
 /**
  * The business dashboard's own routes. Guarded at class level, so no route
@@ -51,6 +54,7 @@ export class BusinessController {
     private readonly profileService: ProfileService,
     private readonly subscriptions: BusinessSubscriptionService,
     private readonly checkout: BusinessCheckoutService,
+    private readonly statsService: BusinessStatsService,
   ) {}
 
   @Get('plans')
@@ -85,6 +89,17 @@ export class BusinessController {
       dto.planId,
       dto.billingPeriod,
     );
+  }
+
+  @Get('me/stats')
+  @ApiOperation({
+    summary: 'Recruitment figures for the dashboard',
+    description:
+      'Applications, hires, funnel, delays and outcome over the last `days` (7, 30 or 90; default 30), each with the previous period of the same length.',
+  })
+  stats(@Req() req: ProfileAuthenticatedRequest, @Query('days') days?: string) {
+    const period = STATS_PERIODS.find((d) => String(d) === days) ?? 30;
+    return this.statsService.stats(req.user.profileId, period);
   }
 
   @Get('me')
