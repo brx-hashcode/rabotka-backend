@@ -41,6 +41,7 @@ export class BusinessContactsService {
             last_name: true,
             avatar_url: true,
             phone: true,
+            direct_phone: true,
             email: true,
             city: true,
             category: { select: { name: true } },
@@ -127,6 +128,7 @@ function toContact(
       last_name: string;
       avatar_url: string | null;
       phone: string;
+      direct_phone: string | null;
       email: string | null;
       city: string | null;
       category: { name: string } | null;
@@ -139,7 +141,13 @@ function toContact(
     firstName: r.worker.first_name,
     lastName: r.worker.last_name,
     avatarUrl: r.worker.avatar_url,
+    /** The number WhatsApp runs on. */
     phone: r.worker.phone,
+    /** A number for calls, when it is not the WhatsApp one. */
+    directPhone:
+      r.worker.direct_phone && r.worker.direct_phone !== r.worker.phone
+        ? r.worker.direct_phone
+        : null,
     email: r.worker.email,
     city: r.worker.city,
     categoryName: r.worker.category?.name ?? null,

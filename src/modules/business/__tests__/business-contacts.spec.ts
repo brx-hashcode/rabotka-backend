@@ -1,10 +1,11 @@
 import { BusinessContactsService } from '../business-contacts.service';
 
-const worker = (first: string) => ({
+const worker = (first: string, direct_phone: string | null = null) => ({
   first_name: first,
   last_name: 'K.',
   avatar_url: null,
   phone: '+242060000000',
+  direct_phone,
   email: null,
   city: 'Brazzaville',
   category: { name: 'Nettoyage' },
@@ -54,6 +55,38 @@ describe('BusinessContactsService', () => {
     expect(list[0].unlockedAt).toBe('2026-10-20T00:00:00.000Z');
     expect(list[0].offers.map((o) => o.id)).toEqual(['o2', 'o1']);
     expect(list[1].offers).toEqual([]);
+  });
+
+  it('gives the call number apart from the WhatsApp one, only when it differs', async () => {
+    const at = new Date('2026-10-20');
+    const findMany = jest.fn().mockResolvedValue([
+      {
+        worker_id: 'w1',
+        origin: 'DIRECT',
+        unlocked_at: at,
+        job_offer: null,
+        worker: worker('Awa', '+242050000000'),
+      },
+      {
+        worker_id: 'w2',
+        origin: 'DIRECT',
+        unlocked_at: at,
+        job_offer: null,
+        worker: worker('Paul', '+242060000000'),
+      },
+    ]);
+    const service = new BusinessContactsService(
+      { contactRecord: { findMany } } as never,
+      {} as never,
+    );
+
+    const [awa, paul] = await service.list('biz');
+
+    expect(awa).toMatchObject({
+      phone: '+242060000000',
+      directPhone: '+242050000000',
+    });
+    expect(paul.directPhone).toBeNull();
   });
 
   describe('unlock', () => {
