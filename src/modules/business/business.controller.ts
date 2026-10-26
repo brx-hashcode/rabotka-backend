@@ -114,6 +114,20 @@ export class BusinessController {
     return this.contacts.list(req.user.profileId);
   }
 
+  @Post('me/contacts/:workerId')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Reveal a worker from the search, on the plan quota',
+    description:
+      'No fee and no WhatsApp: the details come back in the response. Free for a worker already unlocked; 403 once the quota is used up.',
+  })
+  unlockContact(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('workerId', ParseUUIDPipe) workerId: string,
+  ) {
+    return this.contacts.unlock(req.user.profileId, workerId);
+  }
+
   @Get('me')
   @ApiOperation({
     summary: 'The signed-in business: its organisation, papers and review',

@@ -3495,7 +3495,10 @@ model BusinessQuotaUsage {
   id                        String    @id @default(uuid()) @db.Uuid
   created_at                DateTime  @default(now())
   subscription_id           String    @db.Uuid
-  contact_unlock_attempt_id String    @unique @db.Uuid
+  /// The unit covered one of the two: a mission unlock (its attempt), or a
+  /// direct unlock from the business's search (its contact record).
+  contact_unlock_attempt_id String?   @unique @db.Uuid
+  contact_record_id         String?   @unique @db.Uuid
   released_at               DateTime? @db.Timestamptz
 
   subscription BusinessSubscription @relation(fields: [subscription_id], references: [id], onDelete: Cascade)

@@ -490,6 +490,36 @@ export class BusinessSubscriptionService {
     attemptId: string,
     db: Db = this.prisma,
   ) {
+    return this.consume(
+      employerProfileId,
+      { contact_unlock_attempt_id: attemptId },
+      db,
+    );
+  }
+
+  /**
+   * A direct unlock from the business's own search: covered by the same
+   * quota as a mission unlock, recorded against its contact record. Never
+   * released — the contact is revealed at once, there is nothing to expire.
+   */
+  async consumeDirectUnlock(
+    employerProfileId: string,
+    contactRecordId: string,
+    db: Db = this.prisma,
+  ) {
+    return this.consume(
+      employerProfileId,
+      { contact_record_id: contactRecordId },
+      db,
+    );
+  }
+
+  private async consume(
+    employerProfileId: string,
+    target:
+      { contact_unlock_attempt_id: string } | { contact_record_id: string },
+    db: Db,
+  ) {
     const businessId = await this.businessOf(employerProfileId, db);
     if (!businessId) return false;
     const sub = await this.current(businessId, db);
@@ -504,7 +534,7 @@ export class BusinessSubscriptionService {
     });
     if (count === 0) return false;
     await db.businessQuotaUsage.create({
-      data: { subscription_id: sub.id, contact_unlock_attempt_id: attemptId },
+      data: { subscription_id: sub.id, ...target },
     });
     return true;
   }
