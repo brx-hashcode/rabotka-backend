@@ -1,4 +1,8 @@
 import {
+  BUSINESS_IDENTITY_SELECT,
+  publicEmployerName,
+} from '../business/public-employer';
+import {
   AdminCacheService,
   ADMIN_LIST_TTL_SECONDS,
 } from '../../common/services/cache/admin-cache.service';
@@ -260,6 +264,7 @@ const WORKER_MISSION_SELECT = {
           avatar_url: true,
           rating_avg: true,
           rating_count: true,
+          ...BUSINESS_IDENTITY_SELECT,
         },
       },
     },
@@ -2488,8 +2493,9 @@ export class ApplicationService {
       },
       employer: {
         id: a.job_offer.employer.id,
-        firstName: a.job_offer.employer.first_name,
-        lastName: a.job_offer.employer.last_name,
+        // A business shows as itself on the worker's mission.
+        firstName: publicEmployerName(a.job_offer.employer).first_name,
+        lastName: publicEmployerName(a.job_offer.employer).last_name,
         reliabilityScore: a.job_offer.employer.reliability_score,
         avatarUrl: a.job_offer.employer.avatar_url,
         ratingAvg: a.job_offer.employer.rating_avg,

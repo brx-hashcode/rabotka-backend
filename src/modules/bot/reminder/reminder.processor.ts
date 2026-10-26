@@ -1,4 +1,9 @@
 import {
+  BUSINESS_IDENTITY_SELECT,
+  publicEmployerContact,
+  publicEmployerFullName,
+} from '../../business/public-employer';
+import {
   Injectable,
   Logger,
   Inject,
@@ -856,7 +861,13 @@ export class ReminderProcessor {
     const app = await this.prisma.application.findUnique({
       where: { id: applicationId },
       include: {
-        job_offer: { include: { employer: true } },
+        job_offer: {
+          include: {
+            employer: {
+              include: { business: BUSINESS_IDENTITY_SELECT.business },
+            },
+          },
+        },
         worker: true,
       },
     });
@@ -883,8 +894,8 @@ export class ReminderProcessor {
       date: formatDate(app.job_offer.scheduled_at),
       address: jobLocationLabel(app.job_offer),
       amount: Number(app.job_offer.amount).toLocaleString('fr-FR'),
-      employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
-      employerPhone: app.job_offer.employer.phone,
+      employerName: publicEmployerFullName(app.job_offer.employer),
+      employerPhone: publicEmployerContact(app.job_offer.employer).phone,
       cancellationThresholdHours: String(fees.cancellationThresholdHours),
       penaltyFcfa: fees.lateCancellationPenaltyFcfa.toLocaleString('fr-FR'),
       // URL suffix: the reminder deep-links to this exact mission rather
@@ -919,7 +930,13 @@ export class ReminderProcessor {
     const app = await this.prisma.application.findUnique({
       where: { id: applicationId },
       include: {
-        job_offer: { include: { employer: true } },
+        job_offer: {
+          include: {
+            employer: {
+              include: { business: BUSINESS_IDENTITY_SELECT.business },
+            },
+          },
+        },
         worker: true,
       },
     });
@@ -967,8 +984,8 @@ export class ReminderProcessor {
         offerTitle: app.job_offer.title,
         time,
         address: jobLocationLabel(app.job_offer),
-        employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
-        employerPhone: app.job_offer.employer.phone,
+        employerName: publicEmployerFullName(app.job_offer.employer),
+        employerPhone: publicEmployerContact(app.job_offer.employer).phone,
         applicationId,
       };
       notifyProfile(this.events, {

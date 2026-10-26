@@ -1,3 +1,7 @@
+import {
+  BUSINESS_IDENTITY_SELECT,
+  publicEmployerName,
+} from '../business/public-employer';
 import { PRIORITY_FIRST } from '../business/subscription/subscription-where';
 import {
   CHATTABLE_APPLICATION_ORDER,
@@ -124,6 +128,7 @@ const JOB_SEARCH_SELECT = {
       avatar_url: true,
       rating_avg: true,
       rating_count: true,
+      ...BUSINESS_IDENTITY_SELECT,
     },
   },
   _count: {
@@ -453,8 +458,19 @@ export class MobileFeedController {
     // Built through toWorkerJobShape rather than field by field: the explicit
     // list here used to omit is_remote, employment_type, city and country_name
     // entirely, even though the shared select fetches all four.
-    const items = rows.map(({ category, _count, ...r }) => ({
-      ...toWorkerJobShape(r),
+    const items = rows.map(({ category, _count, employer, ...r }) => ({
+      ...toWorkerJobShape({
+        ...r,
+        // A business shows as itself, without its contact fields.
+        employer: employer && {
+          id: employer.id,
+          ...publicEmployerName(employer),
+          reliability_score: employer.reliability_score,
+          avatar_url: employer.avatar_url,
+          rating_avg: employer.rating_avg,
+          rating_count: employer.rating_count,
+        },
+      }),
       // Prisma Decimal → number, which is what the client's type declares.
       amount: r.amount == null ? null : Number(r.amount),
       acceptedCount: _count.applications,

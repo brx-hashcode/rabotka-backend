@@ -1,3 +1,4 @@
+import { publicEmployerFullName } from '../business/public-employer';
 import {
   Injectable,
   Inject,
@@ -64,7 +65,14 @@ type ResumeAssignment = Prisma.AssignmentGetPayload<{
         scheduled_at: true;
         payment_flow: true;
         category_id: true;
-        employer: { select: { first_name: true; last_name: true } };
+        employer: {
+          select: {
+            first_name: true;
+            last_name: true;
+            is_business: true;
+            business: { select: { name: true; deleted_at: true } };
+          };
+        };
       };
     };
   };
@@ -144,7 +152,14 @@ export class ResumeService {
               scheduled_at: true,
               payment_flow: true,
               category_id: true,
-              employer: { select: { first_name: true, last_name: true } },
+              employer: {
+                select: {
+                  first_name: true,
+                  last_name: true,
+                  is_business: true,
+                  business: { select: { name: true, deleted_at: true } },
+                },
+              },
             },
           },
         },
@@ -198,7 +213,8 @@ export class ResumeService {
       const inProgress = a.status === AssignmentStatus.CONFIRMED;
       return {
         period: date.toLocaleDateString('fr-FR').toUpperCase(),
-        employer: `${job.employer.first_name} ${job.employer.last_name}`,
+        // A business is named as the organisation the worker worked for.
+        employer: publicEmployerFullName(job.employer),
         status: inProgress ? 'En cours' : 'Terminé',
         ongoing: inProgress,
         title: job.title,
