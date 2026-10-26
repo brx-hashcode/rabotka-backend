@@ -1,5 +1,13 @@
-import { Injectable } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { ContactRecordOrigin } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { CONTACTABLE_WORKER } from '../recommendation/contactable-worker';
+import { BusinessSubscriptionService } from './subscription/business-subscription.service';
 
 /**
  * The workers whose contact a business unlocked, with the details that unlock
@@ -9,11 +17,17 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
  */
 @Injectable()
 export class BusinessContactsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly subscriptions: BusinessSubscriptionService,
+  ) {}
 
-  async list(profileId: string) {
+  async list(profileId: string, workerId?: string) {
     const records = await this.prisma.contactRecord.findMany({
-      where: { employer_id: profileId },
+      where: {
+        employer_id: profileId,
+        ...(workerId ? { worker_id: workerId } : {}),
+      },
       orderBy: { unlocked_at: 'desc' },
       take: 500,
       select: {
@@ -50,6 +64,56 @@ export class BusinessContactsService {
       }
     }
     return [...byWorker.values()];
+  }
+
+  /**
+   * Reveals a worker found in the business's search, on its plan's contact
+   * quota — no fee, no WhatsApp: the details come back here. A worker already
+   * unlocked by this business comes back as is, without spending a unit.
+   * Only an active, verified worker (the rule every paid unlock follows).
+   */
+  async unlock(profileId: string, workerId: string) {
+    const [existing] = await this.list(profileId, workerId);
+    if (existing) return { contact: existing, spent: false };
+    // The search it comes from is a plan feature; so is reaching out from it.
+    await this.subscriptions.assertFeature(profileId, 'preselection');
+
+    const worker = await this.prisma.profile.findFirst({
+      where: { id: workerId, ...CONTACTABLE_WORKER },
+      select: { id: true },
+    });
+    if (!worker) {
+      throw new NotFoundException("Ce profil n'est plus actif ou vérifié.");
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const recordId = randomUUID();
+      // The record first: the usage row points at it.
+      await tx.contactRecord.create({
+        data: {
+          id: recordId,
+          employer_id: profileId,
+          worker_id: workerId,
+          origin: ContactRecordOrigin.DIRECT,
+          amount: 0,
+          unlocked_at: new Date(),
+        },
+      });
+      const covered = await this.subscriptions.consumeDirectUnlock(
+        profileId,
+        recordId,
+        tx,
+      );
+      // Rolls the record back with it.
+      if (!covered) {
+        throw new ForbiddenException(
+          'Votre quota de contacts est épuisé pour cette période. Passez à une formule supérieure depuis « Abonnement ».',
+        );
+      }
+    });
+
+    const [contact] = await this.list(profileId, workerId);
+    return { contact, spent: true };
   }
 }
 
