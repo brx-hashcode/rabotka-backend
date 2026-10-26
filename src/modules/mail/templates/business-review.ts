@@ -19,8 +19,8 @@ export function businessApprovedEmail(
     </p>
 
     <p>
-      Vous pouvez publier vos offres et consulter les profils présélectionnés
-      depuis votre espace.
+      Vous pouvez publier vos offres et trouver des profils depuis votre
+      espace.
     </p>
 
     ${emailButton(dashboardUrl, 'Accéder à mon espace')}

@@ -107,7 +107,7 @@ export class BusinessContactsService {
       // Rolls the record back with it.
       if (!covered) {
         throw new ForbiddenException(
-          'Votre quota de contacts est épuisé pour cette période. Passez à une formule supérieure depuis « Abonnement ».',
+          'Vous avez utilisé tous les contacts inclus dans votre formule. Passez à une formule supérieure depuis « Abonnement ».',
         );
       }
     });

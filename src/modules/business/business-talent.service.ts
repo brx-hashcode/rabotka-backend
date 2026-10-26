@@ -268,9 +268,7 @@ export class BusinessTalentService {
       },
     });
     if (applied > 0) {
-      throw new ConflictException(
-        'Ce travailleur a déjà postulé à cette offre.',
-      );
+      throw new ConflictException('Ce candidat a déjà postulé à cette offre.');
     }
 
     notifyProfile(this.events, {

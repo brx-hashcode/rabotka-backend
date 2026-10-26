@@ -125,7 +125,7 @@ describe('BusinessContactsService', () => {
     it('refuses past the quota, and an inactive worker', async () => {
       await expect(
         setup({ covered: false }).service.unlock('biz', 'w1'),
-      ).rejects.toThrow('quota');
+      ).rejects.toThrow('contacts inclus');
       await expect(
         setup({ worker: false }).service.unlock('biz', 'w1'),
       ).rejects.toThrow('plus actif');
