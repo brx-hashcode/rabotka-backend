@@ -1,4 +1,4 @@
-import { BadRequestException, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { ProfileService } from '../profile.service';
 import { GeoService } from '../../geo/geo.service';
 
@@ -1883,7 +1883,15 @@ describe('ProfileService', () => {
       verified_at: null,
       rejection_reason: null,
       created_at: new Date('2026-10-23T10:00:00Z'),
-      profile: { profile_type: 'EMPLOYER' },
+      profile: {
+        profile_type: 'EMPLOYER',
+        first_name: 'Awa',
+        last_name: 'Mabiala',
+        email: 'awa@ecole.cg',
+        phone: '+242061234567',
+        direct_phone: null,
+        created_at: new Date('2026-10-23T10:00:00Z'),
+      },
       documents: [
         {
           id: 'd-1',
@@ -1917,6 +1925,56 @@ describe('ProfileService', () => {
         categoryLabel: expect.stringContaining('École'),
         documents: [expect.objectContaining({ documentType: 'AGREMENT', label: expect.any(String) })],
         missingDocuments: [],
+      });
+    });
+
+    it('names the account holder', async () => {
+      const detail = await service.getBusinessForAdmin('p-1');
+      expect(detail.owner).toEqual({
+        firstName: 'Awa',
+        lastName: 'Mabiala',
+        email: 'awa@ecole.cg',
+        phone: '+242061234567',
+        directPhone: null,
+        createdAt: '2026-10-23T10:00:00.000Z',
+      });
+    });
+
+    describe('once verified', () => {
+      beforeEach(() => {
+        (prisma as any).business.findUnique.mockResolvedValue({
+          ...businessRow,
+          verification_status: 'VERIFIED',
+          documents: businessRow.documents,
+        });
+      });
+
+      it('refuses the owner a change to what the review checked', async () => {
+        await expect(
+          service.updateBusiness('p-1', { name: 'Autre nom' } as any, 'owner'),
+        ).rejects.toThrow(ForbiddenException);
+        expect((prisma as any).business.update).not.toHaveBeenCalled();
+      });
+
+      it('still lets the owner change contact details', async () => {
+        const { reopened } = await service.updateBusiness(
+          'p-1',
+          { website: 'https://ecole.cg' } as any,
+          'owner',
+        );
+        expect(reopened).toBe(false);
+        expect((prisma as any).business.update).toHaveBeenCalled();
+      });
+
+      it('lets an admin change the identity', async () => {
+        await service.updateBusiness('p-1', { name: 'Autre nom' } as any, 'admin');
+        expect((prisma as any).business.update).toHaveBeenCalled();
+      });
+
+      it('refuses a new document', async () => {
+        await expect(
+          service.uploadBusinessDocument('p-1', {} as any, 'AGREMENT' as any),
+        ).rejects.toThrow(ForbiddenException);
       });
     });
 

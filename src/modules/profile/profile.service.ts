@@ -8,6 +8,7 @@ import {
   Logger,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
   Inject,
   Optional,
@@ -401,6 +402,15 @@ export type AdminBusinessDetail = {
   verifiedAt: string | null;
   rejectionReason: string | null;
   createdAt: string;
+  /** The person who opened the account and signs in with it. */
+  owner: {
+    firstName: string;
+    lastName: string;
+    email: string | null;
+    phone: string;
+    directPhone: string | null;
+    createdAt: string;
+  };
   /** The current papers; each carries the versions it replaced. */
   documents: (BusinessDocumentView & {
     /** Sent to replace a refused or pending paper. */
@@ -2238,7 +2248,17 @@ export class ProfileService {
       where: { profile_id: profileId },
       include: {
         documents: { orderBy: { created_at: 'asc' } },
-        profile: { select: { avatar_url: true } },
+        profile: {
+          select: {
+            avatar_url: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            phone: true,
+            direct_phone: true,
+            created_at: true,
+          },
+        },
       },
     });
     if (!business) {
@@ -2273,6 +2293,14 @@ export class ProfileService {
       verifiedAt: business.verified_at?.toISOString() ?? null,
       rejectionReason: business.rejection_reason,
       createdAt: business.created_at.toISOString(),
+      owner: {
+        firstName: business.profile.first_name,
+        lastName: business.profile.last_name,
+        email: business.profile.email,
+        phone: business.profile.phone,
+        directPhone: business.profile.direct_phone,
+        createdAt: business.profile.created_at.toISOString(),
+      },
       // A replacement keeps the place of the paper it replaced: ordered by
       // when the first version was sent.
       documents: current
@@ -2472,6 +2500,17 @@ export class ProfileService {
       },
       { ...dto, legalForm },
     );
+    // Verified, what the review checked is settled: the owner asks the team
+    // (Aide), and only an admin changes it. Contact details stay the owner's.
+    if (
+      by === 'owner' &&
+      changed.length > 0 &&
+      business.verification_status === VerificationStatus.VERIFIED
+    ) {
+      throw new ForbiddenException(
+        'Votre organisation est vérifiée : pour modifier son identité ou ses identifiants officiels, faites une demande à l’équipe Rabotka depuis Aide.',
+      );
+    }
     const reopened =
       by === 'owner' &&
       changed.length > 0 &&
@@ -2536,6 +2575,11 @@ export class ProfileService {
     });
     if (!business || business.deleted_at) {
       throw new NotFoundException("Ce profil n'a pas d'organisation.");
+    }
+    if (business.verification_status === VerificationStatus.VERIFIED) {
+      throw new ForbiddenException(
+        'Votre organisation est vérifiée : ses documents ne se modifient plus. Pour en ajouter un, faites une demande à l’équipe Rabotka depuis Aide.',
+      );
     }
     const accepted = DOCUMENTS_BY_CATEGORY[business.category];
     if (
