@@ -1,3 +1,4 @@
+import { publicEmployerContact } from '../business/public-employer';
 import {
   Injectable,
   NotFoundException,
@@ -47,6 +48,47 @@ export type InvoiceItem = {
   status: string;
   createdAt: string;
 };
+
+/**
+ * Who the invoice is made out to. A business account pays as its
+ * organisation: its name, its own phone and e-mail when given, and its
+ * identifiers for templates that print them. Anyone else, as themselves.
+ */
+export function invoiceClient(profile: {
+  first_name: string;
+  last_name: string;
+  email: string | null;
+  phone: string;
+  is_business: boolean;
+  business: {
+    name: string;
+    phone: string | null;
+    email: string | null;
+    tax_id: string | null;
+    registration_number: string | null;
+    address: string;
+    city: string | null;
+    deleted_at: Date | null;
+  } | null;
+}): Record<string, string> {
+  const b =
+    profile.is_business && profile.business && !profile.business.deleted_at
+      ? profile.business
+      : null;
+  const contact = publicEmployerContact({ ...profile, business: b });
+  return {
+    FIRST_NAME: b ? b.name : profile.first_name,
+    LAST_NAME: b ? '' : profile.last_name,
+    EMAIL: contact.email ?? '-',
+    PHONE: contact.phone,
+    BUSINESS_NAME: b?.name ?? '-',
+    BUSINESS_NIU: b?.tax_id ?? '-',
+    BUSINESS_RCCM: b?.registration_number ?? '-',
+    BUSINESS_ADDRESS: b ? [b.address, b.city].filter(Boolean).join(', ') : '-',
+    /** The person who holds the account, for templates that name a contact. */
+    ACCOUNT_HOLDER: `${profile.first_name} ${profile.last_name}`.trim(),
+  };
+}
 
 @Injectable()
 export class InvoiceService {
@@ -197,7 +239,11 @@ export class InvoiceService {
   ): Promise<{ buffer: Buffer; filename: string }> {
     const invoice = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
-      include: { profile: true, payment_request: true, payment: true },
+      include: {
+        profile: { include: { business: true } },
+        payment_request: true,
+        payment: true,
+      },
     });
 
     if (!invoice) throw new NotFoundException('Invoice not found');
@@ -213,7 +259,7 @@ export class InvoiceService {
 
     const filename = `facture_${invoice.profile.last_name}_${invoice.id.slice(0, 8)}.pdf`;
 
-    const cacheKey = `${REDIS_KEY_PREFIX}pdf:invoice:${invoiceId}:${template.id}`;
+    const cacheKey = `${REDIS_KEY_PREFIX}pdf:invoice:v2:${invoiceId}:${template.id}`;
     const cached = await this.redis.get(cacheKey);
     if (cached) return { buffer: Buffer.from(cached, 'base64'), filename };
 
@@ -235,11 +281,9 @@ export class InvoiceService {
     const data: Record<string, string> = {
       INVOICE_ID: this.invoiceRef(invoice.id, invoice.created_at),
       INVOICE_DATE: new Date(invoice.created_at).toLocaleDateString('fr-FR'),
-      FIRST_NAME: invoice.profile.first_name,
-      LAST_NAME: invoice.profile.last_name,
+      // A business is billed as the organisation, not its owner.
+      ...invoiceClient(invoice.profile),
       PROFILE_TYPE: invoice.profile.profile_type,
-      EMAIL: invoice.profile.email ?? '-',
-      PHONE: invoice.profile.phone,
       AMOUNT: invoice.amount.toString(),
       REASON: reasonLabel[invoice.reason] ?? invoice.reason,
       PAYMENT_REF:
@@ -276,7 +320,11 @@ export class InvoiceService {
   ): Promise<{ buffer: Buffer; filename: string }> {
     const invoice = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
-      include: { profile: true, payment_request: true, payment: true },
+      include: {
+        profile: { include: { business: true } },
+        payment_request: true,
+        payment: true,
+      },
     });
 
     if (!invoice) throw new NotFoundException('Invoice not found');
@@ -289,7 +337,7 @@ export class InvoiceService {
 
     const filename = `facture_${invoice.profile.last_name}_${invoice.id.slice(0, 8)}.pdf`;
 
-    const cacheKey = `${REDIS_KEY_PREFIX}pdf:invoice:${invoiceId}:${template.id}`;
+    const cacheKey = `${REDIS_KEY_PREFIX}pdf:invoice:v2:${invoiceId}:${template.id}`;
     const cached = await this.redis.get(cacheKey);
     if (cached) return { buffer: Buffer.from(cached, 'base64'), filename };
 
@@ -311,11 +359,9 @@ export class InvoiceService {
     const data: Record<string, string> = {
       INVOICE_ID: this.invoiceRef(invoice.id, invoice.created_at),
       INVOICE_DATE: new Date(invoice.created_at).toLocaleDateString('fr-FR'),
-      FIRST_NAME: invoice.profile.first_name,
-      LAST_NAME: invoice.profile.last_name,
+      // A business is billed as the organisation, not its owner.
+      ...invoiceClient(invoice.profile),
       PROFILE_TYPE: this.getProfileTypeLabel(invoice.profile.profile_type),
-      EMAIL: invoice.profile.email ?? '-',
-      PHONE: invoice.profile.phone,
       AMOUNT: invoice.amount.toString(),
       REASON: reasonLabel[invoice.reason] ?? invoice.reason,
       PAYMENT_REF:
