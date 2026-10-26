@@ -1,4 +1,9 @@
 import {
+  BUSINESS_IDENTITY_SELECT,
+  publicEmployerContact,
+  publicEmployerFullName,
+} from '../business/public-employer';
+import {
   Injectable,
   NotFoundException,
   ForbiddenException,
@@ -138,7 +143,13 @@ export class ContractService {
       include: {
         application: {
           include: {
-            job_offer: { include: { employer: true } },
+            job_offer: {
+              include: {
+                employer: {
+                  include: { business: BUSINESS_IDENTITY_SELECT.business },
+                },
+              },
+            },
             worker: true,
           },
         },
@@ -173,6 +184,13 @@ export class ContractService {
           last_name: string;
           email: string | null;
           phone: string;
+          is_business?: boolean | null;
+          business?: {
+            name: string;
+            phone: string | null;
+            email: string | null;
+            deleted_at: Date | null;
+          } | null;
         };
       };
       worker: {
@@ -209,8 +227,10 @@ export class ContractService {
     const amountFormatted =
       job.amount == null ? '-' : Number(job.amount).toLocaleString('fr-FR');
 
-    const employerName =
-      `${employer.first_name} ${employer.last_name}`.trim() || '-';
+    // The party is the organisation for a business; its owner stays named
+    // below (EMPLOYER_FIRST/LAST_NAME) as the one who represents it.
+    const employerName = publicEmployerFullName(employer) || '-';
+    const employerContact = publicEmployerContact(employer);
     const workerFullname =
       `${worker.first_name} ${worker.last_name}`.trim() || '-';
 
@@ -221,8 +241,8 @@ export class ContractService {
       END_DATE: endStr,
       DURATION: period.durationLabel,
       EMPLOYER_NAME: employerName,
-      EMPLOYER_PHONE: s(employer.phone),
-      EMPLOYER_EMAIL: s(employer.email),
+      EMPLOYER_PHONE: s(employerContact.phone),
+      EMPLOYER_EMAIL: s(employerContact.email),
       WORKER_FULLNAME: workerFullname,
       WORKER_PHONE: s(worker.phone),
       WORKER_EMAIL: s(worker.email),

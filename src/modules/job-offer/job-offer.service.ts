@@ -1,4 +1,8 @@
 import {
+  BUSINESS_IDENTITY_SELECT,
+  publicEmployerName,
+} from '../business/public-employer';
+import {
   AdminCacheService,
   ADMIN_LIST_TTL_SECONDS,
 } from '../../common/services/cache/admin-cache.service';
@@ -968,6 +972,7 @@ export class JobOfferService {
             avatar_url: true,
             rating_avg: true,
             rating_count: true,
+            ...BUSINESS_IDENTITY_SELECT,
           },
         },
         _count: {
@@ -986,8 +991,8 @@ export class JobOfferService {
       employer: offer.employer
         ? {
             id: offer.employer.id,
-            first_name: offer.employer.first_name,
-            last_name: offer.employer.last_name,
+            // A business shows as itself to the workers reading its offer.
+            ...publicEmployerName(offer.employer),
             reliability_score: offer.employer.reliability_score,
             avatar_url: offer.employer.avatar_url,
             rating_avg: offer.employer.rating_avg,
@@ -1012,6 +1017,7 @@ export class JobOfferService {
             avatar_url: true,
             rating_avg: true,
             rating_count: true,
+            ...BUSINESS_IDENTITY_SELECT,
           },
         },
         _count: {
@@ -1030,8 +1036,8 @@ export class JobOfferService {
       employer: offer.employer
         ? {
             id: offer.employer.id,
-            first_name: offer.employer.first_name,
-            last_name: offer.employer.last_name,
+            // A business shows as itself to the workers reading its offer.
+            ...publicEmployerName(offer.employer),
             reliability_score: offer.employer.reliability_score,
             avatar_url: offer.employer.avatar_url,
             rating_avg: offer.employer.rating_avg,

@@ -1,4 +1,8 @@
 import {
+  BUSINESS_IDENTITY_SELECT,
+  publicEmployerFullName,
+} from '../business/public-employer';
+import {
   BadRequestException,
   ForbiddenException,
   Injectable,
@@ -160,6 +164,7 @@ const CONVERSATION_VIEW_INCLUDE = {
       first_name: true,
       last_name: true,
       avatar_url: true,
+      ...BUSINESS_IDENTITY_SELECT,
     },
   },
   application: {
@@ -499,7 +504,10 @@ export class ProfileChatService {
       return {
         id: row.id,
         counterpartId: counterpart.id,
-        counterpartName: `${counterpart.first_name} ${counterpart.last_name}`,
+        // A business shows as itself to the worker it talks to.
+        counterpartName: isWorker
+          ? publicEmployerFullName(row.employer)
+          : `${counterpart.first_name} ${counterpart.last_name}`,
         counterpartAvatarUrl: counterpart.avatar_url ?? null,
         counterpartOnline: online.has(counterpart.id),
         jobTitle: row.application?.job_offer.title ?? null,
@@ -858,7 +866,11 @@ export class ProfileChatService {
     const [sender, application] = await Promise.all([
       this.prisma.profile.findUnique({
         where: { id: senderId },
-        select: { first_name: true, last_name: true },
+        select: {
+          first_name: true,
+          last_name: true,
+          ...BUSINESS_IDENTITY_SELECT,
+        },
       }),
       conversation.application_id
         ? this.prisma.application.findUnique({
@@ -877,7 +889,7 @@ export class ProfileChatService {
       input: {
         type: 'NEW_MESSAGE',
         conversationId: conversation.id,
-        senderName: `${sender.first_name} ${sender.last_name}`,
+        senderName: publicEmployerFullName(sender),
         jobTitle: application?.job_offer.title ?? null,
       },
     });

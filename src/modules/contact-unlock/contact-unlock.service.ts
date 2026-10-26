@@ -1,4 +1,8 @@
 import {
+  BUSINESS_IDENTITY_SELECT,
+  publicEmployerFullName,
+} from '../business/public-employer';
+import {
   Injectable,
   Logger,
   NotFoundException,
@@ -1021,7 +1025,13 @@ export class ContactUnlockService {
           select: { id: true, phone: true, first_name: true, last_name: true },
         },
         employer: {
-          select: { id: true, phone: true, first_name: true, last_name: true },
+          select: {
+            id: true,
+            phone: true,
+            first_name: true,
+            last_name: true,
+            ...BUSINESS_IDENTITY_SELECT,
+          },
         },
         job_offer: {
           select: {
@@ -1145,7 +1155,7 @@ export class ContactUnlockService {
     });
 
     const currentName = isEmployer
-      ? `${attempt.employer.first_name} ${attempt.employer.last_name}`.trim()
+      ? publicEmployerFullName(attempt.employer)
       : `${attempt.worker.first_name} ${attempt.worker.last_name}`.trim();
     const otherPhone = isEmployer
       ? attempt.worker.phone
