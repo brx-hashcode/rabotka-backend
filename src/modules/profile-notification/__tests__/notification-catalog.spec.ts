@@ -153,7 +153,7 @@ describe('renderNotification', () => {
     });
   });
 
-  it('sends a business to its own contacts list, never to WhatsApp', () => {
+  it('sends a business to its candidates, never to WhatsApp', () => {
     const out = renderNotification({
       type: 'CONTACT_UNLOCKED',
       recipientRole: 'BUSINESS',
@@ -161,8 +161,10 @@ describe('renderNotification', () => {
       counterpartName: 'Awa K.',
       jobTitle: 'Plombier',
     });
-    expect(out.link).toBe('/espace/contacts');
+    expect(out.link).toBe('/espace/candidatures');
     expect(out.body).not.toContain('WhatsApp');
+    // The space's words, not the mechanics (docs/lexique.md in rabotka-business).
+    expect(`${out.title} ${out.body}`).not.toMatch(/débloqu|déblocage/i);
     expect(out.body).not.toContain('..');
   });
 

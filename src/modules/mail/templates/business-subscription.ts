@@ -89,7 +89,7 @@ export function businessSubscriptionExpiringEmail(
 
     <p>
       ${p.trial ? 'Choisissez une formule' : 'Renouvelez-le'} pour garder vos
-      offres actives, vos contacts inclus et vos avantages. Un renouvellement
+      offres en ligne, vos contacts inclus et vos avantages. Un renouvellement
       anticipé s'ajoute à la période en cours : vous ne perdez aucun jour.
     </p>
 
@@ -112,7 +112,7 @@ export function businessSubscriptionExpiredEmail(
 
     <p>
       Vos offres publiées restent visibles, mais vous ne pouvez plus en publier
-      de nouvelles, et chaque contact débloqué est désormais payé à l'unité.
+      de nouvelles, et chaque contact devient payant.
       Choisissez une formule pour retrouver vos avantages.
     </p>
 

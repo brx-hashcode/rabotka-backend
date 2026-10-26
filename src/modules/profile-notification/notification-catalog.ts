@@ -402,11 +402,11 @@ export function renderNotification(
       // A business never gets WhatsApp: the details are in its space.
       if (input.recipientRole === 'BUSINESS') {
         return {
-          title: 'Contact débloqué',
-          body: `Les coordonnées de ${input.counterpartName}${
+          title: 'Contact disponible',
+          body: `${input.counterpartName} a confirmé${
             input.jobTitle ? ` pour${quoted(input.jobTitle)}` : ''
-          } sont disponibles dans vos profils contactés.`,
-          link: '/espace/contacts',
+          } : son contact s’affiche avec « Contact » sur sa candidature.`,
+          link: '/espace/candidatures',
         };
       }
       // Informational only: the details are delivered on WhatsApp, and the

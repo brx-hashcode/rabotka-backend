@@ -568,7 +568,7 @@ export class BusinessSubscriptionService {
     if (e.activeOffersLimit !== null && e.activeOffers >= e.activeOffersLimit) {
       throw new ForbiddenException(
         e.plan
-          ? `Votre formule ${e.plan.name} permet ${e.activeOffersLimit} offre${e.activeOffersLimit > 1 ? 's' : ''} active${e.activeOffersLimit > 1 ? 's' : ''}. Passez à une formule supérieure pour en publier davantage.`
+          ? `Votre formule ${e.plan.name} permet ${e.activeOffersLimit} offre${e.activeOffersLimit > 1 ? 's' : ''} en ligne. Passez à une formule supérieure pour en publier davantage.`
           : 'Choisissez une formule depuis votre espace, rubrique « Abonnement », pour publier vos offres.',
       );
     }
@@ -589,8 +589,8 @@ export class BusinessSubscriptionService {
     if (!ok) {
       throw new ForbiddenException(
         feature === 'preselection'
-          ? 'La présélection de profils est incluse dans les formules supérieures. Changez de formule depuis votre espace.'
-          : 'Le recrutement accompagné par nos agents est inclus dans les formules supérieures. Changez de formule depuis votre espace.',
+          ? 'La recherche de profils est incluse dans les formules supérieures. Changez de formule depuis votre espace.'
+          : 'L’aide d’un agent sur le terrain est incluse dans les formules supérieures. Changez de formule depuis votre espace.',
       );
     }
   }
