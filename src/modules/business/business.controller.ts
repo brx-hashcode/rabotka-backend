@@ -188,7 +188,7 @@ export class BusinessController {
   @ApiOperation({
     summary: 'Edit the organisation',
     description:
-      'Changing name, type, legal form, RCCM, NIU or SCIEN sends a decided business back to review; contact details do not.',
+      'Changing name, type, legal form, RCCM, NIU or SCIEN sends a refused business back to review, and is refused (403) once it is verified — the team changes it on request; contact details stay editable.',
   })
   async updateMe(
     @Req() req: ProfileAuthenticatedRequest,
