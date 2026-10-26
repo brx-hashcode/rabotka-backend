@@ -57,6 +57,12 @@ const SAMPLES: NotificationInput[] = [
     counterpartName: 'Awa K.',
     jobTitle: 'Plombier',
   },
+  {
+    type: 'JOB_INVITATION',
+    jobOfferId: 'o-1',
+    jobTitle: 'Serveuse',
+    businessName: 'Love Life',
+  },
   { type: 'PAYMENT_SUCCEEDED', amount: 2500, kind: 'WALLET_TOP_UP' },
   { type: 'PAYMENT_FAILED', amount: 2500, kind: 'PENALTY' },
   { type: 'CLAIM_COMMENTED', claimId: 'c-1', claimTitle: 'Paiement' },

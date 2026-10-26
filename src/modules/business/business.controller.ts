@@ -2,11 +2,13 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   Res,
@@ -40,6 +42,8 @@ import { SubscribeDto } from './subscription/dto/business-plan.dto';
 import { planView } from './subscription/plan-view';
 import { BusinessStatsService } from './business-stats.service';
 import { BusinessContactsService } from './business-contacts.service';
+import { BusinessTalentService } from './business-talent.service';
+import { InviteTalentDto, SaveTalentDto } from './dto/business-talent.dto';
 import { STATS_PERIODS } from './business-stats';
 
 /**
@@ -57,6 +61,7 @@ export class BusinessController {
     private readonly checkout: BusinessCheckoutService,
     private readonly statsService: BusinessStatsService,
     private readonly contacts: BusinessContactsService,
+    private readonly talents: BusinessTalentService,
   ) {}
 
   @Get('plans')
@@ -126,6 +131,48 @@ export class BusinessController {
     @Param('workerId', ParseUUIDPipe) workerId: string,
   ) {
     return this.contacts.unlock(req.user.profileId, workerId);
+  }
+
+  @Get('me/talents')
+  @ApiOperation({
+    summary: 'The talent pool: workers kept, then workers already hired',
+  })
+  myTalents(@Req() req: ProfileAuthenticatedRequest) {
+    return this.talents.list(req.user.profileId);
+  }
+
+  @Put('me/talents/:workerId')
+  @ApiOperation({ summary: 'Keep a worker, or edit the note and tags' })
+  saveTalent(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('workerId', ParseUUIDPipe) workerId: string,
+    @Body() dto: SaveTalentDto,
+  ) {
+    return this.talents.save(req.user.profileId, workerId, dto);
+  }
+
+  @Delete('me/talents/:workerId')
+  @ApiOperation({ summary: 'Stop keeping a worker' })
+  removeTalent(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('workerId', ParseUUIDPipe) workerId: string,
+  ) {
+    return this.talents.remove(req.user.profileId, workerId);
+  }
+
+  @Post('me/talents/:workerId/invite')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Invite a worker to apply to one of its open offers',
+    description:
+      'In-app notification to the worker, once per worker and offer. 409 if they already applied.',
+  })
+  inviteTalent(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('workerId', ParseUUIDPipe) workerId: string,
+    @Body() dto: InviteTalentDto,
+  ) {
+    return this.talents.invite(req.user.profileId, workerId, dto.offerId);
   }
 
   @Get('me')

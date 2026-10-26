@@ -557,6 +557,8 @@ model Profile {
   payment_requests                PaymentRequest[]
   kyc_documents                   KycDocument[]
   business                        Business?
+  talents_kept                    BusinessTalent[]       @relation("BusinessTalentEmployer")
+  kept_by_businesses              BusinessTalent[]       @relation("BusinessTalentWorker")
   kyc_verification_images         KycVerificationImage[]
   applications                    Application[]
   job_offers                      JobOffer[]
@@ -2218,6 +2220,8 @@ enum ProfileNotificationType {
   BUSINESS_SUBSCRIPTION_ACTIVE
   BUSINESS_SUBSCRIPTION_EXPIRING
   BUSINESS_SUBSCRIPTION_EXPIRED
+  /// A business asked a worker from its talent pool to apply to one of its offers.
+  JOB_INVITATION
 }
 
 /// The in-app feed behind the bell in rabotka-client.
@@ -3487,6 +3491,26 @@ model BusinessSubscription {
   @@index([business_id, ends_at], name: "idx_business_subscription_business_end")
   @@index([status, ends_at], name: "idx_business_subscription_status_end")
   @@map("business_subscriptions")
+}
+
+/// A worker a business keeps for later — its talent pool. Private to the
+/// business: a note and tags only it reads. One row per business and worker.
+model BusinessTalent {
+  id          String   @id @default(uuid()) @db.Uuid
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  /// The business's profile (the employer side), as on every offer.
+  employer_id String   @db.Uuid
+  worker_id   String   @db.Uuid
+  note        String?  @db.Text
+  tags        String[] @default([])
+
+  employer Profile @relation("BusinessTalentEmployer", fields: [employer_id], references: [id], onDelete: Cascade)
+  worker   Profile @relation("BusinessTalentWorker", fields: [worker_id], references: [id], onDelete: Cascade)
+
+  @@unique([employer_id, worker_id])
+  @@index([employer_id], name: "idx_business_talent_employer")
+  @@map("business_talents")
 }
 
 /// A contact unlock covered by a subscription's quota. Released (and the unit
