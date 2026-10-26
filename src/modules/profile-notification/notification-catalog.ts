@@ -216,7 +216,13 @@ export type NotificationInput =
       endsAt: string;
       trial: boolean;
     }
-  | { type: 'BUSINESS_SUBSCRIPTION_EXPIRED'; planName: string; trial: boolean };
+  | { type: 'BUSINESS_SUBSCRIPTION_EXPIRED'; planName: string; trial: boolean }
+  | {
+      type: 'JOB_INVITATION';
+      jobOfferId: string;
+      jobTitle: string;
+      businessName: string;
+    };
 
 export type NotificationType = NotificationInput['type'];
 
@@ -572,6 +578,15 @@ export function renderNotification(
           ? 'Votre essai gratuit est terminé. Choisissez une formule pour continuer à publier.'
           : `Votre abonnement ${input.planName} est terminé. Renouvelez-le pour retrouver vos avantages.`,
         link: '/espace/abonnement',
+      };
+
+    case 'JOB_INVITATION':
+      // To the worker, from a business that kept them: the same page as a
+      // recommended offer, where applying is one tap.
+      return {
+        title: 'Invitation à postuler',
+        body: `${input.businessName} vous invite à postuler${quoted(input.jobTitle)}.`,
+        link: `/offres/${input.jobOfferId}`,
       };
 
     case 'BUSINESS_DOCUMENT_REJECTED':

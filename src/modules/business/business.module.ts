@@ -9,6 +9,7 @@ import { BusinessSubscriptionModule } from './subscription/business-subscription
 import { BusinessCheckoutService } from './subscription/business-checkout.service';
 import { BusinessStatsService } from './business-stats.service';
 import { BusinessContactsService } from './business-contacts.service';
+import { BusinessTalentService } from './business-talent.service';
 import { AdminBusinessSubscriptionController } from './subscription/admin-business-subscription.controller';
 
 /** Business accounts: the public catalog and the dashboard's own routes. */
@@ -30,6 +31,7 @@ import { AdminBusinessSubscriptionController } from './subscription/admin-busine
     BusinessCheckoutService,
     BusinessStatsService,
     BusinessContactsService,
+    BusinessTalentService,
   ],
 })
 export class BusinessModule {}
