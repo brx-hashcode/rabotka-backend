@@ -1,4 +1,4 @@
-import { emailButton, escapeHtml } from '../../mail/templates/layout';
+import { escapeHtml } from '../../mail/templates/layout';
 
 /**
  * Interview e-mails: to the candidate (invitation, change, cancellation,
@@ -77,8 +77,10 @@ export function interviewInviteEmail(
     </p>
     ${details(i)}
     ${note(i.message)}
-    <p>Merci de confirmer votre présence, ou de proposer un autre moment :</p>
-    ${emailButton(url, 'Répondre à l’invitation')}
+    <p>
+      Merci de confirmer votre présence, ou de proposer un autre moment :
+      <a href="${escapeHtml(url)}">répondre à l’invitation</a>.
+    </p>
     <p style="color:#6b7280;font-size:13px;">Le fichier joint ajoute l’entretien à votre agenda.</p>
     <p>Cordialement,<br /><strong>${escapeHtml(i.businessName)}</strong>, via Rabotka</p>
   `;
@@ -98,7 +100,6 @@ export function interviewCancelledEmail(i: InterviewMail): string {
 
 export function interviewReminderEmail(
   i: InterviewMail,
-  url: string,
   to: 'candidate' | 'business',
 ): string {
   return to === 'candidate'
@@ -106,13 +107,11 @@ export function interviewReminderEmail(
     <p>Bonjour ${escapeHtml(i.candidateName)},</p>
     <p>Petit rappel : votre entretien avec <strong>${escapeHtml(i.businessName)}</strong> a lieu demain.</p>
     ${details(i)}
-    ${url ? emailButton(url, 'Voir l’invitation') : ''}
     <p>Cordialement,<br /><strong>${escapeHtml(i.businessName)}</strong>, via Rabotka</p>`
     : `
     <p>Bonjour,</p>
     <p>Rappel : entretien avec <strong>${escapeHtml(i.candidateName)}</strong> demain.</p>
     ${details(i)}
-    ${emailButton(url, 'Voir mes entretiens')}
     <p>L’équipe Rabotka Business</p>`;
 }
 
@@ -126,14 +125,12 @@ export function interviewAnsweredEmail(
   i: InterviewMail,
   answer: keyof typeof ANSWER_SENTENCE,
   responseNote: string | null,
-  url: string,
 ): string {
   return `
     <p>Bonjour,</p>
     <p><strong>${escapeHtml(i.candidateName)}</strong> ${ANSWER_SENTENCE[answer]}.</p>
     ${details(i)}
     ${responseNote?.trim() ? `<p>Son message :</p>${note(responseNote)}` : ''}
-    ${emailButton(url, 'Voir mes entretiens')}
     <p>L’équipe Rabotka Business</p>
   `;
 }
