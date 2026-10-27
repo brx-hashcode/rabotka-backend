@@ -219,6 +219,53 @@ describe('BusinessSubscriptionService', () => {
     });
   });
 
+  describe('cancelByAdmin', () => {
+    it('ends the running period now and clears the queue after it', async () => {
+      const { service, prisma } = make();
+      const startsAt = new Date('2026-10-14T12:00:00Z');
+      prisma.businessSubscription.findFirst.mockResolvedValue(
+        running({ starts_at: startsAt }),
+      );
+      prisma.businessSubscription.update = jest.fn().mockReturnValue('end');
+      prisma.$transaction = jest.fn().mockResolvedValue([]);
+
+      await service.cancelByAdmin('b1', 'sub-1', 'admin-1');
+
+      expect(prisma.businessSubscription.update.mock.calls[0][0]).toMatchObject({
+        where: { id: 'sub-1' },
+        data: { status: 'CANCELLED', granted_by: 'admin-1' },
+      });
+      expect(
+        prisma.businessSubscription.update.mock.calls[0][0].data.ends_at,
+      ).toBeInstanceOf(Date);
+      expect(prisma.businessSubscription.updateMany).toHaveBeenCalledWith({
+        where: {
+          business_id: 'b1',
+          status: { in: ['TRIAL', 'ACTIVE'] },
+          starts_at: { gt: startsAt },
+          id: { not: 'sub-1' },
+        },
+        data: expect.objectContaining({ status: 'CANCELLED' }),
+      });
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the dates of a period not yet started', async () => {
+      const { service, prisma } = make();
+      prisma.businessSubscription.findFirst.mockResolvedValue(
+        running({ starts_at: new Date('2099-01-01T00:00:00Z') }),
+      );
+      prisma.businessSubscription.update = jest.fn().mockReturnValue('drop');
+      prisma.$transaction = jest.fn().mockResolvedValue([]);
+
+      await service.cancelByAdmin('b1', 'sub-1', null);
+
+      expect(
+        prisma.businessSubscription.update.mock.calls[0][0].data,
+      ).not.toHaveProperty('ends_at');
+    });
+  });
+
   describe('startTrial', () => {
     it('does nothing when the trial is configured off', async () => {
       const { service, prisma } = make({

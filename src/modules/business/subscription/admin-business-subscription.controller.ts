@@ -139,7 +139,10 @@ export class AdminBusinessSubscriptionController {
 
   @Post('profiles/:id/business/subscription/:subscriptionId/cancel')
   @Roles(UserRole.MANAGER)
-  @ApiOperation({ summary: 'End a period now (or drop one not yet started)' })
+  @ApiOperation({
+    summary:
+      'End a period now (or drop one not yet started), and the periods queued after it',
+  })
   async cancel(
     @Param('id', ParseUUIDPipe) profileId: string,
     @Param('subscriptionId', ParseUUIDPipe) subscriptionId: string,
