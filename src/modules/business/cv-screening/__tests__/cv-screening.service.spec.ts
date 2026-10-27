@@ -69,6 +69,9 @@ function make() {
     cvResumeMessage: {
       deleteMany: jest.fn().mockReturnValue('messages-delete'),
     },
+    cvComparisonMessage: {
+      deleteMany: jest.fn().mockReturnValue('comparison-messages-delete'),
+    },
     cvScreeningResume: {
       findUnique: jest.fn(),
       findMany: jest.fn().mockResolvedValue([]),
@@ -496,6 +499,9 @@ describe('CvScreeningService', () => {
       // The conversations quote the CV: purged with it.
       expect(prisma.cvResumeMessage.deleteMany).toHaveBeenCalledWith({
         where: { resume_id: { in: ['r1', 'r2'] } },
+      });
+      expect(prisma.cvComparisonMessage.deleteMany).toHaveBeenCalledWith({
+        where: { comparison: { screening_id: 's1' } },
       });
     });
 

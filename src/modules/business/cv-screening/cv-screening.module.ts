@@ -7,12 +7,18 @@ import { CvScreeningController } from './cv-screening.controller';
 import { CvScreeningScheduler } from './cv-screening.scheduler';
 import { CvScreeningService } from './cv-screening.service';
 import { CvChatService } from './cv-chat.service';
+import { CvCompareService } from './cv-compare.service';
 
 /** « Analyse de CV »: AI screening of CVs a business uploads, within its plan. */
 @Module({
   // AuthModule for ProfileAuthGuard's JwtService.
   imports: [ConfigModule, AuthModule, LlmModule, BusinessSubscriptionModule],
   controllers: [CvScreeningController],
-  providers: [CvScreeningService, CvScreeningScheduler, CvChatService],
+  providers: [
+    CvScreeningService,
+    CvScreeningScheduler,
+    CvChatService,
+    CvCompareService,
+  ],
 })
 export class CvScreeningModule {}

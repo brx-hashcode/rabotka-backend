@@ -30,8 +30,14 @@ import { sendPrivateFile } from '../../profile/send-private-file';
 import { CvScreeningService } from './cv-screening.service';
 import { CvChatService } from './cv-chat.service';
 import {
+  CvCompareService,
+  MAX_COMPARED,
+  MIN_COMPARED,
+} from './cv-compare.service';
+import {
   CreateCvScreeningDto,
   CvChatQuestionDto,
+  CvCompareDto,
 } from './dto/create-cv-screening.dto';
 
 /**
@@ -51,6 +57,7 @@ export class CvScreeningController {
   constructor(
     private readonly screenings: CvScreeningService,
     private readonly chat: CvChatService,
+    private readonly compare: CvCompareService,
   ) {}
 
   @Post()
@@ -143,34 +150,50 @@ export class CvScreeningController {
       resumeId,
       dto.question,
     );
+    await streamAnswer(
+      res,
+      (signal) => this.chat.answer(turn, signal),
+      turn.remaining,
+    );
+  }
 
-    res.status(200);
-    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-    // No proxy on the way may hold the answer back to compress or buffer it.
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders();
+  @Post(':id/comparisons')
+  @ApiOperation({
+    summary: 'Open (or reopen) the conversation comparing some of its CVs',
+    description: `${MIN_COMPARED} to ${MAX_COMPARED} scored CVs; the same selection reopens the same conversation.`,
+  })
+  openComparison(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CvCompareDto,
+  ) {
+    return this.compare.open(req.user.profileId, id, dto.resumeIds);
+  }
 
-    const reader = new AbortController();
-    res.on('close', () => {
-      if (!res.writableEnded) reader.abort();
-    });
-    const send = (event: string, data: unknown) =>
-      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-
-    try {
-      for await (const text of this.chat.answer(turn, reader.signal)) {
-        send('delta', { text });
-      }
-      if (!reader.signal.aborted) send('done', { remaining: turn.remaining });
-    } catch {
-      send('error', {
-        message:
-          'La réponse n’a pas pu être rédigée. Réessayez dans un instant : cette question n’est pas décomptée.',
-      });
-    }
-    res.end();
+  @Post(':id/comparisons/:comparisonId/chat')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Ask about the compared CVs; the answer streams back',
+    description: 'Same events as the one-CV chat: `delta`, `done`, `error`.',
+  })
+  async askComparison(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('comparisonId', ParseUUIDPipe) comparisonId: string,
+    @Body() dto: CvChatQuestionDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const turn = await this.compare.prepare(
+      req.user.profileId,
+      id,
+      comparisonId,
+      dto.question,
+    );
+    await streamAnswer(
+      res,
+      (signal) => this.compare.answer(turn, signal),
+      turn.remaining,
+    );
   }
 
   @Delete(':id')
@@ -182,4 +205,40 @@ export class CvScreeningController {
   ): Promise<void> {
     await this.screenings.remove(req.user.profileId, id);
   }
+}
+
+/**
+ * An answer as server-sent events: `delta` as it is written, then `done`
+ * (questions left) or `error`. The reader leaving stops the model.
+ */
+async function streamAnswer(
+  res: Response,
+  answer: (signal: AbortSignal) => AsyncGenerator<string>,
+  remaining: number,
+): Promise<void> {
+  res.status(200);
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  // No proxy on the way may hold the answer back to compress or buffer it.
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const reader = new AbortController();
+  res.on('close', () => {
+    if (!res.writableEnded) reader.abort();
+  });
+  const send = (event: string, data: unknown) =>
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+
+  try {
+    for await (const text of answer(reader.signal)) send('delta', { text });
+    if (!reader.signal.aborted) send('done', { remaining });
+  } catch {
+    send('error', {
+      message:
+        'La réponse n’a pas pu être rédigée. Réessayez dans un instant : cette question n’est pas décomptée.',
+    });
+  }
+  res.end();
 }
