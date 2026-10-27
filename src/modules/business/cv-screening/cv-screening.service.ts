@@ -81,7 +81,7 @@ type ScreeningRow = Prisma.CvScreeningGetPayload<{
 type ResumeRow = ScreeningRow['resumes'][number];
 
 /**
- * « Tri des CV »: a business uploads CVs for one job, the AI reads and scores
+ * « Analyse de CV »: a business uploads CVs for one job, the AI reads and scores
  * each against it, and the list comes back ranked. Paid for by the plan's
  * « CV inclus »; a CV that cannot be read is given back. Files and contact
  * details are purged after the plan's retention; scores stay.
@@ -112,7 +112,7 @@ export class CvScreeningService {
     const e = await this.subscriptions.entitlements(businessId);
     if (e.cvQuota === 0) {
       throw new ForbiddenException(
-        'Le tri des CV est inclus dans les formules supérieures. Changez de formule depuis votre espace, rubrique « Abonnement ».',
+        'L’analyse de CV est incluse dans les formules supérieures. Changez de formule depuis votre espace, rubrique « Abonnement ».',
       );
     }
     if (files.length === 0) {
