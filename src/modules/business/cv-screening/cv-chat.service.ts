@@ -20,6 +20,7 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { LlmService } from '../../rag/llm/llm.service';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
 import { CvScreeningService } from './cv-screening.service';
+import type { ChatReportCandidate, ChatReportInput } from './cv-chat-report';
 
 /** The turns sent back with each question: enough to follow up, not a whole afternoon. */
 export const HISTORY_TURNS = 12;
@@ -87,6 +88,43 @@ export class CvChatService {
       limit,
       remaining: Math.max(0, limit - asked),
       available: resume.storage_key !== null,
+    };
+  }
+
+  /** The conversation about one CV, for its PDF. */
+  async report(
+    profileId: string,
+    screeningId: string,
+    resumeId: string,
+  ): Promise<ChatReportInput> {
+    const { resume, screening } = await this.owned(
+      profileId,
+      screeningId,
+      resumeId,
+    );
+    const [rows, business] = await Promise.all([
+      this.prisma.cvResumeMessage.findMany({
+        where: { resume_id: resume.id },
+        orderBy: { created_at: 'asc' },
+      }),
+      this.prisma.business.findUnique({
+        where: { id: screening.business_id },
+        select: { name: true },
+      }),
+    ]);
+    if (rows.length === 0) {
+      throw new BadRequestException('Aucune question pour l’instant.');
+    }
+    return {
+      businessName: business?.name ?? '',
+      jobTitle: screening.job_title,
+      candidates: [reportCandidate(resume, 1)],
+      messages: rows.map((m) => ({
+        role: m.role === CvChatRole.USER ? 'user' : 'assistant',
+        content: m.content,
+        createdAt: m.created_at,
+      })),
+      generatedAt: new Date(),
     };
   }
 
@@ -262,6 +300,30 @@ export class CvChatService {
     const { screening, ...row } = resume;
     return { resume: row, screening, limit: e.cvChatQuestions };
   }
+}
+
+/** What the PDF says of a candidate: never the e-mail or phone. */
+export function reportCandidate(
+  resume: Pick<CvScreeningResume, 'candidate' | 'score' | 'summary'>,
+  position: number,
+): ChatReportCandidate {
+  const c =
+    resume.candidate &&
+    typeof resume.candidate === 'object' &&
+    !Array.isArray(resume.candidate)
+      ? resume.candidate
+      : {};
+  const text = (v: unknown) =>
+    typeof v === 'string' && v.trim() ? v.trim() : null;
+  return {
+    name: text(c.name) ?? `Candidat ${position}`,
+    title: text(c.currentTitle),
+    city: text(c.city),
+    yearsExperience:
+      typeof c.yearsExperience === 'number' ? c.yearsExperience : null,
+    score: resume.score,
+    summary: resume.summary,
+  };
 }
 
 export function view(m: {

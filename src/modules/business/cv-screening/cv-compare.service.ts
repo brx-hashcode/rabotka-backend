@@ -21,8 +21,10 @@ import {
   CHAT_RULES,
   CvChatService,
   HISTORY_TURNS,
+  reportCandidate,
   view,
 } from './cv-chat.service';
+import type { ChatReportInput } from './cv-chat-report';
 
 export const MIN_COMPARED = 2;
 export const MAX_COMPARED = 5;
@@ -99,6 +101,45 @@ export class CvCompareService {
       limit,
       remaining: Math.max(0, limit - asked),
       available: resumes.every((r) => r.storage_key !== null),
+    };
+  }
+
+  /** The comparison's conversation, for its PDF. */
+  async report(
+    profileId: string,
+    screeningId: string,
+    comparisonId: string,
+  ): Promise<ChatReportInput> {
+    const { businessId } = await this.business(profileId);
+    const comparison = await this.prisma.cvComparison.findFirst({
+      where: {
+        id: comparisonId,
+        screening: { id: screeningId, business_id: businessId },
+      },
+      include: {
+        screening: { include: { business: { select: { name: true } } } },
+        messages: { orderBy: { created_at: 'asc' } },
+      },
+    });
+    if (!comparison) throw new NotFoundException('Comparaison introuvable.');
+    if (comparison.messages.length === 0) {
+      throw new BadRequestException('Aucune question pour l’instant.');
+    }
+    const resumes = await this.prisma.cvScreeningResume.findMany({
+      where: { id: { in: comparison.resume_ids } },
+    });
+    // Best first, as the analysis lists them.
+    resumes.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+    return {
+      businessName: comparison.screening.business.name,
+      jobTitle: comparison.screening.job_title,
+      candidates: resumes.map((r, i) => reportCandidate(r, i + 1)),
+      messages: comparison.messages.map((m) => ({
+        role: m.role === CvChatRole.USER ? 'user' : 'assistant',
+        content: m.content,
+        createdAt: m.created_at,
+      })),
+      generatedAt: new Date(),
     };
   }
 

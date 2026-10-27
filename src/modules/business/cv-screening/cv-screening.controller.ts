@@ -1,6 +1,8 @@
 import {
   Body,
   Controller,
+  InternalServerErrorException,
+  Logger,
   Delete,
   Get,
   HttpCode,
@@ -26,7 +28,13 @@ import type { Response } from 'express';
 import { ProfileAuthGuard } from '../../auth/guards/profile-auth.guard';
 import { BusinessProfileGuard } from '../../auth/guards/business-profile.guard';
 import type { ProfileAuthenticatedRequest } from '../../auth/guards/jwt-auth.guard';
+import { htmlToPdf } from '../../../common/utils/puppeteer';
 import { sendPrivateFile } from '../../profile/send-private-file';
+import {
+  buildChatReportFilename,
+  buildChatReportHtml,
+  type ChatReportInput,
+} from './cv-chat-report';
 import { CvScreeningService } from './cv-screening.service';
 import { CvChatService } from './cv-chat.service';
 import {
@@ -54,6 +62,8 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 @Controller('business/me/cv-screenings')
 @UseGuards(ProfileAuthGuard, BusinessProfileGuard)
 export class CvScreeningController {
+  private readonly logger = new Logger(CvScreeningController.name);
+
   constructor(
     private readonly screenings: CvScreeningService,
     private readonly chat: CvChatService,
@@ -130,6 +140,23 @@ export class CvScreeningController {
     return this.chat.history(req.user.profileId, id, resumeId);
   }
 
+  @Get(':id/resumes/:resumeId/chat.pdf')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'The conversation about one CV, as a PDF (no contact details)',
+  })
+  async chatPdf(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('resumeId', ParseUUIDPipe) resumeId: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    await this.sendReport(
+      res,
+      await this.chat.report(req.user.profileId, id, resumeId),
+    );
+  }
+
   @Post(':id/resumes/:resumeId/chat')
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @ApiOperation({
@@ -170,6 +197,23 @@ export class CvScreeningController {
     return this.compare.open(req.user.profileId, id, dto.resumeIds);
   }
 
+  @Get(':id/comparisons/:comparisonId/chat.pdf')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'The comparison’s conversation, as a PDF (no contact details)',
+  })
+  async comparisonPdf(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('comparisonId', ParseUUIDPipe) comparisonId: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    await this.sendReport(
+      res,
+      await this.compare.report(req.user.profileId, id, comparisonId),
+    );
+  }
+
   @Post(':id/comparisons/:comparisonId/chat')
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @ApiOperation({
@@ -204,6 +248,28 @@ export class CvScreeningController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<void> {
     await this.screenings.remove(req.user.profileId, id);
+  }
+
+  private async sendReport(res: Response, input: ChatReportInput) {
+    let pdf: Buffer;
+    try {
+      pdf = await htmlToPdf(buildChatReportHtml(input), 'Analyse de CV');
+    } catch (err) {
+      // The business sees only the generic message: keep the real cause.
+      this.logger.error(
+        'CV chat PDF generation failed',
+        err instanceof Error ? err.stack : String(err),
+      );
+      throw new InternalServerErrorException(
+        'Le PDF n’a pas pu être créé. Réessayez dans un instant.',
+      );
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${buildChatReportFilename(input)}"`,
+    );
+    res.send(pdf);
   }
 }
 
