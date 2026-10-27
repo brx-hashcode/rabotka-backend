@@ -28,8 +28,9 @@ export class BusinessContactsService {
         employer_id: profileId,
         ...(workerId ? { worker_id: workerId } : {}),
       },
+      // Every record, without a cap: a contact obtained stays the business's,
+      // plan or no plan, and a cap would silently drop the oldest ones.
       orderBy: { unlocked_at: 'desc' },
-      take: 500,
       select: {
         worker_id: true,
         origin: true,
