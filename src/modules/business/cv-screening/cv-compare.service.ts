@@ -21,6 +21,7 @@ import {
   CHAT_RULES,
   CvChatService,
   HISTORY_TURNS,
+  careerOf,
   reportCandidate,
   view,
 } from './cv-chat.service';
@@ -276,6 +277,7 @@ function contextText(
       resume.gaps.length
         ? `Points d’attention : ${resume.gaps.join(' ; ')}`
         : null,
+      careerOf(resume),
       `CV :\n${text.slice(0, CV_CHARS_EACH)}`,
     ]
       .filter(Boolean)

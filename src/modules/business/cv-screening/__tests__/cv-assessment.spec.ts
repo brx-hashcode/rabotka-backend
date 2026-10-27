@@ -57,6 +57,48 @@ describe('parseAssessment', () => {
     expect(parsed?.strengths).toEqual(['a', 'b', 'c']);
   });
 
+  it('counts the years from the career, not from the model', () => {
+    const parsed = parseAssessment(
+      answer({
+        candidate: {
+          name: 'Grâce',
+          yearsExperience: 9,
+          experiences: [
+            {
+              title: 'Caissière',
+              start: '2020-01',
+              end: '2021-12',
+              type: 'FULL_TIME',
+              relevance: 'HIGH',
+            },
+            {
+              title: 'Vendeuse',
+              start: '2021-01',
+              end: '2022-12',
+              type: 'PART_TIME',
+              relevance: 'PARTIAL',
+            },
+          ],
+        },
+      }),
+      new Date('2026-10-15T00:00:00Z'),
+    );
+    expect(parsed?.candidate).toMatchObject({
+      experienceMonths: 36,
+      relevantMonths: 27,
+      yearsExperience: 3,
+    });
+    expect(parsed?.candidate.experiences).toHaveLength(2);
+  });
+
+  it('keeps the model’s years when the CV gives no dates', () => {
+    expect(parseAssessment(answer())?.candidate).toMatchObject({
+      yearsExperience: 4,
+      experiences: [],
+      experienceMonths: null,
+    });
+  });
+
   it('is null for anything but the JSON asked for', () => {
     expect(parseAssessment('Je ne peux pas lire ce fichier.')).toBeNull();
     expect(parseAssessment('{"isCv": "oui"}')).toBeNull();
