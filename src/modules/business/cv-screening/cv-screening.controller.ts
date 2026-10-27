@@ -162,7 +162,7 @@ export class CvScreeningController {
   @ApiOperation({
     summary: 'Ask about one CV; the answer streams back',
     description:
-      'Server-sent events: `delta` ({ text }) as the answer is written, then `done` ({ remaining }) or `error` ({ message }). Refusals (no plan, questions used up, CV purged) are plain HTTP errors before the stream starts.',
+      'Server-sent events: `delta` ({ text }) as the answer is written, then `done` ({ remaining }) or `error` ({ message }); a question outside the recruitment gets `off_topic` ({ message }) then `done`, and is not counted. Refusals (no plan, questions used up, CV purged) are plain HTTP errors before the stream starts.',
   })
   async ask(
     @Req() req: ProfileAuthenticatedRequest,
@@ -301,12 +301,17 @@ async function streamAnswer(
     for await (const text of answer(reader.signal)) send('delta', { text });
     if (!reader.signal.aborted) send('done', { remaining });
   } catch (err) {
-    send('error', {
-      message:
-        err instanceof OffTopicError
-          ? err.message
-          : 'La réponse n’a pas pu être rédigée. Réessayez dans un instant : cette question n’est pas décomptée.',
-    });
+    if (err instanceof OffTopicError) {
+      // Said as the assistant's reply, not as a failure; the question was
+      // taken back, so as many are left as before it.
+      send('off_topic', { message: err.message });
+      send('done', { remaining: remaining + 1 });
+    } else {
+      send('error', {
+        message:
+          'La réponse n’a pas pu être rédigée. Réessayez dans un instant : cette question n’est pas décomptée.',
+      });
+    }
   }
   res.end();
 }
