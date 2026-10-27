@@ -224,6 +224,28 @@ export type NotificationInput =
       businessName: string;
     }
   | {
+      type: 'INTERVIEW_INVITED';
+      applicationId: string;
+      businessName: string;
+      jobTitle: string;
+      when: string;
+      changed: boolean;
+    }
+  | {
+      type: 'INTERVIEW_CANCELLED';
+      applicationId: string;
+      businessName: string;
+      jobTitle: string;
+      when: string;
+    }
+  | {
+      type: 'INTERVIEW_ANSWERED';
+      candidateName: string;
+      jobTitle: string;
+      when: string;
+      answer: 'CONFIRMED' | 'DECLINED' | 'RESCHEDULE_REQUESTED';
+    }
+  | {
       type: 'CV_SCREENING_DONE';
       screeningId: string;
       jobTitle: string;
@@ -594,6 +616,37 @@ export function renderNotification(
         title: 'Invitation à postuler',
         body: `${input.businessName} vous invite à postuler à${quoted(input.jobTitle)}.`,
         link: `/offres/${input.jobOfferId}`,
+      };
+
+    case 'INTERVIEW_INVITED':
+      return {
+        title: input.changed ? 'Entretien modifié' : 'Entretien proposé',
+        body: `${input.businessName} ${input.changed ? 'a déplacé votre entretien pour' : 'vous propose un entretien pour'}${quoted(input.jobTitle)} : ${input.when}. Répondez depuis l’e-mail reçu.`,
+        link: `/applications/${input.applicationId}`,
+      };
+
+    case 'INTERVIEW_CANCELLED':
+      return {
+        title: 'Entretien annulé',
+        body: `${input.businessName} a annulé l’entretien du ${input.when} pour${quoted(input.jobTitle)}.`,
+        link: `/applications/${input.applicationId}`,
+      };
+
+    case 'INTERVIEW_ANSWERED':
+      return {
+        title:
+          input.answer === 'CONFIRMED'
+            ? 'Entretien confirmé'
+            : input.answer === 'DECLINED'
+              ? 'Entretien décliné'
+              : 'Autre moment demandé',
+        body:
+          input.answer === 'CONFIRMED'
+            ? `${input.candidateName} confirme l’entretien du ${input.when} pour${quoted(input.jobTitle)}.`
+            : input.answer === 'DECLINED'
+              ? `${input.candidateName} a décliné l’entretien du ${input.when}.`
+              : `${input.candidateName} propose un autre moment que le ${input.when}.`,
+        link: '/espace/entretiens',
       };
 
     case 'CV_SCREENING_DONE':

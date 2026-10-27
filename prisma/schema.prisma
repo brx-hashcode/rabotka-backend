@@ -1386,6 +1386,7 @@ model JobOffer {
   saved_by                SavedJob[]
   agent_leads             AgentLead[]
   cv_screenings           CvScreening[]
+  interviews              Interview[]
   deleted_at              DateTime?              @db.Timestamptz
 
   @@index([employer_id], name: "idx_job_offer_employer")
@@ -1448,6 +1449,7 @@ model Application {
   /// Threads that last showed this application as their context. Plural since
   /// conversations became one per pair: the key is the pair, not this row.
   conversations          ProfileConversation[]
+  interviews             Interview[]
   deleted_at             DateTime?             @db.Timestamptz
 
   /// NOT unique any more. Uniqueness is enforced by a PARTIAL index created in
@@ -2224,6 +2226,9 @@ enum ProfileNotificationType {
   /// A business asked a worker from its talent pool to apply to one of its offers.
   JOB_INVITATION
   CV_SCREENING_DONE
+  INTERVIEW_INVITED
+  INTERVIEW_CANCELLED
+  INTERVIEW_ANSWERED
 }
 
 /// The in-app feed behind the bell in rabotka-client.
@@ -3392,6 +3397,7 @@ model Business {
   documents     BusinessDocument[]
   subscriptions BusinessSubscription[]
   cv_screenings CvScreening[]
+  interviews    Interview[]
 
   @@index([verification_status], name: "idx_business_verification_status")
   @@index([category], name: "idx_business_category")
@@ -3581,6 +3587,7 @@ model CvScreeningResume {
 
   screening CvScreening          @relation(fields: [screening_id], references: [id], onDelete: Cascade)
   messages  CvResumeMessage[]
+  interviews Interview[]
 
   @@index([screening_id], name: "idx_cv_screening_resume_screening")
   @@map("cv_screening_resumes")
@@ -3637,6 +3644,66 @@ model CvComparisonMessage {
 
   @@index([comparison_id, created_at], name: "idx_cv_comparison_message_comparison_created")
   @@map("cv_comparison_messages")
+}
+
+enum InterviewMode {
+  IN_PERSON
+  PHONE
+  VIDEO
+}
+
+enum InterviewStatus {
+  /// Sent; the candidate has not answered.
+  PENDING
+  CONFIRMED
+  DECLINED
+  /// The candidate asked for another time (their note says which).
+  RESCHEDULE_REQUESTED
+  CANCELLED
+}
+
+/// An interview a business proposes to a candidate: one whose CV it analysed
+/// (reached by e-mail) or one who applied to its offer (e-mail and in-app).
+/// The candidate answers through a private link (`token_hash` keeps only the
+/// hash of it); the business sees the answer live.
+model Interview {
+  id               String          @id @default(uuid()) @db.Uuid
+  created_at       DateTime        @default(now())
+  updated_at       DateTime        @updatedAt
+  business_id      String          @db.Uuid
+  /// Exactly one of the two: where the candidate comes from.
+  cv_resume_id     String?         @db.Uuid
+  application_id   String?         @db.Uuid
+  offer_id         String?         @db.Uuid
+  job_title        String
+  candidate_name   String
+  /// Where the invitation goes. For an applicant it is read from their
+  /// profile at send time and never shown to the business through this row.
+  candidate_email  String?
+  starts_at        DateTime        @db.Timestamptz
+  duration_minutes Int
+  mode             InterviewMode
+  /// The address, or the video link; the number to call for a phone interview.
+  location         String?
+  message          String?         @db.Text
+  status           InterviewStatus @default(PENDING)
+  /// The candidate's words with their answer (another time, a question…).
+  response_note    String?         @db.Text
+  responded_at     DateTime?       @db.Timestamptz
+  token_hash       String          @unique
+  /// The reminder sent the day before, to both sides.
+  reminded_at      DateTime?       @db.Timestamptz
+
+  business  Business           @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  cv_resume CvScreeningResume? @relation(fields: [cv_resume_id], references: [id], onDelete: SetNull)
+  application Application?     @relation(fields: [application_id], references: [id], onDelete: SetNull)
+  offer     JobOffer?          @relation(fields: [offer_id], references: [id], onDelete: SetNull)
+
+  @@index([business_id, starts_at], name: "idx_interview_business_starts")
+  @@index([status, starts_at], name: "idx_interview_status_starts")
+  @@index([cv_resume_id], name: "idx_interview_cv_resume")
+  @@index([application_id], name: "idx_interview_application")
+  @@map("interviews")
 }
 
 /// A worker a business keeps for later — its talent pool. Private to the
