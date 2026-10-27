@@ -68,7 +68,12 @@ const EMPLOYMENT_LABEL: Record<string, string> = {
 /** A CV still waiting this long is stuck (a lost job): given up and given back. */
 const STUCK_AFTER_MS = 2 * 60 * 60 * 1000;
 
-const LLM_TIMEOUT_MS = 90_000;
+/**
+ * Per model attempt. A CV is answered in 10–20 s; past 45 s the model is
+ * stuck (gemini-3.6-flash was seen hanging the full 90 s the first version
+ * allowed), and the next one in the chain should get its turn.
+ */
+const LLM_TIMEOUT_MS = 45_000;
 
 type ScreeningRow = Prisma.CvScreeningGetPayload<{
   include: { resumes: true };

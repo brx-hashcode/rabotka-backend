@@ -157,11 +157,22 @@ export const TIER_CHAINS: Record<LlmTier, LlmProviderSpec[]> = {
     },
   ],
   // Business CV screening: reading a CV (a scan or a phone photo as often as
-  // a text PDF) and scoring it against a job, in a background queue. Both
-  // models read images; only Google reads a PDF as such, which the caller
-  // handles by picking the Google entries for a scanned PDF. No tools, no
-  // turn budget: quality and vision decide the order, not latency.
+  // a text PDF) and scoring it against a job, in a background queue. All
+  // read images; only Google reads a PDF as such, which the caller handles by
+  // picking the Google entries for a scanned PDF. No tools.
+  //
+  // Flash-Lite leads on measured runs: it scored the same test CVs as
+  // 3.6-flash, in a few seconds, while 3.6-flash (a thinking model) took
+  // 10 s on one run and 46–90 s on the next. It stays second, for the day
+  // Flash-Lite is the one down.
   document: [
+    {
+      provider: 'google',
+      model: modelId(
+        'CV_MODEL_DOCUMENT_GOOGLE_FAST',
+        'gemini-flash-lite-latest',
+      ),
+    },
     {
       provider: 'google',
       model: modelId('CV_MODEL_DOCUMENT_GOOGLE', 'gemini-3.6-flash'),
@@ -169,13 +180,6 @@ export const TIER_CHAINS: Record<LlmTier, LlmProviderSpec[]> = {
     {
       provider: 'openai',
       model: modelId('CV_MODEL_DOCUMENT_OPENAI', 'gpt-4o-mini'),
-    },
-    {
-      provider: 'google',
-      model: modelId(
-        'CV_MODEL_DOCUMENT_GOOGLE_FAST',
-        'gemini-flash-lite-latest',
-      ),
     },
   ],
 };
