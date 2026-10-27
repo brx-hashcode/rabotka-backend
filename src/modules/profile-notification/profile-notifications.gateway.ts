@@ -92,6 +92,14 @@ export class ProfileNotificationsGateway implements OnGatewayConnection {
       return authToken;
     }
 
+    // The business space's server proxies the long-polling transport and
+    // turns its own httpOnly session cookie into this header, as it does for
+    // the HTTP API: its pages never hold the token.
+    const authHeader = client.handshake.headers.authorization;
+    if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+      return authHeader.substring(7) || undefined;
+    }
+
     const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
     const cookieHeader = client.handshake.headers.cookie;
     if (!cookieName || !cookieHeader) return undefined;
