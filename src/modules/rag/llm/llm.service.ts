@@ -380,6 +380,118 @@ export class LlmService {
     }
   }
 
+  /**
+   * The answer as it is written, chunk by chunk, through the tier's chain.
+   *
+   * Falls over to the next provider only BEFORE the first chunk: once text has
+   * reached the reader, switching models would splice two answers together, so
+   * a failure after that point is thrown as is. `idleMs` bounds the wait for
+   * each chunk (the first one included); `signal` stops everything (the reader
+   * left). `providers` narrows the chain, e.g. to those that read a PDF.
+   */
+  async *stream(
+    input: BaseLanguageModelInput,
+    options: {
+      tier: LlmTier;
+      idleMs?: number;
+      signal?: AbortSignal;
+      correlationId?: string;
+      providers?: LlmProviderSpec['provider'][];
+    },
+  ): AsyncGenerator<string> {
+    const startedAt = Date.now();
+    const idleMs = options.idleMs ?? this.defaultTimeoutMs;
+    const chain = resolveChain(options.tier).filter(
+      (spec) => !options.providers || options.providers.includes(spec.provider),
+    );
+    const telemetry: LlmCallTelemetry = {
+      tier: options.tier,
+      provider: null,
+      model: null,
+      fallbackDepth: 0,
+      latencyMs: 0,
+      attempts: 0,
+      breakerSkipped: [],
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+    };
+    let firstError: unknown;
+
+    for (const spec of chain) {
+      if (options.signal?.aborted) return;
+      if (await this.breaker.isOpen(spec)) {
+        telemetry.breakerSkipped.push(specId(spec));
+        telemetry.fallbackDepth += 1;
+        continue;
+      }
+
+      const idle = new AbortController();
+      let timer: NodeJS.Timeout | undefined;
+      const arm = () => {
+        clearTimeout(timer);
+        timer = setTimeout(
+          () => idle.abort(new Error(`${specId(spec)} went quiet`)),
+          idleMs,
+        );
+      };
+      const signal = options.signal
+        ? AbortSignal.any([options.signal, idle.signal])
+        : idle.signal;
+      let yielded = false;
+      telemetry.attempts += 1;
+
+      try {
+        const model = await this.factory.build(spec);
+        arm();
+        const chunks = await model.stream(this.shapeFor(spec, input), {
+          signal,
+        });
+        for await (const chunk of chunks) {
+          arm();
+          const text = chunkText(chunk.content);
+          if (!text) continue;
+          yielded = true;
+          yield text;
+        }
+        clearTimeout(timer);
+        await this.breaker.recordSuccess(spec);
+        telemetry.provider = spec.provider;
+        telemetry.model = spec.model;
+        telemetry.latencyMs = Date.now() - startedAt;
+        this.log(telemetry, options.correlationId, 'ok');
+        return;
+      } catch (err) {
+        clearTimeout(timer);
+        // The reader left: nothing failed, nothing to fall over to.
+        if (options.signal?.aborted) return;
+        if (yielded) throw err;
+        const cls = classifyLlmError(err);
+        firstError ??= err;
+        if (cls === 'fatal') {
+          throw new LlmFatalError(
+            `${specId(spec)} failed fatally (${describe(err)}) — not falling over`,
+            telemetry,
+            err,
+          );
+        }
+        if (shouldTripBreaker(cls)) await this.breaker.recordFailure(spec);
+        this.logger.warn(
+          `${specId(spec)} stream failed (${cls}: ${describe(err)}) — advancing`,
+        );
+        telemetry.fallbackDepth += 1;
+      }
+    }
+
+    telemetry.latencyMs = Date.now() - startedAt;
+    this.log(telemetry, options.correlationId, 'exhausted');
+    throw new LlmChainExhaustedError(
+      `Every provider in tier "${options.tier}" failed or was skipped`,
+      telemetry,
+      firstError,
+    );
+  }
+
   async invoke(
     input: BaseLanguageModelInput,
     options: LlmInvokeOptions,
@@ -886,4 +998,24 @@ export async function withTimeout<T>(
     if (timer) clearTimeout(timer);
     detach?.();
   }
+}
+
+/** The text of a streamed chunk, whatever shape its content takes. */
+function chunkText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((part: unknown) =>
+      typeof part === 'string'
+        ? part
+        : part &&
+            typeof part === 'object' &&
+            'type' in part &&
+            part.type === 'text' &&
+            'text' in part &&
+            typeof part.text === 'string'
+          ? part.text
+          : '',
+    )
+    .join('');
 }

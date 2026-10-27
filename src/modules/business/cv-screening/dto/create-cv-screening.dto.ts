@@ -1,6 +1,12 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+} from 'class-validator';
 
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() || undefined : value;
@@ -31,4 +37,14 @@ export class CreateCvScreeningDto {
   @IsString()
   @MaxLength(8000)
   jobText?: string;
+}
+
+/** One question about an analysed CV. */
+export class CvChatQuestionDto {
+  @ApiPropertyOptional({ description: 'The question, in plain words' })
+  @Transform(trim)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(1000)
+  question: string;
 }

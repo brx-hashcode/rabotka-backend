@@ -101,6 +101,15 @@ export class CreateBusinessPlanDto {
   @Max(365)
   cvRetentionDays?: number;
 
+  @ApiPropertyOptional({
+    description: 'Questions a business may ask about one analysed CV',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(200)
+  cvChatQuestions?: number;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()
