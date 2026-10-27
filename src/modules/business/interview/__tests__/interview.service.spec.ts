@@ -95,6 +95,9 @@ describe('InterviewService', () => {
       expect(sent.to).toBe('grace@example.com');
       expect(sent.subject).toContain('Invitation à un entretien');
       expect(sent.html).toMatch(/\/entretien\/[A-Za-z0-9_-]{32}/);
+      // The message only: the answer link in the text, no button.
+      expect(sent.html).toContain('répondre à l’invitation</a>');
+      expect(sent.html).not.toContain('margin:24px 0;');
       expect(sent.attachments[0]).toMatchObject({ filename: 'entretien.ics' });
       expect(view).toMatchObject({
         candidateEmail: 'grace@example.com',

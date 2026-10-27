@@ -272,12 +272,7 @@ export class InterviewService {
     await this.send(
       updated.business.profile.email,
       `${updated.candidate_name} — ${answer === 'CONFIRMED' ? 'entretien confirmé' : answer === 'DECLINED' ? 'entretien décliné' : 'autre moment demandé'}`,
-      interviewAnsweredEmail(
-        this.mailOf(updated),
-        answer,
-        clean,
-        `${businessDashboardUrl()}/entretiens`,
-      ),
+      interviewAnsweredEmail(this.mailOf(updated), answer, clean),
       [],
       true,
     );
@@ -307,22 +302,16 @@ export class InterviewService {
       const mail = this.mailOf(interview);
       const to = this.candidateEmail(interview);
       if (to) {
-        // No answer link: only its hash is kept, and the invitation e-mail
-        // already carries it.
         await this.send(
           to,
           `Rappel : entretien demain — ${interview.job_title}`,
-          interviewReminderEmail(mail, '', 'candidate'),
+          interviewReminderEmail(mail, 'candidate'),
         );
       }
       await this.send(
         interview.business.profile.email,
         `Rappel : entretien avec ${interview.candidate_name} demain`,
-        interviewReminderEmail(
-          mail,
-          `${businessDashboardUrl()}/entretiens`,
-          'business',
-        ),
+        interviewReminderEmail(mail, 'business'),
         [],
         true,
       );
