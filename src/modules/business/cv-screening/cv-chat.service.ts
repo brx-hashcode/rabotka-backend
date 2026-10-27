@@ -35,7 +35,7 @@ export const OFF_TOPIC = 'HORS_SUJET';
 export class OffTopicError extends Error {
   constructor() {
     super(
-      'Je réponds uniquement aux questions sur ces candidats et ce poste (parcours, compétences, adéquation, entretien). Cette question n’est pas décomptée.',
+      'Cette question sort du cadre de ce recrutement : je réponds uniquement sur ces candidats et ce poste (parcours, compétences, adéquation au poste, entretien). Elle n’est pas décomptée.',
     );
   }
 }
