@@ -598,12 +598,12 @@ export function renderNotification(
 
     case 'CV_SCREENING_DONE':
       return {
-        title: 'Tri des CV terminé',
+        title: 'Analyse de CV terminée',
         body:
           input.scored === 0
             ? `Aucun CV n’a pu être lu pour${quoted(input.jobTitle)}. Ils ne sont pas décomptés.`
             : `${input.scored} CV classé${input.scored > 1 ? 's' : ''} pour${quoted(input.jobTitle)}${input.best !== null ? ` : le meilleur obtient ${input.best}/100` : ''}.`,
-        link: `/espace/tri-cv/${input.screeningId}`,
+        link: `/espace/analyse-cv/${input.screeningId}`,
       };
 
     case 'BUSINESS_DOCUMENT_REJECTED':

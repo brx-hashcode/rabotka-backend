@@ -653,7 +653,7 @@ export class BusinessSubscriptionService {
     const quota = sub ? sub.plan.cv_screenings_per_period : 0;
     if (!sub || quota === 0) {
       throw new ForbiddenException(
-        'Le tri des CV est inclus dans les formules supérieures. Changez de formule depuis votre espace, rubrique « Abonnement ».',
+        'L’analyse de CV est incluse dans les formules supérieures. Changez de formule depuis votre espace, rubrique « Abonnement ».',
       );
     }
     const { count: updated } = await db.businessSubscription.updateMany({

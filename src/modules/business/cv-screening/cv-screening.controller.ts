@@ -38,7 +38,7 @@ import { CreateCvScreeningDto } from './dto/create-cv-screening.dto';
 const MAX_FILES = 100;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
-/** « Tri des CV »: the business's AI screenings. */
+/** « Analyse de CV »: the business's AI screenings. */
 @ApiTags('Business')
 @ApiBearerAuth()
 @Controller('business/me/cv-screenings')
