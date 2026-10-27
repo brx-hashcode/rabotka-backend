@@ -596,6 +596,69 @@ export class CvScreeningService {
   // ── Housekeeping ─────────────────────────────────────────────────────
 
   /**
+   * CVs analysed before the career was read get it now, from the text kept
+   * for their chat: the jobs, their durations and the years of experience.
+   * The score and the points stay as they were; no CV credit is used. A CV
+   * the model can't read for it is marked (an empty career) and not retried;
+   * a provider failure is retried on the next run.
+   */
+  async backfillCareers(limit = 30): Promise<number> {
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+      SELECT id FROM cv_screening_resumes
+      WHERE status = 'SCORED' AND cv_text IS NOT NULL
+        AND (candidate IS NULL OR NOT (candidate ? 'experiences'))
+      ORDER BY created_at DESC
+      LIMIT ${limit}`;
+    let done = 0;
+    for (const { id } of rows) {
+      const resume = await this.prisma.cvScreeningResume.findUnique({
+        where: { id },
+        include: { screening: true },
+      });
+      if (!resume?.cv_text) continue;
+      let assessment: CvAssessment | null;
+      try {
+        assessment = await this.assess(
+          {
+            title: resume.screening.job_title,
+            text: resume.screening.job_text,
+          },
+          { kind: 'text', text: resume.cv_text },
+          resume.id,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Career backfill for CV ${resume.id} failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        continue;
+      }
+      const before =
+        resume.candidate &&
+        typeof resume.candidate === 'object' &&
+        !Array.isArray(resume.candidate)
+          ? resume.candidate
+          : {};
+      const read = assessment?.candidate;
+      await this.prisma.cvScreeningResume.update({
+        where: { id: resume.id },
+        data: {
+          candidate: {
+            ...before,
+            experiences: read?.experiences ?? [],
+            experienceMonths: read?.experienceMonths ?? null,
+            relevantMonths: read?.relevantMonths ?? null,
+            ...(typeof read?.experienceMonths === 'number' && {
+              yearsExperience: read.yearsExperience,
+            }),
+          },
+        },
+      });
+      done++;
+    }
+    return done;
+  }
+
+  /**
    * The periodic sweep: CVs stuck in the queue are given up (and given back),
    * and screenings past their retention lose their files and contact details.
    */

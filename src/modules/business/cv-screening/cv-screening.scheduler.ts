@@ -43,6 +43,10 @@ export class CvScreeningScheduler implements OnModuleInit {
             `CV screenings: ${result.stuck} stuck given up, ${result.purged} purged`,
           );
         }
+        const careers = await this.screenings.backfillCareers();
+        if (careers > 0) {
+          this.logger.log(`CV screenings: ${careers} careers read`);
+        }
       },
       { concurrency: 1 },
     );
@@ -55,6 +59,11 @@ export class CvScreeningScheduler implements OnModuleInit {
           { type: 'sweep' },
           { repeat: { every: SWEEP_INTERVAL_MS } },
         );
+      // Once at start too: CVs analysed before the career was read get it
+      // without waiting an hour.
+      await this.queueService
+        .getQueue(CV_SCREENING_SWEEP_QUEUE)
+        .add('sweep-now', { type: 'sweep' }, { removeOnComplete: true });
     } catch (err) {
       this.logger.error('Failed to register the CV screening sweep', err);
     }
