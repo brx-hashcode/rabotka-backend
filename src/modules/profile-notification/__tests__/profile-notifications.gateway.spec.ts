@@ -55,7 +55,17 @@ describe('ProfileNotificationsGateway', () => {
     expect(client.join).toHaveBeenCalledWith('profile:p-1');
   });
 
-  it('emits to the recipient room, and tolerates having no server', async () => {
+  it('joins the profile room from a bearer header (the business proxy)', async () => {
+    jwt.verify.mockReturnValue({ sub: 'p-1', type: 'profile' });
+    const client = socket({
+      handshake: { auth: {}, headers: { authorization: 'Bearer tok' } },
+    });
+    await gateway.handleConnection(client as never);
+    expect(jwt.verify).toHaveBeenCalledWith('tok', { secret: 'secret' });
+    expect(client.join).toHaveBeenCalledWith('profile:p-1');
+  });
+
+  it('emits to the recipient room, and tolerates having no server', () => {
     expect(() => gateway.emitNew('p-1', {} as never)).not.toThrow();
 
     const emit = jest.fn();
