@@ -1,5 +1,5 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import { CvChatService } from '../cv-chat.service';
+import { CvChatService, OffTopicError } from '../cv-chat.service';
 
 const resume = (over: Record<string, unknown> = {}) => ({
   id: 'r1',
@@ -233,6 +233,50 @@ describe('CvChatService', () => {
       expect(prisma.cvResumeMessage.delete).toHaveBeenCalledWith({
         where: { id: 'USER-Q ?' },
       });
+    });
+
+    it('refuses an off-topic question without showing the marker or counting it', async () => {
+      const { service, prisma, llm } = make();
+      const turn = await service.prepare('p1', 's1', 'r1', 'Centrer une div ?');
+      prisma.cvResumeMessage.create.mockClear();
+      prisma.cvResumeMessage.findFirst.mockResolvedValue(
+        msg('USER', 'Centrer une div ?'),
+      );
+      llm.stream.mockImplementation(async function* () {
+        await Promise.resolve();
+        yield ' HORS';
+        yield '_SUJET';
+      });
+
+      const shown: string[] = [];
+      await expect(
+        (async () => {
+          for await (const t of service.answer(
+            turn,
+            new AbortController().signal,
+          ))
+            shown.push(t);
+        })(),
+      ).rejects.toBeInstanceOf(OffTopicError);
+      expect(shown).toEqual([]);
+      expect(prisma.cvResumeMessage.create).not.toHaveBeenCalled();
+      expect(prisma.cvResumeMessage.delete).toHaveBeenCalledWith({
+        where: { id: 'USER-Centrer une div ?' },
+      });
+    });
+
+    it('streams an answer that only starts like the marker', async () => {
+      const { service, llm } = make();
+      const turn = await service.prepare('p1', 's1', 'r1', 'Q ?');
+      llm.stream.mockImplementation(async function* () {
+        await Promise.resolve();
+        yield 'HO';
+        yield 'nnête et ponctuelle.';
+      });
+
+      await expect(
+        drain(service.answer(turn, new AbortController().signal)),
+      ).resolves.toEqual(['HOnnête et ponctuelle.']);
     });
 
     it('keeps what was written when the reader left mid-answer', async () => {

@@ -36,7 +36,7 @@ import {
   type ChatReportInput,
 } from './cv-chat-report';
 import { CvScreeningService } from './cv-screening.service';
-import { CvChatService } from './cv-chat.service';
+import { CvChatService, OffTopicError } from './cv-chat.service';
 import {
   CvCompareService,
   MAX_COMPARED,
@@ -300,10 +300,12 @@ async function streamAnswer(
   try {
     for await (const text of answer(reader.signal)) send('delta', { text });
     if (!reader.signal.aborted) send('done', { remaining });
-  } catch {
+  } catch (err) {
     send('error', {
       message:
-        'La réponse n’a pas pu être rédigée. Réessayez dans un instant : cette question n’est pas décomptée.',
+        err instanceof OffTopicError
+          ? err.message
+          : 'La réponse n’a pas pu être rédigée. Réessayez dans un instant : cette question n’est pas décomptée.',
     });
   }
   res.end();
