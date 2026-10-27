@@ -1,6 +1,9 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -47,4 +50,14 @@ export class CvChatQuestionDto {
   @IsNotEmpty()
   @MaxLength(1000)
   question: string;
+}
+
+/** The CVs of one screening to compare in a conversation. */
+export class CvCompareDto {
+  @ApiPropertyOptional({ type: [String], description: '2 to 5 scored CVs' })
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(5)
+  @IsUUID('all', { each: true })
+  resumeIds: string[];
 }

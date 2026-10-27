@@ -3545,6 +3545,7 @@ model CvScreening {
   subscription BusinessSubscription? @relation(fields: [subscription_id], references: [id], onDelete: SetNull)
   offer        JobOffer?             @relation(fields: [offer_id], references: [id], onDelete: SetNull)
   resumes      CvScreeningResume[]
+  comparisons  CvComparison[]
 
   @@index([business_id, created_at], name: "idx_cv_screening_business_created")
   @@index([expires_at], name: "idx_cv_screening_expires")
@@ -3603,6 +3604,39 @@ model CvResumeMessage {
 
   @@index([resume_id, created_at], name: "idx_cv_resume_message_resume_created")
   @@map("cv_resume_messages")
+}
+
+/// A conversation comparing several CVs of one screening. One per selection:
+/// choosing the same CVs again reopens it. Its messages go with the files at
+/// the end of the retention (they quote the CVs).
+model CvComparison {
+  id           String   @id @default(uuid()) @db.Uuid
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+  screening_id String   @db.Uuid
+  /// The CVs compared, sorted.
+  resume_ids   String[]
+  /// `resume_ids` joined: what makes a selection the same one.
+  selection    String
+
+  screening CvScreening           @relation(fields: [screening_id], references: [id], onDelete: Cascade)
+  messages  CvComparisonMessage[]
+
+  @@unique([screening_id, selection])
+  @@map("cv_comparisons")
+}
+
+model CvComparisonMessage {
+  id            String     @id @default(uuid()) @db.Uuid
+  created_at    DateTime   @default(now())
+  comparison_id String     @db.Uuid
+  role          CvChatRole
+  content       String     @db.Text
+
+  comparison CvComparison @relation(fields: [comparison_id], references: [id], onDelete: Cascade)
+
+  @@index([comparison_id, created_at], name: "idx_cv_comparison_message_comparison_created")
+  @@map("cv_comparison_messages")
 }
 
 /// A worker a business keeps for later — its talent pool. Private to the

@@ -633,6 +633,9 @@ export class CvScreeningService {
         this.prisma.cvResumeMessage.deleteMany({
           where: { resume_id: { in: screening.resumes.map((r) => r.id) } },
         }),
+        this.prisma.cvComparisonMessage.deleteMany({
+          where: { comparison: { screening_id: screening.id } },
+        }),
         ...screening.resumes.map((r) =>
           this.prisma.cvScreeningResume.update({
             where: { id: r.id },
