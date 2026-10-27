@@ -417,6 +417,7 @@ export class BusinessSubscriptionService {
   }
 
   /** Ends a period now (or drops it if it had not started). No message. */
+  /** Ends a period now (or drops one not yet started), and the periods queued after it. */
   async cancelByAdmin(
     businessId: string,
     subscriptionId: string,
@@ -432,16 +433,34 @@ export class BusinessSubscriptionService {
     if (!sub)
       throw new NotFoundException('Période introuvable ou déjà terminée.');
     const now = new Date();
-    await this.prisma.businessSubscription.update({
-      where: { id: sub.id },
-      data: {
-        status: BusinessSubscriptionStatus.CANCELLED,
-        granted_by: adminUserId,
-        // A started period ends now; one not yet started keeps its dates.
-        ...(sub.starts_at < now ? { ends_at: now } : {}),
-        expired_notified_at: now,
-      },
-    });
+    await this.prisma.$transaction([
+      this.prisma.businessSubscription.update({
+        where: { id: sub.id },
+        data: {
+          status: BusinessSubscriptionStatus.CANCELLED,
+          granted_by: adminUserId,
+          // A started period ends now; one not yet started keeps its dates.
+          ...(sub.starts_at < now ? { ends_at: now } : {}),
+          expired_notified_at: now,
+        },
+      }),
+      // The queue after it goes too: left alone, it would start later than
+      // the period it followed, leaving the business without a plan until
+      // then — and a new purchase would be placed behind it.
+      this.prisma.businessSubscription.updateMany({
+        where: {
+          business_id: businessId,
+          status: { in: RUNNING },
+          starts_at: { gt: sub.starts_at },
+          id: { not: sub.id },
+        },
+        data: {
+          status: BusinessSubscriptionStatus.CANCELLED,
+          granted_by: adminUserId,
+          expired_notified_at: now,
+        },
+      }),
+    ]);
     await this.syncPriority(businessId);
   }
 
