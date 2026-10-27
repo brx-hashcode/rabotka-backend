@@ -266,6 +266,85 @@ describe('BusinessSubscriptionService', () => {
     });
   });
 
+  describe('deletePlan', () => {
+    const setup = () => {
+      const made = make({
+        settings: { trialDays: 14, trialPlanCode: 'free', reminderDays: [] },
+      });
+      const { service, prisma } = made;
+      prisma.businessPlan.findFirst = jest
+        .fn()
+        .mockResolvedValue(plan({ code: 'pro' }));
+      prisma.businessPlan.update = jest.fn().mockResolvedValue({});
+      // b1 has a running and a queued period on the plan; b2 one period.
+      prisma.businessSubscription.findMany.mockResolvedValue([
+        { id: 's1', business_id: 'b1' },
+        { id: 's2', business_id: 'b2' },
+        { id: 's3', business_id: 'b1' },
+      ]);
+      const cancel = jest
+        .spyOn(service, 'cancelByAdmin')
+        .mockResolvedValue(undefined);
+      const current = jest.spyOn(service, 'current');
+      const tell = jest
+        .spyOn(service as any, 'tell')
+        .mockResolvedValue(undefined);
+      return { ...made, cancel, current, tell };
+    };
+
+    it('hides the plan and cancels each business on it from its earliest period', async () => {
+      const { service, prisma, cancel, current } = setup();
+      current.mockResolvedValue(null);
+
+      const res = await service.deletePlan('plan-1', 'admin-1');
+
+      expect(prisma.businessPlan.update).toHaveBeenCalledWith({
+        where: { id: 'plan-1' },
+        data: { deleted_at: expect.any(Date), is_active: false },
+      });
+      expect(cancel.mock.calls).toEqual([
+        ['b1', 's1', 'admin-1'],
+        ['b2', 's2', 'admin-1'],
+      ]);
+      expect(res.businesses).toBe(2);
+    });
+
+    it('tells only the businesses left without a plan', async () => {
+      const { service, current, tell } = setup();
+      current
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'other' } as any);
+
+      await service.deletePlan('plan-1', null);
+
+      expect(tell).toHaveBeenCalledTimes(1);
+      expect(tell.mock.calls[0][0]).toBe('b1');
+      expect(tell.mock.calls[0][1]).toMatchObject({
+        type: 'BUSINESS_SUBSCRIPTION_EXPIRED',
+        planName: 'Pro',
+      });
+    });
+
+    it('refuses the plan the trial setting names', async () => {
+      const { service, prisma, cancel } = setup();
+      prisma.businessPlan.findFirst.mockResolvedValue(plan({ code: 'free' }));
+
+      await expect(service.deletePlan('plan-1', null)).rejects.toThrow(
+        /essai gratuit/,
+      );
+      expect(prisma.businessPlan.update).not.toHaveBeenCalled();
+      expect(cancel).not.toHaveBeenCalled();
+    });
+
+    it('404s a plan already deleted', async () => {
+      const { service, prisma } = setup();
+      prisma.businessPlan.findFirst.mockResolvedValue(null);
+      await expect(service.deletePlan('plan-1', null)).rejects.toThrow(
+        'Formule introuvable.',
+      );
+    });
+  });
+
   describe('startTrial', () => {
     it('does nothing when the trial is configured off', async () => {
       const { service, prisma } = make({

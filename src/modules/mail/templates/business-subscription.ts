@@ -100,14 +100,14 @@ export function businessSubscriptionExpiringEmail(
 
 export function businessSubscriptionExpiredEmail(
   name: string,
-  p: { planName: string; trial: boolean; url: string },
+  p: { planName: string; trial: boolean; url: string; withdrawn?: boolean },
 ): string {
   return `
     <p>Bonjour ${escapeHtml(name)},</p>
 
     <p>
       ${p.trial ? 'Votre essai gratuit' : `Votre abonnement <strong>${escapeHtml(p.planName)}</strong>`}
-      est terminé.
+      est terminé${p.withdrawn ? ' : cette formule n’est plus proposée' : ''}.
     </p>
 
     <p>

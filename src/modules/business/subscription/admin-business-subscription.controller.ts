@@ -2,6 +2,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
@@ -29,8 +30,8 @@ import { planData, planView } from './plan-view';
 
 /**
  * Business plans (the catalog: prices, quotas, features) and each business's
- * subscription, for the admin. A plan is never deleted — deactivated — since
- * past periods point to it.
+ * subscription, for the admin. A deleted plan stays in the database, hidden,
+ * since past periods and payments point to it.
  */
 @ApiTags('Admin – Business subscriptions')
 @Controller('admin')
@@ -46,7 +47,15 @@ export class AdminBusinessSubscriptionController {
   @Roles(UserRole.MODERATOR)
   @ApiOperation({ summary: 'All business plans, active or not' })
   async listPlans() {
-    return (await this.subscriptions.listPlans(false)).map(planView);
+    const [plans, businesses] = await Promise.all([
+      this.subscriptions.listPlans(false),
+      this.subscriptions.businessesPerPlan(),
+    ]);
+    // How many businesses a deletion would cancel.
+    return plans.map((p) => ({
+      ...planView(p),
+      businesses: businesses.get(p.id) ?? 0,
+    }));
   }
 
   @Post('business-plans')
@@ -81,7 +90,7 @@ export class AdminBusinessSubscriptionController {
   ) {
     try {
       const plan = await this.prisma.businessPlan.update({
-        where: { id: planId },
+        where: { id: planId, deleted_at: null },
         data: planData(dto),
       });
       await this.log(req, 'BUSINESS_PLAN_UPDATED', plan.id, {
@@ -97,6 +106,27 @@ export class AdminBusinessSubscriptionController {
       }
       throw this.duplicate(err);
     }
+  }
+
+  @Delete('business-plans/:planId')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({
+    summary:
+      'Delete a business plan: hidden everywhere, and every business on it is cancelled',
+  })
+  async deletePlan(
+    @Param('planId', ParseUUIDPipe) planId: string,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
+    const { plan, businesses } = await this.subscriptions.deletePlan(
+      planId,
+      req.user?.userId ?? null,
+    );
+    await this.log(req, 'BUSINESS_PLAN_DELETED', plan.id, {
+      code: plan.code,
+      businessesCancelled: businesses,
+    });
+    return { businessesCancelled: businesses };
   }
 
   @Get('profiles/:id/business/subscription')
