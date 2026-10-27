@@ -398,6 +398,47 @@ describe('CvScreeningService', () => {
     });
   });
 
+  describe('list', () => {
+    it('sums each analysis up: best candidate, average, verdict spread', async () => {
+      const { service, prisma } = make();
+      prisma.cvScreening.count = jest.fn().mockResolvedValue(1);
+      const resume = (status: string, score: number | null, name?: string) => ({
+        status,
+        score,
+        candidate: name ? { name } : null,
+      });
+      prisma.cvScreening.findMany.mockResolvedValue([
+        {
+          id: 's1',
+          job_title: 'Caissier',
+          offer_id: null,
+          status: 'DONE',
+          created_at: new Date('2026-10-27T08:00:00Z'),
+          expires_at: new Date('2026-11-26T08:00:00Z'),
+          purged_at: null,
+          resumes: [
+            resume('SCORED', 62, 'Jordy'),
+            resume('SCORED', 91, 'Grâce'),
+            resume('SCORED', 35, 'Prince'),
+            resume('UNREADABLE', null),
+          ],
+        },
+      ]);
+
+      const { items, total } = await service.list('p1', 0, 20);
+
+      expect(total).toBe(1);
+      expect(items[0]).toMatchObject({
+        total: 4,
+        scored: 3,
+        bestScore: 91,
+        bestCandidate: 'Grâce',
+        averageScore: 63,
+        bands: { very: 1, good: 1, partial: 0, low: 1 },
+      });
+    });
+  });
+
   describe('sweep', () => {
     it('purges files and contact details past retention, and keeps the scores', async () => {
       const { service, prisma, storage } = make();
