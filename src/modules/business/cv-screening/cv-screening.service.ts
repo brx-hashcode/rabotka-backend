@@ -614,19 +614,42 @@ export class CvScreeningService {
 // ── Views ──────────────────────────────────────────────────────────────
 
 function counts(
-  resumes: { status: CvScreeningResumeStatus; score: number | null }[],
+  resumes: {
+    status: CvScreeningResumeStatus;
+    score: number | null;
+    candidate: Prisma.JsonValue;
+  }[],
 ) {
-  const scored = resumes.filter(
-    (r) => r.status === CvScreeningResumeStatus.SCORED,
-  );
+  const scored = resumes
+    .filter((r) => r.status === CvScreeningResumeStatus.SCORED)
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const scores = scored.map((r) => r.score ?? 0);
+  const best = scored[0];
+  const bestName =
+    best?.candidate &&
+    typeof best.candidate === 'object' &&
+    !Array.isArray(best.candidate) &&
+    typeof best.candidate.name === 'string'
+      ? best.candidate.name
+      : null;
   return {
     total: resumes.length,
     done: resumes.filter((r) => r.status !== CvScreeningResumeStatus.QUEUED)
       .length,
     scored: scored.length,
-    bestScore: scored.length
-      ? Math.max(...scored.map((r) => r.score ?? 0))
+    bestScore: best ? (best.score ?? 0) : null,
+    /** The name the best CV gives, for the list (null when it gives none). */
+    bestCandidate: bestName,
+    averageScore: scores.length
+      ? Math.round(scores.reduce((a, n) => a + n, 0) / scores.length)
       : null,
+    /** How the scored CVs spread over the verdicts the pages show. */
+    bands: {
+      very: scores.filter((n) => n >= 80).length,
+      good: scores.filter((n) => n >= 60 && n < 80).length,
+      partial: scores.filter((n) => n >= 40 && n < 60).length,
+      low: scores.filter((n) => n < 40).length,
+    },
   };
 }
 
