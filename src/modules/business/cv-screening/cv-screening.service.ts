@@ -32,6 +32,7 @@ import {
   MIN_TEXT_CHARS,
   cvFileType,
   extractCvText,
+  foldWhitespace,
   type CvFileType,
 } from './cv-files';
 import {
@@ -74,6 +75,9 @@ const STUCK_AFTER_MS = 2 * 60 * 60 * 1000;
  * allowed), and the next one in the chain should get its turn.
  */
 const LLM_TIMEOUT_MS = 45_000;
+
+/** As much of a transcribed CV as is kept, like the text read from a PDF. */
+const MAX_TRANSCRIPT_CHARS = 15_000;
 
 type ScreeningRow = Prisma.CvScreeningGetPayload<{
   include: { resumes: true };
@@ -345,7 +349,7 @@ export class CvScreeningService {
     if (!resume || resume.status !== CvScreeningResumeStatus.QUEUED) return;
 
     let outcome:
-      | { status: 'SCORED'; assessment: CvAssessment }
+      | { status: 'SCORED'; assessment: CvAssessment; text: string | null }
       | { status: 'UNREADABLE' | 'FAILED'; error: string };
     try {
       const source = await this.sourceOf(resume);
@@ -371,7 +375,12 @@ export class CvScreeningService {
                 error:
                   'Ce document ne ressemble pas à un CV, ou il est illisible.',
               }
-            : { status: 'SCORED', assessment };
+            : {
+                status: 'SCORED',
+                assessment,
+                // Kept for the CV's chat: no download per question.
+                text: source.kind === 'text' ? source.text : null,
+              };
       }
     } catch (err) {
       this.logger.warn(
@@ -389,7 +398,7 @@ export class CvScreeningService {
       screening: { id: string; subscription_id: string | null };
     },
     outcome:
-      | { status: 'SCORED'; assessment: CvAssessment }
+      | { status: 'SCORED'; assessment: CvAssessment; text: string | null }
       | { status: 'UNREADABLE' | 'FAILED'; error: string },
   ): Promise<void> {
     const data: Prisma.CvScreeningResumeUpdateManyMutationInput =
@@ -402,6 +411,7 @@ export class CvScreeningService {
             strengths: outcome.assessment.strengths,
             gaps: outcome.assessment.gaps,
             candidate: outcome.assessment.candidate,
+            cv_text: outcome.text,
             error: null,
           }
         : { status: outcome.status, error: outcome.error };
@@ -464,7 +474,7 @@ export class CvScreeningService {
   }
 
   /** What the model reads: the text when there is some, else the image or the scanned PDF itself. */
-  private async sourceOf(resume: ResumeRow): Promise<CvSource | null> {
+  async sourceOf(resume: ResumeRow): Promise<CvSource | null> {
     if (!resume.storage_key) return null;
     const downloaded = await this.storage.download(resume.storage_key, {
       bucket: resume.storage_bucket ?? undefined,
@@ -510,6 +520,48 @@ export class CvScreeningService {
       new HumanMessage(JSON_REMINDER),
     ]);
     return parseAssessment(second);
+  }
+
+  /**
+   * The text of a scan or a photo, written out by the model once, so the CV's
+   * chat can read text instead of looking at the file on every question.
+   * Null when the model finds nothing legible.
+   */
+  async transcribe(
+    source: CvSource,
+    correlationId: string,
+  ): Promise<string | null> {
+    if (source.kind === 'text') return source.text;
+    const media =
+      source.kind === 'image'
+        ? {
+            type: 'image_url' as const,
+            image_url: {
+              url: `data:${source.mimeType};base64,${source.base64}`,
+            },
+          }
+        : {
+            type: 'media' as const,
+            mimeType: 'application/pdf',
+            data: source.base64,
+          };
+    const text = await this.call(
+      [
+        new HumanMessage({
+          content: [
+            {
+              type: 'text',
+              text: "Transcris fidèlement tout le texte de ce CV, dans l'ordre, en texte brut, sans commentaire ni mise en forme. S'il est illisible, réponds seulement : ILLISIBLE.",
+            },
+            media,
+          ],
+        }),
+      ],
+      source,
+      correlationId,
+    );
+    const clean = foldWhitespace(text).slice(0, MAX_TRANSCRIPT_CHARS);
+    return clean.length < 50 || clean.startsWith('ILLISIBLE') ? null : clean;
   }
 
   private async call(
@@ -577,12 +629,17 @@ export class CvScreeningService {
         ),
       );
       await this.prisma.$transaction([
+        // The conversations quote the CV: they go with it.
+        this.prisma.cvResumeMessage.deleteMany({
+          where: { resume_id: { in: screening.resumes.map((r) => r.id) } },
+        }),
         ...screening.resumes.map((r) =>
           this.prisma.cvScreeningResume.update({
             where: { id: r.id },
             data: {
               storage_key: null,
               storage_bucket: null,
+              cv_text: null,
               candidate: withoutContact(r.candidate),
             },
           }),

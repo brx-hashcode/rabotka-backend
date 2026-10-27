@@ -28,7 +28,11 @@ import { BusinessProfileGuard } from '../../auth/guards/business-profile.guard';
 import type { ProfileAuthenticatedRequest } from '../../auth/guards/jwt-auth.guard';
 import { sendPrivateFile } from '../../profile/send-private-file';
 import { CvScreeningService } from './cv-screening.service';
-import { CreateCvScreeningDto } from './dto/create-cv-screening.dto';
+import { CvChatService } from './cv-chat.service';
+import {
+  CreateCvScreeningDto,
+  CvChatQuestionDto,
+} from './dto/create-cv-screening.dto';
 
 /**
  * Hard ceilings above any plan: the plan's own limits (CVs per upload, file
@@ -44,7 +48,10 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 @Controller('business/me/cv-screenings')
 @UseGuards(ProfileAuthGuard, BusinessProfileGuard)
 export class CvScreeningController {
-  constructor(private readonly screenings: CvScreeningService) {}
+  constructor(
+    private readonly screenings: CvScreeningService,
+    private readonly chat: CvChatService,
+  ) {}
 
   @Post()
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
@@ -102,6 +109,68 @@ export class CvScreeningController {
       res,
       await this.screenings.file(req.user.profileId, id, resumeId),
     );
+  }
+
+  @Get(':id/resumes/:resumeId/chat')
+  @ApiOperation({
+    summary: 'The conversation about one CV, and the questions left',
+  })
+  chatHistory(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('resumeId', ParseUUIDPipe) resumeId: string,
+  ) {
+    return this.chat.history(req.user.profileId, id, resumeId);
+  }
+
+  @Post(':id/resumes/:resumeId/chat')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Ask about one CV; the answer streams back',
+    description:
+      'Server-sent events: `delta` ({ text }) as the answer is written, then `done` ({ remaining }) or `error` ({ message }). Refusals (no plan, questions used up, CV purged) are plain HTTP errors before the stream starts.',
+  })
+  async ask(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('resumeId', ParseUUIDPipe) resumeId: string,
+    @Body() dto: CvChatQuestionDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const turn = await this.chat.prepare(
+      req.user.profileId,
+      id,
+      resumeId,
+      dto.question,
+    );
+
+    res.status(200);
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    // No proxy on the way may hold the answer back to compress or buffer it.
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    const reader = new AbortController();
+    res.on('close', () => {
+      if (!res.writableEnded) reader.abort();
+    });
+    const send = (event: string, data: unknown) =>
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+
+    try {
+      for await (const text of this.chat.answer(turn, reader.signal)) {
+        send('delta', { text });
+      }
+      if (!reader.signal.aborted) send('done', { remaining: turn.remaining });
+    } catch {
+      send('error', {
+        message:
+          'La réponse n’a pas pu être rédigée. Réessayez dans un instant : cette question n’est pas décomptée.',
+      });
+    }
+    res.end();
   }
 
   @Delete(':id')

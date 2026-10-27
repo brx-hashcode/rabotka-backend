@@ -74,6 +74,8 @@ export type BusinessEntitlements = {
   cvBatchMax: number;
   cvFileMaxMb: number;
   cvRetentionDays: number;
+  /** Questions about one analysed CV (its chat); 0: no chat. */
+  cvChatQuestions: number;
   includesPreselection: boolean;
   includesFieldAgents: boolean;
   priorityVisibility: boolean;
@@ -157,6 +159,7 @@ export class BusinessSubscriptionService {
         cvBatchMax: 0,
         cvFileMaxMb: 0,
         cvRetentionDays: 0,
+        cvChatQuestions: 0,
         includesPreselection: false,
         includesFieldAgents: false,
         priorityVisibility: false,
@@ -183,6 +186,7 @@ export class BusinessSubscriptionService {
       cvBatchMax: sub.plan.cv_batch_max,
       cvFileMaxMb: sub.plan.cv_file_max_mb,
       cvRetentionDays: sub.plan.cv_retention_days,
+      cvChatQuestions: sub.plan.cv_chat_questions,
       includesPreselection: sub.plan.includes_preselection,
       includesFieldAgents: sub.plan.includes_field_agents,
       priorityVisibility: sub.plan.priority_visibility,

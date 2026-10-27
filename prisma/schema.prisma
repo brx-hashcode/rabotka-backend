@@ -3466,6 +3466,8 @@ model BusinessPlan {
   cv_file_max_mb        Int      @default(5)
   /// Days a screening keeps its files and contact details before the purge.
   cv_retention_days     Int      @default(30)
+  /// Questions a business may ask about one analysed CV (its chat).
+  cv_chat_questions     Int      @default(20)
   is_active             Boolean  @default(true)
   sort_order            Int      @default(0)
 
@@ -3561,6 +3563,8 @@ model CvScreeningResume {
   /// Null once purged.
   storage_key    String?
   storage_bucket String?
+  /// The CV's text, read once, for its chat; null for a scan, and once purged.
+  cv_text        String?                 @db.Text
   status         CvScreeningResumeStatus @default(QUEUED)
   /// 0–100 against the job.
   score          Int?
@@ -3574,10 +3578,31 @@ model CvScreeningResume {
   candidate      Json?
   error          String?
 
-  screening CvScreening @relation(fields: [screening_id], references: [id], onDelete: Cascade)
+  screening CvScreening          @relation(fields: [screening_id], references: [id], onDelete: Cascade)
+  messages  CvResumeMessage[]
 
   @@index([screening_id], name: "idx_cv_screening_resume_screening")
   @@map("cv_screening_resumes")
+}
+
+enum CvChatRole {
+  USER
+  ASSISTANT
+}
+
+/// The business's conversation with the AI about one analysed CV. Deleted
+/// with the CV's files at the end of the retention: it quotes the CV.
+model CvResumeMessage {
+  id         String     @id @default(uuid()) @db.Uuid
+  created_at DateTime   @default(now())
+  resume_id  String     @db.Uuid
+  role       CvChatRole
+  content    String     @db.Text
+
+  resume CvScreeningResume @relation(fields: [resume_id], references: [id], onDelete: Cascade)
+
+  @@index([resume_id, created_at], name: "idx_cv_resume_message_resume_created")
+  @@map("cv_resume_messages")
 }
 
 /// A worker a business keeps for later — its talent pool. Private to the

@@ -66,6 +66,9 @@ function make() {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       update: jest.fn().mockReturnValue('screening-update'),
     },
+    cvResumeMessage: {
+      deleteMany: jest.fn().mockReturnValue('messages-delete'),
+    },
     cvScreeningResume: {
       findUnique: jest.fn(),
       findMany: jest.fn().mockResolvedValue([]),
@@ -481,6 +484,7 @@ describe('CvScreeningService', () => {
         data: {
           storage_key: null,
           storage_bucket: null,
+          cv_text: null,
           candidate: { name: 'Awa', email: null, phone: null },
         },
       });
@@ -489,6 +493,10 @@ describe('CvScreeningService', () => {
         data: { purged_at: now },
       });
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      // The conversations quote the CV: purged with it.
+      expect(prisma.cvResumeMessage.deleteMany).toHaveBeenCalledWith({
+        where: { resume_id: { in: ['r1', 'r2'] } },
+      });
     });
 
     it('gives up CVs stuck in the queue, and gives them back', async () => {
