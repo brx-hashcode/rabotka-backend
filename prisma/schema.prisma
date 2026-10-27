@@ -3476,6 +3476,8 @@ model BusinessPlan {
   cv_chat_questions     Int      @default(20)
   is_active             Boolean  @default(true)
   sort_order            Int      @default(0)
+  /// Deleted by an admin: hidden everywhere, kept for the periods and payments that point to it.
+  deleted_at            DateTime?
 
   subscriptions BusinessSubscription[]
 

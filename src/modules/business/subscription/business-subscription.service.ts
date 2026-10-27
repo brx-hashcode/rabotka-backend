@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -219,7 +220,7 @@ export class BusinessSubscriptionService {
 
   listPlans(activeOnly: boolean) {
     return this.prisma.businessPlan.findMany({
-      where: activeOnly ? { is_active: true } : {},
+      where: { deleted_at: null, ...(activeOnly && { is_active: true }) },
       orderBy: [{ sort_order: 'asc' }, { monthly_price_fcfa: 'asc' }],
     });
   }
@@ -464,6 +465,76 @@ export class BusinessSubscriptionService {
     await this.syncPriority(businessId);
   }
 
+  /** Businesses with a period running or queued on each plan. */
+  async businessesPerPlan(): Promise<Map<string, number>> {
+    const rows = await this.prisma.businessSubscription.findMany({
+      where: { status: { in: RUNNING } },
+      distinct: ['plan_id', 'business_id'],
+      select: { plan_id: true },
+    });
+    const counts = new Map<string, number>();
+    for (const r of rows)
+      counts.set(r.plan_id, (counts.get(r.plan_id) ?? 0) + 1);
+    return counts;
+  }
+
+  /**
+   * An admin deletes a plan. Past periods and payments point to it, so it
+   * stays, hidden everywhere; every business on it loses it now: its period
+   * on the plan (running or queued) is cancelled with what was queued after,
+   * as an admin cancel does, and a business left without a plan is told.
+   * The trial plan can't go while the trial setting names it.
+   */
+  async deletePlan(planId: string, adminUserId: string | null) {
+    const plan = await this.prisma.businessPlan.findFirst({
+      where: { id: planId, deleted_at: null },
+    });
+    if (!plan) throw new NotFoundException('Formule introuvable.');
+    const settings = await this.systemConfig.getBusinessSubscriptionSettings();
+    if (settings.trialPlanCode === plan.code) {
+      throw new ConflictException(
+        "Cette formule sert à l'essai gratuit : choisissez une autre formule d'essai dans les réglages avant de la supprimer.",
+      );
+    }
+    await this.prisma.businessPlan.update({
+      where: { id: plan.id },
+      data: { deleted_at: new Date(), is_active: false },
+    });
+
+    // The earliest period on the plan per business: cancelling it takes the
+    // later ones (on this plan or another) with it.
+    const periods = await this.prisma.businessSubscription.findMany({
+      where: { plan_id: plan.id, status: { in: RUNNING } },
+      orderBy: { starts_at: 'asc' },
+      select: { id: true, business_id: true },
+    });
+    const first = new Map<string, string>();
+    for (const p of periods) {
+      if (!first.has(p.business_id)) first.set(p.business_id, p.id);
+    }
+    for (const [businessId, subscriptionId] of first) {
+      await this.cancelByAdmin(businessId, subscriptionId, adminUserId);
+      if (await this.current(businessId)) continue;
+      await this.tell(
+        businessId,
+        {
+          type: 'BUSINESS_SUBSCRIPTION_EXPIRED',
+          planName: plan.name,
+          trial: false,
+        },
+        'Votre abonnement Rabotka Business est terminé',
+        (name) =>
+          businessSubscriptionExpiredEmail(name, {
+            planName: plan.name,
+            trial: false,
+            withdrawn: true,
+            url: this.subscriptionUrl(),
+          }),
+      );
+    }
+    return { plan, businesses: first.size };
+  }
+
   /**
    * One period, after whatever is already running or queued. A paid plan
    * replaces a running trial at once rather than waiting for it to end, and
@@ -480,7 +551,9 @@ export class BusinessSubscriptionService {
     const plan = await this.prisma.businessPlan.findUnique({
       where: { id: planId },
     });
-    if (!plan) return null;
+    // A deleted plan is never granted again; a payment taken for it before
+    // the deletion is still honoured.
+    if (!plan || (plan.deleted_at && !by.paymentRequestId)) return null;
     const created = await this.prisma.$transaction(async (tx) => {
       const trial = await tx.businessSubscription.findFirst({
         where: {
