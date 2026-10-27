@@ -57,6 +57,26 @@ describe('BusinessContactsService', () => {
     expect(list[1].offers).toEqual([]);
   });
 
+  it('lists every contact obtained, with no cap and whatever the plan', async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    // Any call on the plan would throw: an ended plan must not hide contacts.
+    const subscriptions = new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error('the plan was consulted');
+        },
+      },
+    );
+    const service = new BusinessContactsService(
+      { contactRecord: { findMany } } as never,
+      subscriptions as never,
+    );
+
+    await expect(service.list('biz')).resolves.toEqual([]);
+    expect(findMany.mock.calls[0][0]).not.toHaveProperty('take');
+  });
+
   it('gives the call number apart from the WhatsApp one, only when it differs', async () => {
     const at = new Date('2026-10-20');
     const findMany = jest.fn().mockResolvedValue([
