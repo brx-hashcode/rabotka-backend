@@ -445,6 +445,72 @@ describe('CvScreeningService', () => {
     });
   });
 
+  describe('backfillCareers', () => {
+    const scored = (id: string) => ({
+      id,
+      cv_text: 'CV',
+      candidate: { name: 'Awa', yearsExperience: 9, email: 'a@b.c' },
+      screening: { job_title: 'Hôtesse', job_text: 'Accueil.' },
+    });
+
+    it('adds the career to older CVs and keeps the rest of the analysis', async () => {
+      const { service, prisma } = make();
+      prisma.$queryRaw = jest
+        .fn()
+        .mockResolvedValue([{ id: 'r1' }, { id: 'r2' }]);
+      prisma.cvScreeningResume.findUnique = jest
+        .fn()
+        .mockImplementation(({ where }: { where: { id: string } }) =>
+          Promise.resolve(scored(where.id)),
+        );
+      prisma.cvScreeningResume.update = jest.fn().mockResolvedValue({});
+      const assess = jest
+        .spyOn(service as any, 'assess')
+        .mockResolvedValueOnce({
+          candidate: {
+            experiences: [{ title: 'Hôtesse' }],
+            experienceMonths: 36,
+            relevantMonths: 30,
+            yearsExperience: 3,
+          },
+        })
+        // Not readable for its career: marked, not retried.
+        .mockResolvedValueOnce(null);
+
+      await expect(service.backfillCareers()).resolves.toBe(2);
+      expect(assess).toHaveBeenCalledTimes(2);
+      expect(prisma.cvScreeningResume.update.mock.calls[0][0]).toEqual({
+        where: { id: 'r1' },
+        data: {
+          candidate: {
+            name: 'Awa',
+            email: 'a@b.c',
+            yearsExperience: 3,
+            experiences: [{ title: 'Hôtesse' }],
+            experienceMonths: 36,
+            relevantMonths: 30,
+          },
+        },
+      });
+      expect(
+        prisma.cvScreeningResume.update.mock.calls[1][0].data.candidate,
+      ).toMatchObject({ experiences: [], yearsExperience: 9 });
+    });
+
+    it('leaves a CV for the next run when the provider fails', async () => {
+      const { service, prisma } = make();
+      prisma.$queryRaw = jest.fn().mockResolvedValue([{ id: 'r1' }]);
+      prisma.cvScreeningResume.findUnique = jest
+        .fn()
+        .mockResolvedValue(scored('r1'));
+      prisma.cvScreeningResume.update = jest.fn();
+      jest.spyOn(service as any, 'assess').mockRejectedValue(new Error('down'));
+
+      await expect(service.backfillCareers()).resolves.toBe(0);
+      expect(prisma.cvScreeningResume.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('sweep', () => {
     it('purges files and contact details past retention, and keeps the scores', async () => {
       const { service, prisma, storage } = make();
