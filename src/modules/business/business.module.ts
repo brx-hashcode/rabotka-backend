@@ -11,6 +11,7 @@ import { BusinessStatsService } from './business-stats.service';
 import { BusinessContactsService } from './business-contacts.service';
 import { BusinessTalentService } from './business-talent.service';
 import { AdminBusinessSubscriptionController } from './subscription/admin-business-subscription.controller';
+import { CvScreeningModule } from './cv-screening/cv-screening.module';
 
 /** Business accounts: the public catalog and the dashboard's own routes. */
 @Module({
@@ -21,6 +22,7 @@ import { AdminBusinessSubscriptionController } from './subscription/admin-busine
     PaymentRequestModule,
     LogModule,
     BusinessSubscriptionModule,
+    CvScreeningModule,
   ],
   controllers: [
     BusinessCatalogController,

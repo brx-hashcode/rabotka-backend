@@ -10,6 +10,7 @@ import {
   IsString,
   IsUUID,
   Matches,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -66,6 +67,39 @@ export class CreateBusinessPlanDto {
   @IsInt()
   @Min(0)
   activeOffersLimit?: number | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'CVs the AI screening reads per period. Null: unlimited; 0: not included',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  cvScreeningsPerPeriod?: number | null;
+
+  @ApiPropertyOptional({ description: 'CVs in one screening' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  cvBatchMax?: number;
+
+  @ApiPropertyOptional({ description: 'Largest CV file, in MB' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  cvFileMaxMb?: number;
+
+  @ApiPropertyOptional({
+    description: 'Days a screening keeps its files and contact details',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  cvRetentionDays?: number;
 
   @ApiPropertyOptional()
   @IsOptional()

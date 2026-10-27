@@ -33,6 +33,9 @@ export const MESSAGING_NUDGE_QUEUE = 'messaging-nudge-queue';
 /** Field agents' commissions: one repeatable sweep that decides and releases them. */
 export const AGENT_COMMISSION_QUEUE = 'agent-commission-queue';
 export const BUSINESS_SUBSCRIPTION_QUEUE = 'business-subscription-queue';
+/** Business CV screening: one job per CV, plus the repeatable stuck/retention sweep. */
+export const CV_SCREENING_QUEUE = 'cv-screening-queue';
+export const CV_SCREENING_SWEEP_QUEUE = 'cv-screening-sweep-queue';
 
 @Module({})
 export class QueueModule {
