@@ -18,6 +18,10 @@ import {
   type SessionEndedEvent,
 } from '../../common/events/session-ended.events';
 import { OnEvent } from '@nestjs/event-emitter';
+import {
+  CV_SCREENING_PROGRESS,
+  type CvScreeningProgress,
+} from '../business/cv-screening/cv-screening.events';
 
 /**
  * Pushes a new notification to the recipient's open tabs, so the bell updates
@@ -63,6 +67,18 @@ export class ProfileNotificationsGateway implements OnGatewayConnection {
     this.server
       ?.to(`profile:${profileId}`)
       .emit('notification:new', notification);
+  }
+
+  /** A business's CV screening moved on: its open pages refresh the ranking. */
+  @OnEvent(CV_SCREENING_PROGRESS)
+  emitCvProgress(event: CvScreeningProgress): void {
+    this.server
+      ?.to(`profile:${event.profileId}`)
+      .emit('cv-screening:progress', {
+        screeningId: event.screeningId,
+        done: event.done,
+        total: event.total,
+      });
   }
 
   private async resolveProfileId(client: Socket): Promise<string | null> {

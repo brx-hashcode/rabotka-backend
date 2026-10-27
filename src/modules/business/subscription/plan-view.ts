@@ -11,6 +11,10 @@ export function planView(p: BusinessPlan) {
     annualPriceFcfa: p.annual_price_fcfa,
     unlocksPerPeriod: p.unlocks_per_period,
     activeOffersLimit: p.active_offers_limit,
+    cvScreeningsPerPeriod: p.cv_screenings_per_period,
+    cvBatchMax: p.cv_batch_max,
+    cvFileMaxMb: p.cv_file_max_mb,
+    cvRetentionDays: p.cv_retention_days,
     includesPreselection: p.includes_preselection,
     includesFieldAgents: p.includes_field_agents,
     priorityVisibility: p.priority_visibility,
@@ -28,6 +32,10 @@ export function planData(dto: {
   annualPriceFcfa?: number;
   unlocksPerPeriod?: number | null;
   activeOffersLimit?: number | null;
+  cvScreeningsPerPeriod?: number | null;
+  cvBatchMax?: number;
+  cvFileMaxMb?: number;
+  cvRetentionDays?: number;
   includesPreselection?: boolean;
   includesFieldAgents?: boolean;
   priorityVisibility?: boolean;
@@ -42,6 +50,10 @@ export function planData(dto: {
     annual_price_fcfa: dto.annualPriceFcfa,
     unlocks_per_period: dto.unlocksPerPeriod,
     active_offers_limit: dto.activeOffersLimit,
+    cv_screenings_per_period: dto.cvScreeningsPerPeriod,
+    cv_batch_max: dto.cvBatchMax,
+    cv_file_max_mb: dto.cvFileMaxMb,
+    cv_retention_days: dto.cvRetentionDays,
     includes_preselection: dto.includesPreselection,
     includes_field_agents: dto.includesFieldAgents,
     priority_visibility: dto.priorityVisibility,

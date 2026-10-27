@@ -222,6 +222,13 @@ export type NotificationInput =
       jobOfferId: string;
       jobTitle: string;
       businessName: string;
+    }
+  | {
+      type: 'CV_SCREENING_DONE';
+      screeningId: string;
+      jobTitle: string;
+      scored: number;
+      best: number | null;
     };
 
 export type NotificationType = NotificationInput['type'];
@@ -587,6 +594,16 @@ export function renderNotification(
         title: 'Invitation à postuler',
         body: `${input.businessName} vous invite à postuler à${quoted(input.jobTitle)}.`,
         link: `/offres/${input.jobOfferId}`,
+      };
+
+    case 'CV_SCREENING_DONE':
+      return {
+        title: 'Tri des CV terminé',
+        body:
+          input.scored === 0
+            ? `Aucun CV n’a pu être lu pour${quoted(input.jobTitle)}. Ils ne sont pas décomptés.`
+            : `${input.scored} CV classé${input.scored > 1 ? 's' : ''} pour${quoted(input.jobTitle)}${input.best !== null ? ` : le meilleur obtient ${input.best}/100` : ''}.`,
+        link: `/espace/tri-cv/${input.screeningId}`,
       };
 
     case 'BUSINESS_DOCUMENT_REJECTED':

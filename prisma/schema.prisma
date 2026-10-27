@@ -1385,6 +1385,7 @@ model JobOffer {
   contact_records         ContactRecord[]
   saved_by                SavedJob[]
   agent_leads             AgentLead[]
+  cv_screenings           CvScreening[]
   deleted_at              DateTime?              @db.Timestamptz
 
   @@index([employer_id], name: "idx_job_offer_employer")
@@ -2222,6 +2223,7 @@ enum ProfileNotificationType {
   BUSINESS_SUBSCRIPTION_EXPIRED
   /// A business asked a worker from its talent pool to apply to one of its offers.
   JOB_INVITATION
+  CV_SCREENING_DONE
 }
 
 /// The in-app feed behind the bell in rabotka-client.
@@ -3389,6 +3391,7 @@ model Business {
   profile       Profile                @relation(fields: [profile_id], references: [id], onDelete: Cascade)
   documents     BusinessDocument[]
   subscriptions BusinessSubscription[]
+  cv_screenings CvScreening[]
 
   @@index([verification_status], name: "idx_business_verification_status")
   @@index([category], name: "idx_business_category")
@@ -3455,6 +3458,14 @@ model BusinessPlan {
   includes_preselection Boolean  @default(false)
   includes_field_agents Boolean  @default(false)
   priority_visibility   Boolean  @default(false)
+  /// CVs the AI screening reads per period. Null: unlimited; 0: not included.
+  cv_screenings_per_period Int?  @default(0)
+  /// CVs in one screening (one upload).
+  cv_batch_max          Int      @default(20)
+  /// Largest CV file accepted, in MB.
+  cv_file_max_mb        Int      @default(5)
+  /// Days a screening keeps its files and contact details before the purge.
+  cv_retention_days     Int      @default(30)
   is_active             Boolean  @default(true)
   sort_order            Int      @default(0)
 
@@ -3477,6 +3488,8 @@ model BusinessSubscription {
   starts_at           DateTime                   @db.Timestamptz
   ends_at             DateTime                   @db.Timestamptz
   unlocks_used        Int                        @default(0)
+  /// CVs read by the AI screening this period (unreadable ones given back).
+  cv_screened         Int                        @default(0)
   payment_request_id  String?                    @unique @db.Uuid
   /// The admin who granted or cancelled it by hand.
   granted_by          String?                    @db.Uuid
@@ -3487,10 +3500,84 @@ model BusinessSubscription {
   business Business             @relation(fields: [business_id], references: [id], onDelete: Cascade)
   plan     BusinessPlan         @relation(fields: [plan_id], references: [id])
   usages   BusinessQuotaUsage[]
+  cv_screenings CvScreening[]
 
   @@index([business_id, ends_at], name: "idx_business_subscription_business_end")
   @@index([status, ends_at], name: "idx_business_subscription_status_end")
   @@map("business_subscriptions")
+}
+
+enum CvScreeningStatus {
+  PROCESSING
+  DONE
+}
+
+enum CvScreeningResumeStatus {
+  QUEUED
+  SCORED
+  /// Nothing readable in it (empty, corrupt, not a CV): not counted.
+  UNREADABLE
+  /// Every model failed on it: not counted.
+  FAILED
+}
+
+/// CVs a business had the AI read and rank against one job: one of its offers,
+/// or a job described by hand. The job text is a snapshot, so editing the
+/// offer later does not change what the scores were measured against.
+model CvScreening {
+  id              String            @id @default(uuid()) @db.Uuid
+  created_at      DateTime          @default(now())
+  updated_at      DateTime          @updatedAt
+  business_id     String            @db.Uuid
+  /// The period whose « CV inclus » paid for it; unreadable CVs go back to it.
+  subscription_id String?           @db.Uuid
+  offer_id        String?           @db.Uuid
+  job_title       String
+  job_text        String            @db.Text
+  status          CvScreeningStatus @default(PROCESSING)
+  /// The purge date: files and contact details go, scores stay.
+  expires_at      DateTime          @db.Timestamptz
+  purged_at       DateTime?         @db.Timestamptz
+
+  business     Business              @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  subscription BusinessSubscription? @relation(fields: [subscription_id], references: [id], onDelete: SetNull)
+  offer        JobOffer?             @relation(fields: [offer_id], references: [id], onDelete: SetNull)
+  resumes      CvScreeningResume[]
+
+  @@index([business_id, created_at], name: "idx_cv_screening_business_created")
+  @@index([expires_at], name: "idx_cv_screening_expires")
+  @@map("cv_screenings")
+}
+
+/// One CV of a screening, in the private KYC bucket, and what the AI made of it.
+model CvScreeningResume {
+  id             String                  @id @default(uuid()) @db.Uuid
+  created_at     DateTime                @default(now())
+  updated_at     DateTime                @updatedAt
+  screening_id   String                  @db.Uuid
+  file_name      String
+  mime_type      String
+  size_bytes     Int
+  /// Null once purged.
+  storage_key    String?
+  storage_bucket String?
+  status         CvScreeningResumeStatus @default(QUEUED)
+  /// 0–100 against the job.
+  score          Int?
+  /// Sub-scores (skills, experience, training, location, languages), 0–100.
+  criteria       Json?
+  summary        String?                 @db.Text
+  strengths      String[]                @default([])
+  gaps           String[]                @default([])
+  /// What the CV says of the person: name, city, years of experience, and
+  /// email/phone until the purge.
+  candidate      Json?
+  error          String?
+
+  screening CvScreening @relation(fields: [screening_id], references: [id], onDelete: Cascade)
+
+  @@index([screening_id], name: "idx_cv_screening_resume_screening")
+  @@map("cv_screening_resumes")
 }
 
 /// A worker a business keeps for later — its talent pool. Private to the

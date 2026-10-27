@@ -156,6 +156,28 @@ export const TIER_CHAINS: Record<LlmTier, LlmProviderSpec[]> = {
       model: modelId('VOVA_MODEL_STANDARD_DEEPSEEK', 'deepseek-chat'),
     },
   ],
+  // Business CV screening: reading a CV (a scan or a phone photo as often as
+  // a text PDF) and scoring it against a job, in a background queue. Both
+  // models read images; only Google reads a PDF as such, which the caller
+  // handles by picking the Google entries for a scanned PDF. No tools, no
+  // turn budget: quality and vision decide the order, not latency.
+  document: [
+    {
+      provider: 'google',
+      model: modelId('CV_MODEL_DOCUMENT_GOOGLE', 'gemini-3.6-flash'),
+    },
+    {
+      provider: 'openai',
+      model: modelId('CV_MODEL_DOCUMENT_OPENAI', 'gpt-4o-mini'),
+    },
+    {
+      provider: 'google',
+      model: modelId(
+        'CV_MODEL_DOCUMENT_GOOGLE_FAST',
+        'gemini-flash-lite-latest',
+      ),
+    },
+  ],
 };
 
 /**

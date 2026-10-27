@@ -156,6 +156,69 @@ describe('BusinessSubscriptionService', () => {
     });
   });
 
+  describe('consumeCv', () => {
+    const withCv = (over: Record<string, unknown> = {}) =>
+      running({
+        cv_screened: 3,
+        plan: plan({ cv_screenings_per_period: 10, ...over }),
+      });
+
+    it('takes a whole batch at once, only if it all fits', async () => {
+      const { service, prisma } = make({ sub: withCv() });
+      await expect(service.consumeCv('b1', 4)).resolves.toEqual({
+        subscriptionId: 'sub-1',
+      });
+      expect(prisma.businessSubscription.updateMany).toHaveBeenCalledWith({
+        where: { id: 'sub-1', cv_screened: { lte: 6 } },
+        data: { cv_screened: { increment: 4 } },
+      });
+    });
+
+    it('says how many are left when the batch is too big', async () => {
+      const { service, prisma } = make({ sub: withCv() });
+      prisma.businessSubscription.updateMany.mockResolvedValue({ count: 0 });
+      await expect(service.consumeCv('b1', 9)).rejects.toThrow(
+        'Il vous reste 7 CV inclus ce mois-ci : retirez-en 2',
+      );
+    });
+
+    it('refuses when the plan does not include it, or there is no plan', async () => {
+      const notIncluded = make({
+        sub: withCv({ cv_screenings_per_period: 0 }),
+      });
+      await expect(notIncluded.service.consumeCv('b1', 1)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(
+        notIncluded.prisma.businessSubscription.updateMany,
+      ).not.toHaveBeenCalled();
+      const none = make();
+      await expect(none.service.consumeCv('b1', 1)).rejects.toThrow(
+        'formules supérieures',
+      );
+    });
+
+    it('has no limit when the plan says unlimited', async () => {
+      const { service, prisma } = make({
+        sub: withCv({ cv_screenings_per_period: null }),
+      });
+      await service.consumeCv('b1', 50);
+      expect(
+        prisma.businessSubscription.updateMany.mock.calls[0][0].where,
+      ).toEqual({ id: 'sub-1' });
+    });
+
+    it('gives back in one statement, and nothing for zero', async () => {
+      const { service, prisma } = make();
+      prisma.$executeRaw = jest.fn().mockResolvedValue(1);
+      await service.releaseCv('sub-1', 0);
+      expect(prisma.$executeRaw).not.toHaveBeenCalled();
+      await service.releaseCv('sub-1', 2);
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(prisma.$executeRaw.mock.calls[0].slice(1)).toEqual([2, 'sub-1']);
+    });
+  });
+
   describe('startTrial', () => {
     it('does nothing when the trial is configured off', async () => {
       const { service, prisma } = make({

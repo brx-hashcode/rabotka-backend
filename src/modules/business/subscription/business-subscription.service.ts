@@ -67,6 +67,13 @@ export type BusinessEntitlements = {
   /** Offers active at once; null: unlimited; 0: none (no plan). */
   activeOffersLimit: number | null;
   activeOffers: number;
+  /** CVs the AI screening may still read this period; null: unlimited; 0: none. */
+  cvRemaining: number | null;
+  cvQuota: number | null;
+  cvUsed: number;
+  cvBatchMax: number;
+  cvFileMaxMb: number;
+  cvRetentionDays: number;
   includesPreselection: boolean;
   includesFieldAgents: boolean;
   priorityVisibility: boolean;
@@ -144,6 +151,12 @@ export class BusinessSubscriptionService {
         unlocksUsed: 0,
         activeOffersLimit: 0,
         activeOffers,
+        cvRemaining: 0,
+        cvQuota: 0,
+        cvUsed: 0,
+        cvBatchMax: 0,
+        cvFileMaxMb: 0,
+        cvRetentionDays: 0,
         includesPreselection: false,
         includesFieldAgents: false,
         priorityVisibility: false,
@@ -161,6 +174,15 @@ export class BusinessSubscriptionService {
       unlocksUsed: sub.unlocks_used,
       activeOffersLimit: sub.plan.active_offers_limit,
       activeOffers,
+      cvRemaining: remaining(
+        sub.plan.cv_screenings_per_period,
+        sub.cv_screened,
+      ),
+      cvQuota: sub.plan.cv_screenings_per_period,
+      cvUsed: sub.cv_screened,
+      cvBatchMax: sub.plan.cv_batch_max,
+      cvFileMaxMb: sub.plan.cv_file_max_mb,
+      cvRetentionDays: sub.plan.cv_retention_days,
       includesPreselection: sub.plan.includes_preselection,
       includesFieldAgents: sub.plan.includes_field_agents,
       priorityVisibility: sub.plan.priority_visibility,
@@ -615,6 +637,55 @@ export class BusinessSubscriptionService {
       data: { unlocks_used: { decrement: 1 } },
     });
     return true;
+  }
+
+  /**
+   * Takes `count` CVs from the current period's « CV inclus », all or none:
+   * the conditional update cannot let two uploads share the last units.
+   * Returns the period charged; throws when the plan has no room for them.
+   */
+  async consumeCv(
+    businessId: string,
+    count: number,
+    db: Db = this.prisma,
+  ): Promise<{ subscriptionId: string }> {
+    const sub = await this.current(businessId, db);
+    const quota = sub ? sub.plan.cv_screenings_per_period : 0;
+    if (!sub || quota === 0) {
+      throw new ForbiddenException(
+        'Le tri des CV est inclus dans les formules supérieures. Changez de formule depuis votre espace, rubrique « Abonnement ».',
+      );
+    }
+    const { count: updated } = await db.businessSubscription.updateMany({
+      where: {
+        id: sub.id,
+        ...(quota === null ? {} : { cv_screened: { lte: quota - count } }),
+      },
+      data: { cv_screened: { increment: count } },
+    });
+    if (updated === 0) {
+      const left = remaining(quota, sub.cv_screened) ?? 0;
+      throw new ForbiddenException(
+        left > 0
+          ? `Il vous reste ${left} CV inclus ce mois-ci : retirez-en ${count - left} ou changez de formule.`
+          : 'Vous avez utilisé tous les CV inclus dans votre formule pour cette période. Changez de formule pour en analyser davantage.',
+      );
+    }
+    return { subscriptionId: sub.id };
+  }
+
+  /** Gives back CVs that could not be read; never below zero. */
+  async releaseCv(
+    subscriptionId: string,
+    count: number,
+    db: Db = this.prisma,
+  ): Promise<void> {
+    if (count <= 0) return;
+    // One statement: a read-then-write would race an upload taking units.
+    await db.$executeRaw`
+      UPDATE "business_subscriptions"
+      SET "cv_screened" = GREATEST("cv_screened" - ${count}, 0)
+      WHERE "id" = ${subscriptionId}::uuid`;
   }
 
   /** Throws the upgrade message when a business may not publish one more offer. */
