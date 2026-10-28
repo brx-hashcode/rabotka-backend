@@ -52,6 +52,8 @@ import {
   splitTiers,
 } from '../../common/queries/text-search';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { candidateQuestion } from '../job-offer/offer-questions';
+import { ApplyToJobDto } from './dto/apply-to-job.dto';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { KycVerifiedGuard } from '../auth/guards/kyc-verified.guard';
 import { ActiveProfileGuard } from '../auth/guards/active-profile.guard';
@@ -538,7 +540,13 @@ export class MobileFeedController {
       requestId: req.requestId,
     });
 
-    return job;
+    // « Questions aux candidats », asked when applying — never which answers
+    // the employer accepts.
+    const questions = await this.prisma.offerQuestion.findMany({
+      where: { job_offer_id: jobOfferId },
+      orderBy: { position: 'asc' },
+    });
+    return { ...job, questions: questions.map(candidateQuestion) };
   }
 
   @Post('jobs/:jobOfferId/apply')
@@ -557,10 +565,13 @@ export class MobileFeedController {
   async applyToJob(
     @Req() req: ProfileAuthenticatedRequest,
     @Param('jobOfferId') jobOfferId: string,
+    @Body() dto: ApplyToJobDto,
   ) {
     const profileId = req.user.profileId;
     await this.assertProfileType(profileId, ProfileType.WORKER);
-    await this.applicationService.create(jobOfferId, profileId);
+    await this.applicationService.create(jobOfferId, profileId, {
+      answers: dto?.answers,
+    });
     const dailyQuota =
       await this.applicationService.getDailyApplicationQuota(profileId);
     return { success: true, dailyQuota };

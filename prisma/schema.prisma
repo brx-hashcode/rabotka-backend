@@ -1380,6 +1380,8 @@ model JobOffer {
   employer                Profile                @relation(fields: [employer_id], references: [id], onDelete: Cascade)
   category                JobCategory?           @relation(fields: [category_id], references: [id], onDelete: SetNull)
   applications            Application[]
+  /// Questions the candidates answer when they apply (« Questions aux candidats »).
+  questions               OfferQuestion[]
   assignments             Assignment[]
   contact_unlock_attempts ContactUnlockAttempt[]
   contact_records         ContactRecord[]
@@ -1405,6 +1407,9 @@ model Application {
   job_offer_id        String                  @db.Uuid
   worker_id           String                  @db.Uuid
   status              ApplicationStatus       @default(PENDING)
+  /// A wrong answer to one of the offer's « éliminatoire » questions: the
+  /// application is kept, flagged, and listed after the others.
+  knocked_out         Boolean                 @default(false)
   cancelled_at        DateTime?
   cancellation_reason String?
   /// Who cancelled, and therefore whether the worker may apply again: only a
@@ -1473,6 +1478,7 @@ model Application {
   @@index([worker_id, cancelled_by, cancelled_at], name: "idx_application_worker_cancellations")
   @@map("applications")
   assessment ApplicationAssessment?
+  answers    ApplicationAnswer[]
 }
 
 model Assignment {
@@ -3812,4 +3818,53 @@ model BusinessMailbox {
 
   @@unique([business_id, provider, email])
   @@map("business_mailboxes")
+}
+
+enum OfferQuestionKind {
+  YES_NO
+  CHOICE
+  SHORT_TEXT
+}
+
+/// A question an offer asks its candidates when they apply.
+model OfferQuestion {
+  id           String            @id @default(uuid()) @db.Uuid
+  created_at   DateTime          @default(now())
+  job_offer_id String            @db.Uuid
+  position     Int
+  kind         OfferQuestionKind
+  label        String
+  /// CHOICE: the answers offered.
+  options      String[]          @default([])
+  required     Boolean           @default(true)
+  /// « Éliminatoire »: an answer outside `accepted` flags the application.
+  knockout     Boolean           @default(false)
+  /// YES_NO: ["yes"] or ["no"]; CHOICE: some of `options`. Never shown to candidates.
+  accepted     String[]          @default([])
+
+  job_offer JobOffer            @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
+  answers   ApplicationAnswer[]
+
+  @@index([job_offer_id, position])
+  @@map("offer_questions")
+}
+
+/// A candidate's answer, with the question as it read then: editing the
+/// offer's questions later never rewrites what was answered.
+model ApplicationAnswer {
+  id             String            @id @default(uuid()) @db.Uuid
+  created_at     DateTime          @default(now())
+  application_id String            @db.Uuid
+  question_id    String?           @db.Uuid
+  label          String
+  kind           OfferQuestionKind
+  value          String
+  /// For an « éliminatoire » question: whether the answer is accepted.
+  passed         Boolean?
+
+  application Application    @relation(fields: [application_id], references: [id], onDelete: Cascade)
+  question    OfferQuestion? @relation(fields: [question_id], references: [id], onDelete: SetNull)
+
+  @@unique([application_id, question_id])
+  @@map("application_answers")
 }

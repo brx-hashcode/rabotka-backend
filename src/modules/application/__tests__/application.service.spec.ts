@@ -105,6 +105,7 @@ describe('ApplicationService', () => {
   beforeEach(async () => {
     const mockPrismaService = {
       jobOffer: { findUnique: jest.fn(), update: jest.fn() },
+      offerQuestion: { findMany: jest.fn().mockResolvedValue([]) },
       profile: { findUnique: jest.fn(), update: jest.fn() },
       penalty: {
         count: jest.fn(),
@@ -506,6 +507,62 @@ describe('ApplicationService', () => {
       const result = await service.create(JOB_OFFER_ID, WORKER_ID);
       expect(result.id).toBe(APPLICATION_ID);
       expect(result.status).toBe(ApplicationStatus.PENDING);
+    });
+
+    it('keeps the answers to the offer’s questions, and flags a wrong « éliminatoire » one', async () => {
+      (prisma as any).offerQuestion.findMany.mockResolvedValue([
+        {
+          id: 'q1',
+          kind: 'YES_NO',
+          label: 'Avez-vous le permis B ?',
+          options: [],
+          required: true,
+          knockout: true,
+          accepted: ['yes'],
+          position: 0,
+        },
+      ]);
+      await service.create(JOB_OFFER_ID, WORKER_ID, {
+        answers: [{ questionId: 'q1', value: 'no' }],
+      });
+      const data = (prisma.application.create as jest.Mock).mock.calls[0][0]
+        .data;
+      expect(data.knocked_out).toBe(true);
+      expect(data.answers).toEqual({
+        create: [
+          {
+            question_id: 'q1',
+            label: 'Avez-vous le permis B ?',
+            kind: 'YES_NO',
+            value: 'no',
+            passed: false,
+          },
+        ],
+      });
+    });
+
+    it('refuses incomplete answers before anything is created', async () => {
+      (prisma as any).offerQuestion.findMany.mockResolvedValue([
+        {
+          id: 'q1',
+          kind: 'SHORT_TEXT',
+          label: 'Pourquoi ce poste ?',
+          options: [],
+          required: true,
+          knockout: false,
+          accepted: [],
+          position: 0,
+        },
+      ]);
+      await expect(
+        service.create(JOB_OFFER_ID, WORKER_ID, { answers: [] }),
+      ).rejects.toThrow(/Répondez à la question/);
+      expect(prisma.application.create).not.toHaveBeenCalled();
+      // An app that asks nothing (mobile, a field agent) still applies.
+      await service.create(JOB_OFFER_ID, WORKER_ID);
+      expect(
+        (prisma.application.create as jest.Mock).mock.calls[0][0].data,
+      ).toMatchObject({ knocked_out: false });
     });
 
     it('throws ForbiddenException when worker has unpaid penalties', async () => {

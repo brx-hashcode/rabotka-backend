@@ -13,6 +13,7 @@ import {
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { LlmService } from '../../rag/llm/llm.service';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
+import { answerText } from '../../job-offer/offer-questions';
 import {
   applicantMessages,
   applicantScore,
@@ -72,6 +73,10 @@ export class ApplicantScoreService {
       where: { id: applicationId },
       include: {
         job_offer: { include: { category: { select: { name: true } } } },
+        answers: {
+          select: { label: true, kind: true, value: true },
+          orderBy: { created_at: 'asc' },
+        },
         worker: {
           include: {
             category: { select: { name: true } },
@@ -136,6 +141,10 @@ export class ApplicantScoreService {
           completedAt: m.completed_at,
         })),
         portfolio: portfolio.map((p) => (p.description ?? '').slice(0, 200)),
+        answers: (app.answers ?? []).map((x) => ({
+          question: x.label,
+          answer: answerText(x),
+        })),
       },
     );
 

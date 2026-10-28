@@ -16,6 +16,7 @@ import {
   Inject,
   Optional,
 } from '@nestjs/common';
+import { normalizeQuestions, ownerQuestion } from './offer-questions';
 import { BusinessSubscriptionService } from '../business/subscription/business-subscription.service';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
@@ -397,6 +398,12 @@ export type JobOfferDetail = JobOfferListItem & {
   /** For the employer's edit form, which needs the ids behind the labels. */
   category_id: string | null;
   country_code: string | null;
+  /**
+   * « Questions aux candidats », with what the owner set as accepted. Only
+   * the owner may see `knockout` / `accepted`: other readers get
+   * `candidateQuestion` (see the controller).
+   */
+  questions?: ReturnType<typeof ownerQuestion>[];
   employer?: {
     id: string;
     first_name: string;
@@ -511,6 +518,7 @@ export class JobOfferService {
     }
 
     this.validateCreateDto(dto);
+    const questions = normalizeQuestions(dto.questions ?? []);
     // A business publishes within its plan's offers for the period.
     await this.subscriptions?.assertCanPublishOffer(employerId);
     const priorityUntil =
@@ -591,6 +599,12 @@ export class JobOfferService {
         throw new InternalServerErrorException(
           "Impossible de générer une référence unique pour l'offre",
         );
+      }
+      if (questions.length > 0) {
+        const offerId = offer.id;
+        await this.prisma.offerQuestion.createMany({
+          data: questions.map((q) => ({ ...q, job_offer_id: offerId })),
+        });
       }
     } catch (err) {
       if (charged)
@@ -973,6 +987,7 @@ export class JobOfferService {
     const offer = await this.prisma.jobOffer.findFirst({
       where: { id, deleted_at: null },
       include: {
+        questions: { orderBy: { position: 'asc' } },
         employer: {
           select: {
             id: true,
@@ -998,6 +1013,7 @@ export class JobOfferService {
       ...this.toListItem(offer, offer._count.applications),
       category_id: offer.category_id,
       country_code: offer.country_code,
+      questions: (offer.questions ?? []).map(ownerQuestion),
       employer: offer.employer
         ? {
             id: offer.employer.id,
@@ -2283,7 +2299,22 @@ export class JobOfferService {
       }
     }
 
-    const updated = await this.prisma.jobOffer.update({ where: { id }, data });
+    const questions =
+      dto.questions === undefined ? null : normalizeQuestions(dto.questions);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.jobOffer.update({ where: { id }, data });
+      // The list replaces the offer's questions. Answers already given keep
+      // their own copy of the question (and lose only the link).
+      if (questions) {
+        await tx.offerQuestion.deleteMany({ where: { job_offer_id: id } });
+        if (questions.length > 0) {
+          await tx.offerQuestion.createMany({
+            data: questions.map((q) => ({ ...q, job_offer_id: id })),
+          });
+        }
+      }
+      return row;
+    });
 
     await this.afterJobOfferEdited(id, updated.title, "l'employeur");
 
