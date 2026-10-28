@@ -1470,6 +1470,7 @@ model Application {
   /// candidate↔employer compatibility penalty both read this.
   @@index([worker_id, cancelled_by, cancelled_at], name: "idx_application_worker_cancellations")
   @@map("applications")
+  assessment ApplicationAssessment?
 }
 
 model Assignment {
@@ -3754,4 +3755,26 @@ model BusinessQuotaUsage {
 
   @@index([subscription_id], name: "idx_business_quota_usage_subscription")
   @@map("business_quota_usages")
+}
+
+/// How well an applicant to a business's offer fits it: scored by the AI from
+/// their Rabotka profile (no CV), reliability computed. Made once, in the background.
+model ApplicationAssessment {
+  id             String   @id @default(uuid()) @db.Uuid
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+  application_id String   @unique @db.Uuid
+  /// 0–100; null when it could not be assessed.
+  score          Int?
+  /// trade, experience, location (AI), reliability (computed), 0–100.
+  criteria       Json?
+  summary        String?  @db.Text
+  strengths      String[] @default([])
+  gaps           String[] @default([])
+  /// The model never answered usably: not tried again.
+  failed         Boolean  @default(false)
+
+  application Application @relation(fields: [application_id], references: [id], onDelete: Cascade)
+
+  @@map("application_assessments")
 }
