@@ -4,6 +4,7 @@ import {
   Get,
   NotFoundException,
   Param,
+  ParseUUIDPipe,
   Post,
   Req,
   UseGuards,
@@ -86,7 +87,8 @@ export class JobOfferController {
   })
   @ApiResponse({ status: 200, description: 'The job offer detail' })
   @ApiResponse({ status: 404, description: 'Job offer not found' })
-  async getById(@Param('id') id: string) {
+  // A malformed id (« me », an old link) is a 400, not a database error (500).
+  async getById(@Param('id', ParseUUIDPipe) id: string) {
     const offer = await this.jobOfferService.findById(id);
     if (!offer) {
       throw new NotFoundException('Offre introuvable');
