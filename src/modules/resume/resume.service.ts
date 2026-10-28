@@ -89,10 +89,16 @@ export class ResumeService {
     @Inject(REDIS_CONNECTION) private readonly redis: Redis,
   ) {}
 
+  /**
+   * The CV as a PDF. `withContacts: false` is the copy an employer reads: no
+   * e-mail, phone or address, since reaching the candidate is what obtaining
+   * the contact sells. Cached apart, so one never serves the other.
+   */
   async download(
     profileId: string,
+    { withContacts = true }: { withContacts?: boolean } = {},
   ): Promise<{ buffer: Buffer; filename: string }> {
-    const cacheKey = `${REDIS_KEY_PREFIX}pdf:resume:${profileId}`;
+    const cacheKey = `${REDIS_KEY_PREFIX}pdf:resume:${profileId}${withContacts ? '' : ':employer'}`;
     const cached = await this.redis.get(cacheKey);
     if (cached) {
       const named = await this.prisma.profile.findUnique({
@@ -180,7 +186,12 @@ export class ResumeService {
 
     const filename = buildResumeFilename(profile.first_name, profile.last_name);
 
-    const html = this.buildResumeHtml(profile, assignments, totalCompleted);
+    const html = this.buildResumeHtml(
+      profile,
+      assignments,
+      totalCompleted,
+      withContacts,
+    );
     const buffer = await this.renderHtmlToPdf(html);
 
     await this.redis.setex(cacheKey, 3600, buffer.toString('base64'));
@@ -191,6 +202,7 @@ export class ResumeService {
     profile: ResumeProfile,
     assignments: ResumeAssignment[],
     totalCompleted: number,
+    withContacts = true,
   ): string {
     const typeLabel =
       profile.profile_type === ProfileType.WORKER ? 'Travailleur' : 'Employeur';
@@ -293,11 +305,15 @@ export class ResumeService {
   </div>
 
   <!-- CONTACT LINE -->
-  <div style="margin-top:22px; display:flex; flex-wrap:wrap; align-items:center; gap:14px; font-size:12.5px; color:#3C4641; letter-spacing:0.01em;">
+  ${
+    withContacts
+      ? `  <div style="margin-top:22px; display:flex; flex-wrap:wrap; align-items:center; gap:14px; font-size:12.5px; color:#3C4641; letter-spacing:0.01em;">
     ${profile.email ? `<span style="display:inline-flex; align-items:center; gap:7px;"><span style="width:5px; height:5px; border-radius:50%; background:#10C95A; display:inline-block;"></span>${esc(profile.email)}</span>` : ''}
     <span style="display:inline-flex; align-items:center; gap:7px;"><span style="width:5px; height:5px; border-radius:50%; background:#10C95A; display:inline-block;"></span>${esc(profile.phone ?? '')}</span>
     <span style="display:inline-flex; align-items:center; gap:7px;"><span style="width:5px; height:5px; border-radius:50%; background:#10C95A; display:inline-block;"></span>${esc(profile.address)}</span>
-  </div>
+  </div>`
+      : ''
+  }
 
   <div style="height:3px; background:#0F1713; margin-top:22px;"></div>
 
