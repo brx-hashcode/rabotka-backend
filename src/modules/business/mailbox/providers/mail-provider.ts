@@ -32,6 +32,23 @@ export class MailboxAuthError extends Error {
   }
 }
 
+/**
+ * Why a connection could not finish, when the business (or whoever set the
+ * app up) can do something about it: tick the mail permission on the consent
+ * screen, or turn the mail API on for the OAuth app.
+ */
+export type ConnectFailure = 'scope' | 'api_disabled';
+
+export class MailboxConnectError extends Error {
+  constructor(
+    readonly reason: ConnectFailure,
+    detail: string,
+  ) {
+    super(`${reason}: ${detail}`);
+    this.name = 'MailboxConnectError';
+  }
+}
+
 /** A mail service the CVs are read from, by OAuth. */
 export interface MailProviderClient {
   /** Whether its OAuth app is configured (client id and secret). */
@@ -68,6 +85,18 @@ export async function fetchJson<T>(
   if (res.status === 401) throw new MailboxAuthError();
   if (!res.ok) {
     const body = await res.text().catch(() => '');
+    if (res.status === 403) {
+      if (
+        /SERVICE_DISABLED|accessNotConfigured|has not been used in project/i.test(
+          body,
+        )
+      ) {
+        throw new MailboxConnectError('api_disabled', body.slice(0, 300));
+      }
+      if (/insufficient.*scope|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(body)) {
+        throw new MailboxConnectError('scope', body.slice(0, 300));
+      }
+    }
     throw new Error(
       `${init.method ?? 'GET'} ${url.split('?')[0]} → ${res.status} ${body.slice(0, 300)}`,
     );

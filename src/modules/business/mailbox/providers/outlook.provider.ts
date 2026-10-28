@@ -6,6 +6,7 @@ import {
 import {
   fetchJson,
   MailboxAuthError,
+  MailboxConnectError,
   tokenRequest,
   type CvMail,
   type MailProviderClient,
@@ -21,6 +22,7 @@ type MsToken = {
   access_token: string;
   refresh_token?: string;
   expires_in: number;
+  scope?: string;
 };
 type GraphAttachment = {
   '@odata.type': string;
@@ -77,6 +79,14 @@ export class OutlookProvider implements MailProviderClient {
       redirect_uri: redirectUri,
       grant_type: 'authorization_code',
     });
+    if (
+      t.scope &&
+      !/(^|\s)(https:\/\/graph\.microsoft\.com\/)?mail\.read(\s|$)/i.test(
+        t.scope,
+      )
+    ) {
+      throw new MailboxConnectError('scope', `granted: ${t.scope}`);
+    }
     if (!t.refresh_token) throw new Error('Microsoft gave no refresh token');
     const me = await fetchJson<{ mail?: string; userPrincipalName?: string }>(
       `${GRAPH}?$select=mail,userPrincipalName`,

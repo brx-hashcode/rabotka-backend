@@ -5,6 +5,7 @@ import {
 } from '../cv-attachments';
 import {
   fetchJson,
+  MailboxConnectError,
   tokenRequest,
   type CvMail,
   type MailAttachment,
@@ -32,6 +33,8 @@ type GoogleToken = {
   access_token: string;
   refresh_token?: string;
   expires_in: number;
+  /** What was granted: the consent screen lets each permission be unticked. */
+  scope?: string;
 };
 
 /** Every attachment part of a message, however deep the multiparts nest. */
@@ -87,6 +90,9 @@ export class GmailProvider implements MailProviderClient {
       redirect_uri: redirectUri,
       grant_type: 'authorization_code',
     });
+    if (!t.scope?.split(' ').includes(SCOPE)) {
+      throw new MailboxConnectError('scope', `granted: ${t.scope ?? 'none'}`);
+    }
     if (!t.refresh_token) throw new Error('Google gave no refresh token');
     const profile = await fetchJson<{ emailAddress: string }>(
       `${API}/profile`,
