@@ -8,6 +8,7 @@ import {
   Post,
   Req,
   UseGuards,
+  Optional,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -21,6 +22,7 @@ import { KycVerifiedGuard } from '../auth/guards/kyc-verified.guard';
 import { ActiveProfileGuard } from '../auth/guards/active-profile.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { JobOfferService } from './job-offer.service';
+import { JobPagesService } from '../job-pages/job-pages.service';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
 import { RepublishJobOfferDto } from './dto/republish-job-offer.dto';
 
@@ -30,6 +32,8 @@ import { RepublishJobOfferDto } from './dto/republish-job-offer.dto';
 export class JobOfferController {
   constructor(
     private readonly jobOfferService: JobOfferService,
+    // Optional: specs build this controller with the offer service alone.
+    @Optional() private readonly jobPages?: JobPagesService,
   ) {}
 
   @Post()
@@ -106,6 +110,8 @@ export class JobOfferController {
         ),
       };
     }
-    return offer;
+    // The page anyone can open, while the offer is open: what the owner shares.
+    const publicUrl = (await this.jobPages?.publicUrl(id)) ?? null;
+    return { ...offer, public_url: publicUrl };
   }
 }
