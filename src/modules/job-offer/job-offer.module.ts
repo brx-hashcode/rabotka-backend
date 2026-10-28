@@ -1,3 +1,4 @@
+import { JobPagesModule } from '../job-pages/job-pages.module';
 import { AdminArchiveModule } from '../admin-archive/admin-archive.module';
 import { Module, forwardRef } from '@nestjs/common';
 import { BusinessSubscriptionModule } from '../business/subscription/business-subscription.module';
@@ -21,6 +22,8 @@ import { JobNotificationProcessor } from './notification/job-notification.proces
     AdminArchiveModule,
     // A business's plan: active-offer limit and priority visibility.
     BusinessSubscriptionModule,
+    // The public page link the owner shares (« Partager l'offre »).
+    JobPagesModule,
     PrismaModule,
     forwardRef(() => AuthModule),
     forwardRef(() => BotModule),
