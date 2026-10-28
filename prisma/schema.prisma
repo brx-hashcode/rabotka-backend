@@ -1429,6 +1429,8 @@ model Application {
   /// transition, so it can't stand in for the decision moment.
   accepted_at      DateTime?
   rejected_at      DateTime?
+  /// The employer's words with a refusal, shown to the candidate (no contact details).
+  rejection_message String?          @db.Text
   /// EMPLOYER (an actual decision) vs AUTO_FILL (offer filled, pending closed out).
   /// Only EMPLOYER may be treated as a negative preference signal.
   rejection_source RejectionSource?

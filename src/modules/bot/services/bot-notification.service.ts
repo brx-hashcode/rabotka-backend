@@ -676,6 +676,7 @@ export class BotNotificationService {
         select: {
           worker_id: true,
           rejection_source: true,
+          rejection_message: true,
           job_offer: { select: { title: true } },
           worker: { select: { phone: true } },
         },
@@ -690,6 +691,7 @@ export class BotNotificationService {
           type: 'APPLICATION_REJECTED',
           jobTitle: app.job_offer?.title ?? null,
           automatic: app.rejection_source === RejectionSource.AUTO_FILL,
+          message: app.rejection_message,
         },
       });
       if (!app.worker?.phone) return;
@@ -699,7 +701,7 @@ export class BotNotificationService {
         profileId: app.worker_id,
         key: 'applicationRejected',
         params: undefined,
-        freeForm: applicationRejectedFreeForm(),
+        freeForm: applicationRejectedFreeForm(app.rejection_message),
       });
     } catch (err) {
       this.logger.warn(
