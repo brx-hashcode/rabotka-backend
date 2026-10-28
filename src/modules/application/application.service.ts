@@ -56,6 +56,11 @@ import {
   SuspensionSource,
 } from '@prisma/client';
 import { detectContacts } from '../profile-chat/moderation/detect';
+import {
+  answerText,
+  checkAnswers,
+  type AnswerInput,
+} from '../job-offer/offer-questions';
 import { ContractService } from '../contract/contract.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { MatchingService } from '../matching/matching.service';
@@ -364,7 +369,7 @@ export class ApplicationService {
   async create(
     jobOfferId: string,
     workerId: string,
-    options: { agentId?: string } = {},
+    options: { agentId?: string; answers?: AnswerInput[] } = {},
   ): Promise<ApplicationListItem> {
     const [jobOffer, worker] = await Promise.all([
       this.prisma.jobOffer.findUnique({
@@ -479,6 +484,14 @@ export class ApplicationService {
     // A sliding window, not a stored counter: nothing resets it, the midnight
     // boundary simply moves. Enforced for both the WhatsApp bot and the mobile
     // apply endpoint.
+    // « Questions aux candidats »: checked before anything counts against
+    // the worker's day. No answers sent (the mobile app, a field agent) is
+    // accepted: the application simply has none.
+    const questions = await this.prisma.offerQuestion.findMany({
+      where: { job_offer_id: jobOfferId },
+    });
+    const answered = checkAnswers(questions, options.answers);
+
     const todayCount = await this.countApplicationsToday(workerId);
     if (todayCount >= fees.maxDailyApplications) {
       throw new ForbiddenException(
@@ -506,7 +519,11 @@ export class ApplicationService {
           job_offer_id: jobOfferId,
           worker_id: workerId,
           status: ApplicationStatus.PENDING,
+          knocked_out: answered.knockedOut,
           ...(options.agentId ? { agent_id: options.agentId } : {}),
+          ...(answered.rows.length > 0
+            ? { answers: { create: answered.rows } }
+            : {}),
         },
         include: { job_offer: true },
       });
@@ -761,6 +778,10 @@ export class ApplicationService {
         worker: { select: APPLICANT_PUBLIC_SELECT },
         contract: { select: { id: true } },
         assignment: { select: { id: true } },
+        answers: {
+          select: { label: true, kind: true, value: true, passed: true },
+          orderBy: { created_at: 'asc' },
+        },
       },
     });
 
@@ -789,6 +810,15 @@ export class ApplicationService {
       ratedByEmployer: a.assignment
         ? ratedAssignmentIds.has(a.assignment.id)
         : false,
+      // « Questions aux candidats »: what this candidate answered, and
+      // whether an « éliminatoire » answer set them aside.
+      knockedOut: a.knocked_out,
+      answers: (a.answers ?? []).map((x) => ({
+        label: x.label,
+        kind: x.kind,
+        value: answerText(x),
+        passed: x.passed,
+      })),
     }));
   }
 

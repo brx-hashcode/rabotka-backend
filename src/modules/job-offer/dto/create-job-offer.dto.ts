@@ -12,12 +12,62 @@ import {
   MinLength,
   MaxLength,
   ValidateIf,
+  IsArray,
+  ArrayMaxSize,
+  ValidateNested,
 } from 'class-validator';
-import { EmploymentType, PaymentFlow } from '@prisma/client';
+import { Type } from 'class-transformer';
+import { EmploymentType, OfferQuestionKind, PaymentFlow } from '@prisma/client';
 import { LocationDto } from '../../../common/dto/location.dto';
 
 /** Mirrored by `ADDRESS_MIN` in the service, which enforces the same bound. */
 const ADDRESS_MIN_LENGTH = 10;
+
+/** One question the candidates answer when they apply. */
+export class OfferQuestionDto {
+  @ApiProperty({ enum: OfferQuestionKind })
+  @IsEnum(OfferQuestionKind)
+  kind!: OfferQuestionKind;
+
+  @ApiProperty({ example: 'Avez-vous le permis B ?' })
+  @IsString()
+  @MaxLength(140)
+  label!: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'CHOICE: 2 to 6 answers',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(6)
+  @IsString({ each: true })
+  @MaxLength(60, { each: true })
+  options?: string[];
+
+  @ApiPropertyOptional({ default: true })
+  @IsOptional()
+  @IsBoolean()
+  required?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      '« Éliminatoire »: an answer outside `accepted` flags the application',
+  })
+  @IsOptional()
+  @IsBoolean()
+  knockout?: boolean;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'YES_NO: ["yes"] or ["no"]; CHOICE: some of `options`',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(6)
+  @IsString({ each: true })
+  accepted?: string[];
+}
 
 export class CreateJobOfferDto extends LocationDto {
   @ApiProperty({ example: 'Plombier pour réparation urgente' })
@@ -119,4 +169,16 @@ export class CreateJobOfferDto extends LocationDto {
   @Min(1, { message: 'Au moins 1 personne requise' })
   @Max(100, { message: 'Maximum 100 personnes' })
   quantity!: number;
+
+  @ApiPropertyOptional({
+    type: [OfferQuestionDto],
+    description:
+      'Up to 5 questions the candidates answer when they apply. On an edit, the list replaces the current one; omitted leaves it alone.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(5)
+  @ValidateNested({ each: true })
+  @Type(() => OfferQuestionDto)
+  questions?: OfferQuestionDto[];
 }

@@ -88,10 +88,23 @@ export class JobOfferController {
   @ApiResponse({ status: 200, description: 'The job offer detail' })
   @ApiResponse({ status: 404, description: 'Job offer not found' })
   // A malformed id (« me », an old link) is a 400, not a database error (500).
-  async getById(@Param('id', ParseUUIDPipe) id: string) {
+  async getById(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     const offer = await this.jobOfferService.findById(id);
     if (!offer) {
       throw new NotFoundException('Offre introuvable');
+    }
+    // Only the owner sees which answers are accepted: a candidate reading it
+    // could otherwise tune theirs.
+    if (offer.employer_id !== req.user?.profileId) {
+      return {
+        ...offer,
+        questions: (offer.questions ?? []).map(
+          ({ knockout: _k, accepted: _a, ...q }) => q,
+        ),
+      };
     }
     return offer;
   }
