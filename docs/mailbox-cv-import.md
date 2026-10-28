@@ -8,6 +8,19 @@ the OAuth tokens, encrypted.
 Shipped in rabotka-backend #979 (5-CV cap) and #980, rabotka-admin #386, and
 rabotka-business #100.
 
+## Contents
+
+1. [The flow](#the-flow)
+2. [The cap: 5 CVs per analysis](#the-cap-5-cvs-per-analysis)
+3. [Data model](#data-model)
+4. [API](#api)
+5. [Providers](#providers)
+6. [Security and privacy](#security-and-privacy)
+7. [Portal (rabotka-business)](#portal-rabotka-business)
+8. [Configuration](#configuration)
+9. [External setup](#external-setup) (console links, Google, Microsoft, Vault)
+10. [Tests](#tests)
+
 ## The flow
 
 ```mermaid
@@ -294,12 +307,58 @@ backend's `.env.local`, so the redirect URI matches what is registered.
 
 ## External setup
 
+### Console links
+
+Open these signed in with the account that owns Rabotka's Google Cloud project
+or Microsoft tenant.
+
+**Google (Gmail)**
+
+| What | Link |
+|---|---|
+| Google Cloud Console | https://console.cloud.google.com/ |
+| Create or pick a project | https://console.cloud.google.com/projectselector2/home/dashboard |
+| Enable the Gmail API | https://console.cloud.google.com/apis/library/gmail.googleapis.com |
+| OAuth consent screen: branding (name, logo, links, domains) | https://console.cloud.google.com/auth/branding |
+| OAuth consent screen: audience (Testing / In production, test users) | https://console.cloud.google.com/auth/audience |
+| OAuth consent screen: data access (add `gmail.readonly`) | https://console.cloud.google.com/auth/scopes |
+| OAuth clients (create the « Web application » client) | https://console.cloud.google.com/auth/clients |
+| Verification center (publishing for every business) | https://console.cloud.google.com/auth/verification |
+| Gmail API scopes reference | https://developers.google.com/workspace/gmail/api/auth/scopes |
+| Restricted-scope verification and the security assessment (CASA) | https://support.google.com/cloud/answer/13464321 |
+| Google API Services User Data Policy (Limited Use) | https://developers.google.com/terms/api-services-user-data-policy |
+| Where a Gmail user removes Rabotka's access | https://myaccount.google.com/connections |
+
+**Microsoft (Outlook / Microsoft 365)**
+
+| What | Link |
+|---|---|
+| Microsoft Entra admin center | https://entra.microsoft.com/ |
+| App registrations (Entra) | https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade |
+| App registrations (Azure portal, same thing) | https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade |
+| Register an application (guide) | https://learn.microsoft.com/entra/identity-platform/quickstart-register-app |
+| Add a client secret and redirect URI (guide) | https://learn.microsoft.com/entra/identity-platform/how-to-add-credentials |
+| Microsoft Graph permissions reference (`Mail.Read`, `User.Read`) | https://learn.microsoft.com/graph/permissions-reference |
+| Publisher verification (removes « unverified ») | https://learn.microsoft.com/entra/identity-platform/publisher-verification-overview |
+| Microsoft Partner Center (the Partner ID verification needs) | https://partner.microsoft.com/dashboard |
+| Where a work-account user removes Rabotka's access | https://myapps.microsoft.com/ |
+| Where a personal-account user removes Rabotka's access | https://account.live.com/consent/Manage |
+
+**Rabotka**
+
+| What | Link |
+|---|---|
+| Vault (secrets `secret/data/apps/rabotka-backend-production` and `…-develop`) | the Vault UI behind `VAULT_ADDR` (GitHub secret) |
+| Redirect URI, Gmail | `https://business.rabotka.work/api/v1/public/mailbox/callback/gmail` |
+| Redirect URI, Outlook | `https://business.rabotka.work/api/v1/public/mailbox/callback/outlook` |
+| Privacy policy and terms (needed by both consent screens) | https://www.rabotka.work/privacy · https://www.rabotka.work/terms |
+
 ### Google (Gmail)
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), create or pick
-   a project, then enable the **Gmail API** (APIs & Services → Library).
-2. Set up the **OAuth consent screen** (Google Auth Platform → Branding /
-   Audience):
+   a project, then [enable the **Gmail API**](https://console.cloud.google.com/apis/library/gmail.googleapis.com).
+2. Set up the **OAuth consent screen** ([Branding](https://console.cloud.google.com/auth/branding),
+   [Audience](https://console.cloud.google.com/auth/audience), [Data access](https://console.cloud.google.com/auth/scopes)):
    - User type **External**, app name « Rabotka Business », support e-mail,
      logo, and the homepage `https://www.rabotka.work` with privacy and terms
      links.
@@ -307,7 +366,7 @@ backend's `.env.local`, so the redirect URI matches what is registered.
    - **Data access:** add `https://www.googleapis.com/auth/gmail.readonly`.
    - **Audience:** leave it in **Testing** and add the Google accounts that may
      connect (100 at most) as **test users**.
-3. Create the client (Credentials → Create credentials → OAuth client ID):
+3. Create the client in [OAuth clients](https://console.cloud.google.com/auth/clients) → Create client:
    - Type **Web application**.
    - Authorized redirect URIs: the Gmail ones above.
    - Copy the client ID and secret into Vault as `GOOGLE_MAIL_CLIENT_ID` and
@@ -325,8 +384,9 @@ backend's `.env.local`, so the redirect URI matches what is registered.
 
 ### Microsoft (Outlook / Microsoft 365)
 
-1. In the [Microsoft Entra admin center](https://entra.microsoft.com/) or Azure
-   Portal, go to **App registrations → New registration**:
+1. In the Microsoft Entra admin center, open
+   [App registrations](https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade)
+   → **New registration**:
    - Name « Rabotka Business ».
    - Supported accounts: **any organizational directory and personal Microsoft
      accounts**.
