@@ -50,6 +50,17 @@ const RUNNING: BusinessSubscriptionStatus[] = [
   BusinessSubscriptionStatus.ACTIVE,
 ];
 
+const NO_PLAN_TO_PUBLISH =
+  'Choisissez une formule depuis votre espace, rubrique « Abonnement », pour publier vos offres.';
+
+function noOfferLeft(e: {
+  plan: { name: string } | null;
+  activeOffersLimit: number | null;
+}): string {
+  const n = e.activeOffersLimit ?? 0;
+  return `Votre formule ${e.plan?.name ?? ''} permet de publier ${n} offre${n > 1 ? 's' : ''} par période, déjà publiée${n > 1 ? 's' : ''}. Passez à une formule supérieure pour en publier davantage, ou attendez la prochaine période.`;
+}
+
 export const PERIOD_LABEL: Record<BusinessBillingPeriod, string> = {
   TRIAL: 'essai gratuit',
   MONTHLY: 'mensuel',
@@ -66,8 +77,14 @@ export type BusinessEntitlements = {
   unlocksQuota: number | null;
   unlocksUsed: number;
   /** Offers active at once; null: unlimited; 0: none (no plan). */
+  /** Offers the plan lets the business publish per period. Null: unlimited. */
   activeOffersLimit: number | null;
+  /** Offers online right now (information only: the limit is per period). */
   activeOffers: number;
+  /** Offers published during the current period. */
+  offersPublished: number;
+  /** Offers that may still be published this period. Null: unlimited. */
+  offersRemaining: number | null;
   /** CVs the AI screening may still read this period; null: unlimited; 0: none. */
   cvRemaining: number | null;
   cvQuota: number | null;
@@ -157,6 +174,8 @@ export class BusinessSubscriptionService {
         unlocksUsed: 0,
         activeOffersLimit: 0,
         activeOffers,
+        offersPublished: 0,
+        offersRemaining: 0,
         cvRemaining: 0,
         cvQuota: 0,
         cvUsed: 0,
@@ -183,6 +202,11 @@ export class BusinessSubscriptionService {
       unlocksUsed: sub.unlocks_used,
       activeOffersLimit: sub.plan.active_offers_limit,
       activeOffers,
+      offersPublished: sub.offers_published,
+      offersRemaining: remaining(
+        sub.plan.active_offers_limit,
+        sub.offers_published,
+      ),
       cvRemaining: remaining(
         sub.plan.cv_screenings_per_period,
         sub.cv_screened,
@@ -832,17 +856,54 @@ export class BusinessSubscriptionService {
   }
 
   /** Throws the upgrade message when a business may not publish one more offer. */
+  /**
+   * Fails fast, before an offer is even validated, when the period has no
+   * offer left to publish. The offer itself is charged by `consumeOffer`.
+   * Non-businesses pass.
+   */
   async assertCanPublishOffer(employerProfileId: string): Promise<void> {
     const businessId = await this.businessOf(employerProfileId);
     if (!businessId) return;
     const e = await this.entitlements(businessId);
-    if (e.activeOffersLimit !== null && e.activeOffers >= e.activeOffersLimit) {
+    if (!e.plan) throw new ForbiddenException(NO_PLAN_TO_PUBLISH);
+    if (e.offersRemaining === 0) throw new ForbiddenException(noOfferLeft(e));
+  }
+
+  /**
+   * One offer published (or republished) on the current period, counted from 0
+   * each period like the contacts and the CVs. Conditional, so two
+   * publications can't share the last one. Returns the period charged, or
+   * null for an employer that is not a business (no plan, no limit).
+   */
+  async consumeOffer(
+    employerProfileId: string,
+  ): Promise<{ subscriptionId: string } | null> {
+    const businessId = await this.businessOf(employerProfileId);
+    if (!businessId) return null;
+    const sub = await this.current(businessId);
+    if (!sub) throw new ForbiddenException(NO_PLAN_TO_PUBLISH);
+    const quota = sub.plan.active_offers_limit;
+    const { count } = await this.prisma.businessSubscription.updateMany({
+      where: {
+        id: sub.id,
+        ...(quota === null ? {} : { offers_published: { lt: quota } }),
+      },
+      data: { offers_published: { increment: 1 } },
+    });
+    if (count === 0) {
       throw new ForbiddenException(
-        e.plan
-          ? `Votre formule ${e.plan.name} permet ${e.activeOffersLimit} offre${e.activeOffersLimit > 1 ? 's' : ''} en ligne. Passez à une formule supérieure pour en publier davantage.`
-          : 'Choisissez une formule depuis votre espace, rubrique « Abonnement », pour publier vos offres.',
+        noOfferLeft({ plan: sub.plan, activeOffersLimit: quota }),
       );
     }
+    return { subscriptionId: sub.id };
+  }
+
+  /** Gives back an offer that could not be saved; never below zero. */
+  async releaseOffer(subscriptionId: string): Promise<void> {
+    await this.prisma.$executeRaw`
+      UPDATE "business_subscriptions"
+      SET "offers_published" = GREATEST("offers_published" - 1, 0)
+      WHERE "id" = ${subscriptionId}::uuid`;
   }
 
   /** Throws unless the business's plan includes the feature. Non-businesses pass. */
