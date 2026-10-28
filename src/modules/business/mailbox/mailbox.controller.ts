@@ -20,7 +20,8 @@ import { BusinessProfileGuard } from '../../auth/guards/business-profile.guard';
 import type { ProfileAuthenticatedRequest } from '../../auth/guards/jwt-auth.guard';
 import { Public } from '../../auth/decorators/public.decorator';
 import { MailboxMailsQueryDto } from './dto/mailbox.dto';
-import { callbackPage } from './mailbox-callback-page';
+import { callbackPage, type CallbackStatus } from './mailbox-callback-page';
+import { MailboxConnectError } from './providers/mail-provider';
 import {
   MailboxService,
   PROVIDER_OF,
@@ -98,7 +99,7 @@ export class MailboxCallbackController {
     @Query('error') error: string | undefined,
     @Res() res: Response,
   ): Promise<void> {
-    let status: 'connected' | 'error' | 'denied' = 'error';
+    let status: CallbackStatus = 'error';
     if (error === 'access_denied') {
       status = 'denied';
     } else if (code && state && !error) {
@@ -106,6 +107,7 @@ export class MailboxCallbackController {
         await this.mailboxes.complete(slug(provider), code, state);
         status = 'connected';
       } catch (err) {
+        if (err instanceof MailboxConnectError) status = err.reason;
         this.logger.warn(
           `Mailbox connection failed (${provider}): ${String(err)}`,
         );

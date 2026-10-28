@@ -319,3 +319,85 @@ describe('MailboxService', () => {
     });
   });
 });
+
+describe('connection failures with a reason', () => {
+  const fetchMock = jest.fn();
+  const realFetch = global.fetch;
+  beforeEach(() => {
+    fetchMock.mockReset();
+    global.fetch = fetchMock;
+  });
+  afterAll(() => {
+    global.fetch = realFetch;
+  });
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status });
+
+  it('Gmail: the mail permission unticked on the consent screen', async () => {
+    const { GmailProvider } = await import('../providers/gmail.provider');
+    fetchMock.mockResolvedValueOnce(
+      json({
+        access_token: 'a',
+        refresh_token: 'r',
+        expires_in: 3600,
+        scope: 'openid',
+      }),
+    );
+    await expect(
+      new GmailProvider('id', 'secret').exchange('code', 'https://x/cb'),
+    ).rejects.toMatchObject({ name: 'MailboxConnectError', reason: 'scope' });
+  });
+
+  it('Gmail: the API not turned on for the project', async () => {
+    const { GmailProvider } = await import('../providers/gmail.provider');
+    fetchMock
+      .mockResolvedValueOnce(
+        json({
+          access_token: 'a',
+          refresh_token: 'r',
+          expires_in: 3600,
+          scope: 'https://www.googleapis.com/auth/gmail.readonly',
+        }),
+      )
+      .mockResolvedValueOnce(
+        json(
+          {
+            error: {
+              code: 403,
+              message:
+                'Gmail API has not been used in project 123 before or it is disabled.',
+              status: 'PERMISSION_DENIED',
+              details: [{ reason: 'SERVICE_DISABLED' }],
+            },
+          },
+          403,
+        ),
+      );
+    await expect(
+      new GmailProvider('id', 'secret').exchange('code', 'https://x/cb'),
+    ).rejects.toMatchObject({ reason: 'api_disabled' });
+  });
+
+  it('Outlook: Mail.Read not granted', async () => {
+    const { OutlookProvider } = await import('../providers/outlook.provider');
+    fetchMock.mockResolvedValueOnce(
+      json({
+        access_token: 'a',
+        refresh_token: 'r',
+        expires_in: 3600,
+        scope: 'User.Read openid profile',
+      }),
+    );
+    await expect(
+      new OutlookProvider('id', 'secret').exchange('code', 'https://x/cb'),
+    ).rejects.toMatchObject({ reason: 'scope' });
+  });
+
+  it('keeps a failure open and says why', () => {
+    const page = callbackPage('scope');
+    expect(page).toContain('cochez la case');
+    expect(page).toContain('{ rabotkaMailbox: "scope" }');
+    expect(page).not.toContain('window.close');
+    expect(callbackPage('connected')).toContain('window.close');
+  });
+});
