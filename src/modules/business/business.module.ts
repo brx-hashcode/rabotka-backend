@@ -13,6 +13,7 @@ import { BusinessTalentService } from './business-talent.service';
 import { AdminBusinessSubscriptionController } from './subscription/admin-business-subscription.controller';
 import { CvScreeningModule } from './cv-screening/cv-screening.module';
 import { InterviewModule } from './interview/interview.module';
+import { OfferWriterModule } from './offer-writer/offer-writer.module';
 
 /** Business accounts: the public catalog and the dashboard's own routes. */
 @Module({
@@ -25,6 +26,7 @@ import { InterviewModule } from './interview/interview.module';
     BusinessSubscriptionModule,
     CvScreeningModule,
     InterviewModule,
+    OfferWriterModule,
   ],
   controllers: [
     BusinessCatalogController,

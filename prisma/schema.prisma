@@ -3474,6 +3474,8 @@ model BusinessPlan {
   cv_retention_days     Int      @default(30)
   /// Questions a business may ask about one analysed CV (its chat).
   cv_chat_questions     Int      @default(20)
+  /// Offers the AI writes per period (« Rédiger avec l'IA »). Null: unlimited; 0: not included.
+  offer_drafts_per_period Int?   @default(20)
   is_active             Boolean  @default(true)
   sort_order            Int      @default(0)
   /// Deleted by an admin: hidden everywhere, kept for the periods and payments that point to it.
@@ -3500,6 +3502,8 @@ model BusinessSubscription {
   unlocks_used        Int                        @default(0)
   /// CVs read by the AI screening this period (unreadable ones given back).
   cv_screened         Int                        @default(0)
+  /// Offers the AI wrote for this period.
+  offer_drafts_used   Int                        @default(0)
   payment_request_id  String?                    @unique @db.Uuid
   /// The admin who granted or cancelled it by hand.
   granted_by          String?                    @db.Uuid

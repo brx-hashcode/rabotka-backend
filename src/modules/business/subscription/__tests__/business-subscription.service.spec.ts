@@ -26,13 +26,11 @@ function make(
         ),
     },
     business: {
-      findUnique: jest
-        .fn()
-        .mockResolvedValue({
-          profile_id: 'p1',
-          name: 'Akieni',
-          profile: { id: 'p1', first_name: 'Awa', email: 'a@b.c' },
-        }),
+      findUnique: jest.fn().mockResolvedValue({
+        profile_id: 'p1',
+        name: 'Akieni',
+        profile: { id: 'p1', first_name: 'Awa', email: 'a@b.c' },
+      }),
     },
     businessSubscription: {
       findFirst: jest.fn().mockResolvedValue(over.sub ?? null),
@@ -51,15 +49,13 @@ function make(
     paymentRequest: { findUnique: jest.fn() },
   };
   const systemConfig: any = {
-    getBusinessSubscriptionSettings: jest
-      .fn()
-      .mockResolvedValue(
-        over.settings ?? {
-          trialDays: 14,
-          trialPlanCode: 'pro',
-          reminderDays: [7, 1],
-        },
-      ),
+    getBusinessSubscriptionSettings: jest.fn().mockResolvedValue(
+      over.settings ?? {
+        trialDays: 14,
+        trialPlanCode: 'pro',
+        reminderDays: [7, 1],
+      },
+    ),
   };
   const mail: any = { sendMail: jest.fn().mockResolvedValue(undefined) };
   const layout: any = { wrap: jest.fn().mockResolvedValue('<html/>') };
@@ -231,10 +227,12 @@ describe('BusinessSubscriptionService', () => {
 
       await service.cancelByAdmin('b1', 'sub-1', 'admin-1');
 
-      expect(prisma.businessSubscription.update.mock.calls[0][0]).toMatchObject({
-        where: { id: 'sub-1' },
-        data: { status: 'CANCELLED', granted_by: 'admin-1' },
-      });
+      expect(prisma.businessSubscription.update.mock.calls[0][0]).toMatchObject(
+        {
+          where: { id: 'sub-1' },
+          data: { status: 'CANCELLED', granted_by: 'admin-1' },
+        },
+      );
       expect(
         prisma.businessSubscription.update.mock.calls[0][0].data.ends_at,
       ).toBeInstanceOf(Date);
@@ -263,6 +261,42 @@ describe('BusinessSubscriptionService', () => {
       expect(
         prisma.businessSubscription.update.mock.calls[0][0].data,
       ).not.toHaveProperty('ends_at');
+    });
+  });
+
+  describe('consumeOfferDraft', () => {
+    it('takes one on the current period, never past the plan', async () => {
+      const { service, prisma } = make({
+        sub: running({
+          offer_drafts_used: 3,
+          plan: plan({ offer_drafts_per_period: 4 }),
+        }),
+      });
+      await expect(service.consumeOfferDraft('b1')).resolves.toEqual({
+        subscriptionId: 'sub-1',
+      });
+      expect(prisma.businessSubscription.updateMany).toHaveBeenCalledWith({
+        where: { id: 'sub-1', offer_drafts_used: { lt: 4 } },
+        data: { offer_drafts_used: { increment: 1 } },
+      });
+
+      prisma.businessSubscription.updateMany.mockResolvedValue({ count: 0 });
+      await expect(service.consumeOfferDraft('b1')).rejects.toThrow(
+        /toutes les rédactions/,
+      );
+    });
+
+    it('is refused without a plan or with a plan that has none', async () => {
+      const none = make({
+        sub: running({ plan: plan({ offer_drafts_per_period: 0 }) }),
+      });
+      await expect(none.service.consumeOfferDraft('b1')).rejects.toThrow(
+        /formules supérieures/,
+      );
+      const noPlan = make();
+      await expect(noPlan.service.consumeOfferDraft('b1')).rejects.toThrow(
+        /formules supérieures/,
+      );
     });
   });
 

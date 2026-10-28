@@ -16,6 +16,7 @@ export function planView(p: BusinessPlan) {
     cvFileMaxMb: p.cv_file_max_mb,
     cvRetentionDays: p.cv_retention_days,
     cvChatQuestions: p.cv_chat_questions,
+    offerDraftsPerPeriod: p.offer_drafts_per_period,
     includesPreselection: p.includes_preselection,
     includesFieldAgents: p.includes_field_agents,
     priorityVisibility: p.priority_visibility,
@@ -38,6 +39,7 @@ export function planData(dto: {
   cvFileMaxMb?: number;
   cvRetentionDays?: number;
   cvChatQuestions?: number;
+  offerDraftsPerPeriod?: number | null;
   includesPreselection?: boolean;
   includesFieldAgents?: boolean;
   priorityVisibility?: boolean;
@@ -57,6 +59,7 @@ export function planData(dto: {
     cv_file_max_mb: dto.cvFileMaxMb,
     cv_retention_days: dto.cvRetentionDays,
     cv_chat_questions: dto.cvChatQuestions,
+    offer_drafts_per_period: dto.offerDraftsPerPeriod,
     includes_preselection: dto.includesPreselection,
     includes_field_agents: dto.includesFieldAgents,
     priority_visibility: dto.priorityVisibility,
