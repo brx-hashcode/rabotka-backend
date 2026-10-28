@@ -36,6 +36,7 @@ import {
   type ChatReportInput,
 } from './cv-chat-report';
 import { CvScreeningService } from './cv-screening.service';
+import { MailboxService } from '../mailbox/mailbox.service';
 import { CvChatService, OffTopicError } from './cv-chat.service';
 import {
   CvCompareService,
@@ -68,6 +69,7 @@ export class CvScreeningController {
     private readonly screenings: CvScreeningService,
     private readonly chat: CvChatService,
     private readonly compare: CvCompareService,
+    private readonly mailboxes: MailboxService,
   ) {}
 
   @Post()
@@ -81,14 +83,24 @@ export class CvScreeningController {
   @ApiOperation({
     summary: 'Upload CVs for one job; the AI reads and ranks them',
     description:
-      'Multipart: `files` (PDF, DOCX, JPG, PNG, WEBP), plus `offerId` or `jobTitle` and `jobText`. Takes the CVs from the plan’s « CV inclus » at once; the ones that cannot be read are given back.',
+      'Multipart: `files` (PDF, DOCX, JPG, PNG, WEBP) and/or `mailAttachments` (CVs ticked in a connected mailbox, read from it here), plus `offerId` or `jobTitle` and `jobText`. Takes the CVs from the plan’s « CV inclus » at once; the ones that cannot be read are given back.',
   })
-  create(
+  async create(
     @Req() req: ProfileAuthenticatedRequest,
     @UploadedFiles() files: Express.Multer.File[] | undefined,
     @Body() dto: CreateCvScreeningDto,
   ) {
-    return this.screenings.create(req.user.profileId, files ?? [], dto);
+    const { mailAttachments, ...job } = dto;
+    // Same checks as an upload: the plan's limits, the file types, the quota.
+    const fromMail = await this.mailboxes.download(
+      req.user.profileId,
+      mailAttachments ?? [],
+    );
+    return this.screenings.create(
+      req.user.profileId,
+      [...(files ?? []), ...fromMail],
+      job,
+    );
   }
 
   @Get()

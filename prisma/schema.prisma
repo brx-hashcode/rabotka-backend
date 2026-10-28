@@ -3405,6 +3405,7 @@ model Business {
   subscriptions BusinessSubscription[]
   cv_screenings CvScreening[]
   interviews    Interview[]
+  mailboxes     BusinessMailbox[]
 
   @@index([verification_status], name: "idx_business_verification_status")
   @@index([category], name: "idx_business_category")
@@ -3779,4 +3780,36 @@ model ApplicationAssessment {
   application Application @relation(fields: [application_id], references: [id], onDelete: Cascade)
 
   @@map("application_assessments")
+}
+
+/// A mail service a business reads candidates' CVs from.
+enum MailProvider {
+  GMAIL
+  OUTLOOK
+}
+
+/// A mailbox a business connected (OAuth) to pick CVs from its e-mails for
+/// « Analyse de CV ». Only the tokens are kept, encrypted (MAILBOX_TOKEN_KEY):
+/// mails are read on demand, never stored.
+model BusinessMailbox {
+  id                      String       @id @default(uuid()) @db.Uuid
+  created_at              DateTime     @default(now())
+  updated_at              DateTime     @updatedAt
+  business_id             String       @db.Uuid
+  provider                MailProvider
+  /// The account's address, shown to the business.
+  email                   String
+  connected_by_profile_id String       @db.Uuid
+  refresh_token_enc       String       @db.Text
+  access_token_enc        String?      @db.Text
+  access_expires_at       DateTime?
+  /// The provider refused the refresh token (revoked, password changed): the
+  /// business must connect it again.
+  expired_at              DateTime?
+  last_used_at            DateTime?
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@unique([business_id, provider, email])
+  @@map("business_mailboxes")
 }
