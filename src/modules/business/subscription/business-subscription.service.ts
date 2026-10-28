@@ -499,6 +499,73 @@ export class BusinessSubscriptionService {
     await this.syncPriority(businessId);
   }
 
+  /**
+   * The business starts its next, already paid period today instead of
+   * waiting for the running one to end — typically when what the running
+   * one includes is used up. The running period ends now and what it had
+   * left is lost; the next one runs its full length from now, with fresh
+   * counters, and anything queued behind it moves up by the same amount.
+   * Only the very next period can be started.
+   */
+  async startQueuedNow(
+    businessId: string,
+    subscriptionId: string,
+    now = new Date(),
+  ) {
+    const started = await this.prisma.$transaction(async (tx) => {
+      const queued = await tx.businessSubscription.findMany({
+        where: {
+          business_id: businessId,
+          status: BusinessSubscriptionStatus.ACTIVE,
+          starts_at: { gt: now },
+        },
+        orderBy: { starts_at: 'asc' },
+        include: { plan: true },
+      });
+      const next = queued[0];
+      if (!next || next.id !== subscriptionId) {
+        throw new NotFoundException(
+          queued.some((q) => q.id === subscriptionId)
+            ? 'Commencez d’abord la formule qui suit directement la vôtre.'
+            : 'Aucune formule à venir à démarrer.',
+        );
+      }
+
+      await tx.businessSubscription.updateMany({
+        where: {
+          business_id: businessId,
+          status: { in: RUNNING },
+          starts_at: { lte: now },
+          ends_at: { gt: now },
+        },
+        data: {
+          status: BusinessSubscriptionStatus.EXPIRED,
+          ends_at: now,
+          expired_notified_at: now,
+        },
+      });
+
+      const ends = periodEnd(now, next.billing_period);
+      const shift = ends.getTime() - next.ends_at.getTime();
+      for (const later of queued.slice(1)) {
+        await tx.businessSubscription.update({
+          where: { id: later.id },
+          data: {
+            starts_at: new Date(later.starts_at.getTime() + shift),
+            ends_at: new Date(later.ends_at.getTime() + shift),
+          },
+        });
+      }
+      return tx.businessSubscription.update({
+        where: { id: next.id },
+        data: { starts_at: now, ends_at: ends },
+        include: { plan: true },
+      });
+    });
+    await this.syncPriority(businessId);
+    return toPeriodView(started);
+  }
+
   /** Businesses with a period running or queued on each plan. */
   async businessesPerPlan(): Promise<Map<string, number>> {
     const rows = await this.prisma.businessSubscription.findMany({

@@ -264,6 +264,94 @@ describe('BusinessSubscriptionService', () => {
     });
   });
 
+  describe('startQueuedNow', () => {
+    const now = new Date('2026-10-28T12:00:00Z');
+    const queuedPeriod = (id: string, startDay: number, endDay: number) => ({
+      id,
+      business_id: 'b1',
+      status: 'ACTIVE',
+      billing_period: 'MONTHLY',
+      starts_at: new Date(Date.UTC(2026, 10, startDay, 12)),
+      ends_at: new Date(Date.UTC(2026, 11, endDay, 12)),
+      unlocks_used: 0,
+      payment_request_id: 'pay-1',
+      granted_by: null,
+      plan: plan({ name: 'Essentiel' }),
+    });
+    function setup(queued: unknown[]) {
+      const ctx = make();
+      const { prisma } = ctx;
+      prisma.businessSubscription.findMany.mockResolvedValue(queued);
+      prisma.businessSubscription.update = jest
+        .fn()
+        .mockImplementation(({ where, data }: any) => ({
+          ...(queued as any[]).find((q) => q.id === where.id),
+          ...data,
+        }));
+      prisma.$transaction = (fn: (tx: unknown) => unknown) => fn(prisma);
+      return ctx;
+    }
+
+    it('ends the running period now and starts the next one for its full length', async () => {
+      const next = queuedPeriod('next', 28, 28);
+      const { service, prisma } = setup([next]);
+      const view = await service.startQueuedNow('b1', 'next', now);
+
+      expect(prisma.businessSubscription.updateMany).toHaveBeenCalledWith({
+        where: {
+          business_id: 'b1',
+          status: { in: ['TRIAL', 'ACTIVE'] },
+          starts_at: { lte: now },
+          ends_at: { gt: now },
+        },
+        data: { status: 'EXPIRED', ends_at: now, expired_notified_at: now },
+      });
+      expect(prisma.businessSubscription.update).toHaveBeenCalledWith({
+        where: { id: 'next' },
+        data: { starts_at: now, ends_at: new Date('2026-11-28T12:00:00Z') },
+        include: { plan: true },
+      });
+      expect(view).toMatchObject({
+        id: 'next',
+        planName: 'Essentiel',
+        startsAt: now.toISOString(),
+        endsAt: '2026-11-28T12:00:00.000Z',
+      });
+    });
+
+    it('moves what is queued behind it up by the same amount', async () => {
+      const next = queuedPeriod('next', 28, 28);
+      const later = {
+        ...queuedPeriod('later', 28, 28),
+        starts_at: new Date('2026-12-28T12:00:00Z'),
+        ends_at: new Date('2027-01-28T12:00:00Z'),
+      };
+      const { service, prisma } = setup([next, later]);
+      await service.startQueuedNow('b1', 'next', now);
+      // The next period now ends on 28 Nov instead of 28 Dec: one month earlier.
+      expect(prisma.businessSubscription.update).toHaveBeenCalledWith({
+        where: { id: 'later' },
+        data: {
+          starts_at: new Date('2026-11-28T12:00:00Z'),
+          ends_at: new Date('2026-12-29T12:00:00Z'),
+        },
+      });
+    });
+
+    it('starts only the very next period', async () => {
+      const next = queuedPeriod('next', 28, 28);
+      const later = queuedPeriod('later', 28, 28);
+      const { service, prisma } = setup([next, later]);
+      await expect(service.startQueuedNow('b1', 'later', now)).rejects.toThrow(
+        'Commencez d’abord',
+      );
+      await expect(service.startQueuedNow('b1', 'nope', now)).rejects.toThrow(
+        'Aucune formule à venir',
+      );
+      expect(prisma.businessSubscription.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('consumeOfferDraft', () => {
     it('takes one on the current period, never past the plan', async () => {
       const { service, prisma } = make({
