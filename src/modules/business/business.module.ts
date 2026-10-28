@@ -14,6 +14,7 @@ import { AdminBusinessSubscriptionController } from './subscription/admin-busine
 import { CvScreeningModule } from './cv-screening/cv-screening.module';
 import { InterviewModule } from './interview/interview.module';
 import { OfferWriterModule } from './offer-writer/offer-writer.module';
+import { RefusalsModule } from './refusals/refusals.module';
 import { ApplicantScoreModule } from './applicant-score/applicant-score.module';
 import { BusinessContractModule } from './contract/business-contract.module';
 
@@ -29,6 +30,7 @@ import { BusinessContractModule } from './contract/business-contract.module';
     CvScreeningModule,
     InterviewModule,
     OfferWriterModule,
+    RefusalsModule,
     ApplicantScoreModule,
     BusinessContractModule,
   ],

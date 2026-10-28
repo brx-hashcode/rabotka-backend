@@ -55,6 +55,7 @@ import {
   RejectionSource,
   SuspensionSource,
 } from '@prisma/client';
+import { detectContacts } from '../profile-chat/moderation/detect';
 import { ContractService } from '../contract/contract.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { MatchingService } from '../matching/matching.service';
@@ -1038,12 +1039,14 @@ export class ApplicationService {
     ) {
       throw new BadRequestException("Cette candidature n'est plus en attente");
     }
+    const message = refusalMessage(reason);
 
     const updated = await this.prisma.application.update({
       where: { id: applicationId },
       data: {
         status: ApplicationStatus.REJECTED,
         rejected_at: new Date(),
+        rejection_message: message,
         // An actual employer decision — distinct from AUTO_FILL, which is what
         // rejectPendingApplicants writes when an offer simply fills up. Only this
         // variant may ever be read as a negative preference signal.
@@ -3337,4 +3340,23 @@ export class ApplicationService {
       contractId: app.contract?.id ?? null,
     } as ApplicationWithOffer;
   }
+}
+
+/** Longest employer message kept with a refusal. */
+const REFUSAL_MESSAGE_MAX = 500;
+
+/**
+ * The employer's words with a refusal, as the candidate will read them; null
+ * for none. A phone number, an e-mail or a link is refused: a refusal must
+ * not be a way round « obtenir le contact ».
+ */
+export function refusalMessage(reason?: string | null): string | null {
+  const text = reason?.trim().slice(0, REFUSAL_MESSAGE_MAX) ?? '';
+  if (!text) return null;
+  if (detectContacts(text).length > 0) {
+    throw new BadRequestException(
+      'Le message ne peut pas contenir de coordonnées (téléphone, e-mail, lien) : retirez-les.',
+    );
+  }
+  return text;
 }

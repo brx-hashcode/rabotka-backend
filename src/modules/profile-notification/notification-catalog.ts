@@ -78,6 +78,8 @@ export type NotificationInput =
       jobTitle: string | null;
       /** Closed because the offer filled or ended, not by the employer. */
       automatic: boolean;
+      /** The employer's words with the refusal, if any. */
+      message?: string | null;
     }
   | { type: 'HIRE_CANCELLED'; jobTitle: string }
   | {
@@ -370,7 +372,7 @@ export function renderNotification(
         title: 'Candidature non retenue',
         body: input.automatic
           ? `L’offre${quoted(input.jobTitle)} est pourvue ou fermée. Votre candidature n’a pas été retenue.`
-          : `Votre candidature${quoted(input.jobTitle)} n’a pas été retenue.`,
+          : `Votre candidature${quoted(input.jobTitle)} n’a pas été retenue.${input.message ? ` Le mot de l’employeur : « ${input.message} »` : ''}`,
         link: '/recherche-offres',
       };
 
