@@ -458,13 +458,20 @@ describe('AgentPortalService', () => {
 
   describe('getJob', () => {
     it('answers 404 for a job outside the agent zones', async () => {
-      prisma.jobOffer.findFirst.mockResolvedValue(null);
-      await expect(service.getJob('agent-1', 'job-x')).rejects.toThrow(
-        NotFoundException,
-      );
-      expect(prisma.jobOffer.findFirst.mock.calls[0][0].where).toEqual({
-        AND: [{ id: 'job-x' }, jobsInZonesWhere([ZONE])],
-      });
+      // The zone filter carries « now »: one clock for the service and the
+      // expectation, or the two land a millisecond apart and the test flakes.
+      jest.useFakeTimers({ now: new Date('2026-10-28T10:00:00Z') });
+      try {
+        prisma.jobOffer.findFirst.mockResolvedValue(null);
+        await expect(service.getJob('agent-1', 'job-x')).rejects.toThrow(
+          NotFoundException,
+        );
+        expect(prisma.jobOffer.findFirst.mock.calls[0][0].where).toEqual({
+          AND: [{ id: 'job-x' }, jobsInZonesWhere([ZONE])],
+        });
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('answers 404 to an agent with no zone at all', async () => {
