@@ -77,6 +77,9 @@ export type BusinessEntitlements = {
   cvRetentionDays: number;
   /** Questions about one analysed CV (its chat); 0: no chat. */
   cvChatQuestions: number;
+  /** Offers the AI may still write this period. Null: unlimited; 0: none. */
+  offerDraftsRemaining: number | null;
+  offerDraftsQuota: number | null;
   includesPreselection: boolean;
   includesFieldAgents: boolean;
   priorityVisibility: boolean;
@@ -161,6 +164,8 @@ export class BusinessSubscriptionService {
         cvFileMaxMb: 0,
         cvRetentionDays: 0,
         cvChatQuestions: 0,
+        offerDraftsRemaining: 0,
+        offerDraftsQuota: 0,
         includesPreselection: false,
         includesFieldAgents: false,
         priorityVisibility: false,
@@ -188,6 +193,11 @@ export class BusinessSubscriptionService {
       cvFileMaxMb: sub.plan.cv_file_max_mb,
       cvRetentionDays: sub.plan.cv_retention_days,
       cvChatQuestions: sub.plan.cv_chat_questions,
+      offerDraftsRemaining: remaining(
+        sub.plan.offer_drafts_per_period,
+        sub.offer_drafts_used,
+      ),
+      offerDraftsQuota: sub.plan.offer_drafts_per_period,
       includesPreselection: sub.plan.includes_preselection,
       includesFieldAgents: sub.plan.includes_field_agents,
       priorityVisibility: sub.plan.priority_visibility,
@@ -768,6 +778,43 @@ export class BusinessSubscriptionService {
       );
     }
     return { subscriptionId: sub.id };
+  }
+
+  /**
+   * One offer written by the AI, on the current period's « offres rédigées
+   * par l’IA ». Conditional, like the CVs: two clicks can't share the last one.
+   */
+  async consumeOfferDraft(
+    businessId: string,
+  ): Promise<{ subscriptionId: string }> {
+    const sub = await this.current(businessId);
+    const quota = sub ? sub.plan.offer_drafts_per_period : 0;
+    if (!sub || quota === 0) {
+      throw new ForbiddenException(
+        'La rédaction d’offres par l’IA est incluse dans les formules supérieures. Changez de formule depuis votre espace, rubrique « Abonnement ».',
+      );
+    }
+    const { count } = await this.prisma.businessSubscription.updateMany({
+      where: {
+        id: sub.id,
+        ...(quota === null ? {} : { offer_drafts_used: { lt: quota } }),
+      },
+      data: { offer_drafts_used: { increment: 1 } },
+    });
+    if (count === 0) {
+      throw new ForbiddenException(
+        'Vous avez utilisé toutes les rédactions par l’IA incluses dans votre formule pour cette période.',
+      );
+    }
+    return { subscriptionId: sub.id };
+  }
+
+  /** Gives back an offer the AI could not write; never below zero. */
+  async releaseOfferDraft(subscriptionId: string): Promise<void> {
+    await this.prisma.$executeRaw`
+      UPDATE "business_subscriptions"
+      SET "offer_drafts_used" = GREATEST("offer_drafts_used" - 1, 0)
+      WHERE "id" = ${subscriptionId}::uuid`;
   }
 
   /** Gives back CVs that could not be read; never below zero. */

@@ -110,6 +110,16 @@ export class CreateBusinessPlanDto {
   @Max(200)
   cvChatQuestions?: number;
 
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Offers the AI writes per period (« Rédiger avec l’IA »). Null: unlimited; 0: not included',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  offerDraftsPerPeriod?: number | null;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()
