@@ -3459,7 +3459,7 @@ model BusinessPlan {
   annual_price_fcfa     Int
   /// Contact unlocks covered per period (employer side). Null: unlimited.
   unlocks_per_period    Int?
-  /// Job offers active at once. Null: unlimited.
+  /// Job offers published per period. Null: unlimited.
   active_offers_limit   Int?
   includes_preselection Boolean  @default(false)
   includes_field_agents Boolean  @default(false)
@@ -3504,6 +3504,8 @@ model BusinessSubscription {
   cv_screened         Int                        @default(0)
   /// Offers the AI wrote for this period.
   offer_drafts_used   Int                        @default(0)
+  /// Offers published (or republished) during this period.
+  offers_published    Int                        @default(0)
   payment_request_id  String?                    @unique @db.Uuid
   /// The admin who granted or cancelled it by hand.
   granted_by          String?                    @db.Uuid

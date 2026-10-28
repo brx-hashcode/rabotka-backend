@@ -511,7 +511,7 @@ export class JobOfferService {
     }
 
     this.validateCreateDto(dto);
-    // A business publishes within its plan's active-offer limit.
+    // A business publishes within its plan's offers for the period.
     await this.subscriptions?.assertCanPublishOffer(employerId);
     const priorityUntil =
       (await this.subscriptions?.priorityUntil(employerId)) ?? null;
@@ -562,30 +562,40 @@ export class JobOfferService {
       ...(dto.category_id ? { category_id: dto.category_id } : {}),
     };
 
+    // A business's offer counts against its plan for the period, charged
+    // right before it is saved and given back if it can't be.
+    const charged =
+      (await this.subscriptions?.consumeOffer(employerId)) ?? null;
     let offer: Awaited<ReturnType<typeof this.prisma.jobOffer.create>> | null =
       null;
-    for (let attempt = 0; attempt < REFERENCE_MAX_ATTEMPTS; attempt++) {
-      try {
-        offer = await this.prisma.jobOffer.create({
-          data: { ...baseData, reference: generateJobReference() },
-        });
-        break;
-      } catch (err) {
-        if (
-          err instanceof Prisma.PrismaClientKnownRequestError &&
-          err.code === 'P2002' &&
-          Array.isArray(err.meta?.target) &&
-          (err.meta?.target as string[]).includes('reference')
-        ) {
-          continue;
+    try {
+      for (let attempt = 0; attempt < REFERENCE_MAX_ATTEMPTS; attempt++) {
+        try {
+          offer = await this.prisma.jobOffer.create({
+            data: { ...baseData, reference: generateJobReference() },
+          });
+          break;
+        } catch (err) {
+          if (
+            err instanceof Prisma.PrismaClientKnownRequestError &&
+            err.code === 'P2002' &&
+            Array.isArray(err.meta?.target) &&
+            (err.meta?.target as string[]).includes('reference')
+          ) {
+            continue;
+          }
+          throw err;
         }
-        throw err;
       }
-    }
-    if (!offer) {
-      throw new InternalServerErrorException(
-        "Impossible de générer une référence unique pour l'offre",
-      );
+      if (!offer) {
+        throw new InternalServerErrorException(
+          "Impossible de générer une référence unique pour l'offre",
+        );
+      }
+    } catch (err) {
+      if (charged)
+        await this.subscriptions?.releaseOffer(charged.subscriptionId);
+      throw err;
     }
 
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_CREATED, {
@@ -1263,14 +1273,24 @@ export class JobOfferService {
       );
     }
 
-    const updated = await this.prisma.jobOffer.update({
-      where: { id },
-      data: {
-        scheduled_at: scheduledAt,
-        status: JobOfferStatus.ACTIVE,
-        priority_until: priorityUntil,
-      },
-    });
+    // Republishing is publishing: it counts for the period too.
+    const charged =
+      (await this.subscriptions?.consumeOffer(actorProfileId)) ?? null;
+    let updated: Awaited<ReturnType<typeof this.prisma.jobOffer.update>>;
+    try {
+      updated = await this.prisma.jobOffer.update({
+        where: { id },
+        data: {
+          scheduled_at: scheduledAt,
+          status: JobOfferStatus.ACTIVE,
+          priority_until: priorityUntil,
+        },
+      });
+    } catch (err) {
+      if (charged)
+        await this.subscriptions?.releaseOffer(charged.subscriptionId);
+      throw err;
+    }
 
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED, {
       event: AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED,

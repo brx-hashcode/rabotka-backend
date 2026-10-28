@@ -528,12 +528,22 @@ describe('BusinessSubscriptionService', () => {
   });
 
   describe('assertCanPublishOffer', () => {
-    it('refuses past the plan limit, with the upgrade message', async () => {
-      const { service, prisma } = make({ sub: running() });
-      prisma.jobOffer.count.mockResolvedValue(1);
+    it('refuses once the period’s offers are published, with the upgrade message', async () => {
+      const { service } = make({ sub: running({ offers_published: 1 }) });
       await expect(service.assertCanPublishOffer('p1')).rejects.toThrow(
-        ForbiddenException,
+        /par période/,
       );
+    });
+
+    it('counts the period, not the offers online', async () => {
+      const { service, prisma } = make({
+        sub: running({ offers_published: 0 }),
+      });
+      // Four online, published under a larger plan: a new period still starts at 0.
+      prisma.jobOffer.count.mockResolvedValue(4);
+      await expect(
+        service.assertCanPublishOffer('p1'),
+      ).resolves.toBeUndefined();
     });
 
     it('refuses a business without a plan', async () => {
@@ -550,6 +560,42 @@ describe('BusinessSubscriptionService', () => {
       await expect(
         service.assertCanPublishOffer('p1'),
       ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('consumeOffer', () => {
+    it('charges one offer on the current period, never past the plan', async () => {
+      const { service, prisma } = make({ sub: running() });
+      await expect(service.consumeOffer('p1')).resolves.toEqual({
+        subscriptionId: 'sub-1',
+      });
+      expect(prisma.businessSubscription.updateMany).toHaveBeenCalledWith({
+        where: { id: 'sub-1', offers_published: { lt: 1 } },
+        data: { offers_published: { increment: 1 } },
+      });
+
+      prisma.businessSubscription.updateMany.mockResolvedValue({ count: 0 });
+      await expect(service.consumeOffer('p1')).rejects.toThrow(/par période/);
+    });
+
+    it('counts without a cap on an unlimited plan', async () => {
+      const { service, prisma } = make({
+        sub: running({ plan: plan({ active_offers_limit: null }) }),
+      });
+      await service.consumeOffer('p1');
+      expect(prisma.businessSubscription.updateMany).toHaveBeenCalledWith({
+        where: { id: 'sub-1' },
+        data: { offers_published: { increment: 1 } },
+      });
+    });
+
+    it('is nothing for a regular employer, and refused without a plan', async () => {
+      const regular = make({ profile: { is_business: false, business: null } });
+      await expect(regular.service.consumeOffer('p1')).resolves.toBeNull();
+      const noPlan = make({ sub: null });
+      await expect(noPlan.service.consumeOffer('p1')).rejects.toThrow(
+        /Choisissez une formule/,
+      );
     });
   });
 
