@@ -70,6 +70,37 @@ export class MailboxController {
     return this.mailboxes.mails(req.user.profileId, id, query.q, query.page);
   }
 
+  @Get(':id/mails/:messageId/attachments/:attachmentId')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'One attachment, shown inline before it is ticked (PDF or photo)',
+  })
+  async preview(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('messageId') messageId: string,
+    @Param('attachmentId') attachmentId: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const file = await this.mailboxes.preview(
+      req.user.profileId,
+      id,
+      messageId.slice(0, 500),
+      attachmentId.slice(0, 500),
+    );
+    const ascii = file.name.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '');
+    res.setHeader('Content-Type', file.type);
+    res.setHeader('Content-Length', String(file.buffer.length));
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+    );
+    res.setHeader('Cache-Control', 'private, no-store');
+    // Someone else's file: rendered as what its bytes are, and nothing more.
+    res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
+    res.send(file.buffer);
+  }
+
   @Delete(':id')
   @ApiOperation({ summary: 'Disconnect a mailbox (its tokens are revoked)' })
   disconnect(

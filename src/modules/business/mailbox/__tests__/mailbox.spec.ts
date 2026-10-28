@@ -4,6 +4,7 @@ import {
   ConflictException,
   NotFoundException,
   ServiceUnavailableException,
+  UnsupportedMediaTypeException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { MailboxCrypto } from '../mailbox-crypto';
@@ -231,6 +232,47 @@ describe('MailboxService', () => {
         buffer: Buffer.from('%PDF-1.7'),
       },
     ]);
+  });
+
+  it('previews a PDF or a photo, by its bytes, and nothing else', async () => {
+    const { service, prisma, gmail } = make();
+    prisma.businessMailbox.findFirst.mockResolvedValue(box());
+    gmail.attachment = jest.fn().mockResolvedValue({
+      name: 'CV Awa.pdf',
+      mime: 'application/octet-stream',
+      buffer: Buffer.from('%PDF-1.7 a real enough cv'),
+    });
+    await expect(
+      service.preview('p-1', 'mb-1', 'm1', '2'),
+    ).resolves.toMatchObject({ name: 'CV Awa.pdf', type: 'application/pdf' });
+
+    // A .docx is a zip: no preview in a browser.
+    gmail.attachment.mockResolvedValue({
+      name: 'cv.docx',
+      mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      buffer: Buffer.concat([
+        Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+        Buffer.alloc(30),
+      ]),
+    });
+    await expect(
+      service.preview('p-1', 'mb-1', 'm1', '3'),
+    ).rejects.toBeInstanceOf(UnsupportedMediaTypeException);
+
+    // A page dressed up as a PDF is not served.
+    gmail.attachment.mockResolvedValue({
+      name: 'cv.pdf',
+      mime: 'application/pdf',
+      buffer: Buffer.from('<html><script>alert(1)</script>'),
+    });
+    await expect(
+      service.preview('p-1', 'mb-1', 'm1', '4'),
+    ).rejects.toBeInstanceOf(UnsupportedMediaTypeException);
+
+    prisma.businessMailbox.findFirst.mockResolvedValue(null);
+    await expect(
+      service.preview('p-1', 'mb-x', 'm1', '2'),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('takes at most 5 attachments', async () => {
