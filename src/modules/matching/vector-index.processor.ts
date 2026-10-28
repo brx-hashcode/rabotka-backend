@@ -11,6 +11,15 @@ export type VectorIndexJobData =
 
 const SCAN_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 
+/**
+ * How long a job may hold its lock. Embeddings run in-process (fastembed,
+ * ONNX) and block the event loop, so the worker cannot renew BullMQ's 30 s
+ * default lock while a scan embeds a batch: the lock lapsed, the job was
+ * taken for stalled, and finishing it logged « Missing lock … moveToFinished ».
+ * Ten minutes covers a full scan; the stall check runs at half of it.
+ */
+const LOCK_MS = Number(process.env.VECTOR_INDEX_LOCK_MS) || 10 * 60 * 1000;
+
 @Injectable()
 export class VectorIndexProcessor implements OnModuleInit {
   private readonly logger = new Logger(VectorIndexProcessor.name);
@@ -41,7 +50,7 @@ export class VectorIndexProcessor implements OnModuleInit {
           await this.matchingService.indexEmployerProfile(data.profileId);
         }
       },
-      { concurrency: 1 },
+      { concurrency: 1, lockDuration: LOCK_MS, stalledInterval: LOCK_MS / 2 },
     );
 
     try {
