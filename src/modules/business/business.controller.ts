@@ -80,6 +80,21 @@ export class BusinessController {
     return { ...overview, plans: overview.plans.map(planView) };
   }
 
+  @Post('me/subscription/:subscriptionId/start-now')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Start the next, already paid period today',
+    description:
+      'The running period ends now and what it had left is lost; the next one runs its full length from now, with fresh counters. Only the very next period can be started.',
+  })
+  async startNow(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('subscriptionId', ParseUUIDPipe) subscriptionId: string,
+  ) {
+    const businessId = await this.subscriptions.businessOf(req.user.profileId);
+    return this.subscriptions.startQueuedNow(businessId!, subscriptionId);
+  }
+
   @Post('me/subscription')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({
