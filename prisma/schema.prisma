@@ -3368,6 +3368,10 @@ model Business {
   created_at          DateTime           @default(now())
   updated_at          DateTime           @updatedAt
   profile_id          String             @unique @db.Uuid
+  /// The private link of its interview calendar. Kept as is, not hashed: the
+  /// business must be able to see it again to add it to another agenda; it
+  /// only reads the interviews, and replacing it cuts the old one off.
+  calendar_token      String?            @unique
   /// Raison sociale.
   name                String
   category            BusinessCategory

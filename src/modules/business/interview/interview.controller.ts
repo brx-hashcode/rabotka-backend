@@ -8,15 +8,18 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import type { Response } from 'express';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ProfileAuthGuard } from '../../auth/guards/profile-auth.guard';
 import { BusinessProfileGuard } from '../../auth/guards/business-profile.guard';
 import type { ProfileAuthenticatedRequest } from '../../auth/guards/jwt-auth.guard';
 import { Public } from '../../auth/decorators/public.decorator';
 import { InterviewService } from './interview.service';
+import { InterviewCalendarService } from './interview-calendar.service';
 import {
   CreateInterviewDto,
   InterviewAnswerDto,
@@ -29,7 +32,25 @@ import {
 @Controller('business/me/interviews')
 @UseGuards(ProfileAuthGuard, BusinessProfileGuard)
 export class InterviewController {
-  constructor(private readonly interviews: InterviewService) {}
+  constructor(
+    private readonly interviews: InterviewService,
+    private readonly calendar: InterviewCalendarService,
+  ) {}
+
+  @Get('calendar')
+  @ApiOperation({
+    summary: 'The private link of the interview calendar (made on first ask)',
+  })
+  calendarLink(@Req() req: ProfileAuthenticatedRequest) {
+    return this.calendar.link(req.user.profileId);
+  }
+
+  @Post('calendar/reset')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({ summary: 'A new calendar link; the old one stops working' })
+  resetCalendarLink(@Req() req: ProfileAuthenticatedRequest) {
+    return this.calendar.reset(req.user.profileId);
+  }
 
   @Get()
   @ApiOperation({
@@ -103,5 +124,25 @@ export class PublicInterviewController {
   @ApiOperation({ summary: 'Confirm, decline, or ask for another time' })
   answer(@Param('token') token: string, @Body() dto: InterviewAnswerDto) {
     return this.interviews.respond(token, dto.answer, dto.note);
+  }
+}
+
+/** The interview calendar a business subscribed to, by its private link. */
+@ApiTags('Public')
+@Controller('public/calendar')
+export class PublicCalendarController {
+  constructor(private readonly calendar: InterviewCalendarService) {}
+
+  @Public()
+  @Get(':file')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @ApiOperation({ summary: 'A business interview calendar (.ics)' })
+  async feed(@Param('file') file: string, @Res() res: Response): Promise<void> {
+    const ics = await this.calendar.feed(file.replace(/\.ics$/, ''));
+    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+    res.setHeader('Content-Disposition', 'inline; filename="entretiens.ics"');
+    // Agendas poll it; nothing in between should keep an old copy.
+    res.setHeader('Cache-Control', 'private, no-cache');
+    res.send(ics);
   }
 }
