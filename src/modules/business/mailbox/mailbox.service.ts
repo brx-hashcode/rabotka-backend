@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
   ServiceUnavailableException,
+  UnsupportedMediaTypeException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -15,6 +16,7 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { businessDashboardUrl } from '../../mail/audience';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
 import type { CvUpload } from '../cv-screening/cv-screening.service';
+import { cvFileType, DOCX_MIME } from '../cv-screening/cv-files';
 import { MAX_MAIL_ATTACHMENTS } from './cv-attachments';
 import { MailboxCrypto } from './mailbox-crypto';
 import { GmailProvider } from './providers/gmail.provider';
@@ -207,6 +209,36 @@ export class MailboxService {
         page,
       }),
     );
+  }
+
+  /**
+   * One attachment, to look at before ticking it: a PDF or a photo, by what
+   * its bytes are. Read on demand like the list, never stored.
+   */
+  async preview(
+    profileId: string,
+    id: string,
+    messageId: string,
+    attachmentId: string,
+  ) {
+    const box = await this.owned(profileId, id);
+    const file = await this.withAccess(box, (access) =>
+      this.providers[box.provider].attachment(access, messageId, attachmentId),
+    ).catch((err: unknown) => {
+      if (err instanceof ConflictException) throw err;
+      this.logger.warn(`Mail attachment preview failed: ${String(err)}`);
+      throw new NotFoundException('Cette pièce jointe n’a pas pu être lue.');
+    });
+    if (file.buffer.length > MAX_ATTACHMENT_BYTES) {
+      throw new BadRequestException('Fichier trop lourd pour un aperçu.');
+    }
+    const type = cvFileType(file.buffer, file.mime);
+    if (!type || type === DOCX_MIME) {
+      throw new UnsupportedMediaTypeException(
+        'L’aperçu est disponible pour les PDF et les photos.',
+      );
+    }
+    return { name: file.name, type, buffer: file.buffer };
   }
 
   /** The ticked attachments, read into files for an analysis. */
