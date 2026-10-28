@@ -78,11 +78,11 @@ export class CreateBusinessPlanDto {
   @Min(0)
   cvScreeningsPerPeriod?: number | null;
 
-  @ApiPropertyOptional({ description: 'CVs in one screening' })
+  @ApiPropertyOptional({ description: 'CVs in one screening, 5 at most' })
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(100)
+  @Max(5)
   cvBatchMax?: number;
 
   @ApiPropertyOptional({ description: 'Largest CV file, in MB' })
