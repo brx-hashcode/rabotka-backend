@@ -341,6 +341,13 @@ jobs:
           LANGFUSE_SECRET_KEY=$(echo "$VAULT_SECRET" | jq -r '.LANGFUSE_SECRET_KEY // ""')
           LANGFUSE_BASE_URL=https://cloud.langfuse.com
           LANGFUSE_TRACING_ENVIRONMENT=develop
+          # « Analyse de CV » mailboxes (Gmail / Outlook OAuth). Optional: a provider
+          # with no client id and secret, or no MAILBOX_TOKEN_KEY, is simply not offered.
+          GOOGLE_MAIL_CLIENT_ID=$(echo "$VAULT_SECRET" | jq -r '.GOOGLE_MAIL_CLIENT_ID // ""')
+          GOOGLE_MAIL_CLIENT_SECRET=$(echo "$VAULT_SECRET" | jq -r '.GOOGLE_MAIL_CLIENT_SECRET // ""')
+          MS_MAIL_CLIENT_ID=$(echo "$VAULT_SECRET" | jq -r '.MS_MAIL_CLIENT_ID // ""')
+          MS_MAIL_CLIENT_SECRET=$(echo "$VAULT_SECRET" | jq -r '.MS_MAIL_CLIENT_SECRET // ""')
+          MAILBOX_TOKEN_KEY=$(echo "$VAULT_SECRET" | jq -r '.MAILBOX_TOKEN_KEY // ""')
           # --- static values ---
           BACKEND_IMAGE=ghcr.io/${{ github.repository_owner }}/rabotka-backend:${{ needs.build-and-push.outputs.image-sha-tag }}
           NODE_ENV=production
