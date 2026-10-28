@@ -17,6 +17,8 @@ import { OfferWriterModule } from './offer-writer/offer-writer.module';
 import { RefusalsModule } from './refusals/refusals.module';
 import { ApplicantScoreModule } from './applicant-score/applicant-score.module';
 import { BusinessContractModule } from './contract/business-contract.module';
+import { BusinessReportController } from './report/business-report.controller';
+import { BusinessReportService } from './report/business-report.service';
 
 /** Business accounts: the public catalog and the dashboard's own routes. */
 @Module({
@@ -38,12 +40,14 @@ import { BusinessContractModule } from './contract/business-contract.module';
     BusinessCatalogController,
     BusinessController,
     AdminBusinessSubscriptionController,
+    BusinessReportController,
   ],
   providers: [
     BusinessCheckoutService,
     BusinessStatsService,
     BusinessContactsService,
     BusinessTalentService,
+    BusinessReportService,
   ],
 })
 export class BusinessModule {}
