@@ -3473,8 +3473,8 @@ model BusinessPlan {
   priority_visibility   Boolean  @default(false)
   /// CVs the AI screening reads per period. Null: unlimited; 0: not included.
   cv_screenings_per_period Int?  @default(0)
-  /// CVs in one screening (one upload).
-  cv_batch_max          Int      @default(20)
+  /// CVs in one screening (one upload), 5 at most.
+  cv_batch_max          Int      @default(5)
   /// Largest CV file accepted, in MB.
   cv_file_max_mb        Int      @default(5)
   /// Days a screening keeps its files and contact details before the purge.
