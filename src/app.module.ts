@@ -70,7 +70,6 @@ import { BroadcastModule } from './modules/broadcast/broadcast.module';
 import { DocumentModule } from './modules/document/document.module';
 import { ContractModule } from './modules/contract/contract.module';
 import { ResumeModule } from './modules/resume/resume.module';
-import { JobPagesModule } from './modules/job-pages/job-pages.module';
 import { InvoiceModule } from './modules/invoice/invoice.module';
 import { EventModule } from './modules/event/event.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
@@ -209,7 +208,6 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     DocumentModule,
     ContractModule,
     ResumeModule,
-    JobPagesModule,
     InvoiceModule,
     EventModule,
     DashboardModule,
