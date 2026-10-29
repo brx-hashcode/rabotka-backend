@@ -8,6 +8,7 @@ const answer = (over: Record<string, unknown> = {}) =>
     categoryName: 'cuisine & restauration',
     employmentType: 'mission',
     removed: [],
+    toConfirm: [],
     ...over,
   });
 
@@ -19,6 +20,7 @@ describe('offer-writer', () => {
       categoryName: 'Cuisine & Restauration',
       employmentType: 'MISSION',
       removed: [],
+      toConfirm: [],
     });
     expect(
       parseDraft(
@@ -78,5 +80,31 @@ describe('offer-writer', () => {
     expect(text).toContain('Nombre de personnes : 2');
     expect(text).toContain('Entreprise : ZuaFood (Restauration)');
     expect(text).toContain('2 serveurs samedi');
+  });
+
+  it('keeps what the business should still add, short and at most four', () => {
+    const draft = parseDraft(
+      answer({
+        toConfirm: [
+          'la rémunération',
+          '',
+          'les horaires',
+          'la date de début',
+          'la durée',
+          'le lieu',
+        ],
+      }),
+      TRADES,
+    );
+    expect(draft?.toConfirm).toEqual([
+      'la rémunération',
+      'les horaires',
+      'la date de début',
+      'la durée',
+    ]);
+    // An older answer without the field reads as nothing to add.
+    expect(
+      parseDraft(answer({ toConfirm: undefined }), TRADES)?.toConfirm,
+    ).toEqual([]);
   });
 });
