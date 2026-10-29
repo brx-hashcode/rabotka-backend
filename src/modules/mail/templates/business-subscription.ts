@@ -120,3 +120,64 @@ export function businessSubscriptionExpiredEmail(
     ${SIGN_OFF}
   `;
 }
+
+/** An admin assigned a plan by hand: nothing was paid, so no invoice line. */
+export function businessSubscriptionGrantedEmail(
+  name: string,
+  p: {
+    planName: string;
+    periodLabel: string;
+    startsAt: Date;
+    endsAt: Date;
+    url: string;
+  },
+): string {
+  const later = p.startsAt.getTime() > Date.now() + 60_000;
+  return `
+    <p>Bonjour ${escapeHtml(name)},</p>
+
+    <p>
+      L'équipe Rabotka vous a attribué la formule
+      <strong>${escapeHtml(p.planName)}</strong> (${escapeHtml(p.periodLabel)}),
+      offerte. Elle
+      ${
+        later
+          ? `prendra le relais le <strong>${frDate(p.startsAt)}</strong>, à la fin de la période en cours,`
+          : 'est active dès maintenant'
+      }
+      jusqu'au <strong>${frDate(p.endsAt)}</strong>.
+    </p>
+
+    <p>Ses contacts inclus et ses avantages vous sont ouverts pendant toute la période.</p>
+
+    ${emailButton(p.url, 'Voir mon abonnement')}
+    ${SIGN_OFF}
+  `;
+}
+
+/** An admin ended a period (or dropped one not yet started). */
+export function businessSubscriptionCancelledEmail(
+  name: string,
+  p: { planName: string; reason: string | null; url: string },
+): string {
+  const reason = p.reason?.trim();
+  return `
+    <p>Bonjour ${escapeHtml(name)},</p>
+
+    <p>
+      Votre abonnement <strong>${escapeHtml(p.planName)}</strong> a été arrêté
+      par l'équipe Rabotka.
+    </p>
+
+    ${reason ? `<p><strong>Motif :</strong> ${escapeHtml(reason)}</p>` : ''}
+
+    <p>
+      Vos offres publiées restent visibles, mais vous ne pouvez plus en publier
+      de nouvelles, et chaque contact devient payant. Choisissez une formule
+      pour retrouver vos avantages, ou répondez à cet e-mail pour toute question.
+    </p>
+
+    ${emailButton(p.url, 'Choisir une formule')}
+    ${SIGN_OFF}
+  `;
+}

@@ -317,3 +317,49 @@ describe('SIMILAR_PROFILE_HIRED', () => {
     });
   });
 });
+
+describe('admin subscription notices', () => {
+  const later = new Date(Date.now() + 10 * 86400000).toISOString();
+  const end = new Date(Date.now() + 40 * 86400000).toISOString();
+
+  it('says when a granted plan only takes over later', () => {
+    const out = renderNotification({
+      type: 'BUSINESS_SUBSCRIPTION_GRANTED',
+      planName: 'Pro',
+      startsAt: later,
+      endsAt: end,
+    });
+    expect(out.title).toBe('Formule attribuée');
+    expect(out.body).toContain('prendra le relais');
+    expect(out.link).toBe('/espace/abonnement');
+  });
+
+  it('says a plan granted to start now is active', () => {
+    const out = renderNotification({
+      type: 'BUSINESS_SUBSCRIPTION_GRANTED',
+      planName: 'Pro',
+      startsAt: new Date().toISOString(),
+      endsAt: end,
+    });
+    expect(out.body).toContain('active jusqu’au');
+    expect(out.body).not.toContain('prendra le relais');
+  });
+
+  it('adds the motif to a cancellation only when there is one', () => {
+    const base = {
+      type: 'BUSINESS_SUBSCRIPTION_CANCELLED',
+      planName: 'Pro',
+    } as const;
+    expect(
+      renderNotification({ ...base, reason: 'Fin du partenariat' }).body,
+    ).toContain('Motif : Fin du partenariat.');
+    expect(
+      renderNotification({ ...base, reason: 'Contrat terminé.' }).body,
+    ).toMatch(/Motif : Contrat terminé\.$/);
+    for (const reason of [null, '   ']) {
+      const out = renderNotification({ ...base, reason });
+      expect(out.body).not.toContain('Motif');
+      expect(out.body).not.toContain('null');
+    }
+  });
+});

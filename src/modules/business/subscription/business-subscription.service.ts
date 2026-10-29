@@ -22,8 +22,10 @@ import { LayoutService } from '../../mail/layout.service';
 import { appUrlFor } from '../../mail/audience';
 import {
   businessSubscriptionActiveEmail,
+  businessSubscriptionCancelledEmail,
   businessSubscriptionExpiredEmail,
   businessSubscriptionExpiringEmail,
+  businessSubscriptionGrantedEmail,
   businessTrialStartedEmail,
 } from '../../mail/templates';
 import { notifyProfile } from '../../profile-notification/profile-notification.events';
@@ -415,12 +417,16 @@ export class BusinessSubscriptionService {
     return created;
   }
 
-  /** An admin grants or extends a plan by hand (stacked like a purchase). */
+  /**
+   * An admin assigns a plan by hand. By default it is stacked like a
+   * purchase; with `startNow` it replaces the running period today.
+   */
   async grantByAdmin(
     businessId: string,
     planId: string,
     period: BusinessBillingPeriod,
     adminUserId: string | null,
+    { startNow = false }: { startNow?: boolean } = {},
   ) {
     if (period === BusinessBillingPeriod.TRIAL) {
       throw new BadRequestException(
@@ -429,18 +435,20 @@ export class BusinessSubscriptionService {
     }
     const created = await this.createPeriod(businessId, planId, period, {
       grantedBy: adminUserId,
+      replaceRunning: startNow,
     });
     if (!created) throw new NotFoundException('Formule introuvable.');
     await this.tell(
       businessId,
       {
-        type: 'BUSINESS_SUBSCRIPTION_ACTIVE',
+        type: 'BUSINESS_SUBSCRIPTION_GRANTED',
         planName: created.plan.name,
+        startsAt: created.starts_at.toISOString(),
         endsAt: created.ends_at.toISOString(),
       },
-      `Votre abonnement ${created.plan.name} est actif`,
+      `La formule ${created.plan.name} vous a été attribuée`,
       (name) =>
-        businessSubscriptionActiveEmail(name, {
+        businessSubscriptionGrantedEmail(name, {
           planName: created.plan.name,
           periodLabel: PERIOD_LABEL[created.billing_period],
           startsAt: created.starts_at,
@@ -451,9 +459,40 @@ export class BusinessSubscriptionService {
     return created;
   }
 
-  /** Ends a period now (or drops it if it had not started). No message. */
-  /** Ends a period now (or drops one not yet started), and the periods queued after it. */
+  /**
+   * Ends a period now (or drops one not yet started), and the periods queued
+   * after it. The business is told, with the admin's reason when given.
+   */
   async cancelByAdmin(
+    businessId: string,
+    subscriptionId: string,
+    adminUserId: string | null,
+    reason: string | null = null,
+  ) {
+    const sub = await this.endWithQueue(
+      businessId,
+      subscriptionId,
+      adminUserId,
+    );
+    await this.tell(
+      businessId,
+      {
+        type: 'BUSINESS_SUBSCRIPTION_CANCELLED',
+        planName: sub.plan.name,
+        reason,
+      },
+      `Votre abonnement ${sub.plan.name} a été arrêté`,
+      (name) =>
+        businessSubscriptionCancelledEmail(name, {
+          planName: sub.plan.name,
+          reason,
+          url: this.subscriptionUrl(),
+        }),
+    );
+  }
+
+  /** `cancelByAdmin` without the message: a plan deletion sends its own. */
+  private async endWithQueue(
     businessId: string,
     subscriptionId: string,
     adminUserId: string | null,
@@ -464,6 +503,7 @@ export class BusinessSubscriptionService {
         business_id: businessId,
         status: { in: RUNNING },
       },
+      include: { plan: true },
     });
     if (!sub)
       throw new NotFoundException('Période introuvable ou déjà terminée.');
@@ -497,6 +537,7 @@ export class BusinessSubscriptionService {
       }),
     ]);
     await this.syncPriority(businessId);
+    return sub;
   }
 
   /**
@@ -614,7 +655,7 @@ export class BusinessSubscriptionService {
       if (!first.has(p.business_id)) first.set(p.business_id, p.id);
     }
     for (const [businessId, subscriptionId] of first) {
-      await this.cancelByAdmin(businessId, subscriptionId, adminUserId);
+      await this.endWithQueue(businessId, subscriptionId, adminUserId);
       if (await this.current(businessId)) continue;
       await this.tell(
         businessId,
@@ -646,7 +687,12 @@ export class BusinessSubscriptionService {
     businessId: string,
     planId: string,
     period: BusinessBillingPeriod,
-    by: { paymentRequestId?: string; grantedBy?: string | null },
+    by: {
+      paymentRequestId?: string;
+      grantedBy?: string | null;
+      /** An admin's « start now »: the running period ends today. */
+      replaceRunning?: boolean;
+    },
     now = new Date(),
   ) {
     const plan = await this.prisma.businessPlan.findUnique({
@@ -683,15 +729,28 @@ export class BusinessSubscriptionService {
         include: { plan: true },
         orderBy: { starts_at: 'desc' },
       });
-      if (running && isUpgrade(running.plan, plan)) {
-        const ends = upgradedEnd(now, running, { plan, period });
+      const upgrade = !!running && isUpgrade(running.plan, plan);
+      if (running && (upgrade || by.replaceRunning)) {
+        // An upgrade carries the unused days over; an admin replacing the
+        // period with a plan no dearer starts it fresh, and the rest is lost.
+        const ends = upgrade
+          ? upgradedEnd(now, running, { plan, period })
+          : periodEnd(now, period);
         await tx.businessSubscription.update({
           where: { id: running.id },
-          data: {
-            status: BusinessSubscriptionStatus.EXPIRED,
-            ends_at: now,
-            expired_notified_at: now,
-          },
+          data: upgrade
+            ? {
+                status: BusinessSubscriptionStatus.EXPIRED,
+                ends_at: now,
+                expired_notified_at: now,
+              }
+            : {
+                // Shown as cut short by the admin in the history.
+                status: BusinessSubscriptionStatus.CANCELLED,
+                granted_by: by.grantedBy ?? null,
+                ends_at: now,
+                expired_notified_at: now,
+              },
         });
         // What was queued after the old period now follows the new one.
         const shift = ends.getTime() - running.ends_at.getTime();

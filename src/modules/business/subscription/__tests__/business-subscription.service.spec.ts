@@ -57,8 +57,11 @@ function make(
       },
     ),
   };
-  const mail: any = { sendMail: jest.fn().mockResolvedValue(undefined) };
   const layout: any = { wrap: jest.fn().mockResolvedValue('<html/>') };
+  const mail: any = {
+    sendMail: jest.fn().mockResolvedValue(undefined),
+    layout,
+  };
   const events: any = { emit: jest.fn() };
   return {
     service: new BusinessSubscriptionService(
@@ -70,8 +73,12 @@ function make(
     ),
     prisma,
     mail,
+    events,
   };
 }
+
+/** The body handed to the mail layout on the first email sent. */
+const layoutHtml = (mail: any): string => mail.layout.wrap.mock.calls[0][0];
 
 const running = (over: Record<string, unknown> = {}) => ({
   id: 'sub-1',
@@ -262,6 +269,50 @@ describe('BusinessSubscriptionService', () => {
         prisma.businessSubscription.update.mock.calls[0][0].data,
       ).not.toHaveProperty('ends_at');
     });
+
+    it('tells the business in-app and by email, with the reason', async () => {
+      const { service, prisma, mail, events } = make();
+      prisma.businessSubscription.findFirst.mockResolvedValue(
+        running({ starts_at: new Date('2026-10-14T12:00:00Z') }),
+      );
+      prisma.businessSubscription.update = jest.fn();
+      prisma.$transaction = jest.fn().mockResolvedValue([]);
+
+      await service.cancelByAdmin('b1', 'sub-1', 'admin-1', 'Compte <fermé>');
+
+      expect(events.emit).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          recipientId: 'p1',
+          input: {
+            type: 'BUSINESS_SUBSCRIPTION_CANCELLED',
+            planName: 'Pro',
+            reason: 'Compte <fermé>',
+          },
+        }),
+      );
+      expect(mail.sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: 'a@b.c',
+          subject: 'Votre abonnement Pro a été arrêté',
+        }),
+      );
+      const html = layoutHtml(mail);
+      expect(html).toContain('Motif :</strong> Compte &lt;fermé&gt;');
+    });
+
+    it('leaves the motif out when no reason is given', async () => {
+      const { service, prisma, mail } = make();
+      prisma.businessSubscription.findFirst.mockResolvedValue(
+        running({ starts_at: new Date('2026-10-14T12:00:00Z') }),
+      );
+      prisma.businessSubscription.update = jest.fn();
+      prisma.$transaction = jest.fn().mockResolvedValue([]);
+
+      await service.cancelByAdmin('b1', 'sub-1', null);
+
+      expect(layoutHtml(mail)).not.toContain('Motif');
+    });
   });
 
   describe('startQueuedNow', () => {
@@ -405,7 +456,7 @@ describe('BusinessSubscriptionService', () => {
         { id: 's3', business_id: 'b1' },
       ]);
       const cancel = jest
-        .spyOn(service, 'cancelByAdmin')
+        .spyOn(service as any, 'endWithQueue')
         .mockResolvedValue(undefined);
       const current = jest.spyOn(service, 'current');
       const tell = jest
@@ -612,6 +663,78 @@ describe('BusinessSubscriptionService', () => {
       );
       expect(created.starts_at).toEqual(current.ends_at);
       expect(prisma.businessSubscription.update).not.toHaveBeenCalled();
+    });
+
+    it('with startNow, replaces a running dearer plan today and moves the queue', async () => {
+      const current = runningPeriod(dear);
+      const { service, prisma } = setup(current, cheap);
+      prisma.businessSubscription.findMany.mockResolvedValueOnce([
+        {
+          id: 'queued',
+          starts_at: current.ends_at,
+          ends_at: new Date(now + 45 * 86400000),
+        },
+      ]);
+      const created = await service.grantByAdmin(
+        'b1',
+        'ess',
+        'MONTHLY',
+        'admin',
+        { startNow: true },
+      );
+      expect(created.starts_at.getTime()).toBeGreaterThan(now - 5000);
+      expect(created.starts_at.getTime()).toBeLessThanOrEqual(Date.now());
+      // A fresh month: the dearer plan's leftover days are not carried over.
+      const days =
+        (created.ends_at.getTime() - created.starts_at.getTime()) / 86400000;
+      expect(days).toBeGreaterThanOrEqual(28);
+      expect(days).toBeLessThanOrEqual(31);
+      expect(prisma.businessSubscription.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'old' },
+          data: expect.objectContaining({
+            status: 'CANCELLED',
+            granted_by: 'admin',
+          }),
+        }),
+      );
+      const moved = prisma.businessSubscription.update.mock.calls.find(
+        ([a]: any) => a.where.id === 'queued',
+      );
+      expect(moved[0].data.starts_at).toEqual(created.ends_at);
+    });
+
+    it('with startNow and nothing running, starts the plan now as usual', async () => {
+      const { service, prisma } = setup(null, cheap);
+      const created = await service.grantByAdmin(
+        'b1',
+        'ess',
+        'MONTHLY',
+        'admin',
+        { startNow: true },
+      );
+      expect(created.starts_at.getTime()).toBeLessThanOrEqual(Date.now());
+      expect(prisma.businessSubscription.update).not.toHaveBeenCalled();
+    });
+
+    it('tells the business it was granted, never that it paid', async () => {
+      const current = runningPeriod(dear);
+      const { service, mail, events } = setup(current, cheap);
+      await service.grantByAdmin('b1', 'ess', 'MONTHLY', 'admin');
+      expect(events.emit).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          input: expect.objectContaining({
+            type: 'BUSINESS_SUBSCRIPTION_GRANTED',
+            planName: 'Essentiel',
+            startsAt: current.ends_at.toISOString(),
+          }),
+        }),
+      );
+      const html = layoutHtml(mail);
+      expect(html).toContain('prendra le relais');
+      expect(html).not.toContain('paiement');
+      expect(html).not.toContain('facture');
     });
   });
 

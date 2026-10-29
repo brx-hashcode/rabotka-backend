@@ -159,3 +159,25 @@ export class SubscribeDto {
   @IsIn(['MONTHLY', 'ANNUAL'])
   billingPeriod: BusinessBillingPeriod;
 }
+
+/** An admin assigning a plan: queued by default, or replacing the running one. */
+export class AdminGrantDto extends SubscribeDto {
+  @ApiPropertyOptional({
+    description: 'End the running period today and start this plan now',
+  })
+  @IsOptional()
+  @IsBoolean()
+  startNow?: boolean;
+}
+
+/** An admin ending a period. The reason is shown to the business. */
+export class AdminCancelSubscriptionDto {
+  @ApiPropertyOptional({ maxLength: 300 })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() || undefined : value,
+  )
+  @IsString()
+  @MaxLength(300)
+  reason?: string;
+}
