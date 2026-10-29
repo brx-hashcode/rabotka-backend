@@ -221,10 +221,18 @@ export class OnboardingAttemptService {
    * The funnel: how many attempts reached each stage or further, inside the
    * window. "Reached or further" so each bar is a subset of the one before it.
    */
-  async statsForAdmin(params: { startedFrom?: string; startedTo?: string }) {
+  async statsForAdmin(params: {
+    startedFrom?: string;
+    startedTo?: string;
+    entry?: 'whatsapp' | 'business';
+  }) {
+    const where: Prisma.OnboardingAttemptWhereInput = {
+      ...this.windowWhere(params),
+      ...(params.entry ? { entry: params.entry } : {}),
+    };
     const groups = await this.prisma.onboardingAttempt.groupBy({
       by: ['stage'],
-      where: this.windowWhere(params),
+      where,
       _count: { _all: true },
     });
     const atStage = new Map(groups.map((g) => [g.stage, g._count._all]));
@@ -239,7 +247,7 @@ export class OnboardingAttemptService {
     const completed = atStage.get(OnboardingStage.COMPLETED) ?? 0;
     const contacted = await this.prisma.onboardingAttempt.count({
       where: {
-        ...this.windowWhere(params),
+        ...where,
         stage: { not: OnboardingStage.COMPLETED },
         contacted_at: { not: null },
       },

@@ -206,6 +206,18 @@ describe('OnboardingAttemptService', () => {
         completionRate: 0.3,
       });
     });
+
+    it('counts one kind of sign-up when asked, contacts included', async () => {
+      prisma.onboardingAttempt.groupBy.mockResolvedValue([]);
+      prisma.onboardingAttempt.count.mockResolvedValue(0);
+      await service.statsForAdmin({ entry: 'business' });
+      expect(
+        prisma.onboardingAttempt.groupBy.mock.calls[0][0].where,
+      ).toMatchObject({ entry: 'business' });
+      expect(
+        prisma.onboardingAttempt.count.mock.calls[0][0].where,
+      ).toMatchObject({ entry: 'business' });
+    });
   });
 
   describe('listForAdmin', () => {
