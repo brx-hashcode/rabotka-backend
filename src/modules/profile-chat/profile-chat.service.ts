@@ -31,6 +31,7 @@ import { nudgeJobId, type MessagingNudgeJob } from './profile-chat.nudge';
 import { ModerationService } from './moderation/moderation.service';
 import { ProfileChatGateway } from './profile-chat.gateway';
 import { PresenceService } from './presence.service';
+import { BusinessSubscriptionService } from '../business/subscription/business-subscription.service';
 import type { RedactionCategory } from './moderation/patterns';
 
 /**
@@ -205,6 +206,7 @@ export class ProfileChatService {
     private readonly events: EventEmitter2,
     private readonly queue: QueueService,
     private readonly presence: PresenceService,
+    private readonly subscriptions: BusinessSubscriptionService,
   ) {}
 
   // ── Conversations ──────────────────────────────────────────────────────────
@@ -264,6 +266,8 @@ export class ProfileChatService {
         'Cette candidature est terminée, la discussion ne peut pas commencer',
       );
     }
+    // A business without a plan reads the threads it has and starts none.
+    await this.subscriptions.assertCanMessage(actorId);
 
     return this.createPair(workerId, employerId, applicationId);
   }
@@ -338,6 +342,7 @@ export class ProfileChatService {
     // already exists is not reaching out to anybody new, and counting it would
     // make the cap tighten every time somebody returns to a conversation they
     // are already in.
+    await this.subscriptions.assertCanMessage(actorId);
     await this.assertUnderDailyCap(actorId);
 
     return this.createPair(workerId, employerId, null);
@@ -652,6 +657,7 @@ export class ProfileChatService {
     if (conversation.closed_at) {
       throw new BadRequestException('Cette discussion est close');
     }
+    await this.subscriptions.assertCanMessage(senderId);
 
     // ALWAYS moderated. There used to be an exception — a pair that had paid
     // for each other's details could speak freely, on the reasoning that they

@@ -47,6 +47,7 @@ describe('ProfileChatService', () => {
   let events: { emit: jest.Mock };
   let queue: { addJob: jest.Mock };
   let presence: { onlineAmong: jest.Mock };
+  let subscriptions: { assertCanMessage: jest.Mock };
 
   const storedMessage = (over: Record<string, unknown> = {}) => ({
     id: 'm-1',
@@ -126,6 +127,9 @@ describe('ProfileChatService', () => {
     events = { emit: jest.fn() };
     queue = { addJob: jest.fn().mockResolvedValue('job-1') };
     presence = { onlineAmong: jest.fn().mockResolvedValue(new Set()) };
+    subscriptions = {
+      assertCanMessage: jest.fn().mockResolvedValue(undefined),
+    };
 
     service = new ProfileChatService(
       prisma,
@@ -135,6 +139,7 @@ describe('ProfileChatService', () => {
       events as never,
       queue as never,
       presence as never,
+      subscriptions as never,
     );
   });
 
@@ -759,6 +764,75 @@ describe('ProfileChatService', () => {
           service.openWithProfile(WORKER, EMPLOYER),
         ).resolves.toBeTruthy();
       });
+    });
+  });
+
+  describe('a business without a plan', () => {
+    // Read only: it keeps reading the threads it has, starts none, writes none.
+    const noPlan = new ForbiddenException('Choisissez une formule');
+
+    beforeEach(() => {
+      subscriptions.assertCanMessage.mockImplementation((id: string) =>
+        id === EMPLOYER ? Promise.reject(noPlan) : Promise.resolve(),
+      );
+      prisma.application.findFirst.mockResolvedValue({
+        id: APP,
+        worker_id: WORKER,
+        status: ApplicationStatus.PENDING,
+        job_offer: { employer_id: EMPLOYER },
+      });
+      prisma.profile.findFirst = jest
+        .fn()
+        .mockImplementation(({ where }: { where: { id: string } }) =>
+          Promise.resolve({
+            id: where.id,
+            profile_type:
+              where.id === WORKER ? ProfileType.WORKER : ProfileType.EMPLOYER,
+            status: AccountStatus.ACTIVE,
+          }),
+        );
+      prisma.profileConversation.findUnique.mockResolvedValue(null);
+      prisma.profileConversation.count.mockResolvedValue(0);
+    });
+
+    it('starts no conversation from an application', async () => {
+      await expect(service.openForApplication(APP, EMPLOYER)).rejects.toBe(
+        noPlan,
+      );
+      expect(prisma.profileConversation.create).not.toHaveBeenCalled();
+    });
+
+    it('starts no conversation with a profile', async () => {
+      await expect(service.openWithProfile(WORKER, EMPLOYER)).rejects.toBe(
+        noPlan,
+      );
+      expect(prisma.profileConversation.create).not.toHaveBeenCalled();
+    });
+
+    it('still opens a thread it already has, to read it', async () => {
+      prisma.profileConversation.findUnique.mockResolvedValue(conversation);
+      await expect(
+        service.openWithProfile(WORKER, EMPLOYER),
+      ).resolves.toBeTruthy();
+      await expect(
+        service.openForApplication(APP, EMPLOYER),
+      ).resolves.toBeTruthy();
+    });
+
+    it('sends nothing', async () => {
+      prisma.profileConversation.findUnique.mockResolvedValue(conversation);
+      await expect(service.sendMessage(CONV, EMPLOYER, 'salut')).rejects.toBe(
+        noPlan,
+      );
+      expect(prisma.profileMessage.create).not.toHaveBeenCalled();
+    });
+
+    it('still hears from the worker', async () => {
+      prisma.profileConversation.findUnique.mockResolvedValue(conversation);
+      await expect(
+        service.sendMessage(CONV, WORKER, 'salut'),
+      ).resolves.toBeTruthy();
+      expect(subscriptions.assertCanMessage).toHaveBeenCalledWith(WORKER);
     });
   });
 

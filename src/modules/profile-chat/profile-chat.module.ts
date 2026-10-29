@@ -11,6 +11,7 @@ import { AdminConversationController } from './admin-profile-chat.controller';
 import { AdminConversationThreadController } from './admin-profile-chat-thread.controller';
 import { AdminProfileChatService } from './admin-profile-chat.service';
 import { LogModule } from '../log/log.module';
+import { BusinessSubscriptionModule } from '../business/subscription/business-subscription.module';
 
 /**
  * Profile-to-profile messaging before contact details are unlocked.
@@ -21,14 +22,21 @@ import { LogModule } from '../log/log.module';
  * dispute waiting to be filed.
  *
  * Deliberately NOT importing the WhatsApp or payment graphs. The nudge lands in
- * its own lot and is reached through the queue, so this module's imports stay
- * at three.
+ * its own lot and is reached through the queue. The one business import is
+ * the subscription core, which imports none of the flows: a business without a
+ * plan reads its conversations and writes in none.
  */
 @Module({
   // LogModule is here for the thread controller alone: reading two people's
   // messages writes an audit row, and that row is the permission model rather
   // than telemetry.
-  imports: [PrismaModule, AuthModule, SystemConfigModule, LogModule],
+  imports: [
+    PrismaModule,
+    AuthModule,
+    SystemConfigModule,
+    LogModule,
+    BusinessSubscriptionModule,
+  ],
   controllers: [
     ProfileChatController,
     AdminConversationController,
