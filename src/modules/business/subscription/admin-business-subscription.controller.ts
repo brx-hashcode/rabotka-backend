@@ -22,8 +22,9 @@ import { RolesGuard } from '../../auth/guards/roles.guard';
 import { LogService } from '../../log/log.service';
 import { BusinessSubscriptionService } from './business-subscription.service';
 import {
+  AdminCancelSubscriptionDto,
+  AdminGrantDto,
   CreateBusinessPlanDto,
-  SubscribeDto,
   UpdateBusinessPlanDto,
 } from './dto/business-plan.dto';
 import { planData, planView } from './plan-view';
@@ -140,11 +141,11 @@ export class AdminBusinessSubscriptionController {
   @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary:
-      'Grant or extend a plan by hand (stacked after the running period)',
+      'Assign a plan by hand: after the running period, or replacing it now (startNow)',
   })
   async grant(
     @Param('id', ParseUUIDPipe) profileId: string,
-    @Body() dto: SubscribeDto,
+    @Body() dto: AdminGrantDto,
     @Req() req: AdminAuthenticatedRequest,
   ) {
     const businessId = await this.businessId(profileId);
@@ -153,6 +154,7 @@ export class AdminBusinessSubscriptionController {
       dto.planId,
       dto.billingPeriod,
       req.user?.userId ?? null,
+      { startNow: dto.startNow ?? false },
     );
     await this.log(
       req,
@@ -161,6 +163,7 @@ export class AdminBusinessSubscriptionController {
       {
         plan: sub.plan.code,
         period: dto.billingPeriod,
+        startNow: dto.startNow ?? false,
       },
       profileId,
     );
@@ -171,24 +174,27 @@ export class AdminBusinessSubscriptionController {
   @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary:
-      'End a period now (or drop one not yet started), and the periods queued after it',
+      'End a period now (or drop one not yet started), and the periods queued after it; the business is told',
   })
   async cancel(
     @Param('id', ParseUUIDPipe) profileId: string,
     @Param('subscriptionId', ParseUUIDPipe) subscriptionId: string,
+    @Body() dto: AdminCancelSubscriptionDto,
     @Req() req: AdminAuthenticatedRequest,
   ) {
     const businessId = await this.businessId(profileId);
+    const reason = dto.reason ?? null;
     await this.subscriptions.cancelByAdmin(
       businessId,
       subscriptionId,
       req.user?.userId ?? null,
+      reason,
     );
     await this.log(
       req,
       'BUSINESS_SUBSCRIPTION_CANCELLED',
       subscriptionId,
-      {},
+      { reason },
       profileId,
     );
     return this.subscriptions.overview(businessId);

@@ -2232,6 +2232,9 @@ enum ProfileNotificationType {
   BUSINESS_SUBSCRIPTION_ACTIVE
   BUSINESS_SUBSCRIPTION_EXPIRING
   BUSINESS_SUBSCRIPTION_EXPIRED
+  /// An admin assigned a plan by hand, or ended one.
+  BUSINESS_SUBSCRIPTION_GRANTED
+  BUSINESS_SUBSCRIPTION_CANCELLED
   /// A business asked a worker from its talent pool to apply to one of its offers.
   JOB_INVITATION
   CV_SCREENING_DONE

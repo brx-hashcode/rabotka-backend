@@ -30,8 +30,10 @@ export {
 export { adminUpdatedEmail } from './admin-updated';
 export {
   businessSubscriptionActiveEmail,
+  businessSubscriptionCancelledEmail,
   businessSubscriptionExpiredEmail,
   businessSubscriptionExpiringEmail,
+  businessSubscriptionGrantedEmail,
   businessTrialStartedEmail,
 } from './business-subscription';
 export {

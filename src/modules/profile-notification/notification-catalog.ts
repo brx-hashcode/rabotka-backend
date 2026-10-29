@@ -220,6 +220,17 @@ export type NotificationInput =
     }
   | { type: 'BUSINESS_SUBSCRIPTION_EXPIRED'; planName: string; trial: boolean }
   | {
+      type: 'BUSINESS_SUBSCRIPTION_GRANTED';
+      planName: string;
+      startsAt: string;
+      endsAt: string;
+    }
+  | {
+      type: 'BUSINESS_SUBSCRIPTION_CANCELLED';
+      planName: string;
+      reason: string | null;
+    }
+  | {
       type: 'JOB_INVITATION';
       jobOfferId: string;
       jobTitle: string;
@@ -601,6 +612,31 @@ export function renderNotification(
           : `Votre abonnement ${input.planName} se termine le ${shortDate(input.endsAt)}. Renouvelez-le pour garder vos avantages.`,
         link: '/espace/abonnement',
       };
+
+    case 'BUSINESS_SUBSCRIPTION_GRANTED': {
+      // Granted while another period runs, it only takes over at its end.
+      const later = new Date(input.startsAt).getTime() > Date.now() + 60_000;
+      return {
+        title: 'Formule attribuée',
+        body: later
+          ? `L’équipe Rabotka vous a attribué la formule ${input.planName}, qui prendra le relais le ${shortDate(input.startsAt)}, jusqu’au ${shortDate(input.endsAt)}.`
+          : `L’équipe Rabotka vous a attribué la formule ${input.planName}, active jusqu’au ${shortDate(input.endsAt)}.`,
+        link: '/espace/abonnement',
+      };
+    }
+
+    case 'BUSINESS_SUBSCRIPTION_CANCELLED': {
+      const reason = input.reason?.trim();
+      // The admin often ends the reason with its own full stop.
+      const motif = reason
+        ? ` Motif : ${reason}${/[.!?…]$/.test(reason) ? '' : '.'}`
+        : '';
+      return {
+        title: 'Abonnement arrêté',
+        body: `Votre abonnement ${input.planName} a été arrêté par l’équipe Rabotka.${motif}`,
+        link: '/espace/abonnement',
+      };
+    }
 
     case 'BUSINESS_SUBSCRIPTION_EXPIRED':
       return {
