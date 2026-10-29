@@ -83,4 +83,12 @@ export class AdminOnboardingStatsDto {
   @IsOptional()
   @IsDateString()
   started_to?: string;
+
+  @ApiPropertyOptional({
+    enum: ['whatsapp', 'business'],
+    description: 'business: email sign-ups of organisations only.',
+  })
+  @IsOptional()
+  @IsIn(['whatsapp', 'business'])
+  entry?: 'whatsapp' | 'business';
 }

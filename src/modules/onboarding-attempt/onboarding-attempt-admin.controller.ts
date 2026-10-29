@@ -57,6 +57,7 @@ export class OnboardingAttemptAdminController {
     return this.attempts.statsForAdmin({
       startedFrom: query.started_from,
       startedTo: query.started_to,
+      entry: query.entry,
     });
   }
 
