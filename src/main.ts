@@ -132,7 +132,7 @@ async function bootstrap() {
       'Comprehensive REST API documentation for the Rabotka backend service. ' +
         'This API provides endpoints for user authentication, job management, application processing, ' +
         'and workforce analytics. All endpoints require JWT bearer token authentication except for public endpoints. ' +
-        'For integration support, contact api-support@rabotka.com',
+        'For integration support, contact contact@rabotka.work',
     )
     .setVersion('1.0.0')
     .addServer(

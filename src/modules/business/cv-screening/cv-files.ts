@@ -3,7 +3,6 @@ import { sniffFileType } from '../../../common/utils/file-signature.util';
 export const DOCX_MIME =
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-/** What a CV may be: a PDF, a Word file, or a photo or scan of one. */
 export type CvFileType =
   | 'application/pdf'
   | typeof DOCX_MIME
@@ -15,9 +14,7 @@ export const MIN_TEXT_CHARS = 200;
 
 const MAX_TEXT_CHARS = 15_000;
 
-/**
- * The type the bytes say, never the declared one. A .docx is a zip, which the zip signature alone cannot tell from any other zip: the declared Word type is accepted only on top of it.
- */
+
 export function cvFileType(
   buffer: Buffer,
   declared: string,
@@ -41,11 +38,7 @@ export const CV_EXTENSION: Record<CvFileType, string> = {
   'image/webp': 'webp',
 };
 
-/**
- * The text of a PDF or Word CV, whitespace folded, cut to what the model
- * reads. Empty for an image, and for a file that does not open — the caller
- * then tries vision, or calls it unreadable.
- */
+
 export async function extractCvText(
   buffer: Buffer,
   type: CvFileType,
