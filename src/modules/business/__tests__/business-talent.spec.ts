@@ -1,3 +1,4 @@
+import { ForbiddenException } from '@nestjs/common';
 import { BusinessTalentService, cleanTags } from '../business-talent.service';
 import { PROFILE_NOTIFICATION_EVENT } from '../../profile-notification/profile-notification.events';
 
@@ -77,6 +78,7 @@ describe('BusinessTalentService', () => {
     const list = await new BusinessTalentService(
       prisma as never,
       {} as never,
+      {} as never,
     ).list('biz');
     expect(list.map((t) => [t.workerId, t.saved])).toEqual([
       ['w1', true],
@@ -96,7 +98,12 @@ describe('BusinessTalentService', () => {
 
   describe('invite', () => {
     const setup = (
-      o: { status?: string; applied?: number; worker?: boolean } = {},
+      o: {
+        status?: string;
+        applied?: number;
+        worker?: boolean;
+        noPlan?: boolean;
+      } = {},
     ) => {
       const emit = jest.fn();
       const prisma = {
@@ -117,11 +124,27 @@ describe('BusinessTalentService', () => {
         },
         application: { count: jest.fn().mockResolvedValue(o.applied ?? 0) },
       };
+      const assertCanInvite =
+        o.noPlan === true
+          ? jest.fn().mockRejectedValue(new ForbiddenException('formule'))
+          : jest.fn().mockResolvedValue(undefined);
       return {
-        service: new BusinessTalentService(prisma as never, { emit } as never),
+        service: new BusinessTalentService(
+          prisma as never,
+          { emit } as never,
+          { assertCanInvite } as never,
+        ),
         emit,
       };
     };
+
+    it('invites nobody without a plan', async () => {
+      const { service, emit } = setup({ noPlan: true });
+      await expect(service.invite('biz', 'w1', 'o1')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(emit).not.toHaveBeenCalled();
+    });
 
     it('notifies the worker once per offer', async () => {
       const { service, emit } = setup();

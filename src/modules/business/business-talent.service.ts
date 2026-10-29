@@ -12,6 +12,7 @@ import {
   notifyProfile,
 } from '../profile-notification/profile-notification.events';
 import { CONTACTABLE_WORKER } from '../recommendation/contactable-worker';
+import { BusinessSubscriptionService } from './subscription/business-subscription.service';
 
 /** Hired, whatever happened after: a worker the business has worked with. */
 const WORKED_WITH: ApplicationStatus[] = [
@@ -91,6 +92,7 @@ export class BusinessTalentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: EventEmitter2,
+    private readonly subscriptions: BusinessSubscriptionService,
   ) {}
 
   async list(profileId: string) {
@@ -236,6 +238,7 @@ export class BusinessTalentService {
    * notifications, where applying is one tap. Once per worker and offer.
    */
   async invite(profileId: string, workerId: string, offerId: string) {
+    await this.subscriptions.assertCanInvite(profileId);
     const [offer, worker, business] = await Promise.all([
       this.prisma.jobOffer.findFirst({
         where: { id: offerId, employer_id: profileId, deleted_at: null },

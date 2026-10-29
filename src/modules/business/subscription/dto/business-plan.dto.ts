@@ -128,11 +128,6 @@ export class CreateBusinessPlanDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()
-  includesFieldAgents?: boolean;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsBoolean()
   priorityVisibility?: boolean;
 
   @ApiPropertyOptional()

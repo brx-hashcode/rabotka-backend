@@ -3479,7 +3479,6 @@ model BusinessPlan {
   /// Job offers published per period. Null: unlimited.
   active_offers_limit   Int?
   includes_preselection Boolean  @default(false)
-  includes_field_agents Boolean  @default(false)
   priority_visibility   Boolean  @default(false)
   /// CVs the AI screening reads per period. Null: unlimited; 0: not included.
   cv_screenings_per_period Int?  @default(0)

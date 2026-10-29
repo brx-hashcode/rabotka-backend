@@ -58,6 +58,9 @@ const NO_PLAN_TO_PUBLISH =
 const NO_PLAN_TO_MESSAGE =
   'Choisissez une formule depuis votre espace, rubrique « Abonnement », pour écrire aux candidats.';
 
+const NO_PLAN_TO_INVITE =
+  'Choisissez une formule depuis votre espace, rubrique « Abonnement », pour inviter des profils à postuler.';
+
 function noOfferLeft(e: {
   plan: { name: string } | null;
   activeOffersLimit: number | null;
@@ -103,7 +106,6 @@ export type BusinessEntitlements = {
   offerDraftsRemaining: number | null;
   offerDraftsQuota: number | null;
   includesPreselection: boolean;
-  includesFieldAgents: boolean;
   priorityVisibility: boolean;
 };
 
@@ -191,7 +193,6 @@ export class BusinessSubscriptionService {
         offerDraftsRemaining: 0,
         offerDraftsQuota: 0,
         includesPreselection: false,
-        includesFieldAgents: false,
         priorityVisibility: false,
       };
     }
@@ -228,7 +229,6 @@ export class BusinessSubscriptionService {
       ),
       offerDraftsQuota: sub.plan.offer_drafts_per_period,
       includesPreselection: sub.plan.includes_preselection,
-      includesFieldAgents: sub.plan.includes_field_agents,
       priorityVisibility: sub.plan.priority_visibility,
     };
   }
@@ -1040,30 +1040,33 @@ export class BusinessSubscriptionService {
    * its conversations, but starts none and writes in none. Non-businesses pass.
    */
   async assertCanMessage(profileId: string): Promise<void> {
+    await this.requirePlan(profileId, NO_PLAN_TO_MESSAGE);
+  }
+
+  /** Throws unless the business has a running plan to invite profiles to apply. Non-businesses pass. */
+  async assertCanInvite(profileId: string): Promise<void> {
+    await this.requirePlan(profileId, NO_PLAN_TO_INVITE);
+  }
+
+  private async requirePlan(profileId: string, message: string) {
     const businessId = await this.businessOf(profileId);
     if (!businessId) return;
     if (!(await this.current(businessId))) {
-      throw new ForbiddenException(NO_PLAN_TO_MESSAGE);
+      throw new ForbiddenException(message);
     }
   }
 
   /** Throws unless the business's plan includes the feature. Non-businesses pass. */
   async assertFeature(
     employerProfileId: string,
-    feature: 'preselection' | 'fieldAgents',
+    feature: 'preselection',
   ): Promise<void> {
     const businessId = await this.businessOf(employerProfileId);
     if (!businessId) return;
     const e = await this.entitlements(businessId);
-    const ok =
-      feature === 'preselection'
-        ? e.includesPreselection
-        : e.includesFieldAgents;
-    if (!ok) {
+    if (feature === 'preselection' && !e.includesPreselection) {
       throw new ForbiddenException(
-        feature === 'preselection'
-          ? 'La recherche de profils est incluse dans les formules supérieures. Changez de formule depuis votre espace.'
-          : 'L’aide d’un agent sur le terrain est incluse dans les formules supérieures. Changez de formule depuis votre espace.',
+        'La recherche de profils est incluse dans les formules supérieures. Changez de formule depuis votre espace.',
       );
     }
   }
