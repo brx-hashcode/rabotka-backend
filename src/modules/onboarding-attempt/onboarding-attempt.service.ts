@@ -343,9 +343,7 @@ export class OnboardingAttemptService {
     return {
       started_at: {
         ...(params.startedFrom ? { gte: new Date(params.startedFrom) } : {}),
-        ...(params.startedTo
-          ? { lte: new Date(`${params.startedTo}T23:59:59.999Z`) }
-          : {}),
+        ...(params.startedTo ? { lte: windowEnd(params.startedTo) } : {}),
       },
     };
   }
@@ -404,4 +402,14 @@ export class OnboardingAttemptService {
       );
     }
   }
+}
+
+/**
+ * The window's last instant: a bare day (« 2026-10-31 ») runs to its end, a
+ * timestamp (what the admin's period comparison sends) is taken as given.
+ */
+export function windowEnd(startedTo: string): Date {
+  return /^\d{4}-\d{2}-\d{2}$/.test(startedTo)
+    ? new Date(`${startedTo}T23:59:59.999Z`)
+    : new Date(startedTo);
 }
