@@ -8,7 +8,6 @@ const plan = (over: Record<string, unknown> = {}) => ({
   unlocks_per_period: 2,
   active_offers_limit: 1,
   includes_preselection: false,
-  includes_field_agents: false,
   priority_visibility: false,
   is_active: true,
   ...over,
@@ -792,6 +791,20 @@ describe('BusinessSubscriptionService', () => {
         profile: { is_business: false, business: null },
       });
       await expect(service.assertCanMessage('p1')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('assertCanInvite', () => {
+    it('refuses a business without a plan', async () => {
+      const { service } = make({ sub: null });
+      await expect(service.assertCanInvite('p1')).rejects.toThrow(
+        /inviter des profils/,
+      );
+    });
+
+    it('lets a business with a running plan invite', async () => {
+      const { service } = make({ sub: running() });
+      await expect(service.assertCanInvite('p1')).resolves.toBeUndefined();
     });
   });
 

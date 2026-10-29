@@ -71,8 +71,7 @@ function worker(id: string) {
   };
 }
 
-
-/** A business's offers reach agents only with field agents in its plan. */
+/** A business's offers reach agents only while it has a running plan. */
 const ELIGIBLE = {
   OR: [
     { employer: { is_business: false } },
@@ -81,7 +80,7 @@ const ELIGIBLE = {
         business: {
           subscriptions: {
             some: expect.objectContaining({
-              plan: { includes_field_agents: true },
+              status: { in: ['TRIAL', 'ACTIVE'] },
             }),
           },
         },

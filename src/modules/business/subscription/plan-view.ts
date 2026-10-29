@@ -18,7 +18,6 @@ export function planView(p: BusinessPlan) {
     cvChatQuestions: p.cv_chat_questions,
     offerDraftsPerPeriod: p.offer_drafts_per_period,
     includesPreselection: p.includes_preselection,
-    includesFieldAgents: p.includes_field_agents,
     priorityVisibility: p.priority_visibility,
     isActive: p.is_active,
     sortOrder: p.sort_order,
@@ -41,7 +40,6 @@ export function planData(dto: {
   cvChatQuestions?: number;
   offerDraftsPerPeriod?: number | null;
   includesPreselection?: boolean;
-  includesFieldAgents?: boolean;
   priorityVisibility?: boolean;
   isActive?: boolean;
   sortOrder?: number;
@@ -61,7 +59,6 @@ export function planData(dto: {
     cv_chat_questions: dto.cvChatQuestions,
     offer_drafts_per_period: dto.offerDraftsPerPeriod,
     includes_preselection: dto.includesPreselection,
-    includes_field_agents: dto.includesFieldAgents,
     priority_visibility: dto.priorityVisibility,
     is_active: dto.isActive,
     sort_order: dto.sortOrder,
