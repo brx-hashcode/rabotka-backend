@@ -263,6 +263,7 @@ export class InterviewService {
       recipientId: updated.business.profile_id,
       input: {
         type: 'INTERVIEW_ANSWERED',
+        applicationId: updated.application_id,
         candidateName: updated.candidate_name,
         jobTitle: updated.job_title,
         when,
