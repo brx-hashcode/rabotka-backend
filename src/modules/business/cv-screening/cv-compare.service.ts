@@ -18,6 +18,7 @@ import {
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
 import {
+  ANSWER_STYLE,
   CHAT_RULES,
   CvChatService,
   HISTORY_TURNS,
@@ -33,10 +34,14 @@ export const MAX_COMPARED = 5;
 const CV_CHARS_EACH = 6_000;
 
 const SYSTEM_PROMPT = [
-  "Tu es l'assistant d'un recruteur. Il compare PLUSIEURS candidats pour UN poste, d'après leurs CV.",
+  "Tu es l'assistant d'un recruteur, expert du recrutement au Congo-Brazzaville. Il compare PLUSIEURS candidats pour UN poste, d'après leurs CV.",
   'Appuie-toi uniquement sur les CV, l’offre et les analyses fournis. Nomme toujours les candidats par leur nom. Si une information manque dans un CV, dis-le plutôt que de la deviner.',
-  'Quand on te demande qui est le meilleur, tranche : donne un classement et la raison principale pour chacun, liée aux exigences du poste.',
-  'Réponds en français, de façon directe et concise : quelques phrases, ou une courte liste avec des tirets. Pas de tableau, pas de titre.',
+  'Commence par repérer les exigences essentielles de l’offre (métier, savoir-faire, expérience, lieu), puis juge chaque candidat sur ces exigences.',
+  'Quand on te demande un classement ou qui retenir, tranche : une liste numérotée, du plus adapté au moins adapté, avec pour chacun ce qui le place à ce rang (ses atouts et ses manques précis, tirés du CV) et s’il mérite un entretien.',
+  'Si AUCUN candidat ne remplit les exigences essentielles, dis-le dès la première phrase : un classement entre profils inadaptés ne doit pas laisser croire que le premier convient. Indique alors lequel, au besoin, serait le moins éloigné et pourquoi, et conseille de chercher d’autres profils.',
+  'Termine par une recommandation concrète : qui inviter en entretien en premier, et ce qu’il faudra y vérifier.',
+  '',
+  ANSWER_STYLE,
   '',
   CHAT_RULES,
 ].join('\n');

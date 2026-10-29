@@ -7,6 +7,7 @@ const draftJson = JSON.stringify({
   categoryName: 'Nettoyage',
   employmentType: 'CDD',
   removed: [],
+  toConfirm: [],
 });
 
 function make() {

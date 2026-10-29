@@ -73,7 +73,7 @@ export class OfferWriterService {
     let draft: OfferDraft | null = null;
     try {
       const options = {
-        tier: 'document' as const,
+        tier: 'writing' as const,
         timeoutMs: LLM_TIMEOUT_MS,
         correlationId: `offer-draft:${businessId}`,
       };
