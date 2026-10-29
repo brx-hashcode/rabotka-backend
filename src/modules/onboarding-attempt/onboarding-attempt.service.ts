@@ -262,6 +262,35 @@ export class OnboardingAttemptService {
     };
   }
 
+  /**
+   * Sign-ups per day (or week), by the day they started: how many began and
+   * how many of those finished. Every bucket of the window is there, empty
+   * ones at zero, so a quiet day reads as one.
+   */
+  async timelineForAdmin(params: {
+    startedFrom?: string;
+    startedTo?: string;
+    entry?: 'whatsapp' | 'business';
+    bucket: TimelineBucket;
+  }): Promise<TimelinePoint[]> {
+    const rows = await this.prisma.onboardingAttempt.findMany({
+      where: {
+        ...this.windowWhere(params),
+        ...(params.entry ? { entry: params.entry } : {}),
+      },
+      select: { started_at: true, stage: true },
+    });
+    const from = params.startedFrom
+      ? new Date(params.startedFrom)
+      : rows.reduce<Date | null>(
+          (min, r) => (!min || r.started_at < min ? r.started_at : min),
+          null,
+        );
+    if (!from) return [];
+    const to = params.startedTo ? windowEnd(params.startedTo) : new Date();
+    return timeline(rows, { from, to, bucket: params.bucket });
+  }
+
   async markContacted(
     id: string,
     adminId: string,
@@ -420,4 +449,54 @@ export function windowEnd(startedTo: string): Date {
   return /^\d{4}-\d{2}-\d{2}$/.test(startedTo)
     ? new Date(`${startedTo}T23:59:59.999Z`)
     : new Date(startedTo);
+}
+
+export type TimelineBucket = 'day' | 'week';
+export type TimelinePoint = {
+  /** The bucket's first day, YYYY-MM-DD, Brazzaville time. */
+  date: string;
+  started: number;
+  completed: number;
+};
+
+/** Brazzaville is UTC+1 all year (no daylight saving). */
+const BRAZZAVILLE_OFFSET_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The bucket a moment falls in: its local day, or that week's Monday. */
+function bucketOf(at: Date, bucket: TimelineBucket): string {
+  const local = new Date(at.getTime() + BRAZZAVILLE_OFFSET_MS);
+  const day = Date.UTC(
+    local.getUTCFullYear(),
+    local.getUTCMonth(),
+    local.getUTCDate(),
+  );
+  const start =
+    bucket === 'week' ? day - ((local.getUTCDay() + 6) % 7) * DAY_MS : day;
+  return new Date(start).toISOString().slice(0, 10);
+}
+
+/** Counts per bucket from `from` to `to`, every bucket present. */
+export function timeline(
+  rows: { started_at: Date; stage: OnboardingStage }[],
+  window: { from: Date; to: Date; bucket: TimelineBucket },
+): TimelinePoint[] {
+  const points = new Map<string, TimelinePoint>();
+  const step = window.bucket === 'week' ? 7 * DAY_MS : DAY_MS;
+  const last = bucketOf(window.to, window.bucket);
+  for (
+    let t = Date.parse(bucketOf(window.from, window.bucket));
+    t <= Date.parse(last);
+    t += step
+  ) {
+    const date = new Date(t).toISOString().slice(0, 10);
+    points.set(date, { date, started: 0, completed: 0 });
+  }
+  for (const r of rows) {
+    const point = points.get(bucketOf(r.started_at, window.bucket));
+    if (!point) continue;
+    point.started += 1;
+    if (r.stage === OnboardingStage.COMPLETED) point.completed += 1;
+  }
+  return [...points.values()];
 }

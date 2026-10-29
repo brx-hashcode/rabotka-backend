@@ -19,6 +19,7 @@ import { OnboardingAttemptService } from './onboarding-attempt.service';
 import {
   AdminListOnboardingAttemptsDto,
   AdminOnboardingStatsDto,
+  AdminOnboardingTimelineDto,
 } from './dto/admin-list-onboarding-attempts.dto';
 import { MarkOnboardingContactedDto } from './dto/mark-contacted.dto';
 
@@ -58,6 +59,20 @@ export class OnboardingAttemptAdminController {
       startedFrom: query.started_from,
       startedTo: query.started_to,
       entry: query.entry,
+    });
+  }
+
+  @Get('timeline')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({
+    summary: 'Sign-ups per day or week: started, and how many finished',
+  })
+  timeline(@Query() query: AdminOnboardingTimelineDto) {
+    return this.attempts.timelineForAdmin({
+      startedFrom: query.started_from,
+      startedTo: query.started_to,
+      entry: query.entry,
+      bucket: query.bucket ?? 'day',
     });
   }
 

@@ -2,6 +2,7 @@ import { OnboardingStage, Prisma, ProfileType } from '@prisma/client';
 import {
   isFurther,
   OnboardingAttemptService,
+  timeline,
   windowEnd,
 } from '../onboarding-attempt.service';
 
@@ -251,5 +252,57 @@ describe('windowEnd', () => {
     expect(windowEnd('2026-09-29T11:25:11.176Z').toISOString()).toBe(
       '2026-09-29T11:25:11.176Z',
     );
+  });
+});
+
+describe('timeline', () => {
+  const at = (iso: string, stage = OnboardingStage.CODE_SENT) => ({
+    started_at: new Date(iso),
+    stage,
+  });
+
+  it('has every day of the window, quiet ones at zero', () => {
+    const points = timeline(
+      [
+        at('2026-10-01T09:00:00Z', OnboardingStage.COMPLETED),
+        at('2026-10-01T10:00:00Z'),
+        at('2026-10-03T12:00:00Z'),
+      ],
+      {
+        from: new Date('2026-10-01T00:00:00Z'),
+        to: new Date('2026-10-03T20:00:00Z'),
+        bucket: 'day',
+      },
+    );
+    expect(points).toEqual([
+      { date: '2026-10-01', started: 2, completed: 1 },
+      { date: '2026-10-02', started: 0, completed: 0 },
+      { date: '2026-10-03', started: 1, completed: 0 },
+    ]);
+  });
+
+  it('counts a late-evening sign-up on its Brazzaville day', () => {
+    // 23:30 UTC is 00:30 the next day in Brazzaville.
+    const points = timeline([at('2026-10-01T23:30:00Z')], {
+      from: new Date('2026-10-01T00:00:00Z'),
+      to: new Date('2026-10-02T12:00:00Z'),
+      bucket: 'day',
+    });
+    expect(points.find((p) => p.started === 1)?.date).toBe('2026-10-02');
+  });
+
+  it('groups by week, from the Monday', () => {
+    const points = timeline(
+      [at('2026-10-28T12:00:00Z'), at('2026-11-01T12:00:00Z')],
+      {
+        from: new Date('2026-10-28T00:00:00Z'),
+        to: new Date('2026-11-02T12:00:00Z'),
+        bucket: 'week',
+      },
+    );
+    expect(points).toEqual([
+      { date: '2026-10-26', started: 2, completed: 0 },
+      { date: '2026-11-02', started: 0, completed: 0 },
+    ]);
   });
 });

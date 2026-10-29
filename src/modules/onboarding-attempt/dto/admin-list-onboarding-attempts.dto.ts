@@ -92,3 +92,13 @@ export class AdminOnboardingStatsDto {
   @IsIn(['whatsapp', 'business'])
   entry?: 'whatsapp' | 'business';
 }
+
+export class AdminOnboardingTimelineDto extends AdminOnboardingStatsDto {
+  @ApiPropertyOptional({
+    enum: ['day', 'week'],
+    description: 'One point per day (default) or per week, Brazzaville time.',
+  })
+  @IsOptional()
+  @IsIn(['day', 'week'])
+  bucket?: 'day' | 'week';
+}
