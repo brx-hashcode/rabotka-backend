@@ -2,6 +2,7 @@ import { OnboardingStage, Prisma, ProfileType } from '@prisma/client';
 import {
   isFurther,
   OnboardingAttemptService,
+  windowEnd,
 } from '../onboarding-attempt.service';
 
 function makePrisma() {
@@ -224,5 +225,19 @@ describe('OnboardingAttemptService', () => {
         prisma.onboardingAttempt.findMany.mock.calls[0][0].where.stage,
       ).toEqual({ in: [OnboardingStage.CODE_SENT] });
     });
+  });
+});
+
+describe('windowEnd', () => {
+  it('runs a bare day to its end', () => {
+    expect(windowEnd('2026-10-31').toISOString()).toBe(
+      '2026-10-31T23:59:59.999Z',
+    );
+  });
+
+  it('takes a timestamp as given (the previous-period comparison)', () => {
+    expect(windowEnd('2026-09-29T11:25:11.176Z').toISOString()).toBe(
+      '2026-09-29T11:25:11.176Z',
+    );
   });
 });
