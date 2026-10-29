@@ -844,6 +844,7 @@ export class BotNotificationService {
         input: {
           type: 'APPLICATION_CANCELLED',
           jobOfferId: app.job_offer.id,
+          applicationId,
           jobTitle: app.job_offer.title,
           workerName: personName(
             app.worker.first_name,

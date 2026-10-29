@@ -2305,6 +2305,7 @@ export class ApplicationService {
         input: {
           type: 'MISSION_COMPLETED',
           jobOfferId: application.job_offer_id,
+          applicationId,
           jobTitle: application.job_offer.title,
           workerName: personName(
             application.worker.first_name,

@@ -106,12 +106,16 @@ export type NotificationInput =
   | {
       type: 'APPLICATION_CANCELLED';
       jobOfferId: string;
+      /** Lets the business space open the candidature itself. */
+      applicationId?: string;
       jobTitle: string;
       workerName: string;
     }
   | {
       type: 'MISSION_COMPLETED';
       jobOfferId: string;
+      /** Lets the business space open the candidature itself. */
+      applicationId?: string;
       jobTitle: string;
       workerName: string;
     }
@@ -253,6 +257,8 @@ export type NotificationInput =
     }
   | {
       type: 'INTERVIEW_ANSWERED';
+      /** The candidature the interview is for; null for an imported CV. */
+      applicationId?: string | null;
       candidateName: string;
       jobTitle: string;
       when: string;
@@ -301,6 +307,23 @@ function fcfa(amount: number): string {
   return `${Math.round(amount)
     .toString()
     .replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} FCFA`;
+}
+
+/** The business space's candidatures, opened on one of them when known. */
+function candidatureLink(applicationId: string | null | undefined): string {
+  return applicationId
+    ? `/espace/candidatures?candidature=${applicationId}`
+    : '/espace/candidatures';
+}
+
+/**
+ * The client app's mission page. The `candidature` query is ignored there;
+ * the business space reads it to open that candidature.
+ */
+function missionLink(jobOfferId: string, applicationId?: string): string {
+  return applicationId
+    ? `/missions/${jobOfferId}?candidature=${applicationId}`
+    : `/missions/${jobOfferId}`;
 }
 
 function quoted(title: string | null | undefined): string {
@@ -430,14 +453,14 @@ export function renderNotification(
       return {
         title: 'Candidature annulée',
         body: `${input.workerName} a annulé sa participation à${quoted(input.jobTitle) || ' votre offre'}.`,
-        link: `/missions/${input.jobOfferId}`,
+        link: missionLink(input.jobOfferId, input.applicationId),
       };
 
     case 'MISSION_COMPLETED':
       return {
         title: 'Mission terminée',
         body: `${input.workerName} a indiqué avoir terminé la mission${quoted(input.jobTitle)}. Vous pouvez maintenant l’évaluer.`,
-        link: `/missions/${input.jobOfferId}`,
+        link: missionLink(input.jobOfferId, input.applicationId),
       };
 
     case 'CONTACT_UNLOCKED':
@@ -448,7 +471,7 @@ export function renderNotification(
           body: `${input.counterpartName} a confirmé${
             input.jobTitle ? ` pour${quoted(input.jobTitle)}` : ''
           } : son contact s’affiche avec « Contact » sur sa candidature.`,
-          link: '/espace/candidatures',
+          link: candidatureLink(input.applicationId),
         };
       }
       // Informational only: the details are delivered on WhatsApp, and the
@@ -684,7 +707,9 @@ export function renderNotification(
             : input.answer === 'DECLINED'
               ? `${input.candidateName} a décliné l’entretien du ${input.when}.`
               : `${input.candidateName} propose un autre moment que le ${input.when}.`,
-        link: '/espace/entretiens',
+        link: input.applicationId
+          ? candidatureLink(input.applicationId)
+          : '/espace/entretiens',
       };
 
     case 'CV_SCREENING_DONE':

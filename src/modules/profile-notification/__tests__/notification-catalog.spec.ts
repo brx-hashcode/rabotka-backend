@@ -161,7 +161,7 @@ describe('renderNotification', () => {
       counterpartName: 'Awa K.',
       jobTitle: 'Plombier',
     });
-    expect(out.link).toBe('/espace/candidatures');
+    expect(out.link).toBe('/espace/candidatures?candidature=a-1');
     expect(out.body).not.toContain('WhatsApp');
     // The space's words, not the mechanics (docs/lexique.md in rabotka-business).
     expect(`${out.title} ${out.body}`).not.toMatch(/débloqu|déblocage/i);
@@ -361,5 +361,62 @@ describe('admin subscription notices', () => {
       expect(out.body).not.toContain('Motif');
       expect(out.body).not.toContain('null');
     }
+  });
+});
+
+describe('business notices open the candidature they are about', () => {
+  it('links a business contact notice to its candidature', () => {
+    const out = renderNotification({
+      type: 'CONTACT_UNLOCKED',
+      recipientRole: 'BUSINESS',
+      applicationId: 'a-1',
+      counterpartName: 'Bakari Y.',
+      jobTitle: 'Encadreur',
+    });
+    expect(out.link).toBe('/espace/candidatures?candidature=a-1');
+  });
+
+  it('falls back to the list without an application', () => {
+    const out = renderNotification({
+      type: 'CONTACT_UNLOCKED',
+      recipientRole: 'BUSINESS',
+      applicationId: null,
+      counterpartName: 'Bakari Y.',
+      jobTitle: null,
+    });
+    expect(out.link).toBe('/espace/candidatures');
+  });
+
+  it('carries the candidature on mission notices, keeping the mission path', () => {
+    for (const type of [
+      'APPLICATION_CANCELLED',
+      'MISSION_COMPLETED',
+    ] as const) {
+      expect(
+        renderNotification({
+          type,
+          jobOfferId: 'o-1',
+          applicationId: 'a-1',
+          jobTitle: 'Plombier',
+          workerName: 'Awa K.',
+        }).link,
+      ).toBe('/missions/o-1?candidature=a-1');
+    }
+  });
+
+  it('opens the candidature of an answered interview, else the interviews', () => {
+    const base = {
+      type: 'INTERVIEW_ANSWERED',
+      candidateName: 'Awa K.',
+      jobTitle: 'Plombier',
+      when: 'jeudi 29 octobre à 10:00',
+      answer: 'CONFIRMED',
+    } as const;
+    expect(renderNotification({ ...base, applicationId: 'a-1' }).link).toBe(
+      '/espace/candidatures?candidature=a-1',
+    );
+    expect(renderNotification({ ...base, applicationId: null }).link).toBe(
+      '/espace/entretiens',
+    );
   });
 });
