@@ -774,6 +774,27 @@ describe('BusinessSubscriptionService', () => {
     });
   });
 
+  describe('assertCanMessage', () => {
+    it('lets a business with a running plan write', async () => {
+      const { service } = make({ sub: running() });
+      await expect(service.assertCanMessage('p1')).resolves.toBeUndefined();
+    });
+
+    it('refuses a business without a plan', async () => {
+      const { service } = make({ sub: null });
+      await expect(service.assertCanMessage('p1')).rejects.toThrow(
+        /écrire aux candidats/,
+      );
+    });
+
+    it('lets a regular employer through untouched', async () => {
+      const { service } = make({
+        profile: { is_business: false, business: null },
+      });
+      await expect(service.assertCanMessage('p1')).resolves.toBeUndefined();
+    });
+  });
+
   describe('consumeOffer', () => {
     it('charges one offer on the current period, never past the plan', async () => {
       const { service, prisma } = make({ sub: running() });

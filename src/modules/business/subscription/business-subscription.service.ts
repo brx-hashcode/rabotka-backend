@@ -55,6 +55,9 @@ const RUNNING: BusinessSubscriptionStatus[] = [
 const NO_PLAN_TO_PUBLISH =
   'Choisissez une formule depuis votre espace, rubrique « Abonnement », pour publier vos offres.';
 
+const NO_PLAN_TO_MESSAGE =
+  'Choisissez une formule depuis votre espace, rubrique « Abonnement », pour écrire aux candidats.';
+
 function noOfferLeft(e: {
   plan: { name: string } | null;
   activeOffersLimit: number | null;
@@ -1030,6 +1033,18 @@ export class BusinessSubscriptionService {
       UPDATE "business_subscriptions"
       SET "offers_published" = GREATEST("offers_published" - 1, 0)
       WHERE "id" = ${subscriptionId}::uuid`;
+  }
+
+  /**
+   * Throws unless the business has a running plan: without one it still reads
+   * its conversations, but starts none and writes in none. Non-businesses pass.
+   */
+  async assertCanMessage(profileId: string): Promise<void> {
+    const businessId = await this.businessOf(profileId);
+    if (!businessId) return;
+    if (!(await this.current(businessId))) {
+      throw new ForbiddenException(NO_PLAN_TO_MESSAGE);
+    }
   }
 
   /** Throws unless the business's plan includes the feature. Non-businesses pass. */
