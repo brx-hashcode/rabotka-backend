@@ -103,6 +103,34 @@ describe('careers slug', () => {
 });
 
 describe('CareersService', () => {
+  it('lists hiring businesses, the busiest first', async () => {
+    const { prisma, service } = serviceWith(null);
+    (prisma.jobOffer as { groupBy?: jest.Mock }).groupBy = jest
+      .fn()
+      .mockResolvedValue([
+        { employer_id: 'p1', _count: { _all: 1 } },
+        { employer_id: 'p2', _count: { _all: 3 } },
+      ]);
+    (prisma.business as { findMany?: jest.Mock }).findMany = jest
+      .fn()
+      .mockResolvedValue([
+        business,
+        { ...business, profile_id: 'p2', public_slug: 'sna', name: 'SNA' },
+      ]);
+
+    const list = await service.companies();
+
+    expect(list.map((c) => [c.slug, c.openOffers])).toEqual([
+      ['sna', 3],
+      ['kamoa', 1],
+    ]);
+    expect(
+      (prisma.business as unknown as { findMany: jest.Mock }).findMany.mock
+        .calls[0][0].where,
+    ).toMatchObject({ verification_status: 'VERIFIED', deleted_at: null });
+    expect(JSON.stringify(list)).not.toContain('rh@kamoa.cg');
+  });
+
   it('only serves a verified, live business', async () => {
     const { prisma, service } = serviceWith(null);
 

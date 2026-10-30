@@ -51,6 +51,8 @@ const OPEN: JobOfferStatus[] = [
   JobOfferStatus.PARTIALLY_FILLED,
 ];
 
+const MAX_COMPANIES = 200;
+
 const COMPANY_SELECT = {
   id: true,
   profile_id: true,
@@ -94,6 +96,35 @@ export class CareersService {
     private readonly layout: LayoutService,
     private readonly events: EventEmitter2,
   ) {}
+
+  /** Verified businesses that are hiring now, those with the most offers first. */
+  async companies() {
+    const open = await this.prisma.jobOffer.groupBy({
+      by: ['employer_id'],
+      where: this.openNow(),
+      _count: { _all: true },
+    });
+    const counts = new Map(open.map((o) => [o.employer_id, o._count._all]));
+    const businesses = await this.prisma.business.findMany({
+      where: {
+        profile_id: { in: [...counts.keys()] },
+        public_slug: { not: null },
+        deleted_at: null,
+        verification_status: VerificationStatus.VERIFIED,
+      },
+      select: COMPANY_SELECT,
+    });
+    return businesses
+      .map((b) => ({
+        ...this.companyView(b),
+        openOffers: counts.get(b.profile_id) ?? 0,
+      }))
+      .sort(
+        (a, b) =>
+          b.openOffers - a.openOffers || a.name.localeCompare(b.name, 'fr'),
+      )
+      .slice(0, MAX_COMPANIES);
+  }
 
   async company(slug: string) {
     const business = await this.business(slug);
@@ -438,10 +469,13 @@ export class CareersService {
     return business;
   }
 
-  /** Open and not past its closing date, which the expiry job may not have reached. */
   private openOffers(employerId: string) {
+    return { ...this.openNow(), employer_id: employerId };
+  }
+
+  /** Open and not past its closing date, which the expiry job may not have reached. */
+  private openNow() {
     return {
-      employer_id: employerId,
       status: { in: OPEN },
       deleted_at: null,
       OR: [{ scheduled_at: null }, { scheduled_at: { gte: new Date() } }],
