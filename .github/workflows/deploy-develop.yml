@@ -368,6 +368,7 @@ jobs:
           APP_ENV=develop
           ARCJET_ENV=development
           API_DOMAIN=api-rabotka.${{ secrets.INFRA_DOMAIN }}
+          BUSINESS_DASHBOARD_URL=https://business-rabotka.${{ secrets.INFRA_DOMAIN }}
           # --- Vova assistant: model ids and budgets ---
           # Not secrets, so they are static here rather than Vault entries.
           #
