@@ -3571,6 +3571,9 @@ model CvScreening {
   job_title       String
   job_text        String            @db.Text
   status          CvScreeningStatus @default(PROCESSING)
+  /// Candidates from the public careers page: one such screening per offer,
+  /// which each new analysis joins, so they can be compared.
+  external        Boolean           @default(false)
   /// The purge date: files and contact details go, scores stay.
   expires_at      DateTime          @db.Timestamptz
   purged_at       DateTime?         @db.Timestamptz
@@ -3582,6 +3585,7 @@ model CvScreening {
   comparisons  CvComparison[]
 
   @@index([business_id, created_at], name: "idx_cv_screening_business_created")
+  @@index([offer_id, external], name: "idx_cv_screening_offer_external")
   @@index([expires_at], name: "idx_cv_screening_expires")
   @@map("cv_screenings")
 }
@@ -3613,6 +3617,7 @@ model CvScreeningResume {
   candidate      Json?
   error          String?
 
+  external_application ExternalApplication?
   screening CvScreening          @relation(fields: [screening_id], references: [id], onDelete: Cascade)
   messages  CvResumeMessage[]
   interviews Interview[]
@@ -3862,7 +3867,11 @@ model ExternalApplication {
   cv_storage_key  String?
   cv_storage_bucket String?
 
+  /// Its analysis, once the business asked for one.
+  cv_resume_id    String?                   @unique @db.Uuid
+
   job_offer JobOffer @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
+  cv_resume CvScreeningResume? @relation(fields: [cv_resume_id], references: [id], onDelete: SetNull)
 
   @@unique([job_offer_id, email])
   @@index([created_at], name: "idx_external_application_created")

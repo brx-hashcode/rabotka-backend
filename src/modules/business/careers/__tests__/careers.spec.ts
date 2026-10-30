@@ -47,6 +47,11 @@ const storage = {
   upload: jest.fn().mockResolvedValue({ key: 'cv-key' }),
   delete: jest.fn().mockResolvedValue(undefined),
 };
+const screenings = { create: jest.fn() };
+const subscriptions = {
+  businessOf: jest.fn().mockResolvedValue('b1'),
+  entitlements: jest.fn().mockResolvedValue({ cvBatchMax: 2, cvFileMaxMb: 5 }),
+};
 const sendMail = jest.fn().mockResolvedValue(undefined);
 const emit = jest.fn();
 
@@ -72,6 +77,8 @@ const serviceWith = (found: unknown, offers: unknown[] = [], one?: unknown) => {
     { sendMail } as never,
     { wrap: jest.fn().mockResolvedValue('<html>') } as never,
     { emit } as never,
+    screenings as never,
+    subscriptions as never,
   );
   return { prisma, service };
 };
@@ -200,6 +207,105 @@ describe('CareersService', () => {
     expect(file.filename).toBe('cv-abcdef12.pdf');
   });
 
+  describe('analyse', () => {
+    const due = (id: string) => ({
+      id,
+      first_name: 'Awa',
+      last_name: 'Ngoma',
+      cv_mime_type: 'application/pdf',
+      cv_size_bytes: 3,
+      cv_storage_key: 'key',
+      cv_storage_bucket: 'bucket',
+    });
+    const withDue = (open: { id: string } | null, ids = ['a1', 'a2']) => {
+      const made = serviceWith(business);
+      const prisma = made.prisma as unknown as {
+        externalApplication: Record<string, jest.Mock>;
+        cvScreening: Record<string, jest.Mock>;
+        cvScreeningResume: Record<string, jest.Mock>;
+      };
+      prisma.externalApplication.findMany = jest
+        .fn()
+        .mockResolvedValue(ids.map(due));
+      prisma.externalApplication.count = jest.fn().mockResolvedValue(3);
+      prisma.cvScreening = {
+        findFirst: jest.fn().mockResolvedValue(open),
+        update: jest.fn().mockResolvedValue({}),
+      };
+      prisma.cvScreeningResume = { update: jest.fn().mockResolvedValue({}) };
+      (storage as { download?: jest.Mock }).download = jest
+        .fn()
+        .mockImplementation(() =>
+          Promise.resolve({
+            body: (async function* () {
+              yield Buffer.from('cv!');
+            })(),
+          }),
+        );
+      screenings.create.mockResolvedValue({
+        id: 's1',
+        resumes: ids.map((id) => ({
+          id: `r-${id}`,
+          fileName: `Awa Ngoma ${id}.pdf`,
+        })),
+      });
+      return { service: made.service, prisma };
+    };
+
+    beforeEach(() => jest.clearAllMocks());
+
+    it('opens the offer’s screening and links each CV to its resume', async () => {
+      const { service, prisma } = withDue(null);
+
+      const result = await service.analyse('p1', 'o1');
+
+      expect(result).toEqual({ screeningId: 's1', analysed: 2, left: 1 });
+      expect(screenings.create.mock.calls[0][3]).toBeUndefined();
+      expect(prisma.cvScreening.update.mock.calls[0][0].data).toEqual({
+        external: true,
+      });
+      expect(
+        prisma.externalApplication.update.mock.calls.map(
+          ([call]) => call.data.cv_resume_id,
+        ),
+      ).toEqual(['r-a1', 'r-a2']);
+      expect(prisma.cvScreeningResume.update.mock.calls[0][0].data).toEqual({
+        file_name: 'Awa Ngoma.pdf',
+      });
+    });
+
+    it('joins the screening already open, so they can be compared', async () => {
+      const { service, prisma } = withDue({ id: 's0' });
+
+      await service.analyse('p1', 'o1');
+
+      expect(screenings.create.mock.calls[0][3]).toBe('s0');
+      expect(prisma.cvScreening.update).not.toHaveBeenCalled();
+    });
+
+    it('only takes what the plan allows at once, not yet read and waiting', async () => {
+      const { service, prisma } = withDue(null);
+
+      await service.analyse('p1', 'o1');
+
+      const query = prisma.externalApplication.findMany.mock.calls[0][0];
+      expect(query.take).toBe(2);
+      expect(query.where).toMatchObject({
+        job_offer_id: 'o1',
+        job_offer: { employer_id: 'p1' },
+        status: 'PENDING',
+        cv_resume_id: null,
+      });
+    });
+
+    it('says so when there is nothing to read', async () => {
+      const { service } = withDue(null, []);
+
+      await expect(service.analyse('p1', 'o1')).rejects.toThrow('Aucun CV');
+      expect(screenings.create).not.toHaveBeenCalled();
+    });
+  });
+
   describe('decisions', () => {
     const application = {
       id: 'a1',
@@ -286,14 +392,14 @@ describe('CareersService', () => {
 
       await service.apply('kamoa', 'RBT-AC5LF', pdf, { ...dto, answers });
 
-      expect(prisma.externalApplication.create.mock.calls[0][0].data).toMatchObject(
-        {
-          first_name: 'Awa',
-          email: 'awa@example.com',
-          knocked_out: true,
-          cv_storage_key: 'cv-key',
-        },
-      );
+      expect(
+        prisma.externalApplication.create.mock.calls[0][0].data,
+      ).toMatchObject({
+        first_name: 'Awa',
+        email: 'awa@example.com',
+        knocked_out: true,
+        cv_storage_key: 'cv-key',
+      });
     });
 
     it('tells the business and the candidate', async () => {

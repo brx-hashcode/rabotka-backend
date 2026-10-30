@@ -21,6 +21,7 @@ import { CvCompareService } from './cv-compare.service';
     MailboxModule,
   ],
   controllers: [CvScreeningController],
+  exports: [CvScreeningService],
   providers: [
     CvScreeningService,
     CvScreeningScheduler,
