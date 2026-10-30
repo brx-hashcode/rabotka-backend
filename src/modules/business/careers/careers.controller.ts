@@ -36,6 +36,14 @@ export class CareersController {
   constructor(private readonly careers: CareersService) {}
 
   @Public()
+  @Get()
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Verified businesses with open offers' })
+  companies() {
+    return this.careers.companies();
+  }
+
+  @Public()
   @Get(':slug')
   @Throttle({ default: { limit: 60, ttl: 60_000 } })
   @ApiOperation({ summary: 'A business and its open offers' })
