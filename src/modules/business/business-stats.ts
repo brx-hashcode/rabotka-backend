@@ -1,6 +1,7 @@
 import {
   ApplicationStatus,
   AssignmentStatus,
+  ExternalApplicationStatus,
   JobOfferStatus,
 } from '@prisma/client';
 
@@ -338,3 +339,30 @@ export function computeBusinessStats(input: StatsInput) {
 }
 
 export type BusinessStats = ReturnType<typeof computeBusinessStats>;
+
+/**
+ * An application from the public careers page, as a stats row: it counts
+ * like any other, whether or not the candidate is on Rabotka. It has no
+ * hiring steps yet, so it stops at viewed or refused.
+ */
+export function externalAsStats(a: {
+  job_offer_id: string;
+  status: ExternalApplicationStatus;
+  created_at: Date;
+  viewed_at: Date | null;
+  refused_at: Date | null;
+}): StatsApplication {
+  const refused = a.status === ExternalApplicationStatus.REFUSED;
+  return {
+    job_offer_id: a.job_offer_id,
+    status: refused
+      ? ApplicationStatus.REJECTED
+      : a.viewed_at
+        ? ApplicationStatus.VIEWED
+        : ApplicationStatus.PENDING,
+    created_at: a.created_at,
+    viewed_at: a.viewed_at,
+    accepted_at: null,
+    rejected_at: a.refused_at,
+  };
+}
