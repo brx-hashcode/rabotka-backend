@@ -50,7 +50,9 @@ const WORKER_SELECT = {
   status: true,
   verification_status: true,
   deleted_at: true,
+  description: true,
   category: { select: { name: true } },
+  categories: { select: { category: { select: { name: true } } } },
 } as const;
 
 type WorkerRow = {
@@ -64,7 +66,9 @@ type WorkerRow = {
   status: string;
   verification_status: string;
   deleted_at: Date | null;
+  description: string;
   category: { name: string } | null;
+  categories: { category: { name: string } | null }[];
 };
 
 /** Tags as people type them: trimmed, no doubles (case-blind), a few short ones. */
@@ -160,7 +164,9 @@ export class BusinessTalentService {
         lastName: w.last_name,
         avatarUrl: w.avatar_url,
         city: w.city,
-        categoryName: w.category?.name ?? null,
+        categoryName:
+          w.categories[0]?.category?.name ?? w.category?.name ?? null,
+        description: w.description || null,
         reliabilityScore: w.reliability_score,
         ratingAvg: w.rating_avg,
         ratingCount: w.rating_count,
