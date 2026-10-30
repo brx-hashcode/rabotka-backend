@@ -163,7 +163,7 @@ describe('renderNotification', () => {
     });
     expect(out.link).toBe('/espace/candidatures?candidature=a-1');
     expect(out.body).not.toContain('WhatsApp');
-    // The space's words, not the mechanics (docs/lexique.md in rabotka-business).
+    // The space's words, not the mechanics.
     expect(`${out.title} ${out.body}`).not.toMatch(/débloqu|déblocage/i);
     expect(out.body).not.toContain('..');
   });
