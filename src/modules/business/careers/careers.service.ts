@@ -285,6 +285,11 @@ export class CareersService {
         `${businessDashboardUrl()}/candidatures`,
       ),
     );
+    // Scored at once, on the plan's « CV inclus ». The candidate is not kept
+    // waiting, and a plan with none left simply shows the CV unscored.
+    void this.analyse(business.profile_id, offer.id, id).catch((err) =>
+      this.logger.warn(`Automatic analysis of ${id} failed: ${String(err)}`),
+    );
     return { sent: true };
   }
 
@@ -332,10 +337,9 @@ export class CareersService {
   }
 
   /**
-   * Scores CVs on the business's request: one, or the offer's not yet read, up
-   * to what its plan takes at once. Never on arrival: the form is public, and
-   * each CV uses one of its « CV inclus ». They all join the offer's one
-   * screening, the only place where they can be compared.
+   * Scores CVs: one as it arrives, or on request those of the offer not yet
+   * read, up to what the plan takes at once. Each uses one of its « CV
+   * inclus ». They all join the offer's one screening, so they can be compared.
    */
   async analyse(profileId: string, offerId: string, applicationId?: string) {
     const businessId = await this.subscriptions.businessOf(profileId);

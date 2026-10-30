@@ -402,6 +402,19 @@ describe('CareersService', () => {
       });
     });
 
+    it('scores the CV as it arrives, and never fails the application for it', async () => {
+      const { service } = serviceWith(business, [], open);
+      const analyse = jest
+        .spyOn(service, 'analyse')
+        .mockRejectedValue(new Error('no CV left'));
+
+      await expect(
+        service.apply('kamoa', 'RBT-AC5LF', pdf, { ...dto, answers }),
+      ).resolves.toEqual({ sent: true });
+
+      expect(analyse).toHaveBeenCalledWith('p1', 'o1', expect.any(String));
+    });
+
     it('tells the business and the candidate', async () => {
       const { service } = serviceWith(business, [], open);
 
