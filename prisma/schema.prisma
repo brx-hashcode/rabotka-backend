@@ -1382,6 +1382,7 @@ model JobOffer {
   applications            Application[]
   /// Questions the candidates answer when they apply (« Questions aux candidats »).
   questions               OfferQuestion[]
+  external_applications   ExternalApplication[]
   assignments             Assignment[]
   contact_unlock_attempts ContactUnlockAttempt[]
   contact_records         ContactRecord[]
@@ -3823,6 +3824,47 @@ model BusinessMailbox {
 
   @@unique([business_id, provider, email])
   @@map("business_mailboxes")
+}
+
+enum ExternalApplicationStatus {
+  PENDING
+  REFUSED
+}
+
+/// An application from a business's public careers page, by someone with no
+/// Rabotka account: `Application` needs a Profile, and no hidden account is
+/// made for them. They gave their contact themselves, so it costs no unlock.
+model ExternalApplication {
+  id              String                    @id @default(uuid()) @db.Uuid
+  created_at      DateTime                  @default(now())
+  updated_at      DateTime                  @updatedAt
+  job_offer_id    String                    @db.Uuid
+  first_name      String
+  last_name       String
+  /// Lower-cased: one application per person and offer.
+  email           String
+  phone           String
+  status          ExternalApplicationStatus @default(PENDING)
+  /// The questions as they were asked: { label, kind, value, passed }[].
+  answers         Json                      @default("[]")
+  /// A wrong answer to an « éliminatoire » question: kept, listed after the others.
+  knocked_out     Boolean                   @default(false)
+  consented_at    DateTime                  @db.Timestamptz
+  viewed_at       DateTime?                 @db.Timestamptz
+  refused_at      DateTime?                 @db.Timestamptz
+  refusal_message String?                   @db.Text
+  cv_file_name    String
+  cv_mime_type    String
+  cv_size_bytes   Int
+  /// Null once purged (EXTERNAL_CV_RETENTION_DAYS, in the CV screening sweep).
+  cv_storage_key  String?
+  cv_storage_bucket String?
+
+  job_offer JobOffer @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
+
+  @@unique([job_offer_id, email])
+  @@index([created_at], name: "idx_external_application_created")
+  @@map("external_applications")
 }
 
 enum OfferQuestionKind {

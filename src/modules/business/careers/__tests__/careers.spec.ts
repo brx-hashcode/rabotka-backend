@@ -5,6 +5,8 @@ import { CareersService } from '../careers.service';
 
 const business = {
   profile_id: 'p1',
+  id: 'b1',
+  email: 'rh@kamoa.cg',
   public_slug: 'kamoa',
   name: 'KAMOA',
   category: 'STARTUP',
@@ -41,6 +43,13 @@ const offer = {
   ],
 };
 
+const storage = {
+  upload: jest.fn().mockResolvedValue({ key: 'cv-key' }),
+  delete: jest.fn().mockResolvedValue(undefined),
+};
+const sendMail = jest.fn().mockResolvedValue(undefined);
+const emit = jest.fn();
+
 const serviceWith = (found: unknown, offers: unknown[] = [], one?: unknown) => {
   const prisma = {
     business: { findFirst: jest.fn().mockResolvedValue(found) },
@@ -48,8 +57,23 @@ const serviceWith = (found: unknown, offers: unknown[] = [], one?: unknown) => {
       findMany: jest.fn().mockResolvedValue(offers),
       findFirst: jest.fn().mockResolvedValue(one ?? null),
     },
+    externalApplication: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      findFirst: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ id: 'a1' }),
+      update: jest.fn().mockResolvedValue({}),
+    },
   };
-  return { prisma, service: new CareersService(prisma as never) };
+  const service = new CareersService(
+    prisma as never,
+    storage as never,
+    { get: jest.fn().mockResolvedValue('kyc-bucket') } as never,
+    { get: jest.fn() } as never,
+    { sendMail } as never,
+    { wrap: jest.fn().mockResolvedValue('<html>') } as never,
+    { emit } as never,
+  );
+  return { prisma, service };
 };
 
 describe('careers slug', () => {
@@ -127,5 +151,102 @@ describe('CareersService', () => {
     });
     expect(JSON.stringify(shown)).not.toContain('accepted');
     expect(JSON.stringify(shown)).not.toContain('knockout');
+  });
+
+  describe('apply', () => {
+    const pdf = {
+      buffer: Buffer.from('%PDF-1.7 a real enough start'),
+      mimetype: 'application/pdf',
+      originalname: 'cv.pdf',
+      size: 26,
+    } as Express.Multer.File;
+    const dto = {
+      firstName: ' Awa ',
+      lastName: 'Ngoma',
+      email: 'Awa@Example.com',
+      phone: '+242061234567',
+      consent: 'true',
+    };
+    const open = { ...offer, id: 'o1' };
+    const answers = JSON.stringify([{ questionId: 'q1', value: 'no' }]);
+
+    beforeEach(() => jest.clearAllMocks());
+
+    it('keeps a wrong « éliminatoire » answer, flagged', async () => {
+      const { prisma, service } = serviceWith(business, [], open);
+
+      await service.apply('kamoa', 'RBT-AC5LF', pdf, { ...dto, answers });
+
+      expect(prisma.externalApplication.create.mock.calls[0][0].data).toMatchObject(
+        {
+          first_name: 'Awa',
+          email: 'awa@example.com',
+          knocked_out: true,
+          cv_storage_key: 'cv-key',
+        },
+      );
+    });
+
+    it('tells the business and the candidate', async () => {
+      const { service } = serviceWith(business, [], open);
+
+      await service.apply('kamoa', 'RBT-AC5LF', pdf, { ...dto, answers });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(emit).toHaveBeenCalled();
+      expect(sendMail.mock.calls.map(([mail]) => mail.to)).toEqual([
+        'awa@example.com',
+        'rh@kamoa.cg',
+      ]);
+    });
+
+    it('refuses a second application with the same email', async () => {
+      const { prisma, service } = serviceWith(business, [], open);
+      prisma.externalApplication.findUnique.mockResolvedValue({ id: 'a0' });
+
+      await expect(
+        service.apply('kamoa', 'RBT-AC5LF', pdf, { ...dto, answers }),
+      ).rejects.toThrow('déjà postulé');
+      expect(storage.upload).not.toHaveBeenCalled();
+    });
+
+    it('refuses a file that is not a PDF or Word document', async () => {
+      const { service } = serviceWith(business, [], open);
+
+      await expect(
+        service.apply(
+          'kamoa',
+          'RBT-AC5LF',
+          { ...pdf, buffer: Buffer.from('not a cv at all') },
+          { ...dto, answers },
+        ),
+      ).rejects.toThrow('PDF');
+      expect(storage.upload).not.toHaveBeenCalled();
+    });
+
+    it('needs the CV', async () => {
+      const { service } = serviceWith(business, [], open);
+
+      await expect(
+        service.apply('kamoa', 'RBT-AC5LF', undefined, dto),
+      ).rejects.toThrow('CV');
+    });
+
+    it('drops what a bot sends, and says it worked', async () => {
+      const { prisma, service } = serviceWith(business, [], open);
+
+      await expect(
+        service.apply('kamoa', 'RBT-AC5LF', pdf, { ...dto, website: 'x' }),
+      ).resolves.toEqual({ sent: true });
+      expect(prisma.externalApplication.create).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 for a closed offer', async () => {
+      const { service } = serviceWith(business);
+
+      await expect(
+        service.apply('kamoa', 'RBT-X', pdf, dto),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
   });
 });

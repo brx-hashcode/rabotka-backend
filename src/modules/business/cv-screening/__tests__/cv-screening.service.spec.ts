@@ -42,6 +42,10 @@ const ANSWER = JSON.stringify({
 function make() {
   const prisma: any = {
     jobOffer: { findFirst: jest.fn() },
+    externalApplication: {
+      findMany: jest.fn().mockResolvedValue([]),
+      update: jest.fn(),
+    },
     businessSubscription: {
       findUnique: jest
         .fn()

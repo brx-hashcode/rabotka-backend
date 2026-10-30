@@ -51,6 +51,9 @@ import {
 
 export type CvScreeningJob = { resumeId: string };
 
+/** How long a CV from a public careers page is kept. */
+const EXTERNAL_CV_RETENTION_DAYS = 90;
+
 /** One uploaded file, as multer hands it over. */
 export type CvUpload = {
   originalname: string;
@@ -662,6 +665,30 @@ export class CvScreeningService {
    * The periodic sweep: CVs stuck in the queue are given up (and given back),
    * and screenings past their retention lose their files and contact details.
    */
+  /** CVs sent from a public careers page go after a while; the row stays. */
+  private async purgeExternalCvs(now: Date): Promise<void> {
+    const before = new Date(
+      now.getTime() - EXTERNAL_CV_RETENTION_DAYS * 24 * 3600 * 1000,
+    );
+    const due = await this.prisma.externalApplication.findMany({
+      where: { created_at: { lt: before }, cv_storage_key: { not: null } },
+      select: { id: true, cv_storage_key: true, cv_storage_bucket: true },
+      take: 200,
+    });
+    for (const a of due) {
+      await this.deleteObjects([
+        {
+          key: a.cv_storage_key as string,
+          bucket: a.cv_storage_bucket ?? undefined,
+        },
+      ]);
+      await this.prisma.externalApplication.update({
+        where: { id: a.id },
+        data: { cv_storage_key: null, cv_storage_bucket: null },
+      });
+    }
+  }
+
   async sweep(now = new Date()): Promise<{ stuck: number; purged: number }> {
     const stuck = await this.prisma.cvScreeningResume.findMany({
       where: {
@@ -677,6 +704,8 @@ export class CvScreeningService {
         error: "L'analyse n'a pas abouti.",
       });
     }
+
+    await this.purgeExternalCvs(now);
 
     const expired = await this.prisma.cvScreening.findMany({
       where: { expires_at: { lte: now }, purged_at: null },

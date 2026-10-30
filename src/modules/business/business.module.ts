@@ -19,8 +19,7 @@ import { ApplicantScoreModule } from './applicant-score/applicant-score.module';
 import { BusinessContractModule } from './contract/business-contract.module';
 import { BusinessReportController } from './report/business-report.controller';
 import { BusinessReportService } from './report/business-report.service';
-import { CareersController } from './careers/careers.controller';
-import { CareersService } from './careers/careers.service';
+import { CareersModule } from './careers/careers.module';
 
 /** Business accounts: the public catalog and the dashboard's own routes. */
 @Module({
@@ -37,13 +36,13 @@ import { CareersService } from './careers/careers.service';
     RefusalsModule,
     ApplicantScoreModule,
     BusinessContractModule,
+    CareersModule,
   ],
   controllers: [
     BusinessCatalogController,
     BusinessController,
     AdminBusinessSubscriptionController,
     BusinessReportController,
-    CareersController,
   ],
   providers: [
     BusinessCheckoutService,
@@ -51,7 +50,6 @@ import { CareersService } from './careers/careers.service';
     BusinessContactsService,
     BusinessTalentService,
     BusinessReportService,
-    CareersService,
   ],
 })
 export class BusinessModule {}
