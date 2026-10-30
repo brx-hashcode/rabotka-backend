@@ -3,6 +3,7 @@ import {
   IsEmail,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   MaxLength,
 } from 'class-validator';
@@ -45,4 +46,14 @@ export class RefuseExternalDto {
   @IsString()
   @MaxLength(500)
   message?: string;
+}
+
+export class AnalyseExternalDto {
+  @IsUUID()
+  offerId!: string;
+
+  /** Just this one; without it, those of the offer not yet read. */
+  @IsOptional()
+  @IsUUID()
+  applicationId?: string;
 }

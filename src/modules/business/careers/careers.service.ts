@@ -38,6 +38,8 @@ import {
 import { notifyProfile } from '../../profile-notification/profile-notification.events';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { BUSINESS_CATEGORY_LABELS } from '../business-catalog';
+import { CvScreeningService } from '../cv-screening/cv-screening.service';
+import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
 import {
   CV_EXTENSION,
   cvFileType,
@@ -95,6 +97,8 @@ export class CareersService {
     private readonly mail: MailService,
     private readonly layout: LayoutService,
     private readonly events: EventEmitter2,
+    private readonly screenings: CvScreeningService,
+    private readonly subscriptions: BusinessSubscriptionService,
   ) {}
 
   /** Verified businesses that are hiring now, those with the most offers first. */
@@ -289,7 +293,18 @@ export class CareersService {
     const rows = await this.prisma.externalApplication.findMany({
       where: { job_offer: { employer_id: profileId } },
       orderBy: [{ knocked_out: 'asc' }, { created_at: 'desc' }],
-      include: { job_offer: { select: { id: true, title: true } } },
+      include: {
+        job_offer: { select: { id: true, title: true } },
+        cv_resume: {
+          select: {
+            id: true,
+            status: true,
+            score: true,
+            summary: true,
+            screening_id: true,
+          },
+        },
+      },
     });
     return rows.map((a) => ({
       id: a.id,
@@ -306,7 +321,111 @@ export class CareersService {
       createdAt: a.created_at.toISOString(),
       viewedAt: a.viewed_at?.toISOString() ?? null,
       offer: a.job_offer,
+      analysis: a.cv_resume && {
+        resumeId: a.cv_resume.id,
+        screeningId: a.cv_resume.screening_id,
+        status: a.cv_resume.status,
+        score: a.cv_resume.score,
+        summary: a.cv_resume.summary,
+      },
     }));
+  }
+
+  /**
+   * Scores CVs on the business's request: one, or the offer's not yet read, up
+   * to what its plan takes at once. Never on arrival: the form is public, and
+   * each CV uses one of its « CV inclus ». They all join the offer's one
+   * screening, the only place where they can be compared.
+   */
+  async analyse(profileId: string, offerId: string, applicationId?: string) {
+    const businessId = await this.subscriptions.businessOf(profileId);
+    if (!businessId) throw new NotFoundException('Organisation introuvable.');
+    const e = await this.subscriptions.entitlements(businessId);
+    const where = {
+      job_offer_id: offerId,
+      job_offer: { employer_id: profileId, deleted_at: null },
+      status: ExternalApplicationStatus.PENDING,
+      cv_resume_id: null,
+      cv_storage_key: { not: null },
+      ...(applicationId
+        ? { id: applicationId }
+        : { cv_size_bytes: { lte: e.cvFileMaxMb * 1024 * 1024 } }),
+    };
+    const [due, total] = await Promise.all([
+      this.prisma.externalApplication.findMany({
+        where,
+        orderBy: { created_at: 'asc' },
+        take: e.cvBatchMax,
+      }),
+      this.prisma.externalApplication.count({ where }),
+    ]);
+    if (due.length === 0) {
+      throw new BadRequestException('Aucun CV à analyser.');
+    }
+
+    // The application's id in the file name: it finds its resume again below.
+    const files = await Promise.all(
+      due.map(async (a) => ({
+        originalname: `${a.first_name} ${a.last_name} ${a.id}.${CV_EXTENSION[a.cv_mime_type as CvFileType] ?? 'pdf'}`,
+        mimetype: a.cv_mime_type,
+        size: a.cv_size_bytes,
+        buffer: await this.readCv(a),
+      })),
+    );
+
+    const open = await this.prisma.cvScreening.findFirst({
+      where: {
+        business_id: businessId,
+        offer_id: offerId,
+        external: true,
+        purged_at: null,
+        expires_at: { gt: new Date() },
+      },
+      select: { id: true },
+    });
+    const screening = await this.screenings.create(
+      profileId,
+      files,
+      { offerId },
+      open?.id,
+    );
+    if (!open) {
+      await this.prisma.cvScreening.update({
+        where: { id: screening.id },
+        data: { external: true },
+      });
+    }
+    for (const a of due) {
+      const resume = screening.resumes.find((r) => r.fileName.includes(a.id));
+      if (!resume) continue;
+      await this.prisma.externalApplication.update({
+        where: { id: a.id },
+        data: { cv_resume_id: resume.id },
+      });
+      await this.prisma.cvScreeningResume.update({
+        where: { id: resume.id },
+        data: { file_name: resume.fileName.replace(` ${a.id}`, '') },
+      });
+    }
+    return {
+      screeningId: screening.id,
+      analysed: due.length,
+      left: total - due.length,
+    };
+  }
+
+  private async readCv(a: {
+    cv_storage_key: string | null;
+    cv_storage_bucket: string | null;
+  }): Promise<Buffer> {
+    const { body } = await this.storage.download(a.cv_storage_key as string, {
+      bucket: a.cv_storage_bucket ?? undefined,
+    });
+    const chunks: Buffer[] = [];
+    for await (const chunk of body as AsyncIterable<Buffer | string>) {
+      chunks.push(Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
   }
 
   async cvFile(profileId: string, id: string) {

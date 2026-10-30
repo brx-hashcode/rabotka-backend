@@ -25,7 +25,11 @@ import { Public } from '../../auth/decorators/public.decorator';
 import { BusinessProfileGuard } from '../../auth/guards/business-profile.guard';
 import { ProfileAuthGuard } from '../../auth/guards/profile-auth.guard';
 import { CareersService } from './careers.service';
-import { ApplyDto, RefuseExternalDto } from './dto/apply.dto';
+import {
+  AnalyseExternalDto,
+  ApplyDto,
+  RefuseExternalDto,
+} from './dto/apply.dto';
 
 const MAX_CV_BYTES = 10 * 1024 * 1024;
 
@@ -99,6 +103,22 @@ export class ExternalApplicationsController {
     @Res() res: Response,
   ): Promise<void> {
     sendPrivateFile(res, await this.careers.cvFile(req.user.profileId, id));
+  }
+
+  @Post('analyse')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Score these CVs; each uses one of the plan’s « CV inclus »',
+  })
+  analyse(
+    @Req() req: { user: { profileId: string } },
+    @Body() dto: AnalyseExternalDto,
+  ) {
+    return this.careers.analyse(
+      req.user.profileId,
+      dto.offerId,
+      dto.applicationId,
+    );
   }
 
   @Post(':id/retain')

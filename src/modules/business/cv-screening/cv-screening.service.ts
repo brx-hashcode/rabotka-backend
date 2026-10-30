@@ -114,6 +114,8 @@ export class CvScreeningService {
     profileId: string,
     files: CvUpload[],
     job: { offerId?: string; jobTitle?: string; jobText?: string },
+    /** Adds to this screening instead of opening a new one. */
+    into?: string,
   ) {
     const businessId = await this.requireBusiness(profileId);
     const e = await this.subscriptions.entitlements(businessId);
@@ -186,29 +188,41 @@ export class CvScreeningService {
     });
     const retentionDays = plan?.plan.cv_retention_days ?? 30;
 
-    const screening = await this.prisma.cvScreening.create({
-      data: {
-        id,
-        business_id: businessId,
-        subscription_id: subscriptionId,
-        offer_id: brief.offerId,
-        job_title: brief.title,
-        job_text: brief.text,
-        expires_at: new Date(Date.now() + retentionDays * 24 * 60 * 60 * 1000),
-        resumes: {
-          create: typed.map(({ file, type, name }, i) => ({
-            file_name: name.slice(0, 200),
-            mime_type: type,
-            size_bytes: file.size,
-            storage_key: uploaded[i].key,
-            storage_bucket: uploaded[i].bucket,
-          })),
-        },
-      },
-      include: { resumes: true },
-    });
+    const resumes = typed.map(({ file, type, name }, i) => ({
+      file_name: name.slice(0, 200),
+      mime_type: type,
+      size_bytes: file.size,
+      storage_key: uploaded[i].key,
+      storage_bucket: uploaded[i].bucket,
+    }));
+    const screening = into
+      ? await this.prisma.cvScreening.update({
+          where: { id: into },
+          data: {
+            status: CvScreeningStatus.PROCESSING,
+            resumes: { create: resumes },
+          },
+          include: { resumes: true },
+        })
+      : await this.prisma.cvScreening.create({
+          data: {
+            id,
+            business_id: businessId,
+            subscription_id: subscriptionId,
+            offer_id: brief.offerId,
+            job_title: brief.title,
+            job_text: brief.text,
+            expires_at: new Date(
+              Date.now() + retentionDays * 24 * 60 * 60 * 1000,
+            ),
+            resumes: { create: resumes },
+          },
+          include: { resumes: true },
+        });
 
+    const fresh = new Set(resumes.map((r) => r.storage_key));
     for (const resume of screening.resumes) {
+      if (!resume.storage_key || !fresh.has(resume.storage_key)) continue;
       await this.queue.addJob<CvScreeningJob>(CV_SCREENING_QUEUE, {
         resumeId: resume.id,
       });
