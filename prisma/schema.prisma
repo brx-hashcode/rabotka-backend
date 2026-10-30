@@ -3828,6 +3828,7 @@ model BusinessMailbox {
 
 enum ExternalApplicationStatus {
   PENDING
+  RETAINED
   REFUSED
 }
 
@@ -3851,6 +3852,7 @@ model ExternalApplication {
   knocked_out     Boolean                   @default(false)
   consented_at    DateTime                  @db.Timestamptz
   viewed_at       DateTime?                 @db.Timestamptz
+  retained_at     DateTime?                 @db.Timestamptz
   refused_at      DateTime?                 @db.Timestamptz
   refusal_message String?                   @db.Text
   cv_file_name    String

@@ -51,6 +51,30 @@ export class JobOfferController {
     return this.jobOfferService.create(req.user.profileId, dto);
   }
 
+  @Post(':id/close')
+  @UseGuards(ActiveProfileGuard)
+  @ApiBearerAuth()
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Stop recruiting on an open offer (employer).',
+    description:
+      'Expires it, or fills it if someone is hired. Candidates still waiting are told.',
+  })
+  @ApiResponse({ status: 201, description: 'The offer is closed' })
+  @ApiResponse({
+    status: 400,
+    description: 'Already closed, or a payment is due',
+  })
+  @ApiResponse({ status: 403, description: 'Not the offer owner' })
+  @ApiResponse({ status: 404, description: 'Job offer not found' })
+  async close(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
+    await this.jobOfferService.closeByEmployer(id, req.user.profileId);
+    return { closed: true };
+  }
+
   @Post(':id/republish')
   @UseGuards(ActiveProfileGuard, KycVerifiedGuard)
   @ApiBearerAuth()

@@ -93,6 +93,15 @@ export class ExternalApplicationsController {
     sendPrivateFile(res, await this.careers.cvFile(req.user.profileId, id));
   }
 
+  @Post(':id/retain')
+  @ApiOperation({ summary: 'Retain it; the candidate is told by e-mail' })
+  retain(
+    @Req() req: { user: { profileId: string } },
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.careers.retain(req.user.profileId, id);
+  }
+
   @Post(':id/refuse')
   @ApiOperation({ summary: 'Refuse it; the candidate is told by e-mail' })
   refuse(

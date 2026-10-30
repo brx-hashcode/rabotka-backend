@@ -342,27 +342,31 @@ export type BusinessStats = ReturnType<typeof computeBusinessStats>;
 
 /**
  * An application from the public careers page, as a stats row: it counts
- * like any other, whether or not the candidate is on Rabotka. It has no
- * hiring steps yet, so it stops at viewed or refused.
+ * like any other, whether or not the candidate is on Rabotka. Retained is
+ * its hire: there is no contract or mission behind it.
  */
 export function externalAsStats(a: {
   job_offer_id: string;
   status: ExternalApplicationStatus;
   created_at: Date;
   viewed_at: Date | null;
+  retained_at: Date | null;
   refused_at: Date | null;
 }): StatsApplication {
-  const refused = a.status === ExternalApplicationStatus.REFUSED;
+  const status =
+    a.status === ExternalApplicationStatus.REFUSED
+      ? ApplicationStatus.REJECTED
+      : a.status === ExternalApplicationStatus.RETAINED
+        ? ApplicationStatus.ACCEPTED
+        : a.viewed_at
+          ? ApplicationStatus.VIEWED
+          : ApplicationStatus.PENDING;
   return {
     job_offer_id: a.job_offer_id,
-    status: refused
-      ? ApplicationStatus.REJECTED
-      : a.viewed_at
-        ? ApplicationStatus.VIEWED
-        : ApplicationStatus.PENDING,
+    status,
     created_at: a.created_at,
     viewed_at: a.viewed_at,
-    accepted_at: null,
+    accepted_at: a.retained_at,
     rejected_at: a.refused_at,
   };
 }

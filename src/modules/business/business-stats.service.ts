@@ -58,6 +58,7 @@ export class BusinessStatsService {
           status: true,
           created_at: true,
           viewed_at: true,
+          retained_at: true,
           refused_at: true,
         },
       }),
