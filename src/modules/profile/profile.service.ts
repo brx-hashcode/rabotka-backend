@@ -380,6 +380,7 @@ export type AdminProfileDetailResponse = AdminProfileListItem & {
 export type AdminBusinessDetail = {
   id: string;
   name: string;
+  publicSlug: string | null;
   /** The organisation's logo: the account's own profile picture. */
   logoUrl: string | null;
   category: BusinessCategory;
