@@ -1,3 +1,4 @@
+import { uniqueBusinessSlug } from '../business/careers/careers-slug';
 import { countCountedCancellations } from '../application/cancellation-counter';
 import {
   AdminCacheService,
@@ -2270,6 +2271,7 @@ export class ProfileService {
     return {
       id: business.id,
       name: business.name,
+      publicSlug: business.public_slug,
       logoUrl: business.profile.avatar_url,
       category: business.category,
       categoryLabel: BUSINESS_CATEGORY_LABELS[business.category],
@@ -3145,6 +3147,7 @@ export class ProfileService {
       await tx.business.create({
         data: {
           profile_id: createdProfile.id,
+          public_slug: await uniqueBusinessSlug(tx, business.name),
           name: business.name,
           category: business.category,
           legal_form: business.legalForm ?? null,

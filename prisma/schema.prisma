@@ -3384,6 +3384,9 @@ model Business {
   /// business must be able to see it again to add it to another agenda; it
   /// only reads the interviews, and replacing it cuts the old one off.
   calendar_token      String?            @unique
+  /// Its public careers page: /carrieres/<public_slug>. Null only for a row
+  /// created before the migration ran; every sign-up sets it.
+  public_slug         String?            @unique
   /// Raison sociale.
   name                String
   category            BusinessCategory

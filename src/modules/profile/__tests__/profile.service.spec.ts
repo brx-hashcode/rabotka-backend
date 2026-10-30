@@ -1753,7 +1753,10 @@ describe('ProfileService', () => {
 
     const txWithBusiness = () => {
       const tx = makePrisma() as any;
-      tx.business = { create: jest.fn().mockResolvedValue({ id: 'b-1' }) };
+      tx.business = {
+        create: jest.fn().mockResolvedValue({ id: 'b-1' }),
+        findMany: jest.fn().mockResolvedValue([]),
+      };
       prisma.$transaction.mockImplementation((fn: any) => fn(tx));
       return tx;
     };
@@ -1777,6 +1780,7 @@ describe('ProfileService', () => {
       expect(tx.business.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           profile_id: 'new-p-1',
+          public_slug: 'ecole-les-lauriers',
           name: 'École Les Lauriers',
           category: 'SCHOOL',
           email: 'contact@ecole.cg',
