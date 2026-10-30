@@ -33,7 +33,12 @@ import {
 import { notifyProfile } from '../../profile-notification/profile-notification.events';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { BUSINESS_CATEGORY_LABELS } from '../business-catalog';
-import { CV_EXTENSION, cvFileType, DOCX_MIME } from '../cv-screening/cv-files';
+import {
+  CV_EXTENSION,
+  cvFileType,
+  type CvFileType,
+  DOCX_MIME,
+} from '../cv-screening/cv-files';
 import type { ApplyDto } from './dto/apply.dto';
 
 const OPEN: JobOfferStatus[] = [
@@ -259,6 +264,7 @@ export class CareersService {
       knockedOut: a.knocked_out,
       hasCv: a.cv_storage_key !== null,
       cvFileName: a.cv_file_name,
+      cvMimeType: a.cv_mime_type,
       createdAt: a.created_at.toISOString(),
       viewedAt: a.viewed_at?.toISOString() ?? null,
       offer: a.job_offer,
@@ -284,7 +290,8 @@ export class CareersService {
     return {
       ...downloaded,
       contentType: application.cv_mime_type,
-      filename: application.cv_file_name,
+      // Not the candidate's own name: it goes in a header, and they typed it.
+      filename: `cv-${application.id.slice(0, 8)}.${CV_EXTENSION[application.cv_mime_type as CvFileType] ?? 'bin'}`,
     };
   }
 

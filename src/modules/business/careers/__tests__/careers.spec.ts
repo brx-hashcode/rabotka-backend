@@ -153,6 +153,25 @@ describe('CareersService', () => {
     expect(JSON.stringify(shown)).not.toContain('knockout');
   });
 
+  it('never puts the name a candidate gave their file in a header', async () => {
+    const { prisma, service } = serviceWith(business);
+    prisma.externalApplication.findFirst.mockResolvedValue({
+      id: 'abcdef12-0000',
+      cv_storage_key: 'key',
+      cv_storage_bucket: 'bucket',
+      cv_mime_type: 'application/pdf',
+      cv_file_name: 'mon "cv" — 2026.pdf',
+      viewed_at: new Date(),
+    });
+    (storage as { download?: jest.Mock }).download = jest
+      .fn()
+      .mockResolvedValue({ body: 'bytes' });
+
+    const file = await service.cvFile('p1', 'abcdef12-0000');
+
+    expect(file.filename).toBe('cv-abcdef12.pdf');
+  });
+
   describe('apply', () => {
     const pdf = {
       buffer: Buffer.from('%PDF-1.7 a real enough start'),
