@@ -172,6 +172,68 @@ describe('CareersService', () => {
     expect(file.filename).toBe('cv-abcdef12.pdf');
   });
 
+  describe('decisions', () => {
+    const application = {
+      id: 'a1',
+      status: 'PENDING',
+      email: 'awa@example.com',
+      first_name: 'Awa',
+      job_offer: { title: 'Dev' },
+    };
+    const owned = (status: string) => {
+      const made = serviceWith(business);
+      made.prisma.externalApplication.findFirst.mockResolvedValue({
+        ...application,
+        status,
+      });
+      (made.prisma.business as { findUnique?: jest.Mock }).findUnique = jest
+        .fn()
+        .mockResolvedValue({ name: 'KAMOA' });
+      return made;
+    };
+
+    beforeEach(() => jest.clearAllMocks());
+
+    it('retains a candidate and tells them', async () => {
+      const { prisma, service } = owned('PENDING');
+
+      await service.retain('p1', 'a1');
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(
+        prisma.externalApplication.update.mock.calls[0][0].data.status,
+      ).toBe('RETAINED');
+      expect(sendMail.mock.calls[0][0].to).toBe('awa@example.com');
+    });
+
+    it('does not retain someone already refused', async () => {
+      const { service } = owned('REFUSED');
+
+      await expect(service.retain('p1', 'a1')).rejects.toThrow('refusée');
+    });
+
+    it('does not refuse someone already retained', async () => {
+      const { prisma, service } = owned('RETAINED');
+
+      await service.refuse('p1', 'a1');
+
+      expect(prisma.externalApplication.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses those still waiting when the offer closes', async () => {
+      const { prisma, service } = owned('PENDING');
+      (
+        prisma.externalApplication as unknown as { findMany: jest.Mock }
+      ).findMany = jest.fn().mockResolvedValue([{ id: 'a1' }]);
+
+      await service.refuseWaiting({ jobOfferId: 'o1', employerId: 'p1' });
+
+      expect(
+        prisma.externalApplication.update.mock.calls[0][0].data.status,
+      ).toBe('REFUSED');
+    });
+  });
+
   describe('apply', () => {
     const pdf = {
       buffer: Buffer.from('%PDF-1.7 a real enough start'),

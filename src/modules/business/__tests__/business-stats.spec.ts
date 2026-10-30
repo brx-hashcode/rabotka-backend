@@ -170,7 +170,12 @@ describe('business dashboard stats', () => {
 
 describe('externalAsStats', () => {
   const at = new Date('2026-10-30');
-  const row = { job_offer_id: 'o1', created_at: at, refused_at: null };
+  const row = {
+    job_offer_id: 'o1',
+    created_at: at,
+    retained_at: null,
+    refused_at: null,
+  };
 
   it('waits for review until the CV is read', () => {
     expect(
@@ -179,6 +184,17 @@ describe('externalAsStats', () => {
     expect(
       externalAsStats({ ...row, status: 'PENDING', viewed_at: at }).status,
     ).toBe('VIEWED');
+  });
+
+  it('counts a retained candidate as a hire', () => {
+    expect(
+      externalAsStats({
+        ...row,
+        status: 'RETAINED',
+        viewed_at: at,
+        retained_at: at,
+      }),
+    ).toMatchObject({ status: 'ACCEPTED', accepted_at: at });
   });
 
   it('counts a refusal, and never a hire', () => {

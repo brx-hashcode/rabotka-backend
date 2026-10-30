@@ -33,6 +33,21 @@ export function applicationRefusedEmail(
   `;
 }
 
+export function applicationRetainedEmail(
+  firstName: string,
+  businessName: string,
+  jobTitle: string,
+): string {
+  return `
+    <p>Bonjour ${escapeHtml(firstName)},</p>
+    <p>
+      Bonne nouvelle : ${escapeHtml(businessName)} a retenu votre candidature
+      pour <strong>${escapeHtml(jobTitle)}</strong>.
+    </p>
+    <p>Le recruteur vous contacte directement pour la suite.</p>
+  `;
+}
+
 export function newExternalApplicationEmail(
   candidateName: string,
   jobTitle: string,

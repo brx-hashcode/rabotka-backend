@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import {
   ExternalApplicationStatus,
   JobOfferStatus,
@@ -28,8 +28,13 @@ import { MailService } from '../../mail/mail.service';
 import {
   applicationReceivedEmail,
   applicationRefusedEmail,
+  applicationRetainedEmail,
   newExternalApplicationEmail,
 } from '../../mail/templates/external-application';
+import {
+  JOB_OFFER_CLOSED,
+  type JobOfferClosedEvent,
+} from '../../job-offer/job-offer.events';
 import { notifyProfile } from '../../profile-notification/profile-notification.events';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { BUSINESS_CATEGORY_LABELS } from '../business-catalog';
@@ -153,7 +158,9 @@ export class CareersService {
     if (!file) throw new BadRequestException('Ajoutez votre CV.');
     const type = cvFileType(file.buffer, file.mimetype);
     if (type !== 'application/pdf' && type !== DOCX_MIME) {
-      throw new BadRequestException('Le CV doit être un PDF ou un fichier Word.');
+      throw new BadRequestException(
+        'Le CV doit être un PDF ou un fichier Word.',
+      );
     }
 
     const email = dto.email.trim().toLowerCase();
@@ -295,10 +302,55 @@ export class CareersService {
     };
   }
 
-  async refuse(profileId: string, id: string, message?: string) {
+  async retain(profileId: string, id: string) {
     const application = await this.owned(profileId, id);
     if (application.status === ExternalApplicationStatus.REFUSED) {
-      return { refused: true };
+      throw new BadRequestException('Cette candidature a été refusée.');
+    }
+    if (application.status === ExternalApplicationStatus.RETAINED) {
+      return { retained: true };
+    }
+    await this.prisma.externalApplication.update({
+      where: { id },
+      data: {
+        status: ExternalApplicationStatus.RETAINED,
+        retained_at: new Date(),
+      },
+    });
+    const name = await this.businessName(profileId);
+    void this.send(
+      application.email,
+      `Votre candidature chez ${name}`,
+      applicationRetainedEmail(
+        application.first_name,
+        name,
+        application.job_offer.title,
+      ),
+    );
+    return { retained: true };
+  }
+
+  /** A closed offer: those still waiting hear it, as Rabotka's candidates do. */
+  @OnEvent(JOB_OFFER_CLOSED)
+  async refuseWaiting({ jobOfferId, employerId }: JobOfferClosedEvent) {
+    const waiting = await this.prisma.externalApplication.findMany({
+      where: {
+        job_offer_id: jobOfferId,
+        status: ExternalApplicationStatus.PENDING,
+      },
+      select: { id: true },
+    });
+    for (const { id } of waiting) {
+      await this.refuse(employerId, id, 'Cette offre est maintenant fermée.');
+    }
+  }
+
+  async refuse(profileId: string, id: string, message?: string) {
+    const application = await this.owned(profileId, id);
+    if (application.status !== ExternalApplicationStatus.PENDING) {
+      return {
+        refused: application.status === ExternalApplicationStatus.REFUSED,
+      };
     }
     const refusalMessage = message?.trim() || null;
     await this.prisma.externalApplication.update({
@@ -309,11 +361,7 @@ export class CareersService {
         refusal_message: refusalMessage,
       },
     });
-    const business = await this.prisma.business.findUnique({
-      where: { profile_id: profileId },
-      select: { name: true },
-    });
-    const name = business?.name ?? 'Le recruteur';
+    const name = await this.businessName(profileId);
     void this.send(
       application.email,
       `Votre candidature chez ${name}`,
@@ -325,6 +373,14 @@ export class CareersService {
       ),
     );
     return { refused: true };
+  }
+
+  private async businessName(profileId: string): Promise<string> {
+    const business = await this.prisma.business.findUnique({
+      where: { profile_id: profileId },
+      select: { name: true },
+    });
+    return business?.name ?? 'Le recruteur';
   }
 
   private async owned(profileId: string, id: string) {

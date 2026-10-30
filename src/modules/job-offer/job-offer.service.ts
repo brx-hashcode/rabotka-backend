@@ -32,6 +32,7 @@ import { MailService } from '../mail/mail.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
+import { JOB_OFFER_CLOSED, type JobOfferClosedEvent } from './job-offer.events';
 import { MIN_HOURS_FROM_NOW } from './job-offer.constants';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
@@ -1920,6 +1921,68 @@ export class JobOfferService {
    * cancelled assignments, no longer stand in the way. Soft delete (reversible,
    * preserves history) mirroring {@link deleteJobOfferByAdmin}.
    */
+  /**
+   * The employer stops recruiting. With nobody hired it expires, and can be
+   * republished; with hires it is filled, and they carry on. Candidates still
+   * waiting are told, on Rabotka here and from the careers page by the event.
+   */
+  async closeByEmployer(id: string, actorProfileId: string): Promise<void> {
+    const offer = await this.prisma.jobOffer.findFirst({
+      where: { id, deleted_at: null },
+      select: { id: true, employer_id: true, status: true },
+    });
+    if (!offer) {
+      throw new NotFoundException('Offre introuvable');
+    }
+    if (offer.employer_id !== actorProfileId) {
+      throw new ForbiddenException(
+        "Vous n'êtes pas l'employeur de cette offre",
+      );
+    }
+    if (
+      offer.status !== JobOfferStatus.ACTIVE &&
+      offer.status !== JobOfferStatus.PARTIALLY_FILLED
+    ) {
+      throw new BadRequestException('Cette offre est déjà fermée.');
+    }
+
+    const closedIds = await this.prisma.$transaction(async (tx) => {
+      const paying = await tx.application.count({
+        where: {
+          job_offer_id: id,
+          deleted_at: null,
+          status: ApplicationStatus.WAITING_PAYMENT,
+        },
+      });
+      if (paying > 0) {
+        throw new BadRequestException(
+          'Un candidat attend un paiement : réglez-le avant de fermer cette offre.',
+        );
+      }
+      const ids = await this.rejectWaitingApplicants(tx, id, [
+        ApplicationStatus.PENDING,
+        ApplicationStatus.VIEWED,
+      ]);
+      await tx.jobOffer.update({
+        where: { id },
+        data: {
+          status:
+            offer.status === JobOfferStatus.PARTIALLY_FILLED
+              ? JobOfferStatus.FILLED
+              : JobOfferStatus.EXPIRED,
+        },
+      });
+      return ids;
+    });
+
+    await this.cache.invalidate('jobs');
+    this.notifyClosedApplicants(closedIds, 'closeByEmployer');
+    this.eventEmitter.emit(JOB_OFFER_CLOSED, {
+      jobOfferId: id,
+      employerId: actorProfileId,
+    } satisfies JobOfferClosedEvent);
+  }
+
   async deleteByEmployer(id: string, actorProfileId: string): Promise<void> {
     const offer = await this.prisma.jobOffer.findFirst({
       where: { id, deleted_at: null },
