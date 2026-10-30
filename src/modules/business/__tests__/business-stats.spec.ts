@@ -9,6 +9,7 @@ import {
   type StatsApplication,
   type StatsInput,
   type StatsOffer,
+  externalAsStats,
 } from '../business-stats';
 
 const NOW = new Date('2026-10-26T12:00:00Z');
@@ -164,5 +165,33 @@ describe('business dashboard stats', () => {
     expect(s.quality.ratingGiven).toBe(4.5);
     expect(s.topOffers.map((o) => o.id)).toEqual(['open', 'old']);
     expect(s.applications.perOffer).toBe(2);
+  });
+});
+
+describe('externalAsStats', () => {
+  const at = new Date('2026-10-30');
+  const row = { job_offer_id: 'o1', created_at: at, refused_at: null };
+
+  it('waits for review until the CV is read', () => {
+    expect(
+      externalAsStats({ ...row, status: 'PENDING', viewed_at: null }).status,
+    ).toBe('PENDING');
+    expect(
+      externalAsStats({ ...row, status: 'PENDING', viewed_at: at }).status,
+    ).toBe('VIEWED');
+  });
+
+  it('counts a refusal, and never a hire', () => {
+    const stats = externalAsStats({
+      ...row,
+      status: 'REFUSED',
+      viewed_at: at,
+      refused_at: at,
+    });
+    expect(stats).toMatchObject({
+      status: 'REJECTED',
+      rejected_at: at,
+      accepted_at: null,
+    });
   });
 });
