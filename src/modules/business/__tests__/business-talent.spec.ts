@@ -13,7 +13,9 @@ const worker = (first: string) => ({
   status: 'ACTIVE',
   verification_status: 'VERIFIED',
   deleted_at: null,
-  category: { name: 'Nettoyage' },
+  description: 'Dix ans de ménage en bureaux.',
+  category: { name: 'Ancien métier' },
+  categories: [{ category: { name: 'Nettoyage' } }],
 });
 
 describe('BusinessTalentService', () => {
@@ -25,6 +27,33 @@ describe('BusinessTalentService', () => {
     expect(
       cleanTags(Array.from({ length: 12 }, (_, i) => `t${i}`)),
     ).toHaveLength(8);
+  });
+
+  it('reads the trade from the worker\'s domains, with the description', async () => {
+    const prisma = {
+      businessTalent: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            worker_id: 'w1',
+            note: null,
+            tags: [],
+            created_at: new Date('2026-10-20'),
+            worker: worker('Awa'),
+          },
+        ]),
+      },
+      application: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const service = new BusinessTalentService(
+      prisma as never,
+      {} as never,
+      {} as never,
+    );
+
+    const [talent] = await service.list('e1');
+
+    expect(talent.categoryName).toBe('Nettoyage');
+    expect(talent.description).toBe('Dix ans de ménage en bureaux.');
   });
 
   it('lists kept workers first, then those already hired, with their history', async () => {
