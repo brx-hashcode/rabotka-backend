@@ -37,6 +37,7 @@ import {
   ApplicationStatus,
   AssignmentStatus,
   EmploymentType,
+  ExternalApplicationStatus,
   JobOfferStatus,
   Prisma,
 } from '@prisma/client';
@@ -344,6 +345,9 @@ export class ReminderProcessor {
           in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
         },
         employer: { is_business: true },
+        external_applications: {
+          none: { status: ExternalApplicationStatus.RETAINED },
+        },
         OR: [
           { scheduled_at: { gte: now, lte: horizon } },
           {
@@ -789,6 +793,10 @@ export class ReminderProcessor {
             is_business: true,
           },
         },
+        external_applications: {
+          where: { status: ExternalApplicationStatus.RETAINED },
+          select: { id: true },
+        },
         applications: {
           where: {
             status: {
@@ -821,6 +829,11 @@ export class ReminderProcessor {
         .map((a) => a.id),
     );
 
+    // Hired from the careers page: the post is filled, not left empty.
+    const staffedIds = overdue
+      .filter((o) => (o.external_applications ?? []).length > 0)
+      .map((o) => o.id);
+
     await this.prisma.$transaction([
       ...(unconfirmedIds.length > 0
         ? [
@@ -834,8 +847,14 @@ export class ReminderProcessor {
           ]
         : []),
       this.prisma.jobOffer.updateMany({
-        where: { id: { in: overdueIds } },
+        where: {
+          id: { in: overdueIds.filter((id) => !staffedIds.includes(id)) },
+        },
         data: { status: JobOfferStatus.EXPIRED },
+      }),
+      this.prisma.jobOffer.updateMany({
+        where: { id: { in: staffedIds } },
+        data: { status: JobOfferStatus.FILLED },
       }),
       // Cancel the uncommitted applicants left behind by the expired offers so
       // they don't linger as PENDING forever. Workers are notified below.
@@ -864,7 +883,9 @@ export class ReminderProcessor {
     );
 
     for (const offer of overdue) {
-      await this.notifyExpiredOffer(offer);
+      if (!staffedIds.includes(offer.id)) {
+        await this.notifyExpiredOffer(offer);
+      }
       for (const app of offer.applications ?? []) {
         await this.notifyExpiredApplicant(offer, app.worker);
       }

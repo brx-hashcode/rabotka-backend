@@ -124,6 +124,7 @@ describe('ApplicationService', () => {
         count: jest.fn(),
       },
       payment: { create: jest.fn() },
+      externalApplication: { count: jest.fn().mockResolvedValue(0) },
       assignment: {
         create: jest.fn(),
         updateMany: jest.fn(),

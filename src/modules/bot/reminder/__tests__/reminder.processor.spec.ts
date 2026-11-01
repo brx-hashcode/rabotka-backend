@@ -666,6 +666,27 @@ describe('ReminderProcessor', () => {
       expect(mail.sendMail.mock.calls[0][0].to).toBe('rh@kamoa.test');
     });
 
+    it('fills an overdue offer hired from the careers page, without an expiry notice', async () => {
+      prisma.jobOffer.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+        {
+          id: 'offer-1',
+          title: 'Comptable',
+          employer_id: 'biz-1',
+          employer: { phone: null, first_name: 'Kamoa' },
+          external_applications: [{ id: 'ext-1' }],
+          applications: [],
+        },
+      ]);
+
+      await processor.process({ data: { type: 'scan' } });
+
+      expect(prisma.jobOffer.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['offer-1'] } },
+        data: { status: JobOfferStatus.FILLED },
+      });
+      expect(inAppNotifications(events.emit, 'JOB_OFFER_EXPIRED')).toEqual([]);
+    });
+
     it('frees the assignment of a retained candidate who never confirmed', async () => {
       prisma.assignment = {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
