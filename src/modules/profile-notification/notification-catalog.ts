@@ -204,6 +204,12 @@ export type NotificationInput =
       jobOfferId: string;
       jobTitle: string;
     }
+  | {
+      type: 'JOB_OFFER_EXPIRING';
+      jobOfferId: string;
+      jobTitle: string;
+      endsAt: string;
+    }
   | { type: 'KYC_REJECTED'; reason: string | null }
   | { type: 'ACCOUNT_SUSPENDED'; reason: string | null }
   | { type: 'UNLOCK_CONVERTED_TO_CREDIT'; amount: number }
@@ -582,6 +588,13 @@ export function renderNotification(
             body: `${quoted(input.jobTitle).trim()} est arrivée à échéance et votre candidature est close. D’autres missions sont disponibles.`,
             link: '/recherche-offres',
           };
+
+    case 'JOB_OFFER_EXPIRING':
+      return {
+        title: 'Votre offre se termine bientôt',
+        body: `${quoted(input.jobTitle).trim()} se termine le ${shortDate(input.endsAt)} et aucun candidat n’est encore retenu.`,
+        link: `/job-offers/${input.jobOfferId}`,
+      };
 
     case 'KYC_REJECTED':
       return {

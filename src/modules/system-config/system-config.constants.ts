@@ -235,6 +235,14 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    // 0 = no reminder.
+    key: 'business.offer_expiry_reminder_days',
+    value: '3',
+    category: ConfigCategory.FEES,
+    label: 'Entreprises – Rappel avant la fin d’une offre (jours, 0 = aucun)',
+    isSecret: false,
+  },
+  {
     key: 'business.renewal_reminder_days',
     value: '7,1',
     category: ConfigCategory.FEES,

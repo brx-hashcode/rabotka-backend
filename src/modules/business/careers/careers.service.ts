@@ -36,6 +36,7 @@ import {
   type JobOfferClosedEvent,
 } from '../../job-offer/job-offer.events';
 import { notifyProfile } from '../../profile-notification/profile-notification.events';
+import { refuseOutsideCandidates } from './refuse-closed-offer';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { BUSINESS_CATEGORY_LABELS } from '../business-catalog';
 import { CvScreeningService } from '../cv-screening/cv-screening.service';
@@ -486,17 +487,12 @@ export class CareersService {
 
   /** A closed offer: those still waiting hear it, as Rabotka's candidates do. */
   @OnEvent(JOB_OFFER_CLOSED)
-  async refuseWaiting({ jobOfferId, employerId }: JobOfferClosedEvent) {
-    const waiting = await this.prisma.externalApplication.findMany({
-      where: {
-        job_offer_id: jobOfferId,
-        status: ExternalApplicationStatus.PENDING,
-      },
-      select: { id: true },
-    });
-    for (const { id } of waiting) {
-      await this.refuse(employerId, id, 'Cette offre est maintenant fermée.');
-    }
+  async refuseWaiting({ jobOfferId }: JobOfferClosedEvent) {
+    await refuseOutsideCandidates(
+      { prisma: this.prisma, mail: this.mail, layout: this.layout },
+      { job_offer_id: jobOfferId },
+      (err) => this.logger.warn(`Careers mail failed: ${String(err)}`),
+    );
   }
 
   async refuse(profileId: string, id: string, message?: string) {

@@ -40,6 +40,7 @@ import { BroadcastProcessor } from './modules/broadcast/broadcast.processor';
 import { BotPauseService } from './modules/bot/services/bot-pause.service';
 import { NotificationDispatcher } from './modules/notification-dispatch/notification-dispatcher.service';
 import { ProfileNotificationService } from './modules/profile-notification/profile-notification.service';
+import { workerInAppEvents } from './modules/bot/reminder/worker-in-app-events';
 import { ProfileWebPushService } from './modules/profile-notification/profile-web-push.service';
 import { WebPushService } from './common/services/web-push/web-push.service';
 
@@ -174,6 +175,10 @@ export class WorkerModule {
               queue: unknown,
               redis: Redis,
               systemConfig: SystemConfigService,
+              idempotency: IdempotencyService,
+              mail: MailService,
+              layout: LayoutService,
+              config: ConfigService,
             ) => {
               // Minimal stubs for services only needed in full bot context
               const contactUnlockStub = {
@@ -182,6 +187,20 @@ export class WorkerModule {
               const botNotificationStub = {
                 sendContactUnlockCreditConversionNotification: async () => {},
               } as never;
+              // The same in-app service the broadcasts use. No dispatcher on
+              // purpose: passing one puts these WhatsApp sends behind the
+              // admin switches, which default to off.
+              const inApp = new ProfileNotificationService(
+                prisma as never,
+                idempotency,
+                systemConfig,
+                { emitNew: () => undefined } as never,
+                new EventEmitter2(),
+                new ProfileWebPushService(
+                  prisma as never,
+                  new WebPushService(prisma as never, config),
+                ),
+              );
               return new ReminderProcessor(
                 prisma as never,
                 whatsApp,
@@ -190,6 +209,10 @@ export class WorkerModule {
                 systemConfig,
                 contactUnlockStub,
                 botNotificationStub,
+                undefined,
+                workerInAppEvents(inApp),
+                mail,
+                layout,
               );
             },
             inject: [
@@ -198,6 +221,10 @@ export class WorkerModule {
               QueueService,
               REDIS_CONNECTION,
               SystemConfigService,
+              IdempotencyService,
+              MailService,
+              LayoutService,
+              ConfigService,
             ],
           },
         ]
