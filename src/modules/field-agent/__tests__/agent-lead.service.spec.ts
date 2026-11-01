@@ -254,8 +254,16 @@ describe('AgentLeadService', () => {
 
     it('answers 404 to an agent with no zone', async () => {
       prisma.agentZone.findMany.mockResolvedValue([]);
+      prisma.jobOffer.count.mockResolvedValue(0);
       await expect(service.claim('agent-1', 'lead-1')).rejects.toThrow(
         NotFoundException,
+      );
+    });
+
+    it('says the offer closed, on the agent own lead', async () => {
+      prisma.jobOffer.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+      await expect(service.claim('agent-1', 'lead-1')).rejects.toThrow(
+        "Cette offre n'est plus disponible.",
       );
     });
   });
@@ -263,6 +271,13 @@ describe('AgentLeadService', () => {
   describe('revealPhone', () => {
     it('still shows the number of a worker this agent placed', async () => {
       onLoad({ status: AgentLeadStatus.CONFIRMED, claim_expires_at: null });
+      const result = await service.revealPhone('agent-1', 'lead-1');
+      expect(result.phone).toBe('+242061234567');
+    });
+
+    it('still shows it once the job closed', async () => {
+      onLoad({ status: AgentLeadStatus.CONFIRMED, claim_expires_at: null });
+      prisma.jobOffer.count.mockResolvedValue(0);
       const result = await service.revealPhone('agent-1', 'lead-1');
       expect(result.phone).toBe('+242061234567');
     });
@@ -492,7 +507,14 @@ describe('AgentLeadService', () => {
         avatar_url: null,
         city: 'Brazzaville',
       },
-      job_offer: { id: 'job-1', title: 'Serveuse', city: 'Brazzaville' },
+      rejection_source: null,
+      job_offer: {
+        id: 'job-1',
+        title: 'Serveuse',
+        city: 'Brazzaville',
+        status: 'FILLED',
+        deleted_at: null,
+      },
       agent_lead: { id: 'lead-2' },
       ...over,
     });
@@ -519,7 +541,14 @@ describe('AgentLeadService', () => {
           applicationId: 'app-2',
           status: 'ACCEPTED',
           leadId: 'lead-2',
-          job: { id: 'job-1', title: 'Serveuse', city: 'Brazzaville' },
+          rejectionSource: null,
+          job: {
+            id: 'job-1',
+            title: 'Serveuse',
+            city: 'Brazzaville',
+            status: 'FILLED',
+            available: true,
+          },
           worker: expect.objectContaining({ firstName: 'Awa' }),
           commission: null,
         }),
@@ -527,10 +556,11 @@ describe('AgentLeadService', () => {
       expect(result[0].worker).not.toHaveProperty('phone');
     });
 
-    it('rejects a job outside the zones', async () => {
+    it('still lists them once the job left the agent zones or closed', async () => {
       prisma.jobOffer.count.mockResolvedValue(0);
-      await expect(service.listPlacements('agent-1', 'job-1')).rejects.toThrow(
-        'Offre introuvable',
+
+      await expect(service.listPlacements('agent-1', 'job-1')).resolves.toEqual(
+        [expect.objectContaining({ applicationId: 'app-2' })],
       );
     });
 

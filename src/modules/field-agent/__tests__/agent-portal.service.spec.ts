@@ -473,12 +473,78 @@ describe('AgentPortalService', () => {
       }
     });
 
-    it('answers 404 to an agent with no zone at all', async () => {
+    it('answers 404 to an agent with no zone and no placement on it', async () => {
       prisma.agentZone.findMany.mockResolvedValue([]);
+      prisma.jobOffer.findFirst.mockResolvedValue(null);
       await expect(service.getJob('agent-1', 'job-1')).rejects.toThrow(
         NotFoundException,
       );
-      expect(prisma.jobOffer.findFirst).not.toHaveBeenCalled();
+      const { where } = prisma.jobOffer.findFirst.mock.calls[0][0];
+      expect(where.applications.some.agent_id).toBe('agent-1');
+    });
+
+    it('gives an open job in the zones, ready to place on', async () => {
+      await expect(service.getJob('agent-1', 'job-1')).resolves.toMatchObject({
+        access: 'full',
+        canPlace: true,
+      });
+    });
+
+    describe('a job they placed someone on, closed since', () => {
+      const closed = (...statuses: string[]) =>
+        prisma.jobOffer.findFirst
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({
+            ...JOB_ROW,
+            address: '12 rue Mbochi',
+            amount: 50000,
+            note: 'Apporter ses outils',
+            status: 'FILLED',
+            applications: statuses.map((status) => ({ status })),
+          });
+
+      it('shows it in full while a candidate of theirs is on it', async () => {
+        closed('ACCEPTED');
+
+        const job = await service.getJob('agent-1', 'job-1');
+
+        expect(job).toMatchObject({
+          status: 'FILLED',
+          address: '12 rue Mbochi',
+          amount: 50000,
+          access: 'full',
+          canPlace: false,
+        });
+      });
+
+      it('holds back address and pay once they were all refused', async () => {
+        closed('REJECTED', 'CANCELLED');
+
+        const job = await service.getJob('agent-1', 'job-1');
+
+        expect(job).toMatchObject({
+          title: JOB_ROW.title,
+          access: 'limited',
+          canPlace: false,
+          address: null,
+          amount: null,
+          paymentFlow: null,
+          note: null,
+        });
+      });
+
+      it('finds only offers with their own live application', async () => {
+        closed('ACCEPTED');
+
+        await service.getJob('agent-1', 'job-1');
+
+        const { where } = prisma.jobOffer.findFirst.mock.calls[1][0];
+        expect(where).toEqual({
+          id: 'job-1',
+          deleted_at: null,
+          applications: { some: { agent_id: 'agent-1', deleted_at: null } },
+        });
+      });
     });
   });
 

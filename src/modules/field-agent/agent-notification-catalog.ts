@@ -65,7 +65,6 @@ export function listCities(cities: string[]): string {
 }
 
 const WALLET = '/profile?tab=portefeuille';
-const PLACEMENTS = '/profile?tab=placements';
 
 export function renderAgentNotification(
   input: AgentNotificationInput,
@@ -111,28 +110,28 @@ export function renderAgentNotification(
         type: AgentNotificationType.PLACEMENT_ACCEPTED,
         title: `${input.workerName} est retenu(e)`,
         body: `L'employeur a retenu ${input.workerName} pour « ${input.jobTitle} ».`,
-        link: PLACEMENTS,
+        link: `/jobs/${input.jobId}`,
       };
     case 'PLACEMENT_STARTED':
       return {
         type: AgentNotificationType.PLACEMENT_STARTED,
         title: `${input.workerName} a commencé`,
         body: `${input.workerName} a commencé la mission « ${input.jobTitle} ».`,
-        link: PLACEMENTS,
+        link: `/jobs/${input.jobId}`,
       };
     case 'PLACEMENT_COMPLETED':
       return {
         type: AgentNotificationType.PLACEMENT_COMPLETED,
         title: 'Mission terminée',
         body: `${input.workerName} a terminé « ${input.jobTitle} ».`,
-        link: PLACEMENTS,
+        link: `/jobs/${input.jobId}`,
       };
     case 'PLACEMENT_ENDED':
       return {
         type: AgentNotificationType.PLACEMENT_ENDED,
         title: 'Placement non abouti',
         body: `La candidature de ${input.workerName} pour « ${input.jobTitle} » a été refusée ou annulée.`,
-        link: PLACEMENTS,
+        link: `/jobs/${input.jobId}`,
       };
     case 'NEW_JOBS_IN_ZONE':
       return input.job && input.count === 1
