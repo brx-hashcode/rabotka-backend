@@ -89,6 +89,8 @@ export type BusinessEntitlements = {
   activeOffersLimit: number | null;
   /** Offers online right now (information only: the limit is per period). */
   activeOffers: number;
+  /** Has published at least once, whatever became of the offer since. */
+  hasPublishedOffer: boolean;
   /** Offers published during the current period. */
   offersPublished: number;
   /** Offers that may still be published this period. Null: unlimited. */
@@ -166,11 +168,19 @@ export class BusinessSubscriptionService {
       ? await this.prisma.jobOffer.count({
           where: {
             employer_id: business.profile_id,
-            status: JobOfferStatus.ACTIVE,
+            status: {
+              in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
+            },
             deleted_at: null,
           },
         })
       : 0;
+    const hasPublishedOffer = business
+      ? (await this.prisma.jobOffer.count({
+          where: { employer_id: business.profile_id },
+          take: 1,
+        })) > 0
+      : false;
     if (!sub) {
       return {
         plan: null,
@@ -181,6 +191,7 @@ export class BusinessSubscriptionService {
         unlocksUsed: 0,
         activeOffersLimit: 0,
         activeOffers,
+        hasPublishedOffer,
         offersPublished: 0,
         offersRemaining: 0,
         cvRemaining: 0,
@@ -208,6 +219,7 @@ export class BusinessSubscriptionService {
       unlocksUsed: sub.unlocks_used,
       activeOffersLimit: sub.plan.active_offers_limit,
       activeOffers,
+      hasPublishedOffer,
       offersPublished: sub.offers_published,
       offersRemaining: remaining(
         sub.plan.active_offers_limit,

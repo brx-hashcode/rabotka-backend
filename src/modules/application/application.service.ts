@@ -35,6 +35,7 @@ import {
 } from '../penalty/penalty.utils';
 import { closesOnFill } from '../job-offer/utils/employment-type.util';
 import { isTerminalJobOfferStatus } from '../job-offer/utils/job-offer-status.util';
+import { takenSeats } from '../job-offer/utils/offer-seats';
 import { closeRecruitedOfferTx } from '../job-offer/utils/close-recruited-offer';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
@@ -907,17 +908,10 @@ export class ApplicationService {
       // Lock the job offer row to prevent concurrent over-acceptance
       await tx.$executeRaw`SELECT id FROM "job_offers" WHERE id = ${application.job_offer_id}::uuid FOR UPDATE`;
 
-      const currentAcceptedCount = await tx.application.count({
-        where: {
-          job_offer_id: application.job_offer_id,
-          status: {
-            in: [
-              ApplicationStatus.ACCEPTED,
-              'WAITING_PAYMENT' as ApplicationStatus,
-            ],
-          },
-        },
-      });
+      const currentAcceptedCount = await takenSeats(
+        tx,
+        application.job_offer_id,
+      );
 
       const quantityNeeded = application.job_offer.quantity ?? 1;
       if (currentAcceptedCount >= quantityNeeded) {

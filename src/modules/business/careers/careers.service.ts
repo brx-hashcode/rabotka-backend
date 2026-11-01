@@ -37,6 +37,7 @@ import {
 } from '../../job-offer/job-offer.events';
 import { notifyProfile } from '../../profile-notification/profile-notification.events';
 import { refuseOutsideCandidates } from './refuse-closed-offer';
+import { takenSeats } from '../../job-offer/utils/offer-seats';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { BUSINESS_CATEGORY_LABELS } from '../business-catalog';
 import { CvScreeningService } from '../cv-screening/cv-screening.service';
@@ -300,7 +301,7 @@ export class CareersService {
       where: { job_offer: { employer_id: profileId } },
       orderBy: [{ knocked_out: 'asc' }, { created_at: 'desc' }],
       include: {
-        job_offer: { select: { id: true, title: true } },
+        job_offer: { select: { id: true, title: true, status: true } },
         cv_resume: {
           select: {
             id: true,
@@ -348,7 +349,11 @@ export class CareersService {
     const e = await this.subscriptions.entitlements(businessId);
     const where = {
       job_offer_id: offerId,
-      job_offer: { employer_id: profileId, deleted_at: null },
+      job_offer: {
+        employer_id: profileId,
+        deleted_at: null,
+        status: { in: OPEN },
+      },
       status: ExternalApplicationStatus.PENDING,
       cv_resume_id: null,
       cv_storage_key: { not: null },
@@ -465,12 +470,38 @@ export class CareersService {
     if (application.status === ExternalApplicationStatus.RETAINED) {
       return { retained: true };
     }
-    await this.prisma.externalApplication.update({
-      where: { id },
-      data: {
-        status: ExternalApplicationStatus.RETAINED,
-        retained_at: new Date(),
-      },
+    const offerId = application.job_offer_id;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM "job_offers" WHERE id = ${offerId}::uuid FOR UPDATE`;
+      const offer = await tx.jobOffer.findUnique({
+        where: { id: offerId },
+        select: { status: true, quantity: true, deleted_at: true },
+      });
+      if (!offer || offer.deleted_at || !OPEN.includes(offer.status)) {
+        throw new BadRequestException('Cette offre ne recrute plus.');
+      }
+      const taken = (await takenSeats(tx, offerId)) + 1;
+      if (taken > offer.quantity) {
+        throw new ConflictException(
+          'Tous les postes de cette offre sont déjà pourvus.',
+        );
+      }
+      await tx.externalApplication.update({
+        where: { id },
+        data: {
+          status: ExternalApplicationStatus.RETAINED,
+          retained_at: new Date(),
+        },
+      });
+      await tx.jobOffer.update({
+        where: { id: offerId },
+        data: {
+          status:
+            taken >= offer.quantity
+              ? JobOfferStatus.FILLED
+              : JobOfferStatus.PARTIALLY_FILLED,
+        },
+      });
     });
     const name = await this.businessName(profileId);
     void this.send(
