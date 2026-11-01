@@ -7,6 +7,17 @@ import {
 import { AgentNotificationService } from '../agent-notification.service';
 
 describe('agent notification catalog', () => {
+  it('opens the job a placement is about, which stays readable when closed', () => {
+    expect(
+      renderAgentNotification({
+        type: 'PLACEMENT_ACCEPTED',
+        workerName: 'Awa',
+        jobTitle: 'Serveuse',
+        jobId: 'job-1',
+      } as never).link,
+    ).toBe('/jobs/job-1');
+  });
+
   it('names the money and links to the wallet', () => {
     expect(
       renderAgentNotification({

@@ -1470,6 +1470,7 @@ model Application {
   /// SAY NO, and carry the index forward by hand.
   @@index([job_offer_id, worker_id], name: "idx_application_pair")
   @@index([worker_id], name: "idx_application_worker")
+  @@index([agent_id], name: "idx_application_agent")
   @@index([job_offer_id], name: "idx_application_job_offer")
   @@index([status], name: "idx_application_status")
   @@index([job_offer_id, status], name: "idx_application_job_offer_status")

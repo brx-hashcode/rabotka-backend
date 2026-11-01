@@ -45,12 +45,19 @@ const SEAT_HOLDING: ApplicationStatus[] = [
   ApplicationStatus.WAITING_PAYMENT,
 ];
 
+/** A placement that went nowhere: it opens the job, not its address or pay. */
+const PLACEMENT_FAILED: ApplicationStatus[] = [
+  ApplicationStatus.REJECTED,
+  ApplicationStatus.CANCELLED,
+];
+
 /**
  * Read side of the agent app: what an agent can browse.
  *
  * Every job-scoped method re-checks the zone in the query itself rather than
  * trusting the list the agent clicked from — an id typed into the url is
- * answered exactly like one outside the territory: not found.
+ * answered exactly like one outside the territory: not found. The one way
+ * past that is reading a job the agent placed someone on (`placedJob`).
  */
 @Injectable()
 export class AgentPortalService {
@@ -260,9 +267,56 @@ export class AgentPortalService {
   }
 
   async getJob(agentId: string, jobOfferId: string) {
-    const job = await this.findInZones(agentId, jobOfferId, AGENT_JOB_SELECT);
+    const zones = await this.zonesOf(agentId);
+    const job =
+      zones.length === 0
+        ? null
+        : await this.prisma.jobOffer.findFirst({
+            where: { AND: [{ id: jobOfferId }, jobsInZonesWhere(zones)] },
+            select: AGENT_JOB_SELECT,
+          });
+    if (!job) return this.placedJob(agentId, jobOfferId);
     const filled = await this.filledSeats([job.id]);
-    return toAgentJob(job, filled.get(job.id) ?? 0);
+    return {
+      ...toAgentJob(job, filled.get(job.id) ?? 0),
+      access: 'full' as const,
+      canPlace: true,
+    };
+  }
+
+  /**
+   * A job the agent cannot work any more — filled, ended, or out of their zones
+   * — that they placed someone on: it stays readable from their history. The
+   * address and pay only while one of their candidates is still on it.
+   */
+  private async placedJob(agentId: string, jobOfferId: string) {
+    const mine = { agent_id: agentId, deleted_at: null };
+    const job = await this.prisma.jobOffer.findFirst({
+      where: {
+        id: jobOfferId,
+        deleted_at: null,
+        applications: { some: mine },
+      },
+      select: {
+        ...AGENT_JOB_SELECT,
+        applications: { where: mine, select: { status: true } },
+      },
+    });
+    if (!job) throw new NotFoundException('Offre introuvable');
+
+    const details = toAgentJob(job, 0);
+    if (job.applications.some((a) => !PLACEMENT_FAILED.includes(a.status))) {
+      return { ...details, access: 'full' as const, canPlace: false };
+    }
+    return {
+      ...details,
+      amount: null,
+      paymentFlow: null,
+      address: null,
+      note: null,
+      access: 'limited' as const,
+      canPlace: false,
+    };
   }
 
   /**
