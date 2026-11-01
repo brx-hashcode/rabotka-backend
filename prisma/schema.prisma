@@ -2220,6 +2220,8 @@ enum ProfileNotificationType {
   MISSION_STARTED
   MISSION_STATUS_CHECK
   JOB_OFFER_EXPIRED
+  /// A business's offer ends in a few days with nobody retained.
+  JOB_OFFER_EXPIRING
   KYC_REJECTED
   ACCOUNT_SUSPENDED
   UNLOCK_CONVERTED_TO_CREDIT

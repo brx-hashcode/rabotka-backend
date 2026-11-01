@@ -277,6 +277,8 @@ export class SystemConfigService implements OnModuleInit {
     'agent.commission_confirmation_hours',
     // 0 = only late cancellations cost reliability points.
     'fees.cancellation_score_deduction',
+    // 0 = no reminder before an offer ends.
+    'business.offer_expiry_reminder_days',
   ]);
 
   /** Keys whose value is one of a fixed set; anything else is refused. */
@@ -965,6 +967,13 @@ export class SystemConfigService implements OnModuleInit {
       multiSeatMode:
         multiSeat === 'FIRST_ONLY' ? 'FIRST_ONLY' : 'PER_PLACEMENT',
     };
+  }
+
+  /** Days before an offer ends that its business is told. 0 = never. */
+  async getOfferExpiryReminderDays(): Promise<number> {
+    const val = await this.get('business.offer_expiry_reminder_days', '3');
+    const n = Number(val);
+    return Number.isInteger(n) && n >= 0 ? n : 3;
   }
 
   /** Threshold for the agent app's suggested workers — see the seeded key. */

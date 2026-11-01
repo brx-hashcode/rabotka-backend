@@ -356,15 +356,27 @@ describe('CareersService', () => {
 
     it('refuses those still waiting when the offer closes', async () => {
       const { prisma, service } = owned('PENDING');
-      (
-        prisma.externalApplication as unknown as { findMany: jest.Mock }
-      ).findMany = jest.fn().mockResolvedValue([{ id: 'a1' }]);
+      const outside = prisma.externalApplication as unknown as {
+        findMany: jest.Mock;
+        updateMany: jest.Mock;
+      };
+      outside.findMany = jest.fn().mockResolvedValue([
+        {
+          id: 'a1',
+          email: 'awa@example.com',
+          first_name: 'Awa',
+          job_offer: {
+            title: 'Comptable',
+            employer: { business: { name: 'KAMOA' } },
+          },
+        },
+      ]);
+      outside.updateMany = jest.fn().mockResolvedValue({ count: 1 });
 
       await service.refuseWaiting({ jobOfferId: 'o1', employerId: 'p1' });
 
-      expect(
-        prisma.externalApplication.update.mock.calls[0][0].data.status,
-      ).toBe('REFUSED');
+      expect(outside.updateMany.mock.calls[0][0].data.status).toBe('REFUSED');
+      expect(outside.findMany.mock.calls[0][0].where.job_offer_id).toBe('o1');
     });
   });
 

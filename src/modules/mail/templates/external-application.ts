@@ -33,6 +33,23 @@ export function applicationRefusedEmail(
   `;
 }
 
+/** No one decided here: the offer ended with this application still open. */
+export function applicationClosedEmail(
+  firstName: string,
+  businessName: string,
+  jobTitle: string,
+): string {
+  return `
+    <p>Bonjour ${escapeHtml(firstName)},</p>
+    <p>
+      L'offre <strong>${escapeHtml(jobTitle)}</strong> de
+      ${escapeHtml(businessName)} est maintenant fermée. Votre candidature
+      n'a donc pas pu aboutir.
+    </p>
+    <p>Merci de votre intérêt, et bonne continuation.</p>
+  `;
+}
+
 export function applicationRetainedEmail(
   firstName: string,
   businessName: string,

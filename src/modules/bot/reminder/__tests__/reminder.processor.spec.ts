@@ -626,6 +626,188 @@ describe('ReminderProcessor', () => {
         ]),
       );
     });
+
+    it('emails a business when its offer expires, and no other employer', async () => {
+      const mail = { sendMail: jest.fn().mockResolvedValue(undefined) };
+      (processor as any).mail = mail;
+      (processor as any).layout = {
+        wrap: jest.fn(async (html: string) => html),
+      };
+      prisma.jobOffer.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+        {
+          id: 'offer-1',
+          title: 'Comptable',
+          employer_id: 'biz-1',
+          employer: {
+            phone: null,
+            first_name: 'Kamoa',
+            email: 'rh@kamoa.test',
+            is_business: true,
+          },
+          applications: [],
+        },
+        {
+          id: 'offer-2',
+          title: 'Ménage',
+          employer_id: 'emp-2',
+          employer: {
+            phone: null,
+            first_name: 'Bob',
+            email: 'bob@test.test',
+            is_business: false,
+          },
+          applications: [],
+        },
+      ]);
+
+      await processor.process({ data: { type: 'scan' } });
+
+      expect(mail.sendMail).toHaveBeenCalledTimes(1);
+      expect(mail.sendMail.mock.calls[0][0].to).toBe('rh@kamoa.test');
+    });
+
+    it('frees the assignment of a retained candidate who never confirmed', async () => {
+      prisma.assignment = {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      };
+      prisma.jobOffer.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+        {
+          id: 'offer-1',
+          title: 'Ménage',
+          employer_id: 'emp-1',
+          employer: { phone: null, first_name: 'Bob' },
+          applications: [
+            {
+              id: 'app-a',
+              status: ApplicationStatus.WAITING_PAYMENT,
+              worker: { id: 'w-a', phone: null },
+            },
+            {
+              id: 'app-b',
+              status: ApplicationStatus.PENDING,
+              worker: { id: 'w-b', phone: null },
+            },
+          ],
+        },
+      ]);
+
+      await processor.process({ data: { type: 'scan' } });
+
+      expect(prisma.assignment.updateMany.mock.calls[0][0].where).toEqual({
+        application_id: { in: ['app-a'] },
+      });
+    });
+
+    it('never expires a deleted offer', async () => {
+      await processor.process({ data: { type: 'scan' } });
+
+      const expiryQuery = prisma.jobOffer.findMany.mock.calls.find(
+        ([q]: any[]) => q.where?.OR?.[1]?.scheduled_at === null,
+      );
+      expect(expiryQuery[0].where.deleted_at).toBeNull();
+    });
+
+    describe('before an offer ends', () => {
+      const ending = {
+        id: 'offer-1',
+        title: 'Comptable',
+        employer_id: 'biz-1',
+        scheduled_at: new Date('2026-11-05T08:00:00Z'),
+        created_at: new Date('2026-10-01T08:00:00Z'),
+        employer: { first_name: 'Kamoa', email: 'rh@kamoa.test' },
+      };
+      let mail: { sendMail: jest.Mock };
+
+      beforeEach(() => {
+        mail = { sendMail: jest.fn().mockResolvedValue(undefined) };
+        (processor as any).mail = mail;
+        (processor as any).layout = {
+          wrap: jest.fn(async (html: string) => html),
+        };
+        (systemConfigService as any).getOfferExpiryReminderDays = jest
+          .fn()
+          .mockResolvedValue(3);
+        prisma.jobOffer.findMany.mockImplementation(async ({ where }: any) =>
+          where.employer?.is_business ? [ending] : [],
+        );
+      });
+
+      it('tells the business by bell and email, once for that date', async () => {
+        await processor.process({ data: { type: 'scan' } });
+
+        expect(
+          inAppNotifications(events.emit, 'JOB_OFFER_EXPIRING'),
+        ).toHaveLength(1);
+        expect(mail.sendMail).toHaveBeenCalledTimes(1);
+
+        redis.set.mockResolvedValue(null);
+        await processor.process({ data: { type: 'scan' } });
+
+        expect(mail.sendMail).toHaveBeenCalledTimes(1);
+      });
+
+      it('is off at 0 days', async () => {
+        (systemConfigService as any).getOfferExpiryReminderDays = jest
+          .fn()
+          .mockResolvedValue(0);
+
+        await processor.process({ data: { type: 'scan' } });
+
+        expect(mail.sendMail).not.toHaveBeenCalled();
+      });
+
+      it('never sends the business anything on WhatsApp', async () => {
+        await processor.process({ data: { type: 'scan' } });
+
+        expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('outside candidates of ended offers', () => {
+      let mail: { sendMail: jest.Mock };
+
+      beforeEach(() => {
+        mail = { sendMail: jest.fn().mockResolvedValue(undefined) };
+        (processor as any).mail = mail;
+        (processor as any).layout = {
+          wrap: jest.fn(async (html: string) => html),
+        };
+        prisma.externalApplication = {
+          findMany: jest.fn().mockResolvedValue([
+            {
+              id: 'ext-1',
+              email: 'awa@test.test',
+              first_name: 'Awa',
+              job_offer: {
+                title: 'Comptable',
+                employer: { business: { name: 'KAMOA' } },
+              },
+            },
+          ]),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        };
+      });
+
+      it('refuses them and leaves FILLED offers alone, which can reopen', async () => {
+        await processor.process({ data: { type: 'scan' } });
+
+        const { where } = prisma.externalApplication.findMany.mock.calls[0][0];
+        expect(where.status).toBe('PENDING');
+        expect(where.job_offer.OR[0].status.in).toEqual(
+          expect.arrayContaining(['EXPIRED', 'CANCELLED', 'COMPLETED']),
+        );
+        expect(where.job_offer.OR[0].status.in).not.toContain('FILLED');
+        expect(mail.sendMail).toHaveBeenCalledTimes(1);
+      });
+
+      it('mails nobody when another run refused them first', async () => {
+        prisma.externalApplication.updateMany.mockResolvedValue({ count: 0 });
+
+        await processor.process({ data: { type: 'scan' } });
+
+        expect(mail.sendMail).not.toHaveBeenCalled();
+      });
+    });
   });
 
   describe('sendReminder24h()', () => {
