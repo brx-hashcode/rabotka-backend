@@ -325,7 +325,7 @@ export class CareersService {
   /** The business's own: newest first, a failed « éliminatoire » after the others. */
   async listForBusiness(profileId: string) {
     const rows = await this.prisma.externalApplication.findMany({
-      where: { job_offer: { employer_id: profileId } },
+      where: { job_offer: { employer_id: profileId, deleted_at: null } },
       orderBy: [{ knocked_out: 'asc' }, { created_at: 'desc' }],
       include: {
         job_offer: { select: { id: true, title: true, status: true } },

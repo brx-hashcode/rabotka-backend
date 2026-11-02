@@ -68,7 +68,7 @@ describe('business dashboard stats', () => {
     );
     expect(s.applications.received).toBe(2);
     expect(s.applications.receivedPrevious).toBe(1);
-    expect(s.series).toHaveLength(30);
+    expect(s.series).toHaveLength(31);
     expect(s.series.reduce((n, d) => n + d.applications, 0)).toBe(2);
   });
 
@@ -154,9 +154,21 @@ describe('business dashboard stats', () => {
           app({ job_offer_id: 'old' }),
         ],
         assignments: [
-          { status: AssignmentStatus.COMPLETED, created_at: ago(D) },
-          { status: AssignmentStatus.NO_SHOW, created_at: ago(D) },
-          { status: AssignmentStatus.CONFIRMED, created_at: ago(D) },
+          {
+            status: AssignmentStatus.COMPLETED,
+            completed_at: ago(D),
+            no_show_at: null,
+          },
+          {
+            status: AssignmentStatus.NO_SHOW,
+            completed_at: null,
+            no_show_at: ago(D),
+          },
+          {
+            status: AssignmentStatus.CONFIRMED,
+            completed_at: null,
+            no_show_at: null,
+          },
         ],
         ratingsGiven: [4, 5],
       }),
@@ -165,6 +177,94 @@ describe('business dashboard stats', () => {
     expect(s.quality.ratingGiven).toBe(4.5);
     expect(s.topOffers.map((o) => o.id)).toEqual(['open', 'old']);
     expect(s.applications.perOffer).toBe(2);
+  });
+
+  it('counts a mission when it ended, whenever the hire was', () => {
+    const s = computeBusinessStats(
+      input({
+        days: 7,
+        assignments: [
+          {
+            status: AssignmentStatus.COMPLETED,
+            completed_at: ago(D),
+            no_show_at: null,
+          },
+        ],
+      }),
+    );
+    expect(s.quality.missionsEnded).toBe(1);
+  });
+
+  it('leaves applications on an ended offer out of the review pile', () => {
+    const s = computeBusinessStats(
+      input({
+        offers: [
+          offer({ id: 'over', status: JobOfferStatus.EXPIRED }),
+          offer({ id: 'open' }),
+        ],
+        applications: [
+          app({ job_offer_id: 'over', created_at: ago(3 * D) }),
+          app({ job_offer_id: 'open', created_at: ago(3 * D) }),
+        ],
+      }),
+    );
+    expect(s.applications.toReview).toBe(1);
+    expect(s.applications.overdue).toBe(1);
+  });
+
+  it('averages the period, not all time', () => {
+    const s = computeBusinessStats(
+      input({
+        days: 7,
+        offers: [offer({ id: 'a' })],
+        applications: [
+          app({ job_offer_id: 'a', created_at: ago(2 * D) }),
+          app({ job_offer_id: 'a', created_at: ago(20 * D) }),
+        ],
+      }),
+    );
+    expect(s.applications.perOffer).toBe(1);
+  });
+
+  it('has no average for a period without applications', () => {
+    const s = computeBusinessStats(
+      input({
+        days: 7,
+        offers: [offer({ id: 'a' })],
+        applications: [app({ job_offer_id: 'a', created_at: ago(20 * D) })],
+      }),
+    );
+    expect(s.applications.perOffer).toBeNull();
+  });
+
+  it('does not take an automatic close for the employer looking', () => {
+    const s = computeBusinessStats(
+      input({
+        offers: [offer({ id: 'a' })],
+        applications: [
+          app({
+            job_offer_id: 'a',
+            status: ApplicationStatus.REJECTED,
+            created_at: ago(5 * D),
+            rejected_at: ago(4 * D),
+            rejection_source: 'AUTO_FILL',
+          }),
+        ],
+      }),
+    );
+    expect(s.funnel.viewed).toBe(0);
+    expect(s.timing.responseHours).toBeNull();
+  });
+
+  it('keeps applications of the first day of the period on the chart', () => {
+    const s = computeBusinessStats(
+      input({
+        days: 7,
+        offers: [offer({ id: 'a' })],
+        applications: [app({ job_offer_id: 'a', created_at: ago(7 * D - H) })],
+      }),
+    );
+    expect(s.series.reduce((n, d) => n + d.applications, 0)).toBe(1);
   });
 });
 
@@ -175,7 +275,20 @@ describe('externalAsStats', () => {
     created_at: at,
     retained_at: null,
     refused_at: null,
+    refusal_message: null,
   };
+
+  it('marks a refusal that only closed the offer as automatic', () => {
+    expect(
+      externalAsStats({
+        ...row,
+        status: 'REFUSED',
+        viewed_at: null,
+        refused_at: at,
+        refusal_message: 'Cette offre est maintenant fermée.',
+      }).rejection_source,
+    ).toBe('AUTO_FILL');
+  });
 
   it('waits for review until the CV is read', () => {
     expect(

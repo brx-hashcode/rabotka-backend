@@ -5,7 +5,9 @@ import {
   Logger,
 } from '@nestjs/common';
 import {
+  ApplicationStatus,
   CvScreeningResumeStatus,
+  ExternalApplicationStatus,
   InterviewStatus,
   InvoiceReason,
 } from '@prisma/client';
@@ -22,6 +24,13 @@ import {
 
 /** Offers listed in the report: the busiest of the period. */
 const MAX_OFFERS = 30;
+/** A hire who later cancelled or was dropped does not count as recruited. */
+const STAYED_HIRED: ApplicationStatus[] = [
+  ApplicationStatus.ACCEPTED,
+  ApplicationStatus.WAITING_PAYMENT,
+  ApplicationStatus.STARTED,
+  ApplicationStatus.END,
+];
 
 /**
  * The dashboard's period as a PDF: its figures (BusinessStatsService), every
@@ -86,6 +95,8 @@ export class BusinessReportService {
               { created_at: window },
               { applications: { some: { created_at: window } } },
               { applications: { some: { accepted_at: window } } },
+              { external_applications: { some: { created_at: window } } },
+              { external_applications: { some: { retained_at: window } } },
             ],
           },
           select: {
@@ -97,7 +108,11 @@ export class BusinessReportService {
                 deleted_at: null,
                 OR: [{ created_at: window }, { accepted_at: window }],
               },
-              select: { created_at: true, accepted_at: true },
+              select: { status: true, created_at: true, accepted_at: true },
+            },
+            external_applications: {
+              where: { OR: [{ created_at: window }, { retained_at: window }] },
+              select: { status: true, created_at: true, retained_at: true },
             },
           },
         }),
@@ -139,8 +154,18 @@ export class BusinessReportService {
           title: o.title,
           status: o.status,
           positions: o.quantity,
-          received: o.applications.filter((a) => within(a.created_at)).length,
-          hired: o.applications.filter((a) => within(a.accepted_at)).length,
+          received:
+            o.applications.filter((a) => within(a.created_at)).length +
+            o.external_applications.filter((a) => within(a.created_at)).length,
+          hired:
+            o.applications.filter(
+              (a) => within(a.accepted_at) && STAYED_HIRED.includes(a.status),
+            ).length +
+            o.external_applications.filter(
+              (a) =>
+                within(a.retained_at) &&
+                a.status === ExternalApplicationStatus.RETAINED,
+            ).length,
         }))
         .sort((a, b) => b.received - a.received || b.hired - a.hired)
         .slice(0, MAX_OFFERS),
