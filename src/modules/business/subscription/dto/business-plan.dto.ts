@@ -120,6 +120,27 @@ export class CreateBusinessPlanDto {
   @Min(0)
   offerDraftsPerPeriod?: number | null;
 
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Recruteurs a business may invite (its account holder is the only administrator). Null: unlimited; 0: none',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(500)
+  recruitersLimit?: number | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Évaluateurs a business may invite. Null: unlimited; 0: none',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(500)
+  reviewersLimit?: number | null;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()

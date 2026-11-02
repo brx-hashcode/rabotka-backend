@@ -46,6 +46,8 @@ import {
   SignupSendOtpDto,
   SignupVerifyOtpDto,
   SignupProgressDto,
+  BusinessSendOtpDto,
+  BusinessVerifyOtpDto,
 } from './dto';
 import { SIGNUP_TOKEN_HEADER } from './guards/signup-upload.guard';
 import { QrGateway } from '../ws-notifications/qr.gateway';
@@ -346,6 +348,54 @@ export class AuthController {
     @Body() sendOtpDto: SendOtpDto,
   ): Promise<{ success: boolean; message: string }> {
     return this.resendOtp(sendOtpDto);
+  }
+
+  // --- Business space: the account holder or a team member ---------------
+
+  @Public()
+  @Post('business/send-otp')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({
+    summary: '[Business] Send the sign-in code',
+    description:
+      'To the business account holder, or to a team member invited or active in a business. Tokens as auth/mobile.',
+  })
+  @ApiBody({ type: BusinessSendOtpDto })
+  @ApiResponse({ status: 200, description: 'Code sent' })
+  @ApiResponse({ status: 404, description: 'No such account' })
+  businessSendOtp(@Body() dto: BusinessSendOtpDto) {
+    return this.authService.sendBusinessOtp(dto.email);
+  }
+
+  @Public()
+  @Post('business/resend-otp')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({
+    summary: '[Business] Resend the sign-in code (60s cooldown)',
+  })
+  @ApiBody({ type: BusinessSendOtpDto })
+  @ApiResponse({ status: 200, description: 'Code sent again' })
+  @ApiResponse({ status: 429, description: 'Resend cooldown active' })
+  businessResendOtp(@Body() dto: BusinessSendOtpDto) {
+    return this.authService.sendBusinessOtp(dto.email, true);
+  }
+
+  @Public()
+  @Post('business/verify-otp')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: '[Business] Verify the code and issue tokens',
+    description:
+      "A member's tokens are the business's profile with the member in them (`mid`); its first sign-in accepts the invitation. Refresh and logout: auth/mobile.",
+  })
+  @ApiBody({ type: BusinessVerifyOtpDto })
+  @ApiResponse({ status: 200, description: 'Tokens issued' })
+  @ApiResponse({ status: 401, description: 'Invalid or expired code' })
+  businessVerifyOtp(@Body() dto: BusinessVerifyOtpDto) {
+    return this.authService.verifyBusinessOtp(dto.email, dto.otp);
   }
 
   @Public()

@@ -45,6 +45,24 @@ describe('ReminderProcessor', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prisma = {
+      // A business's e-mails go to its people (team/business-recipients):
+      // here only the account holder, at its profile's address.
+      business: {
+        findUnique: jest.fn(async ({ where }: any) => {
+          const holders: Record<string, { email: string; first_name: string }> =
+            {
+              'biz-1': { email: 'rh@kamoa.test', first_name: 'Kamoa' },
+            };
+          if (where.profile_id) {
+            return holders[where.profile_id] ? { id: where.profile_id } : null;
+          }
+          return holders[where.id] ? { profile: holders[where.id] } : null;
+        }),
+      },
+      businessMember: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
       application: {
         findMany: jest.fn().mockResolvedValue([]),
         findUnique: jest.fn().mockResolvedValue(null),

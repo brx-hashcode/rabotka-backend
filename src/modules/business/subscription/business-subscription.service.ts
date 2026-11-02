@@ -44,6 +44,7 @@ import {
   type BusinessSubscriptionPaidPayload,
   type BusinessVerifiedPayload,
 } from './subscription.events';
+import { businessEmailRecipients } from '../team/business-recipients';
 
 type Db = Prisma.TransactionClient | PrismaService;
 
@@ -109,6 +110,14 @@ export type BusinessEntitlements = {
   offerDraftsQuota: number | null;
   includesPreselection: boolean;
   priorityVisibility: boolean;
+  /** Recruteurs the business may have (the holder is its one administrator). Null: unlimited; 0: none. */
+  recruitersLimit: number | null;
+  /** Évaluateurs the business may have. Null: unlimited; 0: none. */
+  reviewersLimit: number | null;
+  /** Recruteurs invited or active now. */
+  recruiters: number;
+  /** Évaluateurs invited or active now. */
+  reviewers: number;
 };
 
 /**
@@ -181,6 +190,19 @@ export class BusinessSubscriptionService {
           take: 1,
         })) > 0
       : false;
+    const seats = await this.prisma.businessMember.groupBy({
+      by: ['role'],
+      where: {
+        business_id: businessId,
+        is_owner: false,
+        status: { in: ['INVITED', 'ACTIVE'] },
+      },
+      _count: { _all: true },
+    });
+    const taken = (role: 'RECRUITER' | 'REVIEWER') =>
+      seats.find((s) => s.role === role)?._count._all ?? 0;
+    const recruiters = taken('RECRUITER');
+    const reviewers = taken('REVIEWER');
     if (!sub) {
       return {
         plan: null,
@@ -205,6 +227,10 @@ export class BusinessSubscriptionService {
         offerDraftsQuota: 0,
         includesPreselection: false,
         priorityVisibility: false,
+        recruitersLimit: 0,
+        reviewersLimit: 0,
+        recruiters,
+        reviewers,
       };
     }
     return {
@@ -242,6 +268,10 @@ export class BusinessSubscriptionService {
       offerDraftsQuota: sub.plan.offer_drafts_per_period,
       includesPreselection: sub.plan.includes_preselection,
       priorityVisibility: sub.plan.priority_visibility,
+      recruitersLimit: sub.plan.recruiters_limit,
+      reviewersLimit: sub.plan.reviewers_limit,
+      recruiters,
+      reviewers,
     };
   }
 
@@ -1243,7 +1273,10 @@ export class BusinessSubscriptionService {
     return `${appUrlFor('business')}/abonnement`;
   }
 
-  /** In-app and email to the business's account holder. Never throws. */
+  /**
+   * In-app to the business, and email to its administrator — the account
+   * holder — unless it switched its e-mails off. Never throws.
+   */
   private async tell(
     businessId: string,
     input: NotificationInput,
@@ -1260,18 +1293,21 @@ export class BusinessSubscriptionService {
       });
       if (!business) return;
       notifyProfile(this.events, { recipientId: business.profile.id, input });
-      if (!business.profile.email) return;
-      await this.mail.sendMail({
-        to: business.profile.email,
-        subject,
-        html: await this.layout.wrap(
-          html(business.profile.first_name, business.name),
-          {
+      const recipients = await businessEmailRecipients(
+        this.prisma,
+        businessId,
+        'billing',
+      );
+      for (const r of recipients) {
+        await this.mail.sendMail({
+          to: r.email,
+          subject,
+          html: await this.layout.wrap(html(r.name, business.name), {
             previewText: subject,
             product: 'business',
-          },
-        ),
-      });
+          }),
+        });
+      }
     } catch (err) {
       this.logger.warn(
         `Subscription message failed for business ${businessId}`,

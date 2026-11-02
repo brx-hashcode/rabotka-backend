@@ -61,6 +61,7 @@ import {
   notificationDedupeKey,
   notifyProfile,
 } from '../../profile-notification/profile-notification.events';
+import { businessEmailRecipientsOfProfile } from '../../business/team/business-recipients';
 
 const REMINDER_24H_SENT_KEY = 'reminder:sent:24h:';
 const REMINDER_START_SENT_KEY = 'reminder:sent:start:';
@@ -382,14 +383,15 @@ export class ReminderProcessor {
         },
       });
       await this.emailBusiness(
-        offer.employer.email,
+        offer.employer_id,
         `Votre offre se termine bientôt : ${offer.title}`,
-        jobOfferExpiringEmail(
-          offer.employer.first_name,
-          offer.title,
-          formatDate(endsAt),
-          this.offerUrl(offer.id),
-        ),
+        (name) =>
+          jobOfferExpiringEmail(
+            name,
+            offer.title,
+            formatDate(endsAt),
+            this.offerUrl(offer.id),
+          ),
       );
     }
   }
@@ -424,22 +426,32 @@ export class ReminderProcessor {
     return `${businessDashboardUrl()}/espace/offres/${id}`;
   }
 
-  /** Never fails the scan: the offer has already moved on. */
+  /**
+   * To the business's people who keep their e-mails on: the account holder
+   * and its team members. Never fails the scan: the offer has already moved on.
+   */
   private async emailBusiness(
-    to: string | null,
+    employerId: string,
     subject: string,
-    content: string,
+    content: (firstName: string) => string,
   ): Promise<void> {
-    if (!to || !this.mail || !this.layout) return;
+    if (!this.mail || !this.layout) return;
     try {
-      await this.mail.sendMail({
-        to,
-        subject,
-        html: await this.layout.wrap(content, {
-          previewText: subject,
-          product: 'business',
-        }),
-      });
+      const recipients = await businessEmailRecipientsOfProfile(
+        this.prisma,
+        employerId,
+        'recruiting',
+      );
+      for (const r of recipients) {
+        await this.mail.sendMail({
+          to: r.email,
+          subject,
+          html: await this.layout.wrap(content(r.name), {
+            previewText: subject,
+            product: 'business',
+          }),
+        });
+      }
     } catch (err) {
       this.logger.warn(`Offer email failed: ${String(err)}`);
     }
@@ -1046,13 +1058,10 @@ export class ReminderProcessor {
     });
     if (offer.employer?.is_business) {
       await this.emailBusiness(
-        offer.employer.email ?? null,
+        offer.employer_id,
         `Votre offre a expiré : ${offer.title}`,
-        jobOfferExpiredEmail(
-          offer.employer.first_name ?? '',
-          offer.title,
-          this.offerUrl(offer.id),
-        ),
+        (name) =>
+          jobOfferExpiredEmail(name, offer.title, this.offerUrl(offer.id)),
       );
     }
     const phone = offer.employer?.phone;
