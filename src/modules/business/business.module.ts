@@ -21,6 +21,9 @@ import { BusinessReportController } from './report/business-report.controller';
 import { BusinessReportService } from './report/business-report.service';
 import { CareersModule } from './careers/careers.module';
 import { TeamModule } from './team/team.module';
+import { MailboxModule } from './mailbox/mailbox.module';
+import { AdminBusinessController } from './admin/admin-business.controller';
+import { AdminBusinessService } from './admin/admin-business.service';
 import { CandidateNotesModule } from './candidate-notes/candidate-notes.module';
 
 /** Business accounts: the public catalog and the dashboard's own routes. */
@@ -41,11 +44,13 @@ import { CandidateNotesModule } from './candidate-notes/candidate-notes.module';
     CareersModule,
     TeamModule,
     CandidateNotesModule,
+    MailboxModule,
   ],
   controllers: [
     BusinessCatalogController,
     BusinessController,
     AdminBusinessSubscriptionController,
+    AdminBusinessController,
     BusinessReportController,
   ],
   providers: [
@@ -54,6 +59,7 @@ import { CandidateNotesModule } from './candidate-notes/candidate-notes.module';
     BusinessContactsService,
     BusinessTalentService,
     BusinessReportService,
+    AdminBusinessService,
   ],
 })
 export class BusinessModule {}

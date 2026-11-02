@@ -18,7 +18,8 @@ const ROLE_SCOPE = {
 /** To someone invited to join a business's space on Rabotka Business. */
 export function businessTeamInviteEmail(args: {
   name: string;
-  invitedBy: string;
+  /** Null: sent by Rabotka's team, for the organisation. */
+  invitedBy: string | null;
   businessName: string;
   role: keyof typeof BUSINESS_ROLE_LABEL;
   signInUrl: string;
@@ -26,8 +27,13 @@ export function businessTeamInviteEmail(args: {
   return `
     <p>Bonjour ${escapeHtml(args.name)},</p>
     <p>
-      ${escapeHtml(args.invitedBy)} vous invite à rejoindre l’équipe de
-      <strong>${escapeHtml(args.businessName)}</strong> sur Rabotka Business,
+      ${
+        args.invitedBy
+          ? `${escapeHtml(args.invitedBy)} vous invite à rejoindre l’équipe de
+      <strong>${escapeHtml(args.businessName)}</strong>`
+          : `L’équipe de <strong>${escapeHtml(args.businessName)}</strong> vous
+      invite à la rejoindre`
+      } sur Rabotka Business,
       en tant que <strong>${BUSINESS_ROLE_LABEL[args.role]}</strong> : vous
       pourrez ${ROLE_SCOPE[args.role]}.
     </p>
