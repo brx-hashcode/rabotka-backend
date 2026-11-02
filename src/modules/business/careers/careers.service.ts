@@ -636,6 +636,8 @@ export class CareersService {
           : []
         ).map((x) => ({ label: x.label, value: answerText(x) })),
         hasCv: a.cv_storage_key !== null,
+        // So admin's viewer knows how to draw it (PDF, Word, photo).
+        cvMimeType: a.cv_mime_type,
         score: a.cv_resume?.score ?? null,
         createdAt: a.created_at.toISOString(),
         viewedAt: a.viewed_at?.toISOString() ?? null,
