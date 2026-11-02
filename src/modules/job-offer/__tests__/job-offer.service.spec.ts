@@ -685,6 +685,7 @@ describe('JobOfferService', () => {
             scheduled_at: when,
             status: JobOfferStatus.ACTIVE,
             priority_until: null,
+            closed_at: null,
           },
         }),
       );

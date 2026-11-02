@@ -34,6 +34,7 @@ import {
   RejectionSource,
   WalletTransactionType,
 } from '@prisma/client';
+import { isTerminalJobOfferStatus } from '../job-offer/utils/job-offer-status.util';
 import { cancellationPatch } from '../application/application.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { isEmployerCoveredAtJobLevel } from './employer-coverage';
@@ -181,20 +182,19 @@ export class ContactUnlockService {
   private shouldReopenOffer(params: {
     scheduledAt: Date | null;
     currentStatus: JobOfferStatus;
+    closedAt: Date | null;
     now: Date;
   }): boolean {
+    if (params.closedAt) return false;
     // Null means no closing date, so the offer cannot be in the past — it stays
     // reopenable until something else closes it.
     if (params.scheduledAt !== null && params.scheduledAt <= params.now) {
       return false;
     }
-    if (
-      params.currentStatus === JobOfferStatus.IN_PROGRESS ||
-      params.currentStatus === JobOfferStatus.COMPLETED
-    ) {
-      return false;
-    }
-    return true;
+    return (
+      params.currentStatus !== JobOfferStatus.IN_PROGRESS &&
+      !isTerminalJobOfferStatus(params.currentStatus)
+    );
   }
 
   private jobOfferStatusFromRemainingAccepted(
@@ -566,7 +566,7 @@ export class ContactUnlockService {
 
       const offer = await tx.jobOffer.findUnique({
         where: { id: params.jobOfferId },
-        select: { status: true, scheduled_at: true },
+        select: { status: true, scheduled_at: true, closed_at: true },
       });
       if (!offer) return;
 
@@ -608,6 +608,7 @@ export class ContactUnlockService {
         this.shouldReopenOffer({
           scheduledAt: offer.scheduled_at,
           currentStatus: offer.status,
+          closedAt: offer.closed_at,
           now,
         })
       ) {
@@ -1137,13 +1138,14 @@ export class ContactUnlockService {
       // put a fully-staffed post back on the feed with every worker at END.
       const freshOffer = await tx.jobOffer.findUnique({
         where: { id: attempt.job_offer_id },
-        select: { status: true, scheduled_at: true },
+        select: { status: true, scheduled_at: true, closed_at: true },
       });
       if (
         freshOffer &&
         this.shouldReopenOffer({
           scheduledAt: freshOffer.scheduled_at,
           currentStatus: freshOffer.status,
+          closedAt: freshOffer.closed_at,
           now,
         })
       ) {

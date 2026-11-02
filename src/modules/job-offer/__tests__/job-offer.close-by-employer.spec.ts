@@ -75,7 +75,15 @@ describe('JobOfferService.closeByEmployer', () => {
     expect(tx.application.findMany.mock.calls[0][0].where.status).toEqual({
       in: [ApplicationStatus.PENDING, ApplicationStatus.VIEWED],
     });
-    expect(tx.application.updateMany).toHaveBeenCalled();
+    // Cancelled, not rejected: they can apply again if it is republished.
+    expect(tx.application.updateMany.mock.calls[0][0].data).toMatchObject({
+      status: ApplicationStatus.CANCELLED,
+      cancelled_by: 'SYSTEM',
+      rejection_source: 'AUTO_FILL',
+    });
+    expect(tx.jobOffer.update.mock.calls[0][0].data.closed_at).toBeInstanceOf(
+      Date,
+    );
     expect(events.emit).toHaveBeenCalledWith(JOB_OFFER_CLOSED, {
       jobOfferId: OFFER_ID,
       employerId: EMPLOYER_ID,

@@ -251,6 +251,47 @@ describe('InterviewService', () => {
     });
   });
 
+  describe('candidates who are out', () => {
+    it('cancels their interview and tells them', async () => {
+      const { service, prisma, mail } = make();
+      prisma.interview.findMany.mockResolvedValue([{ id: 'i1' }]);
+
+      await expect(service.closeEnded()).resolves.toBe(1);
+
+      expect(prisma.interview.update.mock.calls[0][0].data.status).toBe(
+        'CANCELLED',
+      );
+      expect(mail.sendMail.mock.calls[0][0].subject).toContain(
+        'Entretien annulé',
+      );
+    });
+
+    it('leaves an uploaded CV alone: only applicants are followed', async () => {
+      const { service, prisma } = make();
+
+      await service.closeEnded();
+
+      const { where } = prisma.interview.findMany.mock.calls[0][0];
+      expect(where.OR).toEqual([
+        { application: expect.anything() },
+        { cv_resume: { external_application: { status: 'REFUSED' } } },
+      ]);
+      expect(where).not.toHaveProperty('offer');
+    });
+
+    it('refuses a new interview on an ended offer', async () => {
+      const { service, prisma } = make();
+      prisma.application.findFirst.mockResolvedValue({
+        job_offer: { id: 'o1', title: 'Caissier', status: 'EXPIRED' },
+        worker: { first_name: 'Awa', last_name: 'Ngoma' },
+      });
+
+      await expect(
+        service.create('p1', { ...slot, applicationId: 'a1' }),
+      ).rejects.toThrow('ne recrute plus');
+    });
+  });
+
   describe('reschedule and cancel', () => {
     it('a new time is a new invitation, with a new link and no old answer', async () => {
       const { service, prisma, mail } = make();

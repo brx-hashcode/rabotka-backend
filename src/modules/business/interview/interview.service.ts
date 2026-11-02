@@ -8,11 +8,14 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { createHash, randomBytes } from 'node:crypto';
 import {
+  ApplicationStatus,
   CvScreeningResumeStatus,
+  ExternalApplicationStatus,
   InterviewMode,
   InterviewStatus,
   type Interview,
 } from '@prisma/client';
+import { isTerminalJobOfferStatus } from '../../job-offer/utils/job-offer-status.util';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { MailService } from '../../mail/mail.service';
 import { LayoutService } from '../../mail/layout.service';
@@ -186,8 +189,12 @@ export class InterviewService {
   async cancel(profileId: string, id: string) {
     const interview = await this.owned(profileId, id);
     if (interview.status === InterviewStatus.CANCELLED) return view(interview);
+    return view(await this.cancelAndTell(interview.id));
+  }
+
+  private async cancelAndTell(id: string) {
     const updated = await this.prisma.interview.update({
-      where: { id: interview.id },
+      where: { id },
       data: { status: InterviewStatus.CANCELLED },
       include: LOAD,
     });
@@ -214,7 +221,47 @@ export class InterviewService {
         },
       });
     }
-    return view(updated);
+    return updated;
+  }
+
+  /**
+   * Interviews whose candidate is out: refused, or closed along with the offer.
+   * Follows the application, not the offer: an uploaded CV has none, and a
+   * business may well interview those after the offer's date.
+   */
+  async closeEnded(now = new Date()): Promise<number> {
+    const stale = await this.prisma.interview.findMany({
+      where: {
+        status: {
+          in: [
+            InterviewStatus.PENDING,
+            InterviewStatus.CONFIRMED,
+            InterviewStatus.RESCHEDULE_REQUESTED,
+          ],
+        },
+        starts_at: { gt: now },
+        OR: [
+          {
+            application: {
+              status: {
+                in: [ApplicationStatus.REJECTED, ApplicationStatus.CANCELLED],
+              },
+            },
+          },
+          {
+            cv_resume: {
+              external_application: {
+                status: ExternalApplicationStatus.REFUSED,
+              },
+            },
+          },
+        ],
+      },
+      select: { id: true },
+      take: 200,
+    });
+    for (const { id } of stale) await this.cancelAndTell(id);
+    return stale.length;
   }
 
   // ── The candidate, through the private link ──────────────────────────
@@ -399,11 +446,14 @@ export class InterviewService {
         deleted_at: null,
       },
       include: {
-        job_offer: { select: { id: true, title: true } },
+        job_offer: { select: { id: true, title: true, status: true } },
         worker: { select: { first_name: true, last_name: true } },
       },
     });
     if (!application) throw new NotFoundException('Candidature introuvable.');
+    if (isTerminalJobOfferStatus(application.job_offer.status)) {
+      throw new BadRequestException('Cette offre ne recrute plus.');
+    }
     return {
       name: `${application.worker.first_name} ${application.worker.last_name}`.trim(),
       // Read at send time from the profile: never kept where the business reads.

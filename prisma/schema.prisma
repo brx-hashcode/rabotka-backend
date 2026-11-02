@@ -1391,6 +1391,9 @@ model JobOffer {
   cv_screenings           CvScreening[]
   interviews              Interview[]
   deleted_at              DateTime?              @db.Timestamptz
+  /// The employer closed it. Nothing reopens it until they republish, not even
+  /// a hire dropping out; an EXPIRED status alone cannot tell this from expiry.
+  closed_at               DateTime?              @db.Timestamptz
 
   @@index([employer_id], name: "idx_job_offer_employer")
   @@index([status], name: "idx_job_offer_status")
