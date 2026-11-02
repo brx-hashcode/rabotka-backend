@@ -9,6 +9,9 @@ import {
   ExternalApplicationsController,
 } from './careers.controller';
 import { CareersService } from './careers.service';
+import { CareersPageController } from './careers-page.controller';
+import { CareersPageService } from './careers-page.service';
+import { FileModule } from '../../file/file.module';
 
 /** A business's public careers page, and who applied from it. */
 @Module({
@@ -19,8 +22,13 @@ import { CareersService } from './careers.service';
     MailModule,
     CvScreeningModule,
     BusinessSubscriptionModule,
+    FileModule,
   ],
-  controllers: [CareersController, ExternalApplicationsController],
-  providers: [CareersService],
+  controllers: [
+    CareersController,
+    ExternalApplicationsController,
+    CareersPageController,
+  ],
+  providers: [CareersService, CareersPageService],
 })
 export class CareersModule {}

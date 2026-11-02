@@ -76,6 +76,9 @@ const COMPANY_SELECT = {
   website: true,
   description: true,
   distribute_offers: true,
+  cover_url: true,
+  photos: true,
+  benefits: true,
   profile: { select: { avatar_url: true } },
 } as const;
 
@@ -761,6 +764,9 @@ export class CareersService {
     website: string | null;
     description: string | null;
     distribute_offers: boolean;
+    cover_url: string | null;
+    photos: string[];
+    benefits: string[];
     profile: { avatar_url: string | null };
   }) {
     return {
@@ -773,6 +779,9 @@ export class CareersService {
       description: b.description,
       // Search engines may list its pages: it has not opted out.
       indexable: b.distribute_offers,
+      coverUrl: b.cover_url,
+      photos: b.photos,
+      benefits: b.benefits,
     };
   }
 
