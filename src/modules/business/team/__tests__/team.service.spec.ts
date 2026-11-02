@@ -27,6 +27,7 @@ const row = (over: Partial<BusinessMember> = {}): BusinessMember => ({
   joined_at: null,
   last_seen_at: null,
   removed_at: null,
+  seat_subscription_id: null,
   ...over,
 });
 
@@ -43,6 +44,9 @@ describe('TeamService', () => {
   let subscriptions: any;
   let mail: any;
   let service: TeamService;
+  /** The current period's places: the plan's limit and those taken. */
+  let limits: Record<string, number | null>;
+  let taken: Record<string, number>;
   const admin: TeamActor = {
     businessId: BUSINESS,
     profileId: PROFILE,
@@ -78,14 +82,23 @@ describe('TeamService', () => {
       profile: { findFirst: jest.fn().mockResolvedValue(null) },
       businessActivity: { create: jest.fn().mockResolvedValue({}) },
     };
+    limits = { RECRUITER: 2, REVIEWER: 0 };
+    taken = { RECRUITER: 0, REVIEWER: 0 };
     subscriptions = {
       businessOf: jest.fn().mockResolvedValue(BUSINESS),
-      entitlements: jest.fn().mockResolvedValue({
-        recruiters: 0,
-        recruitersLimit: 2,
-        reviewers: 0,
-        reviewersLimit: 0,
-      }),
+      consumeSeat: jest
+        .fn()
+        .mockImplementation(
+          (_b: string, role: string, message: (l: number) => string) => {
+            const limit = limits[role];
+            if (limit !== null && taken[role] >= limit) {
+              return Promise.reject(new ForbiddenException(message(limit)));
+            }
+            taken[role] += 1;
+            return Promise.resolve({ subscriptionId: 'sub-1' });
+          },
+        ),
+      releaseSeat: jest.fn().mockResolvedValue(undefined),
     };
     mail = { sendMail: jest.fn().mockResolvedValue({ jobId: 'j' }) };
     const layout = {
@@ -134,6 +147,7 @@ describe('TeamService', () => {
           role: 'RECRUITER',
           emails_on: true,
           invited_by_member_id: 'owner',
+          seat_subscription_id: 'sub-1',
         }),
       });
       expect(mail.sendMail).toHaveBeenCalledWith(
@@ -150,18 +164,23 @@ describe('TeamService', () => {
       await expect(
         service.invite(admin, { ...dto, role: 'REVIEWER' }),
       ).rejects.toThrow(/n’inclut pas d’évaluateurs/);
-      subscriptions.entitlements.mockResolvedValue({
-        recruiters: 2,
-        recruitersLimit: 2,
-        reviewers: 0,
-        reviewersLimit: null,
-      });
+      limits.REVIEWER = null;
+      taken.RECRUITER = 2;
       await expect(service.invite(admin, dto)).rejects.toThrow(
-        /permet 2 recruteurs/,
+        /déjà ajouté 2 recruteurs sur cette période/,
       );
       await expect(
         service.invite(admin, { ...dto, role: 'REVIEWER' }),
       ).resolves.toBeDefined();
+    });
+
+    it('gives the place back when the invitation cannot be saved', async () => {
+      prisma.businessMember.create.mockRejectedValueOnce(new Error('db'));
+      await expect(service.invite(admin, dto)).rejects.toThrow('db');
+      expect(subscriptions.releaseSeat).toHaveBeenCalledWith(
+        'sub-1',
+        'RECRUITER',
+      );
     });
 
     it('never makes a second administrator', async () => {
@@ -216,7 +235,11 @@ describe('TeamService', () => {
       await service.removeByAdmin(BUSINESS, 'm-2');
       expect(prisma.businessMember.update).toHaveBeenCalledWith({
         where: { id: 'm-2' },
-        data: { status: 'REMOVED', removed_at: expect.any(Date) },
+        data: {
+          status: 'REMOVED',
+          removed_at: expect.any(Date),
+          seat_subscription_id: null,
+        },
       });
       prisma.businessMember.findFirst.mockResolvedValueOnce(holder);
       await expect(
@@ -250,21 +273,30 @@ describe('TeamService', () => {
       prisma.businessMember.findFirst.mockResolvedValue(row({ id: 'm-2' })),
     );
 
-    it('changes a role only within the new role’s limit', async () => {
+    it('changes a role only within the new role’s places this period', async () => {
       await expect(service.setRole(admin, 'm-2', 'REVIEWER')).rejects.toThrow(
         /évaluateurs/,
       );
-      subscriptions.entitlements.mockResolvedValue({
-        recruiters: 1,
-        recruitersLimit: 2,
-        reviewers: 0,
-        reviewersLimit: 1,
-      });
+      limits.REVIEWER = 1;
       await service.setRole(admin, 'm-2', 'REVIEWER');
       expect(prisma.businessMember.update).toHaveBeenCalledWith({
         where: { id: 'm-2' },
-        data: { role: 'REVIEWER' },
+        data: { role: 'REVIEWER', seat_subscription_id: 'sub-1' },
       });
+      // Added on an earlier period: its old place is not this period's.
+      expect(subscriptions.releaseSeat).not.toHaveBeenCalled();
+    });
+
+    it('frees the old role’s place when moved within the period it was added in', async () => {
+      limits.REVIEWER = 1;
+      prisma.businessMember.findFirst.mockResolvedValue(
+        row({ id: 'm-2', seat_subscription_id: 'sub-1' }),
+      );
+      await service.setRole(admin, 'm-2', 'REVIEWER');
+      expect(subscriptions.releaseSeat).toHaveBeenCalledWith(
+        'sub-1',
+        'RECRUITER',
+      );
     });
 
     it('never touches the holder', async () => {
@@ -274,12 +306,31 @@ describe('TeamService', () => {
       );
     });
 
-    it('removes a member: its next call is refused', async () => {
+    it('removes a member: its next call is refused, its place stays used', async () => {
+      prisma.businessMember.findFirst.mockResolvedValue(
+        row({ id: 'm-2', seat_subscription_id: 'sub-1' }),
+      );
       await service.remove(admin, 'm-2');
       expect(prisma.businessMember.update).toHaveBeenCalledWith({
         where: { id: 'm-2' },
-        data: { status: 'REMOVED', removed_at: expect.any(Date) },
+        data: {
+          status: 'REMOVED',
+          removed_at: expect.any(Date),
+          seat_subscription_id: null,
+        },
       });
+      expect(subscriptions.releaseSeat).not.toHaveBeenCalled();
+    });
+
+    it('cancelling an invitation never accepted gives its place back', async () => {
+      prisma.businessMember.findFirst.mockResolvedValue(
+        row({ id: 'm-2', status: 'INVITED', seat_subscription_id: 'sub-1' }),
+      );
+      await service.remove(admin, 'm-2');
+      expect(subscriptions.releaseSeat).toHaveBeenCalledWith(
+        'sub-1',
+        'RECRUITER',
+      );
     });
   });
 });

@@ -252,7 +252,7 @@ export class TeamService {
     }
 
     this.assertInvitedRole(dto.role);
-    await this.assertSeat(actor.businessId, dto.role);
+    const seat = await this.takeSeat(actor.businessId, dto.role);
 
     const now = new Date();
     const data = {
@@ -265,15 +265,22 @@ export class TeamService {
       joined_at: null,
       last_seen_at: null,
       removed_at: null,
+      seat_subscription_id: seat.subscriptionId,
     };
-    const member = here
-      ? await this.prisma.businessMember.update({
-          where: { id: here.id },
-          data,
-        })
-      : await this.prisma.businessMember.create({
-          data: { ...data, business_id: actor.businessId, email },
-        });
+    let member: BusinessMember;
+    try {
+      member = here
+        ? await this.prisma.businessMember.update({
+            where: { id: here.id },
+            data,
+          })
+        : await this.prisma.businessMember.create({
+            data: { ...data, business_id: actor.businessId, email },
+          });
+    } catch (err) {
+      await this.subscriptions.releaseSeat(seat.subscriptionId, dto.role);
+      throw err;
+    }
     await this.sendInvite(actor.businessId, member, actor.member.name);
     return memberView(member);
   }
@@ -307,11 +314,24 @@ export class TeamService {
     const member = await this.ownIn(actor.businessId, id);
     this.assertNotHolderOrSelf(actor, member);
     if (member.role === role) return memberView(member);
-    await this.assertSeat(actor.businessId, role);
-    const updated = await this.prisma.businessMember.update({
-      where: { id },
-      data: { role },
-    });
+    const seat = await this.takeSeat(actor.businessId, role);
+    let updated: BusinessMember;
+    try {
+      updated = await this.prisma.businessMember.update({
+        where: { id },
+        data: { role, seat_subscription_id: seat.subscriptionId },
+      });
+    } catch (err) {
+      await this.subscriptions.releaseSeat(seat.subscriptionId, role);
+      throw err;
+    }
+    // Moved within the period it was added in: its old place is free again.
+    if (member.seat_subscription_id === seat.subscriptionId) {
+      await this.subscriptions.releaseSeat(
+        seat.subscriptionId,
+        member.role as InvitedRole,
+      );
+    }
     return memberView(updated);
   }
 
@@ -319,10 +339,7 @@ export class TeamService {
     this.assertAdmin(actor);
     const member = await this.ownIn(actor.businessId, id);
     this.assertNotHolderOrSelf(actor, member);
-    await this.prisma.businessMember.update({
-      where: { id },
-      data: { status: 'REMOVED', removed_at: new Date() },
-    });
+    await this.markRemoved(member);
     return { removed: true };
   }
 
@@ -361,10 +378,7 @@ export class TeamService {
     if (member.is_owner) {
       throw new ForbiddenException('The account holder cannot be removed.');
     }
-    await this.prisma.businessMember.update({
-      where: { id },
-      data: { status: 'REMOVED', removed_at: new Date() },
-    });
+    await this.markRemoved(member);
     return { removed: true, member: memberView(member) };
   }
 
@@ -466,20 +480,38 @@ export class TeamService {
     }
   }
 
-  /** One more of this role still fits the plan. */
-  private async assertSeat(businessId: string, role: InvitedRole) {
-    const e = await this.subscriptions.entitlements(businessId);
-    const [used, limit] =
-      role === 'RECRUITER'
-        ? [e.recruiters, e.recruitersLimit]
-        : [e.reviewers, e.reviewersLimit];
-    if (limit === null || used < limit) return;
+  /**
+   * One place of this role on the current period. Places are counted per
+   * period, like the offers: a new period frees them, the team stays.
+   */
+  private takeSeat(businessId: string, role: InvitedRole) {
     const [one, many] = ROLE_PLURAL[role];
-    throw new ForbiddenException(
+    return this.subscriptions.consumeSeat(businessId, role, (limit) =>
       limit === 0
         ? `Votre formule n’inclut pas d’${many}. Changez de formule pour en inviter.`
-        : `Votre formule permet ${limit} ${limit > 1 ? many : one}. Changez de formule pour en inviter davantage.`,
+        : `Vous avez déjà ajouté ${limit} ${limit > 1 ? many : one} sur cette période, le maximum de votre formule. Changez de formule ou attendez son renouvellement.`,
     );
+  }
+
+  /**
+   * Takes the member out of the team. An invitation never accepted gives its
+   * place back to the period it was taken on.
+   */
+  private async markRemoved(member: BusinessMember) {
+    await this.prisma.businessMember.update({
+      where: { id: member.id },
+      data: {
+        status: 'REMOVED',
+        removed_at: new Date(),
+        seat_subscription_id: null,
+      },
+    });
+    if (member.status === 'INVITED' && member.seat_subscription_id) {
+      await this.subscriptions.releaseSeat(
+        member.seat_subscription_id,
+        member.role as InvitedRole,
+      );
+    }
   }
 
   private assertAdmin(actor: TeamActor) {
