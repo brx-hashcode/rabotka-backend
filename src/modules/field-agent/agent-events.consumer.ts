@@ -15,6 +15,7 @@ import {
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import type { AgentNotificationInput } from './agent-notification-catalog';
 import { AgentNotificationService } from './agent-notification.service';
+import { AGENT_EMPLOYMENT_TYPE } from './agent-zones';
 
 type OutboxRow = {
   id: bigint;
@@ -224,7 +225,12 @@ export class AgentEventsConsumer implements OnModuleInit, OnModuleDestroy {
    */
   private async newJobs(jobIds: string[]): Promise<void> {
     const jobs = await this.prisma.jobOffer.findMany({
-      where: { id: { in: jobIds }, status: 'ACTIVE', deleted_at: null },
+      where: {
+        id: { in: jobIds },
+        status: 'ACTIVE',
+        deleted_at: null,
+        employment_type: AGENT_EMPLOYMENT_TYPE,
+      },
       select: { id: true, title: true, city: true, country_code: true },
     });
     if (jobs.length === 0) return;

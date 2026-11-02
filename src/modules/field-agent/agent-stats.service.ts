@@ -262,7 +262,7 @@ export class AgentStatsService {
 const STATS_TIMEZONE = 'Africa/Brazzaville';
 
 /**
- * Open offers with the location the agent app filters on: the offer's own
+ * Open missions, the only offers agents work, with the location the agent app filters on: the offer's own
  * city and country, or — when the offer names no city — the employer's.
  * Mirrors `jobsInZonesWhere` in agent-zones.ts.
  */
@@ -276,6 +276,7 @@ const OPEN_JOBS_SQL = Prisma.sql`
     JOIN profiles e ON e.id = j.employer_id
     WHERE j.deleted_at IS NULL
       AND j.status IN ('ACTIVE', 'PARTIALLY_FILLED')
+      AND j.employment_type = 'MISSION'
 `;
 
 /** Cities covered by at least one ACTIVE agent, lowercased for comparison. */

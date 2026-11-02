@@ -324,6 +324,7 @@ describe('AgentPortalService', () => {
         status: {
           in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
         },
+        employment_type: 'MISSION',
         AND: [ELIGIBLE],
       });
       expect(args).toMatchObject({ skip: 10, take: 10 });
@@ -395,7 +396,8 @@ describe('AgentPortalService', () => {
       const [typeCall, categoryCall] = prisma.jobOffer.groupBy.mock.calls.map(
         (c: [{ where: unknown }]) => JSON.stringify(c[0].where),
       );
-      expect(typeCall).not.toContain('employment_type');
+      // Only the scope's own « missions only » remains, never the filter.
+      expect(typeCall).not.toContain('"employment_type":{"in"');
       expect(typeCall).toContain('plomberie');
       expect(categoryCall).toContain('CDD');
       expect(categoryCall).not.toContain('plomberie');
@@ -452,6 +454,13 @@ describe('AgentPortalService', () => {
         JSON.stringify(prisma.jobOffer.findMany.mock.calls[0][0].where),
       ).toContain('8000');
       expect(result.facets.amount).toEqual({ min: 5000, max: 20000 });
+    });
+  });
+
+  describe('missions only', () => {
+    it('keeps agents to missions, in their zones and on the public feed', () => {
+      expect(jobsInZonesWhere([ZONE]).employment_type).toBe('MISSION');
+      expect(publicScopeWhere({}).employment_type).toBe('MISSION');
     });
   });
 
