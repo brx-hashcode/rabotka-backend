@@ -3817,7 +3817,6 @@ model ApplicationAssessment {
 /// A mail service a business reads candidates' CVs from.
 enum MailProvider {
   GMAIL
-  OUTLOOK
 }
 
 /// A mailbox a business connected (OAuth) to pick CVs from its e-mails for

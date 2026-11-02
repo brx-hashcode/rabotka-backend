@@ -1,5 +1,4 @@
 import { GmailProvider } from '../providers/gmail.provider';
-import { OutlookProvider } from '../providers/outlook.provider';
 import { MailboxAuthError } from '../providers/mail-provider';
 
 const json = (body: unknown, status = 200) =>
@@ -133,71 +132,6 @@ describe('mail providers', () => {
     it('calls a refused refresh token gone', async () => {
       fetchMock.mockResolvedValueOnce(json({ error: 'invalid_grant' }, 400));
       await expect(gmail.refresh('r')).rejects.toBeInstanceOf(MailboxAuthError);
-    });
-  });
-
-  describe('Outlook', () => {
-    const outlook = new OutlookProvider('id', 'secret');
-
-    it('keeps file attachments that can be CVs', async () => {
-      fetchMock.mockResolvedValueOnce(
-        json({
-          value: [
-            {
-              id: 'o1',
-              subject: 'CV',
-              receivedDateTime: new Date().toISOString(),
-              hasAttachments: true,
-              from: { emailAddress: { name: '', address: 'jean@x.cg' } },
-              attachments: [
-                {
-                  '@odata.type': '#microsoft.graph.fileAttachment',
-                  id: 'a1',
-                  name: 'cv.docx',
-                  contentType: '',
-                  size: 50_000,
-                  isInline: false,
-                },
-                {
-                  '@odata.type': '#microsoft.graph.itemAttachment',
-                  id: 'a2',
-                  name: 'fwd.pdf',
-                  contentType: 'application/pdf',
-                  size: 50_000,
-                  isInline: false,
-                },
-              ],
-            },
-          ],
-          '@odata.nextLink':
-            'https://graph.microsoft.com/v1.0/me/messages?$skip=15',
-        }),
-      );
-      const r = await outlook.listCvMails('tok', {});
-      expect(r.mails).toEqual([
-        {
-          id: 'o1',
-          fromName: 'jean',
-          subject: 'CV',
-          date: expect.any(String),
-          attachments: [
-            {
-              id: 'a1',
-              name: 'cv.docx',
-              size: 50_000,
-              mime: 'application/octet-stream',
-            },
-          ],
-        },
-      ]);
-      expect(r.next).toContain('$skip=15');
-    });
-
-    it('follows only its own next links', async () => {
-      await expect(
-        outlook.listCvMails('tok', { page: 'https://evil.example/steal' }),
-      ).rejects.toThrow(/page link/);
-      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 });
