@@ -8,7 +8,7 @@ import {
 } from './mailbox.controller';
 import { MailboxService } from './mailbox.service';
 
-/** Gmail and Outlook mailboxes a business picks CVs from (OAuth, read-only). */
+/** Gmail mailboxes a business picks CVs from (OAuth, read-only). */
 @Module({
   // AuthModule for ProfileAuthGuard's JwtService, which also signs the OAuth state.
   imports: [ConfigModule, AuthModule, BusinessSubscriptionModule],

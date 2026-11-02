@@ -88,8 +88,6 @@ describe('MailboxService', () => {
           MAILBOX_TOKEN_KEY: KEY,
           GOOGLE_MAIL_CLIENT_ID: 'gid',
           GOOGLE_MAIL_CLIENT_SECRET: 'gsecret',
-          MS_MAIL_CLIENT_ID: undefined,
-          MS_MAIL_CLIENT_SECRET: undefined,
           ...env,
         })[k],
     };
@@ -130,15 +128,15 @@ describe('MailboxService', () => {
   it('says which providers can be connected', async () => {
     const { service } = make();
     const r = await service.list('p-1');
-    expect(r.available).toEqual({ gmail: true, outlook: false });
+    expect(r.available).toEqual({ gmail: true });
     expect(
       make({ MAILBOX_TOKEN_KEY: undefined }).service.available('GMAIL' as any),
     ).toBe(false);
   });
 
   it('refuses to connect a provider that is not configured', async () => {
-    const { service } = make();
-    await expect(service.connectUrl('p-1', 'outlook')).rejects.toBeInstanceOf(
+    const { service } = make({ GOOGLE_MAIL_CLIENT_ID: undefined });
+    await expect(service.connectUrl('p-1', 'gmail')).rejects.toBeInstanceOf(
       ServiceUnavailableException,
     );
   });
@@ -418,21 +416,6 @@ describe('connection failures with a reason', () => {
     await expect(
       new GmailProvider('id', 'secret').exchange('code', 'https://x/cb'),
     ).rejects.toMatchObject({ reason: 'api_disabled' });
-  });
-
-  it('Outlook: Mail.Read not granted', async () => {
-    const { OutlookProvider } = await import('../providers/outlook.provider');
-    fetchMock.mockResolvedValueOnce(
-      json({
-        access_token: 'a',
-        refresh_token: 'r',
-        expires_in: 3600,
-        scope: 'User.Read openid profile',
-      }),
-    );
-    await expect(
-      new OutlookProvider('id', 'secret').exchange('code', 'https://x/cb'),
-    ).rejects.toMatchObject({ reason: 'scope' });
   });
 
   it('keeps a failure open and says why', () => {
