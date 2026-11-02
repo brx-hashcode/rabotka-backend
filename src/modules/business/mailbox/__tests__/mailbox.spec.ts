@@ -244,7 +244,7 @@ describe('MailboxService', () => {
       service.preview('p-1', 'mb-1', 'm1', '2'),
     ).resolves.toMatchObject({ name: 'CV Awa.pdf', type: 'application/pdf' });
 
-    // A .docx is a zip: no preview in a browser.
+    // A .docx is served too: the business app draws it in the page.
     gmail.attachment.mockResolvedValue({
       name: 'cv.docx',
       mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -255,7 +255,7 @@ describe('MailboxService', () => {
     });
     await expect(
       service.preview('p-1', 'mb-1', 'm1', '3'),
-    ).rejects.toBeInstanceOf(UnsupportedMediaTypeException);
+    ).resolves.toMatchObject({ name: 'cv.docx' });
 
     // A page dressed up as a PDF is not served.
     gmail.attachment.mockResolvedValue({

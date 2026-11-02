@@ -16,7 +16,7 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { businessDashboardUrl } from '../../mail/audience';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
 import type { CvUpload } from '../cv-screening/cv-screening.service';
-import { cvFileType, DOCX_MIME } from '../cv-screening/cv-files';
+import { cvFileType } from '../cv-screening/cv-files';
 import { MAX_MAIL_ATTACHMENTS } from './cv-attachments';
 import { MailboxCrypto } from './mailbox-crypto';
 import { GmailProvider } from './providers/gmail.provider';
@@ -225,10 +225,12 @@ export class MailboxService {
     if (file.buffer.length > MAX_ATTACHMENT_BYTES) {
       throw new BadRequestException('Fichier trop lourd pour un aperçu.');
     }
+    // PDF, photo or Word, checked on the bytes: the business app draws a
+    // .docx itself, in the page.
     const type = cvFileType(file.buffer, file.mime);
-    if (!type || type === DOCX_MIME) {
+    if (!type) {
       throw new UnsupportedMediaTypeException(
-        'L’aperçu est disponible pour les PDF et les photos.',
+        'L’aperçu est disponible pour les PDF, les fichiers Word et les photos.',
       );
     }
     return { name: file.name, type, buffer: file.buffer };

@@ -73,7 +73,7 @@ export class MailboxController {
   @Get(':id/mails/:messageId/attachments/:attachmentId')
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
-    summary: 'One attachment, shown inline before it is ticked (PDF or photo)',
+    summary: 'One attachment, shown before it is ticked (PDF, Word or photo)',
   })
   async preview(
     @Req() req: ProfileAuthenticatedRequest,
