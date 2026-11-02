@@ -274,13 +274,13 @@ export class TeamService {
       : await this.prisma.businessMember.create({
           data: { ...data, business_id: actor.businessId, email },
         });
-    await this.sendInvite(actor, member);
+    await this.sendInvite(actor.businessId, member, actor.member.name);
     return memberView(member);
   }
 
   async resend(actor: TeamActor, id: string) {
     this.assertAdmin(actor);
-    const member = await this.own(actor, id);
+    const member = await this.ownIn(actor.businessId, id);
     if (member.status !== 'INVITED') {
       throw new ConflictException('Cette personne a déjà rejoint l’équipe.');
     }
@@ -297,14 +297,14 @@ export class TeamService {
       where: { id },
       data: { invited_at: new Date() },
     });
-    await this.sendInvite(actor, updated);
+    await this.sendInvite(actor.businessId, updated, actor.member.name);
     return memberView(updated);
   }
 
   async setRole(actor: TeamActor, id: string, role: InvitedRole) {
     this.assertAdmin(actor);
     this.assertInvitedRole(role);
-    const member = await this.own(actor, id);
+    const member = await this.ownIn(actor.businessId, id);
     this.assertNotHolderOrSelf(actor, member);
     if (member.role === role) return memberView(member);
     await this.assertSeat(actor.businessId, role);
@@ -317,13 +317,87 @@ export class TeamService {
 
   async remove(actor: TeamActor, id: string) {
     this.assertAdmin(actor);
-    const member = await this.own(actor, id);
+    const member = await this.ownIn(actor.businessId, id);
     this.assertNotHolderOrSelf(actor, member);
     await this.prisma.businessMember.update({
       where: { id },
       data: { status: 'REMOVED', removed_at: new Date() },
     });
     return { removed: true };
+  }
+
+  // ── Admin support ────────────────────────────────────────────────────
+
+  /**
+   * Rabotka's team sends an invitation again (rabotka-admin). The same rules
+   * as the business's own resend; the admin audit log records it, not the
+   * business's activity.
+   */
+  async resendByAdmin(businessId: string, id: string) {
+    const member = await this.ownIn(businessId, id);
+    if (member.status !== 'INVITED') {
+      throw new ConflictException('This person has already joined the team.');
+    }
+    if (
+      member.invited_at &&
+      Date.now() - member.invited_at.getTime() < RESEND_AFTER_MS
+    ) {
+      throw new HttpException(
+        'Invitation sent a moment ago: wait a minute.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    const updated = await this.prisma.businessMember.update({
+      where: { id },
+      data: { invited_at: new Date() },
+    });
+    await this.sendInvite(businessId, updated, null);
+    return memberView(updated);
+  }
+
+  /** Rabotka's team removes a member: its sessions stop on their next call. */
+  async removeByAdmin(businessId: string, id: string) {
+    const member = await this.ownIn(businessId, id);
+    if (member.is_owner) {
+      throw new ForbiddenException('The account holder cannot be removed.');
+    }
+    await this.prisma.businessMember.update({
+      where: { id },
+      data: { status: 'REMOVED', removed_at: new Date() },
+    });
+    return { removed: true, member: memberView(member) };
+  }
+
+  /** The team as admin sees it: removed members too, and who invited whom. */
+  async listForAdmin(businessId: string) {
+    await this.holder(businessId);
+    const [rows, entitlements] = await Promise.all([
+      this.prisma.businessMember.findMany({
+        where: { business_id: businessId },
+        orderBy: [{ is_owner: 'desc' }, { created_at: 'asc' }],
+      }),
+      this.subscriptions.entitlements(businessId),
+    ]);
+    const names = new Map(rows.map((r) => [r.id, r.name]));
+    return {
+      members: rows.map((m) => ({
+        ...memberView(m),
+        invitedBy: m.invited_by_member_id
+          ? (names.get(m.invited_by_member_id) ?? null)
+          : null,
+        removedAt: m.removed_at?.toISOString() ?? null,
+      })),
+      seats: {
+        RECRUITER: {
+          used: entitlements.recruiters,
+          limit: entitlements.recruitersLimit,
+        },
+        REVIEWER: {
+          used: entitlements.reviewers,
+          limit: entitlements.reviewersLimit,
+        },
+      },
+    };
   }
 
   // ── Activity ─────────────────────────────────────────────────────────
@@ -349,7 +423,10 @@ export class TeamService {
       );
   }
 
-  async activity(actor: TeamActor, opts: { page?: number; memberId?: string }) {
+  async activity(
+    actor: Pick<TeamActor, 'businessId'>,
+    opts: { page?: number; memberId?: string },
+  ) {
     const page = Math.max(1, opts.page ?? 1);
     const where = {
       business_id: actor.businessId,
@@ -426,17 +503,22 @@ export class TeamService {
     }
   }
 
-  private async own(actor: TeamActor, id: string) {
+  private async ownIn(businessId: string, id: string) {
     const member = await this.prisma.businessMember.findFirst({
-      where: { id, business_id: actor.businessId, status: { not: 'REMOVED' } },
+      where: { id, business_id: businessId, status: { not: 'REMOVED' } },
     });
     if (!member) throw new NotFoundException('Membre introuvable.');
     return member;
   }
 
-  private async sendInvite(actor: TeamActor, member: BusinessMember) {
+  /** `invitedBy`: the member's name, or null when Rabotka's team sends it. */
+  private async sendInvite(
+    businessId: string,
+    member: BusinessMember,
+    invitedBy: string | null,
+  ) {
     const business = await this.prisma.business.findUniqueOrThrow({
-      where: { id: actor.businessId },
+      where: { id: businessId },
       select: { name: true },
     });
     const origin = businessDashboardUrl().replace(/\/espace$/, '');
@@ -448,7 +530,7 @@ export class TeamService {
         html: await this.layout.wrap(
           businessTeamInviteEmail({
             name: member.name,
-            invitedBy: actor.member.name,
+            invitedBy,
             businessName: business.name,
             role: member.role,
             signInUrl,

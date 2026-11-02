@@ -30,5 +30,7 @@ import { FileModule } from '../../file/file.module';
     CareersPageController,
   ],
   providers: [CareersService, CareersPageService],
+  // For rabotka-admin's view of a business (AdminBusinessService).
+  exports: [CareersPageService],
 })
 export class CareersModule {}

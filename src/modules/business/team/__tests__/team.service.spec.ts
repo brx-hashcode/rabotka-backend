@@ -210,6 +210,41 @@ describe('TeamService', () => {
     });
   });
 
+  describe('admin support', () => {
+    it('removes a member of this business, never its holder', async () => {
+      prisma.businessMember.findFirst.mockResolvedValueOnce(row({ id: 'm-2' }));
+      await service.removeByAdmin(BUSINESS, 'm-2');
+      expect(prisma.businessMember.update).toHaveBeenCalledWith({
+        where: { id: 'm-2' },
+        data: { status: 'REMOVED', removed_at: expect.any(Date) },
+      });
+      prisma.businessMember.findFirst.mockResolvedValueOnce(holder);
+      await expect(
+        service.removeByAdmin(BUSINESS, 'owner'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      prisma.businessMember.findFirst.mockResolvedValueOnce(null);
+      await expect(
+        service.removeByAdmin(BUSINESS, 'elsewhere'),
+      ).rejects.toThrow(/introuvable/);
+    });
+
+    it("resends an invitation in the organisation's name", async () => {
+      prisma.businessMember.findFirst.mockResolvedValueOnce(
+        row({
+          id: 'm-3',
+          status: 'INVITED',
+          invited_at: new Date(Date.now() - 120_000),
+        }),
+      );
+      await service.resendByAdmin(BUSINESS, 'm-3');
+      expect(mail.sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          html: expect.stringContaining('L’équipe de <strong>ZuaFood</strong>'),
+        }),
+      );
+    });
+  });
+
   describe('roles and removal', () => {
     beforeEach(() =>
       prisma.businessMember.findFirst.mockResolvedValue(row({ id: 'm-2' })),
