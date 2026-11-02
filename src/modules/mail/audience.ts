@@ -17,6 +17,13 @@ export function audienceOf(profile: {
 }
 
 /** The business dashboard's space (BUSINESS_DASHBOARD_URL, else production's). */
+/** The business app's own origin, where its public careers pages live. */
+export function businessSiteUrl(): string {
+  return (
+    process.env.BUSINESS_DASHBOARD_URL ?? 'https://business.rabotka.work'
+  ).replace(/\/+$/, '');
+}
+
 export function businessDashboardUrl(): string {
   return `${(process.env.BUSINESS_DASHBOARD_URL ?? 'https://business.rabotka.work').replace(/\/+$/, '')}/espace`;
 }

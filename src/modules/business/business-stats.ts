@@ -60,6 +60,8 @@ export type StatsApplication = {
   rejected_at: Date | null;
   /** AUTO_FILL: the post being filled closed it, nobody looked at it. */
   rejection_source?: RejectionSource | null;
+  /** Where the candidate came from: rabotka, agent, or the careers page's source. */
+  source?: string;
 };
 
 export type StatsAssignment = {
@@ -271,6 +273,19 @@ export function computeBusinessStats(input: StatsInput) {
     const name = offerById.get(a.job_offer_id)?.category?.name ?? 'Autre';
     byCategory.set(name, (byCategory.get(name) ?? 0) + 1);
   }
+  // ── Where this period's candidates came from, and who was hired ──
+  const bySource = new Map<string, { received: number; hired: number }>();
+  for (const a of cohort) {
+    const key = a.source ?? 'rabotka';
+    const row = bySource.get(key) ?? { received: 0, hired: 0 };
+    row.received += 1;
+    if (isHired(a)) row.hired += 1;
+    bySource.set(key, row);
+  }
+  const sources = [...bySource]
+    .map(([source, n]) => ({ source, ...n }))
+    .sort((a, b) => b.received - a.received);
+
   const categories = [...byCategory]
     .map(([name, count]) => ({ name, applications: count }))
     .sort((a, b) => b.applications - a.applications)
@@ -339,6 +354,7 @@ export function computeBusinessStats(input: StatsInput) {
     series,
     topOffers,
     categories,
+    sources,
   };
 }
 
@@ -357,6 +373,7 @@ export function externalAsStats(a: {
   retained_at: Date | null;
   refused_at: Date | null;
   refusal_message: string | null;
+  source: string | null;
 }): StatsApplication {
   const status =
     a.status === ExternalApplicationStatus.REFUSED
@@ -373,6 +390,7 @@ export function externalAsStats(a: {
     viewed_at: a.viewed_at,
     accepted_at: a.retained_at,
     rejected_at: a.refused_at,
+    source: a.source ?? 'carrieres',
     rejection_source:
       a.refusal_message === CLOSED_OFFER_REFUSAL
         ? RejectionSource.AUTO_FILL

@@ -24,7 +24,7 @@ import {
   candidateQuestion,
   checkAnswers,
 } from '../../job-offer/offer-questions';
-import { businessDashboardUrl } from '../../mail/audience';
+import { businessSiteUrl, businessDashboardUrl } from '../../mail/audience';
 import { LayoutService } from '../../mail/layout.service';
 import { MailService } from '../../mail/mail.service';
 import {
@@ -43,6 +43,7 @@ import {
   refuseOutsideCandidates,
 } from './refuse-closed-offer';
 import { takenSeats } from '../../job-offer/utils/offer-seats';
+import { feedSite, jobsFeedXml } from './job-feed';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { BUSINESS_CATEGORY_LABELS } from '../business-catalog';
 import { CvScreeningService } from '../cv-screening/cv-screening.service';
@@ -61,6 +62,8 @@ const OPEN: JobOfferStatus[] = [
 ];
 
 const MAX_COMPANIES = 200;
+/** Well above what Rabotka's businesses have open; a feed stays one file. */
+const MAX_FEED_JOBS = 5000;
 
 const COMPANY_SELECT = {
   id: true,
@@ -172,6 +175,52 @@ export class CareersService {
         updatedAt: o.updated_at.toISOString(),
       })),
     };
+  }
+
+  /** Every offer search engines may list, as the aggregators' XML feed. */
+  async feed(site: string) {
+    const offers = await this.prisma.jobOffer.findMany({
+      where: {
+        ...this.openNow(),
+        employer: {
+          business: {
+            public_slug: { not: null },
+            deleted_at: null,
+            verification_status: VerificationStatus.VERIFIED,
+            distribute_offers: true,
+          },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+      take: MAX_FEED_JOBS,
+      select: {
+        ...OFFER_SELECT,
+        description: true,
+        amount: true,
+        payment_flow: true,
+        employer: {
+          select: { business: { select: { public_slug: true, name: true } } },
+        },
+      },
+    });
+    return jobsFeedXml(
+      offers.map((o) => ({
+        slug: o.employer.business!.public_slug as string,
+        company: o.employer.business!.name,
+        reference: o.reference,
+        title: o.title,
+        description: o.description,
+        employmentType: o.employment_type,
+        createdAt: o.created_at,
+        closesAt: o.scheduled_at,
+        city: o.city,
+        countryName: o.country_name,
+        isRemote: o.is_remote,
+        amount: o.amount === null ? null : Number(o.amount),
+        paymentFlow: o.payment_flow,
+      })),
+      { site: feedSite(site), baseUrl: businessSiteUrl(), now: new Date() },
+    );
   }
 
   async company(slug: string) {
@@ -309,6 +358,7 @@ export class CareersService {
             passed: r.passed,
           })),
           knocked_out: knockedOut,
+          source: dto.source ?? null,
           consented_at: new Date(),
           cv_file_name: file.originalname.slice(0, 200),
           cv_mime_type: type,
@@ -392,6 +442,7 @@ export class CareersService {
         : []
       ).map((x) => ({ ...x, value: answerText(x) })),
       knockedOut: a.knocked_out,
+      source: a.source,
       hasCv: a.cv_storage_key !== null,
       cvFileName: a.cv_file_name,
       cvMimeType: a.cv_mime_type,

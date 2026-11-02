@@ -256,6 +256,29 @@ describe('business dashboard stats', () => {
     expect(s.timing.responseHours).toBeNull();
   });
 
+  it("says where this period's candidates came from, and who was hired", () => {
+    const s = computeBusinessStats(
+      input({
+        offers: [offer({ id: 'a' })],
+        applications: [
+          app({ job_offer_id: 'a', source: 'jooble' }),
+          app({
+            job_offer_id: 'a',
+            source: 'jooble',
+            status: ApplicationStatus.ACCEPTED,
+            accepted_at: ago(D),
+          }),
+          app({ job_offer_id: 'a', source: 'agent' }),
+          app({ job_offer_id: 'a', source: 'google', created_at: ago(60 * D) }),
+        ],
+      }),
+    );
+    expect(s.sources).toEqual([
+      { source: 'jooble', received: 2, hired: 1 },
+      { source: 'agent', received: 1, hired: 0 },
+    ]);
+  });
+
   it('keeps applications of the first day of the period on the chart', () => {
     const s = computeBusinessStats(
       input({
@@ -276,6 +299,7 @@ describe('externalAsStats', () => {
     retained_at: null,
     refused_at: null,
     refusal_message: null,
+    source: null,
   };
 
   it('marks a refusal that only closed the offer as automatic', () => {
