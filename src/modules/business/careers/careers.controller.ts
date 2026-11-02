@@ -47,6 +47,15 @@ export class CareersController {
     return this.careers.companies();
   }
 
+  // Before `:slug`, which would take it otherwise; « sitemap » is never a slug.
+  @Public()
+  @Get('sitemap')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Pages search engines may list' })
+  sitemap() {
+    return this.careers.sitemap();
+  }
+
   @Public()
   @Get(':slug')
   @Throttle({ default: { limit: 60, ttl: 60_000 } })

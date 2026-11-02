@@ -72,6 +72,7 @@ const COMPANY_SELECT = {
   city: true,
   website: true,
   description: true,
+  distribute_offers: true,
   profile: { select: { avatar_url: true } },
 } as const;
 
@@ -84,6 +85,7 @@ const OFFER_SELECT = {
   city: true,
   country_name: true,
   quantity: true,
+  created_at: true,
 } as const;
 
 /**
@@ -135,6 +137,41 @@ export class CareersService {
           b.openOffers - a.openOffers || a.name.localeCompare(b.name, 'fr'),
       )
       .slice(0, MAX_COMPANIES);
+  }
+
+  /**
+   * What search engines may list: verified businesses that kept distribution
+   * on, and their open offers. Fed to the business app's sitemap.
+   */
+  async sitemap() {
+    const businesses = await this.prisma.business.findMany({
+      where: {
+        public_slug: { not: null },
+        deleted_at: null,
+        verification_status: VerificationStatus.VERIFIED,
+        distribute_offers: true,
+      },
+      select: { public_slug: true, profile_id: true, updated_at: true },
+    });
+    const bySlug = new Map(businesses.map((b) => [b.profile_id, b]));
+    const offers = await this.prisma.jobOffer.findMany({
+      where: { ...this.openNow(), employer_id: { in: [...bySlug.keys()] } },
+      select: { reference: true, employer_id: true, updated_at: true },
+    });
+    const withOffers = new Set(offers.map((o) => o.employer_id));
+    return {
+      companies: businesses
+        .filter((b) => withOffers.has(b.profile_id))
+        .map((b) => ({
+          slug: b.public_slug as string,
+          updatedAt: b.updated_at.toISOString(),
+        })),
+      offers: offers.map((o) => ({
+        slug: bySlug.get(o.employer_id)!.public_slug as string,
+        reference: o.reference,
+        updatedAt: o.updated_at.toISOString(),
+      })),
+    };
   }
 
   async company(slug: string) {
@@ -672,6 +709,7 @@ export class CareersService {
     city: string | null;
     website: string | null;
     description: string | null;
+    distribute_offers: boolean;
     profile: { avatar_url: string | null };
   }) {
     return {
@@ -682,6 +720,8 @@ export class CareersService {
       city: b.city,
       website: b.website,
       description: b.description,
+      // Search engines may list its pages: it has not opted out.
+      indexable: b.distribute_offers,
     };
   }
 
@@ -694,9 +734,11 @@ export class CareersService {
     city: string | null;
     country_name: string | null;
     quantity: number;
+    created_at: Date;
   }) {
     return {
       reference: o.reference,
+      publishedAt: o.created_at.toISOString(),
       title: o.title,
       employmentType: o.employment_type,
       closesAt: o.scheduled_at?.toISOString() ?? null,
