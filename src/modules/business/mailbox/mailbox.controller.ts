@@ -49,19 +49,6 @@ export class MailboxController {
     return this.mailboxes.list(req.user.profileId);
   }
 
-  @Get('forward-address')
-  @ApiOperation({ summary: 'Its CV forwarding address, made on first use' })
-  forwardAddress(@Req() req: ProfileAuthenticatedRequest) {
-    return this.mailboxes.forwardAddress(req.user.profileId);
-  }
-
-  @Post('forward-address/regenerate')
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
-  @ApiOperation({ summary: 'Replace the CV forwarding address' })
-  regenerateForwardAddress(@Req() req: ProfileAuthenticatedRequest) {
-    return this.mailboxes.regenerateForwardAddress(req.user.profileId);
-  }
-
   @Post(':provider/connect')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({ summary: 'The consent screen to open, for gmail or outlook' })
