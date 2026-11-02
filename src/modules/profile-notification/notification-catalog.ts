@@ -100,6 +100,8 @@ export type NotificationInput =
   | {
       type: 'NEW_APPLICATION';
       applicationId: string;
+      /** Lets the business space open the offer, on this application. */
+      jobOfferId?: string;
       jobTitle: string;
       workerName: string;
     }
@@ -452,7 +454,11 @@ export function renderNotification(
       return {
         title: 'Nouvelle candidature',
         body: `${input.workerName} a postulé à votre offre${quoted(input.jobTitle)}.`,
-        link: `/candidatures/${input.applicationId}`,
+        // The client app reads the path; the business space reads `offre` and
+        // opens that offer on this application.
+        link: input.jobOfferId
+          ? `/candidatures/${input.applicationId}?offre=${input.jobOfferId}`
+          : `/candidatures/${input.applicationId}`,
       };
 
     case 'APPLICATION_CANCELLED':
