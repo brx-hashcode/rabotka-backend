@@ -105,11 +105,18 @@ describe('MailboxService', () => {
     const subscriptions: any = {
       businessOf: jest.fn().mockResolvedValue('biz-1'),
     };
+    const inbox = {
+      available: false,
+      address: jest.fn(),
+      list: jest.fn(),
+      attachment: jest.fn(),
+    };
     const service = new MailboxService(
       prisma,
       jwt,
       subscriptions,
       config as any,
+      inbox as any,
     );
     const gmail = (service as any).providers.GMAIL;
     return { service, prisma, subscriptions, gmail };
@@ -130,7 +137,11 @@ describe('MailboxService', () => {
   it('says which providers can be connected', async () => {
     const { service } = make();
     const r = await service.list('p-1');
-    expect(r.available).toEqual({ gmail: true, outlook: false });
+    expect(r.available).toEqual({
+      gmail: true,
+      outlook: false,
+      forward: false,
+    });
     expect(
       make({ MAILBOX_TOKEN_KEY: undefined }).service.available('GMAIL' as any),
     ).toBe(false);
@@ -194,6 +205,29 @@ describe('MailboxService', () => {
     expect(prisma.businessMailbox.upsert).not.toHaveBeenCalled();
   });
 
+  it('lists the forwarding address first, and reads it from the forwarded mails', async () => {
+    const { service, prisma } = make();
+    const inbox = (service as any).inbox;
+    inbox.available = true;
+    inbox.address.mockResolvedValue('kamoa-a1b2c@cv.rabotka.work');
+    inbox.list.mockResolvedValue({ mails: [], next: null });
+    prisma.businessMailbox.findMany.mockResolvedValue([]);
+
+    const r = await service.list('p-1');
+    expect(r.mailboxes[0]).toMatchObject({
+      id: 'biz-1',
+      provider: 'forward',
+      email: 'kamoa-a1b2c@cv.rabotka.work',
+    });
+
+    await service.mails('p-1', 'biz-1', 'compta');
+    expect(inbox.list).toHaveBeenCalledWith('biz-1', {
+      q: 'compta',
+      page: undefined,
+    });
+    expect(prisma.businessMailbox.findFirst).not.toHaveBeenCalled();
+  });
+
   it('reads only its own mailboxes', async () => {
     const { service, prisma } = make();
     prisma.businessMailbox.findFirst.mockResolvedValue(null);
@@ -204,7 +238,6 @@ describe('MailboxService', () => {
       where: { id: 'mb-x', business_id: 'biz-1' },
     });
 
-    prisma.businessMailbox.findMany.mockResolvedValue([]);
     await expect(
       service.download('p-1', [
         { mailboxId: 'mb-x', messageId: 'm', attachmentId: 'a' },
@@ -214,7 +247,7 @@ describe('MailboxService', () => {
 
   it('reads the ticked attachments into files', async () => {
     const { service, prisma, gmail } = make();
-    prisma.businessMailbox.findMany.mockResolvedValue([box()]);
+    prisma.businessMailbox.findFirst.mockResolvedValue(box());
     gmail.attachment = jest.fn().mockResolvedValue({
       name: 'CV Awa.pdf',
       mime: 'application/pdf',
