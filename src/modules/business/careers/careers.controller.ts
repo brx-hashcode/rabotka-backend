@@ -1,4 +1,6 @@
 import {
+  Query,
+  Header,
   Body,
   Controller,
   Get,
@@ -45,6 +47,16 @@ export class CareersController {
   @ApiOperation({ summary: 'Verified businesses with open offers' })
   companies() {
     return this.careers.companies();
+  }
+
+  @Public()
+  @Get('feed.xml')
+  @Header('Content-Type', 'application/xml; charset=utf-8')
+  @Header('Cache-Control', 'public, max-age=900')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Open offers as an XML feed for job aggregators' })
+  feed(@Query('for') site?: string) {
+    return this.careers.feed(site ?? 'feed');
   }
 
   // Before `:slug`, which would take it otherwise; « sitemap » is never a slug.

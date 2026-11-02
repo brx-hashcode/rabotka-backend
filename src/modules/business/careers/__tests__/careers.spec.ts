@@ -481,6 +481,20 @@ describe('CareersService', () => {
       });
     });
 
+    it('keeps where the candidate came from', async () => {
+      const { prisma, service } = serviceWith(business, [], open);
+
+      await service.apply('kamoa', 'RBT-AC5LF', pdf, {
+        ...dto,
+        answers,
+        source: 'jooble',
+      });
+
+      expect(
+        prisma.externalApplication.create.mock.calls[0][0].data.source,
+      ).toBe('jooble');
+    });
+
     it('scores the CV as it arrives, and never fails the application for it', async () => {
       const { service } = serviceWith(business, [], open);
       const analyse = jest

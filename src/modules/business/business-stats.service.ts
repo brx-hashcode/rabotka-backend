@@ -50,6 +50,7 @@ export class BusinessStatsService {
           accepted_at: true,
           rejected_at: true,
           rejection_source: true,
+          agent_id: true,
         },
       }),
       this.prisma.externalApplication.findMany({
@@ -62,6 +63,7 @@ export class BusinessStatsService {
           retained_at: true,
           refused_at: true,
           refusal_message: true,
+          source: true,
         },
       }),
       this.prisma.assignment.findMany({
@@ -95,7 +97,13 @@ export class BusinessStatsService {
       now,
       days,
       offers,
-      applications: [...applications, ...external.map(externalAsStats)],
+      applications: [
+        ...applications.map(({ agent_id, ...a }) => ({
+          ...a,
+          source: agent_id ? 'agent' : 'rabotka',
+        })),
+        ...external.map(externalAsStats),
+      ],
       assignments,
       unlocks: unlocks.map((u) => u.unlocked_at),
       ratingsGiven: ratingsGiven.map((r) => r.score),

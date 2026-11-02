@@ -3864,6 +3864,8 @@ model ExternalApplication {
   answers         Json                      @default("[]")
   /// A wrong answer to an « éliminatoire » question: kept, listed after the others.
   knocked_out     Boolean                   @default(false)
+  /// Where they came from: google, jooble, qr, whatsapp… Null before tracking.
+  source          String?
   consented_at    DateTime                  @db.Timestamptz
   viewed_at       DateTime?                 @db.Timestamptz
   retained_at     DateTime?                 @db.Timestamptz

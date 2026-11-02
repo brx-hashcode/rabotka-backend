@@ -1,4 +1,5 @@
 import {
+  Matches,
   Equals,
   IsEmail,
   IsOptional,
@@ -34,6 +35,11 @@ export class ApplyDto {
   @IsString()
   @MaxLength(5000)
   answers?: string;
+
+  /** Where they came from, from `?source=` or the page that sent them. */
+  @IsOptional()
+  @Matches(/^[a-z0-9-]{1,30}$/)
+  source?: string;
 
   /** Hidden from people: only a bot fills it. */
   @IsOptional()
