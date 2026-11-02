@@ -10,6 +10,7 @@ import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import {
   ExternalApplicationStatus,
   JobOfferStatus,
+  OfferQuestionKind,
   Prisma,
   VerificationStatus,
 } from '@prisma/client';
@@ -18,6 +19,7 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { kycBucket } from '../../../common/services/storage/kyc-bucket';
 import { StorageService } from '../../../common/services/storage/storage.service';
 import {
+  answerText,
   type AnswerInput,
   candidateQuestion,
   checkAnswers,
@@ -347,7 +349,11 @@ export class CareersService {
       email: a.email,
       phone: a.phone,
       status: a.status,
-      answers: a.answers,
+      // As the business reads them: « Oui », a date in words.
+      answers: (Array.isArray(a.answers)
+        ? (a.answers as { kind: OfferQuestionKind; value: string }[])
+        : []
+      ).map((x) => ({ ...x, value: answerText(x) })),
       knockedOut: a.knocked_out,
       hasCv: a.cv_storage_key !== null,
       cvFileName: a.cv_file_name,

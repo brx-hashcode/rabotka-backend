@@ -12,6 +12,7 @@ export const MAX_QUESTIONS = 5;
 export const LABEL_MAX = 140;
 export const OPTION_MAX = 60;
 export const ANSWER_MAX = 300;
+export const LONG_ANSWER_MAX = 3000;
 export const YES = 'yes';
 export const NO = 'no';
 
@@ -86,6 +87,22 @@ export function normalizeQuestions(input: QuestionInput[]): QuestionRow[] {
           );
         }
         accepted = [want];
+      }
+    } else if (q.kind === OfferQuestionKind.NUMBER) {
+      if (knockout) {
+        const min = q.accepted?.[0]?.trim() ?? '';
+        if (parseNumber(min) === null) {
+          throw bad(`« ${label} » : indiquez le minimum accepté.`);
+        }
+        accepted = [String(parseNumber(min))];
+      }
+    } else if (q.kind === OfferQuestionKind.DATE) {
+      if (knockout) {
+        const latest = q.accepted?.[0] ?? '';
+        if (!isDay(latest)) {
+          throw bad(`« ${label} » : indiquez la date limite acceptée.`);
+        }
+        accepted = [latest];
       }
     } else if (knockout) {
       throw bad('Une réponse libre ne peut pas être éliminatoire.');
@@ -164,9 +181,20 @@ export function checkAnswers(
     if (q.kind === OfferQuestionKind.CHOICE && !q.options.includes(value)) {
       throw bad(`« ${q.label} » : choisissez une des réponses proposées.`);
     }
-    if (q.kind === OfferQuestionKind.SHORT_TEXT) {
-      if (value.length > ANSWER_MAX) {
-        throw bad(`« ${q.label} » : ${ANSWER_MAX} caractères au plus.`);
+    if (q.kind === OfferQuestionKind.NUMBER && parseNumber(value) === null) {
+      throw bad(`« ${q.label} » : répondez par un nombre.`);
+    }
+    if (q.kind === OfferQuestionKind.DATE && !isDay(value)) {
+      throw bad(`« ${q.label} » : indiquez une date.`);
+    }
+    const free =
+      q.kind === OfferQuestionKind.SHORT_TEXT ||
+      q.kind === OfferQuestionKind.LONG_TEXT;
+    if (free) {
+      const max =
+        q.kind === OfferQuestionKind.LONG_TEXT ? LONG_ANSWER_MAX : ANSWER_MAX;
+      if (value.length > max) {
+        throw bad(`« ${q.label} » : ${max} caractères au plus.`);
       }
       if (detectContacts(value).length > 0) {
         throw bad(
@@ -178,8 +206,11 @@ export function checkAnswers(
       question_id: q.id,
       label: q.label,
       kind: q.kind,
-      value,
-      passed: q.knockout ? q.accepted.includes(value) : null,
+      value:
+        q.kind === OfferQuestionKind.NUMBER
+          ? String(parseNumber(value))
+          : value,
+      passed: q.knockout ? passes(q, value) : null,
     });
   }
   return { rows, knockedOut: rows.some((r) => r.passed === false) };
@@ -189,5 +220,36 @@ export function checkAnswers(
 export function answerText(a: { kind: OfferQuestionKind; value: string }) {
   if (a.kind === OfferQuestionKind.YES_NO)
     return a.value === YES ? 'Oui' : 'Non';
+  if (a.kind === OfferQuestionKind.DATE && isDay(a.value)) {
+    return new Date(`${a.value}T12:00:00Z`).toLocaleDateString('fr-FR', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+  }
   return a.value;
+}
+
+/** Whether an answer meets an « éliminatoire » question. */
+function passes(q: StoredQuestion, value: string): boolean {
+  if (q.kind === OfferQuestionKind.NUMBER) {
+    return (parseNumber(value) ?? -Infinity) >= Number(q.accepted[0]);
+  }
+  // Same-length YYYY-MM-DD strings compare as dates.
+  if (q.kind === OfferQuestionKind.DATE) return value <= q.accepted[0];
+  return q.accepted.includes(value);
+}
+
+/** « 3 », « 2,5 » or « 2.5 »; null for anything else. */
+export function parseNumber(raw: string): number | null {
+  const s = raw.trim().replace(',', '.');
+  if (!/^\d{1,9}(\.\d{1,2})?$/.test(s)) return null;
+  return Number(s);
+}
+
+function isDay(raw: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return false;
+  const d = new Date(`${raw}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().startsWith(raw);
 }
