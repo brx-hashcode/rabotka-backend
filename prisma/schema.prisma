@@ -3888,6 +3888,12 @@ enum OfferQuestionKind {
   YES_NO
   CHOICE
   SHORT_TEXT
+  /// A cover letter or any answer of a few paragraphs.
+  LONG_TEXT
+  /// « Éliminatoire »: `accepted[0]` is the minimum.
+  NUMBER
+  /// YYYY-MM-DD. « Éliminatoire »: `accepted[0]` is the latest date accepted.
+  DATE
 }
 
 /// A question an offer asks its candidates when they apply.

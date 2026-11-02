@@ -242,3 +242,102 @@ describe('checkAnswers', () => {
     );
   });
 });
+
+describe('long answers, numbers and dates', () => {
+  const years = {
+    id: 'n1',
+    kind: 'NUMBER' as const,
+    label: 'Années d’expérience',
+    options: [],
+    required: true,
+    knockout: true,
+    accepted: ['3'],
+    position: 0,
+  };
+  const start = {
+    id: 'd1',
+    kind: 'DATE' as const,
+    label: 'Disponible à partir du',
+    options: [],
+    required: true,
+    knockout: true,
+    accepted: ['2026-12-01'],
+    position: 1,
+  };
+  const letter = {
+    id: 'l1',
+    kind: 'LONG_TEXT' as const,
+    label: 'Lettre de motivation',
+    options: [],
+    required: false,
+    knockout: false,
+    accepted: [],
+    position: 2,
+  };
+
+  it('keeps the minimum and the latest date of « éliminatoires »', () => {
+    const [n, d] = normalizeQuestions([
+      { ...years, accepted: ['2,5'] },
+      { ...start },
+    ]);
+    expect(n.accepted).toEqual(['2.5']);
+    expect(d.accepted).toEqual(['2026-12-01']);
+  });
+
+  it('refuses an « éliminatoire » with no threshold, or on a long answer', () => {
+    expect(() => normalizeQuestions([{ ...years, accepted: [] }])).toThrow(
+      'minimum',
+    );
+    expect(() =>
+      normalizeQuestions([{ ...start, accepted: ['01/12/2026'] }]),
+    ).toThrow('date limite');
+    expect(() => normalizeQuestions([{ ...letter, knockout: true }])).toThrow(
+      BadRequestException,
+    );
+  });
+
+  it('passes the minimum and an early enough date, and flags the rest', () => {
+    const ok = checkAnswers(
+      [years, start],
+      [
+        { questionId: 'n1', value: '3' },
+        { questionId: 'd1', value: '2026-11-20' },
+      ],
+    );
+    expect(ok.knockedOut).toBe(false);
+
+    const late = checkAnswers(
+      [years, start],
+      [
+        { questionId: 'n1', value: '1,5' },
+        { questionId: 'd1', value: '2027-01-10' },
+      ],
+    );
+    expect(late.rows.map((r) => r.passed)).toEqual([false, false]);
+    expect(late.rows[0].value).toBe('1.5');
+  });
+
+  it('refuses what is not a number or a date', () => {
+    expect(() =>
+      checkAnswers([years], [{ questionId: 'n1', value: 'trois' }]),
+    ).toThrow('nombre');
+    expect(() =>
+      checkAnswers([start], [{ questionId: 'd1', value: '2026-02-30' }]),
+    ).toThrow('date');
+  });
+
+  it('takes a cover letter past the short-answer limit', () => {
+    const value = 'Bonjour. '.repeat(100);
+    const r = checkAnswers([letter], [{ questionId: 'l1', value }]);
+    expect(r.rows[0].value).toBe(value.trim());
+    expect(() =>
+      checkAnswers([letter], [{ questionId: 'l1', value: 'x'.repeat(3001) }]),
+    ).toThrow('3000');
+  });
+
+  it('writes a date out for the business', () => {
+    expect(answerText({ kind: 'DATE', value: '2026-12-01' })).toBe(
+      '1 décembre 2026',
+    );
+  });
+});
