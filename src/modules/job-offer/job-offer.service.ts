@@ -493,6 +493,7 @@ export class JobOfferService {
         country_code: true,
         country_name: true,
         city: true,
+        is_business: true,
       },
     });
     if (!employer) {
@@ -531,7 +532,7 @@ export class JobOfferService {
       );
     }
 
-    this.validateCreateDto(dto);
+    this.validateCreateDto(dto, employer.is_business);
     const questions = normalizeQuestions(dto.questions ?? []);
     // A business publishes within its plan's offers for the period.
     await this.subscriptions?.assertCanPublishOffer(employerId);
@@ -1263,13 +1264,17 @@ export class JobOfferService {
   async republish(
     id: string,
     actorProfileId: string,
-    scheduledAt: Date,
+    scheduledAt: Date | null,
   ): Promise<JobOfferListItem> {
     const [offer, actor] = await Promise.all([
       this.prisma.jobOffer.findUnique({ where: { id } }),
       this.prisma.profile.findUnique({
         where: { id: actorProfileId },
-        select: { verification_status: true, status: true },
+        select: {
+          verification_status: true,
+          status: true,
+          is_business: true,
+        },
       }),
     ]);
     if (!offer || offer.deleted_at) {
@@ -1300,12 +1305,18 @@ export class JobOfferService {
     await this.subscriptions?.assertCanPublishOffer(actorProfileId);
     const priorityUntil =
       (await this.subscriptions?.priorityUntil(actorProfileId)) ?? null;
-    if (Number.isNaN(scheduledAt.getTime())) {
+    if (
+      scheduledAt === null &&
+      (isDatedMission(offer.employment_type) || !actor.is_business)
+    ) {
+      throw new BadRequestException('Une date est requise');
+    }
+    if (scheduledAt && Number.isNaN(scheduledAt.getTime())) {
       throw new BadRequestException('Date invalide');
     }
 
     const minDate = new Date(Date.now() + MIN_HOURS_FROM_NOW * 60 * 60 * 1000);
-    if (scheduledAt < minDate) {
+    if (scheduledAt && scheduledAt < minDate) {
       throw new BadRequestException(
         `La date doit être au moins ${MIN_HOURS_FROM_NOW} heures dans le futur`,
       );
@@ -1388,7 +1399,7 @@ export class JobOfferService {
     return this.toListItem(updated);
   }
 
-  validateCreateDto(dto: CreateJobOfferDto): void {
+  validateCreateDto(dto: CreateJobOfferDto, isBusiness = false): void {
     if (
       !dto.title ||
       dto.title.trim().length < TITLE_MIN ||
@@ -1410,7 +1421,12 @@ export class JobOfferService {
     // Every offer needs this date, but it means two different things, so the
     // message names the one the employer is actually being asked for. Demanding
     // "la date de clôture" on a CDI is how you get an employer inventing one.
-    if (!dto.scheduled_at) {
+    //
+    // The exception is a business's CDD, CDI or stage: it closes those itself
+    // from its dashboard. Other employers have no such button, and an undated
+    // offer of theirs with a hire could never close.
+    const openEnded = isBusiness && !isDatedMission(dto.employment_type);
+    if (!dto.scheduled_at && !openEnded) {
       throw new BadRequestException(
         isDatedMission(dto.employment_type)
           ? 'La date de la mission est requise'
@@ -2310,20 +2326,34 @@ export class JobOfferService {
     }
 
     const currentAmount = offer.amount == null ? null : Number(offer.amount);
-    this.validateCreateDto({
-      title: dto.title ?? offer.title,
-      description: dto.description ?? offer.description,
-      employment_type: dto.employment_type ?? offer.employment_type,
-      scheduled_at: dto.scheduled_at ?? offer.scheduled_at?.toISOString(),
-      amount:
-        dto.amount !== undefined ? dto.amount : (currentAmount ?? undefined),
-      address: dto.address ?? offer.address ?? undefined,
-      note: dto.note ?? offer.note ?? undefined,
-      quantity: dto.quantity ?? offer.quantity,
-    });
+    const undated = dto.scheduled_at === null || !offer.scheduled_at;
+    const owner = undated
+      ? await this.prisma.profile.findUnique({
+          where: { id: actorProfileId },
+          select: { is_business: true },
+        })
+      : null;
+    this.validateCreateDto(
+      {
+        title: dto.title ?? offer.title,
+        description: dto.description ?? offer.description,
+        employment_type: dto.employment_type ?? offer.employment_type,
+        scheduled_at:
+          dto.scheduled_at === null
+            ? undefined
+            : (dto.scheduled_at ?? offer.scheduled_at?.toISOString()),
+        amount:
+          dto.amount !== undefined ? dto.amount : (currentAmount ?? undefined),
+        address: dto.address ?? offer.address ?? undefined,
+        note: dto.note ?? offer.note ?? undefined,
+        quantity: dto.quantity ?? offer.quantity,
+      },
+      owner?.is_business ?? false,
+    );
 
-    const scheduledAt =
-      dto.scheduled_at !== undefined ? new Date(dto.scheduled_at) : undefined;
+    const scheduledAt = dto.scheduled_at
+      ? new Date(dto.scheduled_at)
+      : undefined;
     if (
       scheduledAt &&
       scheduledAt.getTime() !== offer.scheduled_at?.getTime() &&
@@ -2376,6 +2406,7 @@ export class JobOfferService {
     if (dto.description !== undefined)
       data.description = dto.description.trim();
     if (scheduledAt) data.scheduled_at = scheduledAt;
+    if (dto.scheduled_at === null) data.scheduled_at = null;
     if (dto.employment_type !== undefined)
       data.employment_type = dto.employment_type;
     if (dto.amount !== undefined) data.amount = dto.amount ?? null;

@@ -99,7 +99,7 @@ export class JobOfferController {
     return this.jobOfferService.republish(
       id,
       req.user.profileId,
-      new Date(dto.scheduledAt),
+      dto.scheduledAt ? new Date(dto.scheduledAt) : null,
     );
   }
 
