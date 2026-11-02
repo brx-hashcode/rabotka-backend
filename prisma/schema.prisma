@@ -663,6 +663,8 @@ model User {
   @@index([email], name: "idx_user_email")
   @@index([role], name: "idx_user_role")
   @@index([deleted_at], name: "idx_user_deleted_at")
+  business_notes AdminBusinessNote[]
+
   @@map("users")
   payouts_requested MobileMoneyPayout[] @relation("PayoutRequestedBy")
 }
@@ -3440,6 +3442,7 @@ model Business {
   activities    BusinessActivity[]
   candidate_notes    CandidateNote[]
   candidate_opinions CandidateOpinion[]
+  admin_notes        AdminBusinessNote[]
 
   @@index([verification_status], name: "idx_business_verification_status")
   @@index([category], name: "idx_business_category")
@@ -3853,6 +3856,24 @@ model BusinessMailbox {
 
   @@unique([business_id, provider, email])
   @@map("business_mailboxes")
+}
+
+/// Rabotka's own follow-up notes on a business (rabotka-admin only, never
+/// shown to the business): calls, promises, context for the next person.
+model AdminBusinessNote {
+  id          String    @id @default(uuid()) @db.Uuid
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
+  business_id String    @db.Uuid
+  author_id   String    @db.Uuid
+  body        String    @db.Text
+  deleted_at  DateTime?
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  author   User     @relation(fields: [author_id], references: [id], onDelete: Cascade)
+
+  @@index([business_id, created_at], name: "idx_admin_business_note_business_created")
+  @@map("admin_business_notes")
 }
 
 /// What a member may do in the business space. ADMIN is the account holder
