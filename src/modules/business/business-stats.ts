@@ -3,7 +3,10 @@ import {
   AssignmentStatus,
   ExternalApplicationStatus,
   JobOfferStatus,
+  RejectionSource,
 } from '@prisma/client';
+import { CLOSED_OFFER_REFUSAL } from './careers/refuse-closed-offer';
+import { isTerminalJobOfferStatus } from '../job-offer/utils/job-offer-status.util';
 
 /**
  * The business dashboard's recruitment figures, computed from rows already
@@ -55,11 +58,14 @@ export type StatsApplication = {
   viewed_at: Date | null;
   accepted_at: Date | null;
   rejected_at: Date | null;
+  /** AUTO_FILL: the post being filled closed it, nobody looked at it. */
+  rejection_source?: RejectionSource | null;
 };
 
 export type StatsAssignment = {
   status: AssignmentStatus;
-  created_at: Date;
+  completed_at: Date | null;
+  no_show_at: Date | null;
 };
 
 export type StatsInput = {
@@ -97,7 +103,9 @@ export const isHired = (a: StatsApplication) =>
 
 /** The first sign the employer looked: opened, accepted or turned down. */
 function firstResponse(a: StatsApplication): Date | null {
-  const times = [a.viewed_at, a.accepted_at, a.rejected_at]
+  const rejected =
+    a.rejection_source === RejectionSource.AUTO_FILL ? null : a.rejected_at;
+  const times = [a.viewed_at, a.accepted_at, rejected]
     .filter((d): d is Date => !!d)
     .map((d) => d.getTime());
   return times.length ? new Date(Math.min(...times)) : null;
@@ -196,9 +204,9 @@ export function computeBusinessStats(input: StatsInput) {
   );
   const ended = input.assignments.filter(
     (s) =>
-      within(s.created_at, current) &&
-      (s.status === AssignmentStatus.COMPLETED ||
-        s.status === AssignmentStatus.NO_SHOW),
+      (s.status === AssignmentStatus.COMPLETED &&
+        within(s.completed_at, current)) ||
+      (s.status === AssignmentStatus.NO_SHOW && within(s.no_show_at, current)),
   );
   const noShows = ended.filter(
     (s) => s.status === AssignmentStatus.NO_SHOW,
@@ -207,7 +215,7 @@ export function computeBusinessStats(input: StatsInput) {
   // ── Daily series ──
   const series: { date: string; applications: number; hires: number }[] = [];
   const index = new Map<string, number>();
-  for (let t = current.from + DAY_MS; t <= to; t += DAY_MS) {
+  for (let t = current.from; dayKey(t) <= dayKey(to); t += DAY_MS) {
     index.set(dayKey(t), series.length);
     series.push({ date: dayKey(t), applications: 0, hires: 0 });
   }
@@ -221,6 +229,14 @@ export function computeBusinessStats(input: StatsInput) {
   }
 
   // ── Offers worth a look: the open ones first, then by applications ──
+  const awaitsReview = (a: StatsApplication) => {
+    const offer = offerById.get(a.job_offer_id);
+    return (
+      a.status === ApplicationStatus.PENDING &&
+      !!offer &&
+      !isTerminalJobOfferStatus(offer.status)
+    );
+  };
   const byOffer = new Map<string, StatsApplication[]>();
   for (const a of applications) {
     byOffer.set(a.job_offer_id, [...(byOffer.get(a.job_offer_id) ?? []), a]);
@@ -235,8 +251,7 @@ export function computeBusinessStats(input: StatsInput) {
         quantity: o.quantity,
         hired: hiredByOffer.get(o.id) ?? 0,
         applications: apps.length,
-        toReview: apps.filter((a) => a.status === ApplicationStatus.PENDING)
-          .length,
+        toReview: apps.filter(awaitsReview).length,
         createdAt: o.created_at.toISOString(),
         isOpen: OPEN_OFFER_STATUSES.includes(o.status),
       };
@@ -261,12 +276,8 @@ export function computeBusinessStats(input: StatsInput) {
     .sort((a, b) => b.applications - a.applications)
     .slice(0, 5);
 
-  const pending = applications.filter(
-    (a) => a.status === ApplicationStatus.PENDING,
-  );
-  const offersWithApps = offers.filter(
-    (o) => (byOffer.get(o.id)?.length ?? 0) > 0,
-  );
+  const pending = applications.filter(awaitsReview);
+  const offersApplied = new Set(cohort.map((a) => a.job_offer_id)).size;
 
   return {
     period: {
@@ -290,14 +301,7 @@ export function computeBusinessStats(input: StatsInput) {
         (a) => to - a.created_at.getTime() > OVERDUE_REVIEW_MS,
       ).length,
       perOffer:
-        offersWithApps.length === 0
-          ? null
-          : round1(
-              offersWithApps.reduce(
-                (n, o) => n + byOffer.get(o.id)!.length,
-                0,
-              ) / offersWithApps.length,
-            ),
+        offersApplied === 0 ? null : round1(cohort.length / offersApplied),
     },
     hires: {
       count: hires(current).length,
@@ -352,6 +356,7 @@ export function externalAsStats(a: {
   viewed_at: Date | null;
   retained_at: Date | null;
   refused_at: Date | null;
+  refusal_message: string | null;
 }): StatsApplication {
   const status =
     a.status === ExternalApplicationStatus.REFUSED
@@ -368,5 +373,9 @@ export function externalAsStats(a: {
     viewed_at: a.viewed_at,
     accepted_at: a.retained_at,
     rejected_at: a.refused_at,
+    rejection_source:
+      a.refusal_message === CLOSED_OFFER_REFUSAL
+        ? RejectionSource.AUTO_FILL
+        : null,
   };
 }

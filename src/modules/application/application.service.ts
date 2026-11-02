@@ -743,8 +743,24 @@ export class ApplicationService {
         }),
         this.prisma.application.count({ where }),
       ]);
+      const finished = rows
+        .filter((a) => a.status === ApplicationStatus.END)
+        .map((a) => a.id);
+      const rated = finished.length
+        ? await this.prisma.rating.findMany({
+            where: {
+              rater_id: employerId,
+              assignment: { application_id: { in: finished } },
+            },
+            select: { assignment: { select: { application_id: true } } },
+          })
+        : [];
+      const ratedIds = new Set(rated.map((r) => r.assignment.application_id));
       return {
-        items: rows.map((a) => this.toApplicationWithOffer(a)),
+        items: rows.map((a) => ({
+          ...this.toApplicationWithOffer(a),
+          ratedByEmployer: ratedIds.has(a.id),
+        })),
         total,
       };
     }

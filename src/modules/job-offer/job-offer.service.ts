@@ -69,6 +69,7 @@ import {
   PaymentFlow,
   Prisma,
   ApplicationCancelledBy,
+  ExternalApplicationStatus,
   RejectionSource,
 } from '@prisma/client';
 import { cancellationPatch } from '../application/application.constants';
@@ -388,6 +389,14 @@ export type JobOfferListItem = {
   employer_id: string;
   created_at: Date;
 };
+
+/** Everyone an offer's « N/M postes » counts. */
+const HIRED_APPLICATION_STATUSES: ApplicationStatus[] = [
+  ApplicationStatus.WAITING_PAYMENT,
+  ApplicationStatus.ACCEPTED,
+  ApplicationStatus.STARTED,
+  ApplicationStatus.END,
+];
 
 /**
  * An offer as a WORKER may see it.
@@ -1099,15 +1108,23 @@ export class JobOfferService {
   ): Promise<
     JobOfferListItem[] | { items: JobOfferListItem[]; total: number }
   > {
-    // Newest first, and count ACCEPTED applications so the "N/M postes" filled
-    // count is accurate (matches findById/findByReference).
+    // Newest first, counting everyone hired so the "N/M postes" filled count
+    // holds for an offer past ACCEPTED, and for hires from the careers page.
     const acceptedCount = {
       _count: {
         select: {
-          applications: { where: { status: ApplicationStatus.ACCEPTED } },
+          applications: {
+            where: { status: { in: HIRED_APPLICATION_STATUSES } },
+          },
+          external_applications: {
+            where: { status: ExternalApplicationStatus.RETAINED },
+          },
         },
       },
     } as const;
+    const hires = (o: {
+      _count: { applications: number; external_applications: number };
+    }) => o._count.applications + o._count.external_applications;
 
     // Hide soft-deleted offers from the employer's own list.
     const where: Prisma.JobOfferWhereInput = {
@@ -1124,7 +1141,7 @@ export class JobOfferService {
         orderBy: { created_at: 'desc' },
         include: acceptedCount,
       });
-      return offers.map((o) => this.toListItem(o, o._count.applications));
+      return offers.map((o) => this.toListItem(o, hires(o)));
     }
 
     const { page, pageSize } = pagination;
@@ -1140,7 +1157,7 @@ export class JobOfferService {
       this.prisma.jobOffer.count({ where }),
     ]);
     return {
-      items: offers.map((o) => this.toListItem(o, o._count.applications)),
+      items: offers.map((o) => this.toListItem(o, hires(o))),
       total,
     };
   }

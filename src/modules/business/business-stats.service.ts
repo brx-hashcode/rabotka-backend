@@ -49,6 +49,7 @@ export class BusinessStatsService {
           viewed_at: true,
           accepted_at: true,
           rejected_at: true,
+          rejection_source: true,
         },
       }),
       this.prisma.externalApplication.findMany({
@@ -60,14 +61,18 @@ export class BusinessStatsService {
           viewed_at: true,
           retained_at: true,
           refused_at: true,
+          refusal_message: true,
         },
       }),
       this.prisma.assignment.findMany({
         where: {
-          job_offer: { employer_id: profileId },
-          created_at: { gte: since },
+          job_offer: { employer_id: profileId, deleted_at: null },
+          OR: [
+            { completed_at: { gte: since } },
+            { no_show_at: { gte: since } },
+          ],
         },
-        select: { status: true, created_at: true },
+        select: { status: true, completed_at: true, no_show_at: true },
       }),
       this.prisma.contactRecord.findMany({
         where: { employer_id: profileId, unlocked_at: { gte: since } },
