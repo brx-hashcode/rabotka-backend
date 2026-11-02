@@ -3551,6 +3551,11 @@ model BusinessSubscription {
   offer_drafts_used   Int                        @default(0)
   /// Offers published (or republished) during this period.
   offers_published    Int                        @default(0)
+  /// Recruiters / evaluators added to the team during this period (an
+  /// invitation, or a member moved to the role). Counted from 0 each period:
+  /// the people already in the team stay.
+  recruiters_added    Int                        @default(0)
+  reviewers_added     Int                        @default(0)
   payment_request_id  String?                    @unique @db.Uuid
   /// The admin who granted or cancelled it by hand.
   granted_by          String?                    @db.Uuid
@@ -3898,6 +3903,9 @@ model BusinessMember {
   joined_at            DateTime?
   last_seen_at         DateTime?
   removed_at           DateTime?
+  /// The period whose place this member took (invitation or role change):
+  /// an invitation cancelled before it is accepted gives it back.
+  seat_subscription_id String?              @db.Uuid
 
   business   Business           @relation(fields: [business_id], references: [id], onDelete: Cascade)
   activities BusinessActivity[]

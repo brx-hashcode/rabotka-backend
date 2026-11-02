@@ -190,19 +190,9 @@ export class BusinessSubscriptionService {
           take: 1,
         })) > 0
       : false;
-    const seats = await this.prisma.businessMember.groupBy({
-      by: ['role'],
-      where: {
-        business_id: businessId,
-        is_owner: false,
-        status: { in: ['INVITED', 'ACTIVE'] },
-      },
-      _count: { _all: true },
-    });
-    const taken = (role: 'RECRUITER' | 'REVIEWER') =>
-      seats.find((s) => s.role === role)?._count._all ?? 0;
-    const recruiters = taken('RECRUITER');
-    const reviewers = taken('REVIEWER');
+    // Places taken this period, like the offers: a new period frees them.
+    const recruiters = sub?.recruiters_added ?? 0;
+    const reviewers = sub?.reviewers_added ?? 0;
     if (!sub) {
       return {
         plan: null,
@@ -1067,6 +1057,54 @@ export class BusinessSubscriptionService {
       );
     }
     return { subscriptionId: sub.id };
+  }
+
+  /**
+   * One team place for this role on the current period, counted from 0 each
+   * period like the offers: the people already in the team keep theirs.
+   * Conditional, so two invitations can't share the last one. Returns the
+   * period charged, `message` builds the refusal from the plan's limit.
+   */
+  async consumeSeat(
+    businessId: string,
+    role: 'RECRUITER' | 'REVIEWER',
+    message: (limit: number) => string,
+  ): Promise<{ subscriptionId: string }> {
+    const sub = await this.current(businessId);
+    const limit = !sub
+      ? 0
+      : role === 'RECRUITER'
+        ? sub.plan.recruiters_limit
+        : sub.plan.reviewers_limit;
+    if (!sub || limit === 0) throw new ForbiddenException(message(0));
+    const field = role === 'RECRUITER' ? 'recruiters_added' : 'reviewers_added';
+    const { count } = await this.prisma.businessSubscription.updateMany({
+      where: {
+        id: sub.id,
+        ...(limit === null ? {} : { [field]: { lt: limit } }),
+      },
+      data: { [field]: { increment: 1 } },
+    });
+    if (count === 0) throw new ForbiddenException(message(limit ?? 0));
+    return { subscriptionId: sub.id };
+  }
+
+  /** Gives back a team place (invitation cancelled or never sent); never below zero. */
+  async releaseSeat(
+    subscriptionId: string,
+    role: 'RECRUITER' | 'REVIEWER',
+  ): Promise<void> {
+    if (role === 'RECRUITER') {
+      await this.prisma.$executeRaw`
+        UPDATE "business_subscriptions"
+        SET "recruiters_added" = GREATEST("recruiters_added" - 1, 0)
+        WHERE "id" = ${subscriptionId}::uuid`;
+    } else {
+      await this.prisma.$executeRaw`
+        UPDATE "business_subscriptions"
+        SET "reviewers_added" = GREATEST("reviewers_added" - 1, 0)
+        WHERE "id" = ${subscriptionId}::uuid`;
+    }
   }
 
   /** Gives back an offer that could not be saved; never below zero. */
