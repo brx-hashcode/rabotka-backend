@@ -20,6 +20,7 @@ import { BusinessContractModule } from './contract/business-contract.module';
 import { BusinessReportController } from './report/business-report.controller';
 import { BusinessReportService } from './report/business-report.service';
 import { CareersModule } from './careers/careers.module';
+import { TeamModule } from './team/team.module';
 
 /** Business accounts: the public catalog and the dashboard's own routes. */
 @Module({
@@ -37,6 +38,7 @@ import { CareersModule } from './careers/careers.module';
     ApplicantScoreModule,
     BusinessContractModule,
     CareersModule,
+    TeamModule,
   ],
   controllers: [
     BusinessCatalogController,

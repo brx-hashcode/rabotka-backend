@@ -616,7 +616,8 @@ export class AuthService {
     }
 
     const redisKey = `${MOBILE_REFRESH_PREFIX}${payload.jti}`;
-    const storedProfileId = await this.redis.get(redisKey);
+    const stored = await this.redis.get(redisKey);
+    const [storedProfileId, storedMemberId] = (stored ?? '').split('|');
     if (!storedProfileId || storedProfileId !== payload.sub) {
       throw new UnauthorizedException('Refresh token révoqué ou déjà utilisé');
     }
@@ -631,8 +632,187 @@ export class AuthService {
     if (!profile || profile.deleted_at) {
       throw new UnauthorizedException('Compte introuvable');
     }
+    if (
+      storedMemberId &&
+      !(await this.activeMemberOf(storedMemberId, profile.id))
+    ) {
+      throw new UnauthorizedException('Votre accès à cet espace a été retiré.');
+    }
 
-    return this.issueMobileTokens(profile.id);
+    return this.issueMobileTokens(profile.id, storedMemberId || undefined);
+  }
+
+  // ── Business space: the account holder or a team member ─────────────
+
+  /**
+   * Who a business-space sign-in is for. The account holder (a business
+   * profile) first; else a team member invited or active in a live business;
+   * else any other profile, which the business space then turns away as it
+   * does today.
+   */
+  private async businessLoginTarget(email: string): Promise<
+    | {
+        kind: 'profile';
+        profileId: string;
+        firstName?: string;
+        isBusiness: boolean;
+      }
+    | { kind: 'member'; memberId: string; profileId: string; firstName: string }
+    | null
+  > {
+    const profile = await this.findProfileByEmail(email);
+    const live = profile && !profile.deleted_at ? profile : null;
+    if (live?.is_business) {
+      return {
+        kind: 'profile',
+        profileId: live.id,
+        firstName: live.first_name ?? undefined,
+        isBusiness: true,
+      };
+    }
+    const member = await this.prisma.businessMember.findFirst({
+      where: {
+        email,
+        is_owner: false,
+        status: { in: ['INVITED', 'ACTIVE'] },
+        business: {
+          deleted_at: null,
+          profile: { is_business: true, deleted_at: null },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+      select: {
+        id: true,
+        name: true,
+        business: { select: { profile_id: true } },
+      },
+    });
+    if (member) {
+      return {
+        kind: 'member',
+        memberId: member.id,
+        profileId: member.business.profile_id,
+        firstName: member.name.split(' ')[0] ?? member.name,
+      };
+    }
+    return live
+      ? {
+          kind: 'profile',
+          profileId: live.id,
+          firstName: live.first_name ?? undefined,
+          isBusiness: false,
+        }
+      : null;
+  }
+
+  /** The member still has access to this business's profile. */
+  private async activeMemberOf(memberId: string, profileId: string) {
+    const member = await this.prisma.businessMember.findUnique({
+      where: { id: memberId },
+      select: {
+        status: true,
+        business: { select: { profile_id: true, deleted_at: true } },
+      },
+    });
+    return (
+      member?.status === 'ACTIVE' &&
+      member.business.profile_id === profileId &&
+      !member.business.deleted_at
+    );
+  }
+
+  /** The sign-in code for the business space (`auth/business/send-otp`). */
+  async sendBusinessOtp(
+    email: string,
+    resend = false,
+  ): Promise<{ success: boolean }> {
+    const normalized = this.normalize(email);
+    if (!this.isEmail(normalized)) {
+      throw new BadRequestException('Adresse e-mail invalide');
+    }
+    const target = await this.businessLoginTarget(normalized);
+    if (!target) {
+      throw new NotFoundException(
+        'Aucun compte trouvé pour cet email ou téléphone',
+      );
+    }
+
+    const resendCooldownKey = `${RESEND_COOLDOWN_KEY_PREFIX}${normalized}`;
+    if (resend && (await this.redis.get(resendCooldownKey))) {
+      throw new HttpException(
+        'Veuillez attendre avant de renvoyer le code',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    await this.assertCanSendOtp(OTP_SENDS_KEY_PREFIX, normalized);
+
+    const otp = this.generateOtp();
+    this.logOtp(resend ? 'resend' : 'send', normalized, otp);
+    await this.storeOtp(
+      `${OTP_KEY_PREFIX}${normalized}`,
+      `${OTP_ATTEMPTS_KEY_PREFIX}${normalized}`,
+      otp,
+    );
+    await this.sendOtpByEmail(
+      normalized,
+      otp,
+      target.firstName,
+      target.kind === 'profile' && !target.isBusiness
+        ? 'login'
+        : 'business-login',
+    );
+    if (resend) {
+      await this.redis.set(
+        resendCooldownKey,
+        '1',
+        'EX',
+        RESEND_COOLDOWN_SECONDS,
+      );
+    }
+    return { success: true };
+  }
+
+  /**
+   * Checks the code and opens the business-space session: the holder's, as
+   * `verifyOtpMobile` does, or a member's — the business's profile with the
+   * member in the token. A member's first sign-in accepts the invitation.
+   */
+  async verifyBusinessOtp(email: string, otp: string): Promise<MobileTokens> {
+    const normalized = this.normalize(email);
+    const matched = await this.consumeOtp(
+      `${OTP_KEY_PREFIX}${normalized}`,
+      `${OTP_ATTEMPTS_KEY_PREFIX}${normalized}`,
+      otp,
+    );
+    if (!matched) {
+      throw new UnauthorizedException(
+        'Code de vérification invalide ou expiré',
+      );
+    }
+    const target = await this.businessLoginTarget(normalized);
+    if (!target) {
+      throw new NotFoundException(
+        'Aucun compte trouvé pour cet email ou téléphone',
+      );
+    }
+    if (target.kind === 'profile') {
+      this.recordProfileLogin(target.profileId);
+      return this.issueMobileTokens(target.profileId);
+    }
+    const now = new Date();
+    const member = await this.prisma.businessMember.findUniqueOrThrow({
+      where: { id: target.memberId },
+      select: { joined_at: true },
+    });
+    await this.prisma.businessMember.update({
+      where: { id: target.memberId },
+      data: {
+        status: 'ACTIVE',
+        joined_at: member.joined_at ?? now,
+        last_seen_at: now,
+      },
+    });
+    return this.issueMobileTokens(target.profileId, target.memberId);
   }
 
   async logoutMobile(
@@ -666,9 +846,18 @@ export class AuthService {
     return this.issueMobileTokens(profileId);
   }
 
-  private async issueMobileTokens(profileId: string): Promise<MobileTokens> {
+  /**
+   * `memberId`: a team member of a business, signed in as the business's
+   * profile. It rides in both tokens (`mid`) and in the refresh token's Redis
+   * entry, so a rotation keeps it and can refuse a member removed since.
+   */
+  private async issueMobileTokens(
+    profileId: string,
+    memberId?: string,
+  ): Promise<MobileTokens> {
+    const mid = memberId ? { mid: memberId } : {};
     const accessToken = this.jwtService.sign(
-      { sub: profileId, type: 'profile', jti: randomUUID() },
+      { sub: profileId, type: 'profile', jti: randomUUID(), ...mid },
       {
         expiresIn: this.configService.get<string>(
           'JWT_ACCESS_EXPIRES_IN',
@@ -679,7 +868,7 @@ export class AuthService {
 
     const refreshJti = randomUUID();
     const refreshToken = this.jwtService.sign(
-      { sub: profileId, type: 'refresh', jti: refreshJti },
+      { sub: profileId, type: 'refresh', jti: refreshJti, ...mid },
       {
         expiresIn: this.configService.get<string>(
           'JWT_REFRESH_EXPIRES_IN',
@@ -694,7 +883,7 @@ export class AuthService {
       : DEFAULT_REFRESH_TTL_SECONDS;
     await this.redis.set(
       `${MOBILE_REFRESH_PREFIX}${refreshJti}`,
-      profileId,
+      memberId ? `${profileId}|${memberId}` : profileId,
       'EX',
       Math.max(ttl, 1),
     );

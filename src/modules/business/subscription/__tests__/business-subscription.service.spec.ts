@@ -46,6 +46,12 @@ function make(
     businessPlan: { findUnique: jest.fn().mockResolvedValue(plan()) },
     jobOffer: { count: jest.fn().mockResolvedValue(0), updateMany: jest.fn() },
     paymentRequest: { findUnique: jest.fn() },
+    // No team yet: seats are free, and e-mails go to the account holder.
+    businessMember: {
+      groupBy: jest.fn().mockResolvedValue([]),
+      findMany: jest.fn().mockResolvedValue([]),
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
   };
   const systemConfig: any = {
     getBusinessSubscriptionSettings: jest.fn().mockResolvedValue(

@@ -7,3 +7,4 @@ export * from './verify-admin-otp.dto';
 export * from './update-admin-me.dto';
 export * from './whatsapp-session.dto';
 export * from './signup-otp.dto';
+export * from './business-otp.dto';

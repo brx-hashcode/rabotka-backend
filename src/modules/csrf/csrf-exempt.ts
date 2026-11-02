@@ -9,6 +9,8 @@
  *   A provider is not one of our origins, and a 403 from the check means
  *   signature verification never runs and Meta retries against it for days.
  * - `auth/mobile` — the mobile app, which holds no cookie session.
+ * - `auth/business` — the business space's login (account holder or team
+ *   member): its tokens travel in the body too, kept by its server routes.
  * - `agent/auth` — the field-agent app's login, for the same reason: it holds
  *   no cookie, and its tokens travel in the body and the Authorization header.
  *   Everything else under `agent/` is Bearer-authenticated, which the
@@ -35,6 +37,7 @@ const CSRF_EXEMPT_PREFIXES = [
   '/api/v1/whatsapp/incoming',
   '/api/v1/webhooks/whatsapp',
   '/api/v1/auth/mobile',
+  '/api/v1/auth/business',
   '/api/v1/agent/auth',
   '/api/v1/oauth/token',
   '/api/v1/oauth/revoke',
