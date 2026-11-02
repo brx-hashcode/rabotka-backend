@@ -3394,6 +3394,9 @@ model Business {
   /// Its public careers page: /carrieres/<public_slug>. Null only for a row
   /// created before the migration ran; every sign-up sets it.
   public_slug         String?            @unique
+  /// Its open offers go to Google and the job sites. Its careers page stays
+  /// reachable by link either way.
+  distribute_offers   Boolean            @default(true)
   /// Raison sociale.
   name                String
   category            BusinessCategory

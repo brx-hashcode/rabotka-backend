@@ -25,6 +25,7 @@ const offer = {
   city: 'Brazzaville',
   country_name: 'Congo',
   quantity: 1,
+  created_at: new Date('2026-10-30T08:00:00Z'),
   description: 'Le poste',
   amount: null,
   payment_flow: null,
@@ -587,5 +588,42 @@ describe('CareersService', () => {
         service.apply('kamoa', 'RBT-X', pdf, dto),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
+  });
+});
+
+describe('sitemap', () => {
+  it('lists only distributing businesses that have an open offer', async () => {
+    const { prisma, service } = serviceWith(null);
+    (prisma.business as unknown as { findMany: jest.Mock }).findMany = jest
+      .fn()
+      .mockResolvedValue([
+        { public_slug: 'kamoa', profile_id: 'p1', updated_at: new Date() },
+        { public_slug: 'idle', profile_id: 'p2', updated_at: new Date() },
+      ]);
+    prisma.jobOffer.findMany.mockResolvedValue([
+      { reference: 'RBT-1', employer_id: 'p1', updated_at: new Date() },
+    ]);
+
+    const map = await service.sitemap();
+
+    const where = (prisma.business as unknown as { findMany: jest.Mock })
+      .findMany.mock.calls[0][0].where;
+    expect(where).toMatchObject({
+      distribute_offers: true,
+      verification_status: 'VERIFIED',
+    });
+    expect(map.companies.map((c) => c.slug)).toEqual(['kamoa']);
+    expect(map.offers).toEqual([
+      expect.objectContaining({ slug: 'kamoa', reference: 'RBT-1' }),
+    ]);
+  });
+});
+
+describe('reserved slugs', () => {
+  it('never hands out a slug the API uses', async () => {
+    const tx = { business: { findMany: jest.fn().mockResolvedValue([]) } };
+    await expect(uniqueBusinessSlug(tx as never, 'Sitemap')).resolves.toBe(
+      'sitemap-2',
+    );
   });
 });

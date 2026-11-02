@@ -1,6 +1,8 @@
 import type { Prisma } from '@prisma/client';
 
 const MAX_LENGTH = 60;
+/** Paths of the careers API that a slug would shadow. */
+const RESERVED = new Set(['sitemap', 'feed']);
 
 /** « Café du Port & Fils » becomes `cafe-du-port-fils`. */
 export function slugBase(name: string): string {
@@ -24,7 +26,10 @@ export async function uniqueBusinessSlug(
     where: { public_slug: { startsWith: base } },
     select: { public_slug: true },
   });
-  const taken = new Set(rows.map((r) => r.public_slug));
+  const taken = new Set<string | null>([
+    ...rows.map((r) => r.public_slug),
+    ...RESERVED,
+  ]);
   if (!taken.has(base)) return base;
   let n = 2;
   while (taken.has(`${base}-${n}`)) n += 1;

@@ -1,5 +1,6 @@
 import { Transform } from 'class-transformer';
 import {
+  IsBoolean,
   IsEmail,
   IsEnum,
   IsIn,
@@ -125,4 +126,11 @@ export class UpdateBusinessDto {
   @IsString()
   @MaxLength(2000)
   description?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Send its open offers to Google and the job sites',
+  })
+  @IsOptional()
+  @IsBoolean()
+  distributeOffers?: boolean;
 }

@@ -400,6 +400,8 @@ export type AdminBusinessDetail = {
   phone: string | null;
   website: string | null;
   description: string | null;
+  /** Its open offers go to Google and the job sites. */
+  distributeOffers: boolean;
   verificationStatus: VerificationStatus;
   verifiedAt: string | null;
   rejectionReason: string | null;
@@ -2292,6 +2294,7 @@ export class ProfileService {
       phone: business.phone,
       website: business.website,
       description: business.description,
+      distributeOffers: business.distribute_offers,
       verificationStatus: business.verification_status,
       verifiedAt: business.verified_at?.toISOString() ?? null,
       rejectionReason: business.rejection_reason,
@@ -2545,6 +2548,7 @@ export class ProfileService {
           phone: dto.phone,
           website: dto.website,
           description: dto.description,
+          distribute_offers: dto.distributeOffers,
           ...(reopened ? reopenedReview() : {}),
         },
       }),
