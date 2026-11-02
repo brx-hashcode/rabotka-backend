@@ -44,7 +44,7 @@ const MUTED = '#7A857F';
 const BODY = '#2B342F';
 const SUBTLE = '#5A655F';
 
-const OFFER_STATUS: Record<JobOfferStatus, string> = {
+export const OFFER_STATUS_LABEL: Record<JobOfferStatus, string> = {
   ACTIVE: 'En ligne',
   PARTIALLY_FILLED: 'En partie pourvue',
   FILLED: 'Pourvue',
@@ -145,8 +145,11 @@ function row(label: string, value: string, note = ''): string {
   return `<tr><td style="${TD}">${label}${note ? `<div style="font-size:10.5px; color:${MUTED};">${note}</div>` : ''}</td><td style="${TD_NUM}">${value}</td></tr>`;
 }
 
-/** `rapport-recrutement-zuafood-2026-09-28_2026-10-28.pdf` */
-export function reportFilename(input: ReportInput): string {
+/** `rapport-recrutement-zuafood-2026-09-28_2026-10-28.pdf` (or `.xlsx`, `.csv`) */
+export function reportFilename(
+  input: ReportInput,
+  ext: 'pdf' | 'xlsx' | 'csv' = 'pdf',
+): string {
   const slug =
     input.businessName
       .normalize('NFD')
@@ -155,7 +158,7 @@ export function reportFilename(input: ReportInput): string {
       .replaceAll(/[^a-z0-9]+/g, '-')
       .replaceAll(/^-+|-+$/g, '') || 'entreprise';
   const d = (iso: string) => iso.slice(0, 10);
-  return `rapport-recrutement-${slug}-${d(input.stats.period.from)}_${d(input.stats.period.to)}.pdf`;
+  return `rapport-recrutement-${slug}-${d(input.stats.period.from)}_${d(input.stats.period.to)}.${ext}`;
 }
 
 export function buildReportHtml(input: ReportInput): string {
@@ -180,7 +183,7 @@ export function buildReportHtml(input: ReportInput): string {
           .map(
             (o) => `<tr>
           <td style="${TD}">${escapeHtml(o.title)}</td>
-          <td style="${TD}">${OFFER_STATUS[o.status]}</td>
+          <td style="${TD}">${OFFER_STATUS_LABEL[o.status]}</td>
           <td style="${TD_NUM}">${count(o.received)}</td>
           <td style="${TD_NUM}">${count(o.hired)}</td>
           <td style="${TD_NUM}">${count(o.positions)}</td>
