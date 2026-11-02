@@ -365,6 +365,27 @@ describe('admin subscription notices', () => {
 });
 
 describe('business notices open the candidature they are about', () => {
+  it('carries the offer on a new application, for the business space', () => {
+    expect(
+      renderNotification({
+        type: 'NEW_APPLICATION',
+        applicationId: 'a-1',
+        jobOfferId: 'o-1',
+        jobTitle: 'Plombier',
+        workerName: 'Awa K.',
+      }).link,
+    ).toBe('/candidatures/a-1?offre=o-1');
+    // Older callers without the offer keep the client app's path.
+    expect(
+      renderNotification({
+        type: 'NEW_APPLICATION',
+        applicationId: 'a-1',
+        jobTitle: 'Plombier',
+        workerName: 'Awa K.',
+      }).link,
+    ).toBe('/candidatures/a-1');
+  });
+
   it('links a business contact notice to its candidature', () => {
     const out = renderNotification({
       type: 'CONTACT_UNLOCKED',

@@ -566,6 +566,7 @@ export class ApplicationService {
       input: {
         type: 'NEW_APPLICATION',
         applicationId: application.id,
+        jobOfferId: application.job_offer_id,
         jobTitle: application.job_offer.title,
         workerName: personName(
           worker.first_name,
