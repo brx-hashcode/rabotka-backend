@@ -45,7 +45,9 @@ describe('JobOfferService.updateByEmployer', () => {
     applications?: { id: string; status: ApplicationStatus }[];
   }) {
     const current = offerRow(opts.offer);
-    const prisma = {
+    const prisma: Record<string, unknown> = {
+      $transaction: (fn: (tx: unknown) => unknown) => fn(prisma),
+      offerQuestion: { deleteMany: jest.fn(), createMany: jest.fn() },
       jobOffer: {
         findFirst: jest.fn().mockResolvedValue(current),
         update: jest.fn(({ data }: { data: Record<string, unknown> }) =>

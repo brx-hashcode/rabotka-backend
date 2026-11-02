@@ -1,5 +1,6 @@
 import { AdminArchiveModule } from '../admin-archive/admin-archive.module';
 import { Module, forwardRef } from '@nestjs/common';
+import { BusinessSubscriptionModule } from '../business/subscription/business-subscription.module';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { JobOfferService } from './job-offer.service';
 import { AdminJobOfferController } from './admin-job-offer.controller';
@@ -18,6 +19,8 @@ import { JobNotificationProcessor } from './notification/job-notification.proces
 @Module({
   imports: [
     AdminArchiveModule,
+    // A business's plan: active-offer limit and priority visibility.
+    BusinessSubscriptionModule,
     PrismaModule,
     forwardRef(() => AuthModule),
     forwardRef(() => BotModule),
@@ -31,7 +34,11 @@ import { JobNotificationProcessor } from './notification/job-notification.proces
     RecommendationEngineModule,
   ],
   controllers: [AdminJobOfferController, JobOfferController],
-  providers: [JobOfferService, JobNotificationService, JobNotificationProcessor],
+  providers: [
+    JobOfferService,
+    JobNotificationService,
+    JobNotificationProcessor,
+  ],
   exports: [JobOfferService],
 })
 export class JobOfferModule {}

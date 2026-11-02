@@ -1,3 +1,4 @@
+import { uniqueBusinessSlug } from '../business/careers/careers-slug';
 import { countCountedCancellations } from '../application/cancellation-counter';
 import {
   AdminCacheService,
@@ -8,6 +9,7 @@ import {
   Logger,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
   Inject,
   Optional,
@@ -85,6 +87,9 @@ import {
   ReferralStatus,
   SuspensionSource,
   VerificationStatus,
+  BusinessCategory,
+  BusinessDocumentType,
+  BusinessLegalForm,
 } from '@prisma/client';
 import { randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { OnboardingAttemptService } from '../onboarding-attempt/onboarding-attempt.service';
@@ -105,6 +110,26 @@ import {
   SESSION_ENDED,
   type SessionEndedEvent,
 } from '../../common/events/session-ended.events';
+import { assertBusinessIsEmployer } from '../business/business-rules';
+import { assertBusinessSignupComplete } from '../business/business-signup';
+import {
+  BUSINESS_CATEGORY_LABELS,
+  BUSINESS_DOCUMENT_LABELS,
+  BUSINESS_LEGAL_FORM_LABELS,
+  DOCUMENTS_BY_CATEGORY,
+  missingRequiredDocuments,
+} from '../business/business-catalog';
+import type { SignupIdentity } from '../auth/signup-token';
+import {
+  changedReviewedFields,
+  legalFormAfterEdit,
+} from '../business/business-edit';
+import type { UpdateBusinessDto } from '../business/dto/update-business.dto';
+import { audienceOf, productOf } from '../mail/audience';
+import {
+  BUSINESS_VERIFIED_EVENT,
+  type BusinessVerifiedPayload,
+} from '../business/subscription/subscription.events';
 
 const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
   [ProfileType.WORKER]: 'Travailleur',
@@ -192,6 +217,8 @@ export type ProfileApplicationsResponse = {
 
 export type AdminProfileListItem = {
   id: string;
+  /** A business account: the admin shows its « Entreprise » tab. */
+  isBusiness: boolean;
   firstName: string;
   lastName: string;
   /** Null for the majority, who sign up with a phone and no email. */
@@ -349,6 +376,69 @@ export type AdminProfileDetailResponse = AdminProfileListItem & {
   } | null;
 };
 
+/** The « Entreprise » tab of the admin profile page (getBusinessForAdmin). */
+export type AdminBusinessDetail = {
+  id: string;
+  name: string;
+  publicSlug: string | null;
+  /** The organisation's logo: the account's own profile picture. */
+  logoUrl: string | null;
+  category: BusinessCategory;
+  categoryLabel: string;
+  legalForm: BusinessLegalForm | null;
+  legalFormLabel: string | null;
+  size: string | null;
+  registrationNumber: string | null;
+  taxId: string | null;
+  statisticalId: string | null;
+  address: string;
+  countryCode: string | null;
+  /** The country's name, from the same list as the public geo API. */
+  countryName: string | null;
+  city: string | null;
+  email: string | null;
+  phone: string | null;
+  website: string | null;
+  description: string | null;
+  /** Its open offers go to Google and the job sites. */
+  distributeOffers: boolean;
+  verificationStatus: VerificationStatus;
+  verifiedAt: string | null;
+  rejectionReason: string | null;
+  createdAt: string;
+  /** The person who opened the account and signs in with it. */
+  owner: {
+    firstName: string;
+    lastName: string;
+    email: string | null;
+    phone: string;
+    directPhone: string | null;
+    createdAt: string;
+  };
+  /** The current papers; each carries the versions it replaced. */
+  documents: (BusinessDocumentView & {
+    /** Sent to replace a refused or pending paper. */
+    resubmitted: boolean;
+    /** What was sent before, newest first — kept for the reviewer. */
+    previousVersions: BusinessDocumentView[];
+  })[];
+  /** « One of » groups the type must provide, and those not yet covered. */
+  requiredDocuments: { type: BusinessDocumentType; label: string }[][];
+  missingDocuments: { type: BusinessDocumentType; label: string }[][];
+};
+
+type BusinessDocumentView = {
+  id: string;
+  documentType: BusinessDocumentType;
+  label: string;
+  fileName: string | null;
+  mimeType: string | null;
+  verificationStatus: VerificationStatus;
+  rejectionReason: string | null;
+  createdAt: string;
+  verifiedAt: string | null;
+};
+
 type PrismaTransactionClient = Parameters<
   Parameters<PrismaService['$transaction']>[0]
 >[0];
@@ -369,6 +459,70 @@ const PHONE_CHANGE_KEY_PREFIX = `${REDIS_KEY_PREFIX}profile:phone-change:`;
 const KYC_PENDING_UPLOADS = `${REDIS_KEY_PREFIX}kyc:pending-uploads`;
 const KYC_PENDING_TTL_MS = 24 * 60 * 60 * 1000;
 const KYC_SWEEP_BATCH = 20;
+
+/** The content type of an uploaded KYC object, from the extension its key carries. */
+type BusinessDocumentRow = {
+  id: string;
+  document_type: BusinessDocumentType;
+  file_name: string | null;
+  mime_type: string | null;
+  verification_status: VerificationStatus;
+  rejection_reason: string | null;
+  created_at: Date;
+  verified_at: Date | null;
+  replaces_id: string | null;
+};
+
+function documentView(d: BusinessDocumentRow): BusinessDocumentView {
+  return {
+    id: d.id,
+    documentType: d.document_type,
+    label: BUSINESS_DOCUMENT_LABELS[d.document_type],
+    fileName: d.file_name,
+    mimeType: d.mime_type,
+    verificationStatus: d.verification_status,
+    rejectionReason: d.rejection_reason,
+    createdAt: d.created_at.toISOString(),
+    verifiedAt: d.verified_at?.toISOString() ?? null,
+  };
+}
+
+/** The chain a paper replaced, newest first (bounded: a cycle cannot loop). */
+function previousVersionsOf<T extends BusinessDocumentRow>(
+  doc: T,
+  byId: Map<string, T>,
+): T[] {
+  const chain: T[] = [];
+  let next = doc.replaces_id ? byId.get(doc.replaces_id) : undefined;
+  while (next && chain.length < 50) {
+    chain.push(next);
+    next = next.replaces_id ? byId.get(next.replaces_id) : undefined;
+  }
+  return chain;
+}
+
+/** Back to « en attente »: the last decision no longer holds. */
+function reopenedReview() {
+  return {
+    verification_status: VerificationStatus.PENDING,
+    verified_at: null,
+    verified_by: null,
+    rejection_reason: null,
+  };
+}
+
+function mimeTypeOfKey(key: string): string | null {
+  const ext = key.slice(key.lastIndexOf('.') + 1).toLowerCase();
+  return (
+    {
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      webp: 'image/webp',
+      pdf: 'application/pdf',
+    }[ext] ?? null
+  );
+}
 const PHONE_CHANGE_SENDS_PREFIX = `${REDIS_KEY_PREFIX}profile:phone-change-sends:`;
 const phoneChangeMissKey = (profileId: string) =>
   `${REDIS_KEY_PREFIX}profile:phone-change-misses:${profileId}`;
@@ -849,6 +1003,7 @@ export class ProfileService {
         description: true,
         status: true,
         profile_type: true,
+        is_business: true,
         whatsapp_connected: true,
         bot_paused_until: true,
         verification_status: true,
@@ -983,6 +1138,7 @@ export class ProfileService {
       description: profile.description,
       status: profile.status,
       profileType: profile.profile_type,
+      isBusiness: profile.is_business,
       whatsappConnected: profile.whatsapp_connected,
       /**
        * When VoVa stops being silent for this profile, or null when it is not
@@ -1403,11 +1559,25 @@ export class ProfileService {
     });
     try {
       if (profile.email) {
+        // Read here rather than at every caller: which product's copy.
+        const kind = await this.prisma.profile.findUnique({
+          where: { id: profileId },
+          select: { profile_type: true, is_business: true },
+        });
+        const audience = kind ? audienceOf(kind) : 'worker';
         await this.mailService.sendMail({
           to: profile.email,
-          subject: 'Votre compte a été suspendu',
+          subject:
+            audience === 'business'
+              ? 'Votre compte Rabotka Business a été suspendu'
+              : 'Votre compte a été suspendu',
           html: await this.layoutService.wrap(
-            accountSuspendedEmail(profile.first_name, reason ?? undefined),
+            accountSuspendedEmail(
+              profile.first_name,
+              reason ?? undefined,
+              audience,
+            ),
+            { product: productOf(audience) },
           ),
         });
       }
@@ -1465,11 +1635,18 @@ export class ProfileService {
         first_name: true,
         last_name: true,
         profile_type: true,
+        is_business: true,
       },
     });
     if (!profile) {
       throw new NotFoundException('Profil non trouvé');
     }
+    // A business stays an employer: refused here in words, before the
+    // database's CHECK refuses it with a 500.
+    assertBusinessIsEmployer(
+      dto.profileType ?? profile.profile_type,
+      profile.is_business,
+    );
 
     try {
       await this.prisma.profile.update({
@@ -1694,6 +1871,7 @@ export class ProfileService {
           description: true,
           status: true,
           profile_type: true,
+          is_business: true,
           whatsapp_connected: true,
           verification_status: true,
           verified_by: true,
@@ -1764,6 +1942,7 @@ export class ProfileService {
       description: p.description,
       status: p.status,
       profileType: p.profile_type,
+      isBusiness: p.is_business,
       whatsappConnected: p.whatsapp_connected,
       verificationStatus: p.verification_status,
       verifiedBy: p.verified_by,
@@ -1846,19 +2025,33 @@ export class ProfileService {
     return { count };
   }
 
-  async createProfile(createProfileDto: CreateProfileDto): Promise<{
+  /**
+   * `entry` is what the signup token proved (ProfileController reads it):
+   * 'business' for an email-verified sign-up, which creates the organisation
+   * with the profile.
+   */
+  async createProfile(
+    createProfileDto: CreateProfileDto,
+    entry: SignupIdentity['entry'] = 'whatsapp',
+  ): Promise<{
     message: string;
     profileId: string;
     profileType: ProfileType;
     creditedBalance: number;
   }> {
     try {
-      const profile = await this.createProfileWithDocuments(createProfileDto);
+      const profile = await this.createProfileWithDocuments(
+        createProfileDto,
+        entry,
+      );
 
       this.logger.log(`Profile created successfully: ${profile.id}`);
-      // The sign-up attempt is done. Not awaited, never throws.
+      // The sign-up attempt is done. Not awaited, never throws. A business's
+      // attempt is keyed by the email it proved.
       void this.onboardingAttempts?.completed(
-        createProfileDto.phone,
+        entry === 'business' && createProfileDto.email
+          ? createProfileDto.email
+          : createProfileDto.phone,
         profile.id,
       );
 
@@ -2049,6 +2242,457 @@ export class ProfileService {
     );
   }
 
+  /**
+   * The organisation behind a business profile, for the admin's « Entreprise »
+   * tab: its details, its documents (bytes behind `streamBusinessDocument`,
+   * never a url), and which required papers are still missing for its type.
+   */
+  async getBusinessForAdmin(profileId: string): Promise<AdminBusinessDetail> {
+    const business = await this.prisma.business.findUnique({
+      where: { profile_id: profileId },
+      include: {
+        documents: { orderBy: { created_at: 'asc' } },
+        profile: {
+          select: {
+            avatar_url: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            phone: true,
+            direct_phone: true,
+            created_at: true,
+          },
+        },
+      },
+    });
+    if (!business) {
+      throw new NotFoundException("Ce profil n'a pas d'organisation.");
+    }
+    const requirement = DOCUMENTS_BY_CATEGORY[business.category];
+    const current = business.documents.filter((d) => !d.superseded_at);
+    const byId = new Map(business.documents.map((d) => [d.id, d]));
+    return {
+      id: business.id,
+      name: business.name,
+      publicSlug: business.public_slug,
+      logoUrl: business.profile.avatar_url,
+      category: business.category,
+      categoryLabel: BUSINESS_CATEGORY_LABELS[business.category],
+      legalForm: business.legal_form,
+      legalFormLabel: business.legal_form
+        ? BUSINESS_LEGAL_FORM_LABELS[business.legal_form]
+        : null,
+      size: business.size,
+      registrationNumber: business.registration_number,
+      taxId: business.tax_id,
+      statisticalId: business.statistical_id,
+      address: business.address,
+      countryCode: business.country_code,
+      countryName: this.geo.findCountry(business.country_code)?.name ?? null,
+      city: business.city,
+      email: business.email,
+      phone: business.phone,
+      website: business.website,
+      description: business.description,
+      distributeOffers: business.distribute_offers,
+      verificationStatus: business.verification_status,
+      verifiedAt: business.verified_at?.toISOString() ?? null,
+      rejectionReason: business.rejection_reason,
+      createdAt: business.created_at.toISOString(),
+      owner: {
+        firstName: business.profile.first_name,
+        lastName: business.profile.last_name,
+        email: business.profile.email,
+        phone: business.profile.phone,
+        directPhone: business.profile.direct_phone,
+        createdAt: business.profile.created_at.toISOString(),
+      },
+      // A replacement keeps the place of the paper it replaced: ordered by
+      // when the first version was sent.
+      documents: current
+        .map((d) => ({ doc: d, previous: previousVersionsOf(d, byId) }))
+        .sort(
+          (a, b) =>
+            (a.previous.at(-1) ?? a.doc).created_at.getTime() -
+            (b.previous.at(-1) ?? b.doc).created_at.getTime(),
+        )
+        .map(({ doc, previous }) => ({
+          ...documentView(doc),
+          resubmitted: doc.replaces_id !== null,
+          previousVersions: previous.map(documentView),
+        })),
+      requiredDocuments: requirement.required.map((group) =>
+        group.map((t) => ({ type: t, label: BUSINESS_DOCUMENT_LABELS[t] })),
+      ),
+      missingDocuments: missingRequiredDocuments(
+        business.category,
+        current.map((d) => d.document_type),
+      ).map((group) =>
+        group.map((t) => ({ type: t, label: BUSINESS_DOCUMENT_LABELS[t] })),
+      ),
+    };
+  }
+
+  /** One business document's bytes, behind the admin session, like KYC. */
+  async streamBusinessDocument(
+    profileId: string,
+    documentId: string,
+  ): Promise<DownloadResult & { filename: string }> {
+    const doc = await this.prisma.businessDocument.findFirst({
+      where: { id: documentId, business: { profile_id: profileId } },
+      select: { storage_key: true, document_type: true },
+    });
+    if (!doc) {
+      throw new NotFoundException('Document introuvable.');
+    }
+    return this.streamKycObject(
+      doc.storage_key,
+      null,
+      doc.document_type.toLowerCase(),
+    );
+  }
+
+  /** One document accepted or refused, on its own (the business is decided apart). */
+  async verifyBusinessDocument(
+    profileId: string,
+    documentId: string,
+    adminUserId: string,
+    decision: 'VERIFIED' | 'REJECTED',
+    reason?: string,
+  ): Promise<AdminBusinessDetail> {
+    const note = reason?.trim() || null;
+    if (decision === 'REJECTED' && !note) {
+      throw new BadRequestException('Indiquez le motif du refus.');
+    }
+    const { count } = await this.prisma.businessDocument.updateMany({
+      // A superseded version is history: only the current paper is decided.
+      where: {
+        id: documentId,
+        superseded_at: null,
+        business: { profile_id: profileId },
+      },
+      data: {
+        verification_status: decision,
+        verified_by: adminUserId === 'system' ? null : adminUserId,
+        verified_at: new Date(),
+        rejection_reason: decision === 'REJECTED' ? note : null,
+      },
+    });
+    if (count === 0) {
+      throw new NotFoundException('Document introuvable.');
+    }
+    return this.getBusinessForAdmin(profileId);
+  }
+
+  /**
+   * The business review's decision. A business has no personal KYC (product
+   * decision): approving its organisation is what verifies and activates the
+   * account — the same VERIFIED + ACTIVE transition KYC approval makes, so
+   * every existing guard (KycVerifiedGuard, ActiveProfileGuard) just works.
+   *
+   * Unlike KYC, `whatsapp_connected` is left alone: the business phone was
+   * never verified, and business accounts get no WhatsApp at all.
+   */
+  async verifyBusiness(
+    profileId: string,
+    adminUserId: string,
+    decision: 'VERIFIED' | 'REJECTED',
+    reason?: string,
+  ): Promise<AdminBusinessDetail> {
+    const note = reason?.trim() || null;
+    if (decision === 'REJECTED' && !note) {
+      throw new BadRequestException('Indiquez le motif du refus.');
+    }
+    const business = await this.prisma.business.findUnique({
+      where: { profile_id: profileId },
+      select: { id: true, profile: { select: { profile_type: true } } },
+    });
+    if (!business) {
+      throw new NotFoundException("Ce profil n'a pas d'organisation.");
+    }
+
+    const now = new Date();
+    const by = adminUserId === 'system' ? null : adminUserId;
+    await this.prisma.$transaction([
+      this.prisma.business.update({
+        where: { id: business.id },
+        data: {
+          verification_status: decision,
+          verified_at: now,
+          verified_by: by,
+          rejection_reason: decision === 'REJECTED' ? note : null,
+        },
+      }),
+      // Approving the business approves its papers still waiting; a paper
+      // already refused on its own stays refused.
+      ...(decision === 'VERIFIED'
+        ? [
+            this.prisma.businessDocument.updateMany({
+              where: {
+                business_id: business.id,
+                verification_status: 'PENDING',
+                superseded_at: null,
+              },
+              data: {
+                verification_status: 'VERIFIED',
+                verified_at: now,
+                verified_by: by,
+              },
+            }),
+          ]
+        : []),
+      this.prisma.profile.update({
+        where: { id: profileId },
+        data: {
+          verification_status: decision,
+          verified_by: adminUserId,
+          verified_at: now,
+          kyc_verification_note: note,
+          rejection_reason: decision === 'REJECTED' ? note : null,
+          ...(decision === 'VERIFIED' ? { status: AccountStatus.ACTIVE } : {}),
+        },
+      }),
+    ]);
+
+    this.eventEmitter.emit(AdminNotificationEvent.PROFILE_KYC_VERIFIED, {
+      event: AdminNotificationEvent.PROFILE_KYC_VERIFIED,
+      title: 'Organisation vérifiée',
+      message: `Organisation du profil ${profileId} : ${decision}`,
+      entityType: 'profile',
+      entityId: String(profileId),
+      timestamp: now.toISOString(),
+    });
+
+    if (decision === 'VERIFIED') {
+      // No welcome credit for a business (WalletService): its trial
+      // subscription starts instead, in BusinessSubscriptionService.
+      this.eventEmitter.emit(BUSINESS_VERIFIED_EVENT, {
+        businessId: business.id,
+      } satisfies BusinessVerifiedPayload);
+    }
+
+    return this.getBusinessForAdmin(profileId);
+  }
+
+  /**
+   * Edits an organisation. By the business itself (`by: 'owner'`), changing
+   * what the review checked (name, type, legal form, RCCM, NIU, SCIEN) sends
+   * it back to review — a verified business would otherwise rename itself
+   * after the check. An admin's correction (`by: 'admin'`) is the review, and
+   * reopens nothing. Contact details never do.
+   */
+  async updateBusiness(
+    profileId: string,
+    dto: UpdateBusinessDto,
+    by: 'owner' | 'admin',
+  ): Promise<{ business: AdminBusinessDetail; reopened: boolean }> {
+    const business = await this.prisma.business.findUnique({
+      where: { profile_id: profileId },
+    });
+    if (!business || business.deleted_at) {
+      throw new NotFoundException("Ce profil n'a pas d'organisation.");
+    }
+
+    const category = dto.category ?? business.category;
+    const legalForm = legalFormAfterEdit(category, business.legal_form, dto);
+    const changed = changedReviewedFields(
+      {
+        name: business.name,
+        category: business.category,
+        legalForm: business.legal_form,
+        registrationNumber: business.registration_number,
+        taxId: business.tax_id,
+        statisticalId: business.statistical_id,
+      },
+      { ...dto, legalForm },
+    );
+    // Verified, what the review checked is settled: the owner asks the team
+    // (Aide), and only an admin changes it. Contact details stay the owner's.
+    if (
+      by === 'owner' &&
+      changed.length > 0 &&
+      business.verification_status === VerificationStatus.VERIFIED
+    ) {
+      throw new ForbiddenException(
+        'Votre organisation est vérifiée : pour modifier son identité ou ses identifiants officiels, faites une demande à l’équipe Rabotka depuis Aide.',
+      );
+    }
+    const reopened =
+      by === 'owner' &&
+      changed.length > 0 &&
+      business.verification_status !== VerificationStatus.PENDING;
+
+    const location =
+      dto.countryCode !== undefined || dto.city !== undefined
+        ? this.geo.resolveLocation({
+            countryCode: dto.countryCode ?? business.country_code ?? undefined,
+            city: dto.city ?? undefined,
+          })
+        : {};
+
+    await this.prisma.$transaction([
+      this.prisma.business.update({
+        where: { id: business.id },
+        data: {
+          name: dto.name,
+          category: dto.category,
+          legal_form: legalForm,
+          size: dto.size,
+          registration_number: dto.registrationNumber,
+          tax_id: dto.taxId,
+          statistical_id: dto.statisticalId,
+          address: dto.address,
+          country_code: location.country_code,
+          city: dto.city === null ? null : location.city,
+          email: dto.email,
+          phone: dto.phone,
+          website: dto.website,
+          description: dto.description,
+          distribute_offers: dto.distributeOffers,
+          ...(reopened ? reopenedReview() : {}),
+        },
+      }),
+      ...(reopened ? [this.reopenProfileReview(profileId)] : []),
+    ]);
+
+    if (reopened) {
+      this.emitBusinessResubmitted(
+        profileId,
+        `${business.name} a modifié ses informations (${changed.join(', ')}) : à revoir.`,
+      );
+    }
+    return { business: await this.getBusinessForAdmin(profileId), reopened };
+  }
+
+  /**
+   * A paper sent from the dashboard: a new one, or the replacement of a
+   * current paper not yet accepted (`replacesId`). The replaced row stays,
+   * superseded, so the reviewer can compare and read why it was refused. A
+   * refused business goes back to review with it.
+   */
+  async uploadBusinessDocument(
+    profileId: string,
+    file: Express.Multer.File,
+    documentType: BusinessDocumentType,
+    replacesId?: string,
+  ): Promise<AdminBusinessDetail> {
+    const business = await this.prisma.business.findUnique({
+      where: { profile_id: profileId },
+      include: { documents: { where: { superseded_at: null } } },
+    });
+    if (!business || business.deleted_at) {
+      throw new NotFoundException("Ce profil n'a pas d'organisation.");
+    }
+    if (business.verification_status === VerificationStatus.VERIFIED) {
+      throw new ForbiddenException(
+        'Votre organisation est vérifiée : ses documents ne se modifient plus. Pour en ajouter un, faites une demande à l’équipe Rabotka depuis Aide.',
+      );
+    }
+    const accepted = DOCUMENTS_BY_CATEGORY[business.category];
+    if (
+      ![...accepted.required.flat(), ...accepted.optional].includes(
+        documentType,
+      )
+    ) {
+      throw new BadRequestException(
+        'Ce document ne correspond pas à votre type d’organisation.',
+      );
+    }
+
+    let replaced: (typeof business.documents)[number] | undefined;
+    if (replacesId) {
+      replaced = business.documents.find((d) => d.id === replacesId);
+      if (!replaced) {
+        throw new NotFoundException('Document introuvable.');
+      }
+      if (replaced.verification_status === VerificationStatus.VERIFIED) {
+        throw new ConflictException('Ce document est déjà validé.');
+      }
+      if (replaced.document_type !== documentType) {
+        throw new BadRequestException(
+          'Le nouveau fichier doit être du même type que celui qu’il remplace.',
+        );
+      }
+    } else if (
+      business.documents.some((d) => d.document_type === documentType)
+    ) {
+      throw new ConflictException(
+        'Ce document est déjà fourni : remplacez-le plutôt.',
+      );
+    }
+
+    const bucket = await kycBucket(this.systemConfig, this.configService);
+    const uploaded = await this.fileService.uploadToStorage(file, {
+      folder: 'kyc-documents',
+      access: 'private',
+      bucket,
+    });
+
+    const reopened =
+      business.verification_status === VerificationStatus.REJECTED;
+    const now = new Date();
+    await this.prisma.$transaction([
+      ...(replaced
+        ? [
+            this.prisma.businessDocument.update({
+              where: { id: replaced.id },
+              data: { superseded_at: now },
+            }),
+          ]
+        : []),
+      this.prisma.businessDocument.create({
+        data: {
+          business_id: business.id,
+          document_type: documentType,
+          storage_key: uploaded.key,
+          file_name: file.originalname?.slice(0, 255) || null,
+          mime_type: file.mimetype,
+          replaces_id: replaced?.id ?? null,
+        },
+      }),
+      ...(reopened
+        ? [
+            this.prisma.business.update({
+              where: { id: business.id },
+              data: reopenedReview(),
+            }),
+            this.reopenProfileReview(profileId),
+          ]
+        : []),
+    ]);
+
+    this.emitBusinessResubmitted(
+      profileId,
+      `${business.name} a ${replaced ? 'renvoyé' : 'ajouté'} : ${BUSINESS_DOCUMENT_LABELS[documentType]}.`,
+    );
+    return this.getBusinessForAdmin(profileId);
+  }
+
+  /** A refused profile goes back to « en attente » with its business. */
+  private reopenProfileReview(profileId: string) {
+    return this.prisma.profile.updateMany({
+      where: {
+        id: profileId,
+        verification_status: VerificationStatus.REJECTED,
+      },
+      data: {
+        verification_status: VerificationStatus.PENDING,
+        rejection_reason: null,
+      },
+    });
+  }
+
+  private emitBusinessResubmitted(profileId: string, message: string): void {
+    this.eventEmitter.emit(AdminNotificationEvent.PROFILE_UPDATED, {
+      event: AdminNotificationEvent.PROFILE_UPDATED,
+      title: 'Organisation à revoir',
+      message,
+      entityType: 'profile',
+      entityId: String(profileId),
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   /** The same, for a verification image attached during review. */
   async streamVerificationImage(
     profileId: string,
@@ -2149,10 +2793,13 @@ export class ProfileService {
       KYC_SWEEP_BATCH,
     );
     for (const key of expired) {
-      const attached = await this.prisma.kycDocument.count({
-        where: { storage_key: key },
-      });
-      if (attached === 0) {
+      // A business's documents go through the same upload, so a key is
+      // attached when either table holds it.
+      const [personal, business] = await Promise.all([
+        this.prisma.kycDocument.count({ where: { storage_key: key } }),
+        this.prisma.businessDocument.count({ where: { storage_key: key } }),
+      ]);
+      if (personal + business === 0) {
         await this.fileService.deleteStoredObject(key, bucket);
       }
       await this.redis.zrem(KYC_PENDING_UPLOADS, key);
@@ -2357,9 +3004,21 @@ export class ProfileService {
     return key;
   }
 
-  private async createProfileWithDocuments(createProfileDto: CreateProfileDto) {
+  private async createProfileWithDocuments(
+    createProfileDto: CreateProfileDto,
+    entry: SignupIdentity['entry'],
+  ) {
+    if (entry === 'business') {
+      return this.createBusinessProfileWithDocuments(createProfileDto);
+    }
     const { kycDocumentUrl, kycSelfieUrl, kycDocumentBackUrl } =
       createProfileDto;
+    // Required by the DTO for every sign-up but a business one.
+    if (!kycDocumentUrl || !kycSelfieUrl) {
+      throw new BadRequestException(
+        "Le document d'identité et le selfie sont requis.",
+      );
+    }
 
     // Resolved BEFORE the transaction opens. These do network I/O against R2,
     // and holding a Postgres transaction open across it is how a slow bucket
@@ -2400,18 +3059,7 @@ export class ProfileService {
         createProfileDto,
       );
 
-      if (
-        createProfileDto.categoryIds &&
-        createProfileDto.categoryIds.length > 0
-      ) {
-        await tx.profileCategory.createMany({
-          data: createProfileDto.categoryIds.map((categoryId) => ({
-            profile_id: createdProfile.id,
-            category_id: categoryId,
-          })),
-          skipDuplicates: true,
-        });
-      }
+      await this.linkProfileCategories(tx, createdProfile.id, createProfileDto);
 
       // A PASSPORT has no back to photograph, so it gets two rows; every other
       // type gets three. Gating on documentType rather than merely on the URL
@@ -2453,28 +3101,127 @@ export class ProfileService {
         ),
       ]);
 
-      // Snapshot-link all current AGREEMENT/POLICY platform documents to this profile
-      const platformDocs = await tx.document.findMany({
-        where: { category: { in: ['AGREEMENT', 'POLICY'] } },
-        select: { id: true },
-      });
-      if (platformDocs.length > 0) {
-        await tx.profilePlatformDocumentLink.createMany({
-          data: platformDocs.map((doc) => ({
-            profile_id: createdProfile.id,
-            document_id: doc.id,
-          })),
-          skipDuplicates: true,
-        });
-      }
+      await this.linkPlatformDocuments(tx, createdProfile.id);
 
       return createdProfile;
     });
   }
 
+  /**
+   * A business sign-up: the person's profile, flagged `is_business`, and the
+   * organisation with its documents — in ONE transaction, so a profile can
+   * never be flagged without its business, nor a business exist without its
+   * profile. No personal ID or selfie (product decision): the business's own
+   * papers are what the team reviews, and approving them activates the
+   * account.
+   *
+   * The documents are resolved like the personal KYC files — same upload
+   * route, same private bucket, keys derived server-side — and before the
+   * transaction opens, for the same reason (network I/O against R2).
+   */
+  private async createBusinessProfileWithDocuments(
+    createProfileDto: CreateProfileDto,
+  ) {
+    const business = createProfileDto.business;
+    if (!business) {
+      throw new BadRequestException(
+        'Renseignez les informations de votre entreprise.',
+      );
+    }
+    assertBusinessSignupComplete(business);
+
+    const documentKeys = await Promise.all(
+      business.documents.map((doc) =>
+        this.resolveKycObject(
+          BUSINESS_DOCUMENT_LABELS[doc.documentType],
+          doc.url,
+          doc.key,
+        ),
+      ),
+    );
+    const location = this.geo.resolveLocation(createProfileDto);
+
+    return this.prisma.$transaction(async (tx) => {
+      const createdProfile = await this.createProfileRecord(
+        tx,
+        createProfileDto,
+        { isBusiness: true },
+      );
+      await this.linkProfileCategories(tx, createdProfile.id, createProfileDto);
+
+      await tx.business.create({
+        data: {
+          profile_id: createdProfile.id,
+          public_slug: await uniqueBusinessSlug(tx, business.name),
+          name: business.name,
+          category: business.category,
+          legal_form: business.legalForm ?? null,
+          size: business.size ?? null,
+          registration_number: business.registrationNumber ?? null,
+          tax_id: business.taxId ?? null,
+          statistical_id: business.statisticalId ?? null,
+          address: business.address,
+          country_code: location.country_code ?? null,
+          city: location.city ?? null,
+          email: business.email ?? createProfileDto.email ?? null,
+          phone: business.phone ?? createProfileDto.phone,
+          website: business.website ?? null,
+          description: business.description ?? null,
+          documents: {
+            create: business.documents.map((doc, i) => ({
+              document_type: doc.documentType,
+              storage_key: documentKeys[i],
+              file_name: doc.fileName ?? null,
+              mime_type: mimeTypeOfKey(documentKeys[i]),
+            })),
+          },
+        },
+      });
+
+      await this.linkPlatformDocuments(tx, createdProfile.id);
+      return createdProfile;
+    });
+  }
+
+  private async linkProfileCategories(
+    tx: PrismaTransactionClient,
+    profileId: string,
+    createProfileDto: CreateProfileDto,
+  ): Promise<void> {
+    if (!createProfileDto.categoryIds?.length) return;
+    await tx.profileCategory.createMany({
+      data: createProfileDto.categoryIds.map((categoryId) => ({
+        profile_id: profileId,
+        category_id: categoryId,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  /** Snapshot-link all current AGREEMENT/POLICY platform documents. */
+  private async linkPlatformDocuments(
+    tx: PrismaTransactionClient,
+    profileId: string,
+  ): Promise<void> {
+    const platformDocs = await tx.document.findMany({
+      where: { category: { in: ['AGREEMENT', 'POLICY'] } },
+      select: { id: true },
+    });
+    if (platformDocs.length > 0) {
+      await tx.profilePlatformDocumentLink.createMany({
+        data: platformDocs.map((doc) => ({
+          profile_id: profileId,
+          document_id: doc.id,
+        })),
+        skipDuplicates: true,
+      });
+    }
+  }
+
   private async createProfileRecord(
     tx: PrismaTransactionClient,
     createProfileDto: CreateProfileDto,
+    { isBusiness = false }: { isBusiness?: boolean } = {},
   ): Promise<{ id: string }> {
     return tx.profile.create({
       data: {
@@ -2505,7 +3252,12 @@ export class ProfileService {
         // This does NOT activate the account — `status` stays
         // PENDING_ACTIVATION until KYC passes. The bot's pre-activation gate
         // keys on `status`, not on this flag, so the KYC wall still holds.
-        whatsapp_connected: true,
+        //
+        // A business proved its email, not its phone: the number is required
+        // but unverified, so nothing that targets connected numbers may treat
+        // it as a WhatsApp line until it is verified.
+        whatsapp_connected: !isBusiness,
+        is_business: isBusiness,
       },
       select: {
         id: true,

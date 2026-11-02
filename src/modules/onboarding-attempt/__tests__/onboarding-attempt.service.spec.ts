@@ -2,6 +2,8 @@ import { OnboardingStage, Prisma, ProfileType } from '@prisma/client';
 import {
   isFurther,
   OnboardingAttemptService,
+  timeline,
+  windowEnd,
 } from '../onboarding-attempt.service';
 
 function makePrisma() {
@@ -49,6 +51,32 @@ describe('OnboardingAttemptService', () => {
           last_name: 'Mabiala',
           profile_type: ProfileType.WORKER,
         }),
+      });
+    });
+
+    it('keys a business sign-up by its email, and marks it as one', async () => {
+      prisma.onboardingAttempt.findUnique.mockResolvedValue(null);
+
+      await service.codeSent('contact@ecole.cg');
+
+      expect(prisma.onboardingAttempt.findUnique).toHaveBeenCalledWith({
+        where: { email: 'contact@ecole.cg' },
+      });
+      const { data } = prisma.onboardingAttempt.create.mock.calls[0][0];
+      expect(data).toMatchObject({
+        email: 'contact@ecole.cg',
+        entry: 'business',
+      });
+      expect(data).not.toHaveProperty('phone');
+    });
+
+    it('marks a phone sign-up as WhatsApp', async () => {
+      prisma.onboardingAttempt.findUnique.mockResolvedValue(null);
+
+      await service.codeSent(PHONE);
+
+      expect(prisma.onboardingAttempt.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ phone: PHONE, entry: 'whatsapp' }),
       });
     });
 
@@ -179,6 +207,18 @@ describe('OnboardingAttemptService', () => {
         completionRate: 0.3,
       });
     });
+
+    it('counts one kind of sign-up when asked, contacts included', async () => {
+      prisma.onboardingAttempt.groupBy.mockResolvedValue([]);
+      prisma.onboardingAttempt.count.mockResolvedValue(0);
+      await service.statsForAdmin({ entry: 'business' });
+      expect(
+        prisma.onboardingAttempt.groupBy.mock.calls[0][0].where,
+      ).toMatchObject({ entry: 'business' });
+      expect(
+        prisma.onboardingAttempt.count.mock.calls[0][0].where,
+      ).toMatchObject({ entry: 'business' });
+    });
   });
 
   describe('listForAdmin', () => {
@@ -198,5 +238,71 @@ describe('OnboardingAttemptService', () => {
         prisma.onboardingAttempt.findMany.mock.calls[0][0].where.stage,
       ).toEqual({ in: [OnboardingStage.CODE_SENT] });
     });
+  });
+});
+
+describe('windowEnd', () => {
+  it('runs a bare day to its end', () => {
+    expect(windowEnd('2026-10-31').toISOString()).toBe(
+      '2026-10-31T23:59:59.999Z',
+    );
+  });
+
+  it('takes a timestamp as given (the previous-period comparison)', () => {
+    expect(windowEnd('2026-09-29T11:25:11.176Z').toISOString()).toBe(
+      '2026-09-29T11:25:11.176Z',
+    );
+  });
+});
+
+describe('timeline', () => {
+  const at = (iso: string, stage = OnboardingStage.CODE_SENT) => ({
+    started_at: new Date(iso),
+    stage,
+  });
+
+  it('has every day of the window, quiet ones at zero', () => {
+    const points = timeline(
+      [
+        at('2026-10-01T09:00:00Z', OnboardingStage.COMPLETED),
+        at('2026-10-01T10:00:00Z'),
+        at('2026-10-03T12:00:00Z'),
+      ],
+      {
+        from: new Date('2026-10-01T00:00:00Z'),
+        to: new Date('2026-10-03T20:00:00Z'),
+        bucket: 'day',
+      },
+    );
+    expect(points).toEqual([
+      { date: '2026-10-01', started: 2, completed: 1 },
+      { date: '2026-10-02', started: 0, completed: 0 },
+      { date: '2026-10-03', started: 1, completed: 0 },
+    ]);
+  });
+
+  it('counts a late-evening sign-up on its Brazzaville day', () => {
+    // 23:30 UTC is 00:30 the next day in Brazzaville.
+    const points = timeline([at('2026-10-01T23:30:00Z')], {
+      from: new Date('2026-10-01T00:00:00Z'),
+      to: new Date('2026-10-02T12:00:00Z'),
+      bucket: 'day',
+    });
+    expect(points.find((p) => p.started === 1)?.date).toBe('2026-10-02');
+  });
+
+  it('groups by week, from the Monday', () => {
+    const points = timeline(
+      [at('2026-10-28T12:00:00Z'), at('2026-11-01T12:00:00Z')],
+      {
+        from: new Date('2026-10-28T00:00:00Z'),
+        to: new Date('2026-11-02T12:00:00Z'),
+        bucket: 'week',
+      },
+    );
+    expect(points).toEqual([
+      { date: '2026-10-26', started: 2, completed: 0 },
+      { date: '2026-11-02', started: 0, completed: 0 },
+    ]);
   });
 });

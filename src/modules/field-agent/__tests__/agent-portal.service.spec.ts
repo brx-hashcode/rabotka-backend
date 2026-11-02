@@ -71,6 +71,24 @@ function worker(id: string) {
   };
 }
 
+/** A business's offers reach agents only while it has a running plan. */
+const ELIGIBLE = {
+  OR: [
+    { employer: { is_business: false } },
+    {
+      employer: {
+        business: {
+          subscriptions: {
+            some: expect.objectContaining({
+              status: { in: ['TRIAL', 'ACTIVE'] },
+            }),
+          },
+        },
+      },
+    },
+  ],
+};
+
 describe('jobsInZonesWhere', () => {
   it('matches the offer city, or the employer city when the offer has none', () => {
     const where = jobsInZonesWhere([ZONE]);
@@ -100,7 +118,9 @@ describe('publicScopeWhere', () => {
   it('falls back to the employer city, scoped to the country when given', () => {
     const where = publicScopeWhere({ country: 'cg', city: 'Brazzaville' });
     const city = { equals: 'Brazzaville', mode: 'insensitive' };
+    // First the business-plan eligibility for agents, then the location.
     expect(where.AND).toEqual([
+      ELIGIBLE,
       {
         OR: [
           { country_code: 'CG', city },
@@ -112,6 +132,7 @@ describe('publicScopeWhere', () => {
 
   it('filters by country alone, falling back to the employer country', () => {
     expect(publicScopeWhere({ country: 'CG' }).AND).toEqual([
+      ELIGIBLE,
       {
         OR: [
           { country_code: 'CG' },
@@ -259,7 +280,7 @@ describe('AgentPortalService', () => {
       const result = await service.listJobs('agent-1', { page: 1, limit: 20 });
 
       const where = prisma.jobOffer.findMany.mock.calls[0][0].where;
-      expect(where).toEqual(jobsInZonesWhere([ZONE]));
+      expect(where).toEqual({ ...jobsInZonesWhere([ZONE]), AND: [ELIGIBLE] });
       expect(result.data[0]).toMatchObject({
         id: 'job-1',
         amount: 15000,
@@ -303,6 +324,8 @@ describe('AgentPortalService', () => {
         status: {
           in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
         },
+        employment_type: 'MISSION',
+        AND: [ELIGIBLE],
       });
       expect(args).toMatchObject({ skip: 10, take: 10 });
     });
@@ -373,7 +396,8 @@ describe('AgentPortalService', () => {
       const [typeCall, categoryCall] = prisma.jobOffer.groupBy.mock.calls.map(
         (c: [{ where: unknown }]) => JSON.stringify(c[0].where),
       );
-      expect(typeCall).not.toContain('employment_type');
+      // Only the scope's own « missions only » remains, never the filter.
+      expect(typeCall).not.toContain('"employment_type":{"in"');
       expect(typeCall).toContain('plomberie');
       expect(categoryCall).toContain('CDD');
       expect(categoryCall).not.toContain('plomberie');
@@ -433,23 +457,103 @@ describe('AgentPortalService', () => {
     });
   });
 
+  describe('missions only', () => {
+    it('keeps agents to missions, in their zones and on the public feed', () => {
+      expect(jobsInZonesWhere([ZONE]).employment_type).toBe('MISSION');
+      expect(publicScopeWhere({}).employment_type).toBe('MISSION');
+    });
+  });
+
   describe('getJob', () => {
     it('answers 404 for a job outside the agent zones', async () => {
-      prisma.jobOffer.findFirst.mockResolvedValue(null);
-      await expect(service.getJob('agent-1', 'job-x')).rejects.toThrow(
-        NotFoundException,
-      );
-      expect(prisma.jobOffer.findFirst.mock.calls[0][0].where).toEqual({
-        AND: [{ id: 'job-x' }, jobsInZonesWhere([ZONE])],
-      });
+      // The zone filter carries « now »: one clock for the service and the
+      // expectation, or the two land a millisecond apart and the test flakes.
+      jest.useFakeTimers({ now: new Date('2026-10-28T10:00:00Z') });
+      try {
+        prisma.jobOffer.findFirst.mockResolvedValue(null);
+        await expect(service.getJob('agent-1', 'job-x')).rejects.toThrow(
+          NotFoundException,
+        );
+        expect(prisma.jobOffer.findFirst.mock.calls[0][0].where).toEqual({
+          AND: [{ id: 'job-x' }, jobsInZonesWhere([ZONE])],
+        });
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
-    it('answers 404 to an agent with no zone at all', async () => {
+    it('answers 404 to an agent with no zone and no placement on it', async () => {
       prisma.agentZone.findMany.mockResolvedValue([]);
+      prisma.jobOffer.findFirst.mockResolvedValue(null);
       await expect(service.getJob('agent-1', 'job-1')).rejects.toThrow(
         NotFoundException,
       );
-      expect(prisma.jobOffer.findFirst).not.toHaveBeenCalled();
+      const { where } = prisma.jobOffer.findFirst.mock.calls[0][0];
+      expect(where.applications.some.agent_id).toBe('agent-1');
+    });
+
+    it('gives an open job in the zones, ready to place on', async () => {
+      await expect(service.getJob('agent-1', 'job-1')).resolves.toMatchObject({
+        access: 'full',
+        canPlace: true,
+      });
+    });
+
+    describe('a job they placed someone on, closed since', () => {
+      const closed = (...statuses: string[]) =>
+        prisma.jobOffer.findFirst
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({
+            ...JOB_ROW,
+            address: '12 rue Mbochi',
+            amount: 50000,
+            note: 'Apporter ses outils',
+            status: 'FILLED',
+            applications: statuses.map((status) => ({ status })),
+          });
+
+      it('shows it in full while a candidate of theirs is on it', async () => {
+        closed('ACCEPTED');
+
+        const job = await service.getJob('agent-1', 'job-1');
+
+        expect(job).toMatchObject({
+          status: 'FILLED',
+          address: '12 rue Mbochi',
+          amount: 50000,
+          access: 'full',
+          canPlace: false,
+        });
+      });
+
+      it('holds back address and pay once they were all refused', async () => {
+        closed('REJECTED', 'CANCELLED');
+
+        const job = await service.getJob('agent-1', 'job-1');
+
+        expect(job).toMatchObject({
+          title: JOB_ROW.title,
+          access: 'limited',
+          canPlace: false,
+          address: null,
+          amount: null,
+          paymentFlow: null,
+          note: null,
+        });
+      });
+
+      it('finds only offers with their own live application', async () => {
+        closed('ACCEPTED');
+
+        await service.getJob('agent-1', 'job-1');
+
+        const { where } = prisma.jobOffer.findFirst.mock.calls[1][0];
+        expect(where).toEqual({
+          id: 'job-1',
+          deleted_at: null,
+          applications: { some: { agent_id: 'agent-1', deleted_at: null } },
+        });
+      });
     });
   });
 

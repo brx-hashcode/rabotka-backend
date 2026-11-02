@@ -1,4 +1,4 @@
-import { BadRequestException, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { ProfileService } from '../profile.service';
 import { GeoService } from '../../geo/geo.service';
 
@@ -1018,12 +1018,23 @@ describe('ProfileService', () => {
     });
 
     it('deletes an upload left unattached for a day, and keeps an attached one', async () => {
-      redis.zrangebyscore.mockResolvedValue(['kyc-documents/old.jpg', 'kyc-documents/used.jpg']);
+      redis.zrangebyscore.mockResolvedValue([
+        'kyc-documents/old.jpg',
+        'kyc-documents/used.jpg',
+        'kyc-documents/rccm.pdf',
+      ]);
       (prisma as any).kycDocument.count = jest
         .fn()
         .mockImplementation(({ where }: { where: { storage_key: string } }) =>
           Promise.resolve(where.storage_key.endsWith('used.jpg') ? 1 : 0),
         );
+      (prisma as any).businessDocument = {
+        count: jest
+          .fn()
+          .mockImplementation(({ where }: { where: { storage_key: string } }) =>
+            Promise.resolve(where.storage_key.endsWith('rccm.pdf') ? 1 : 0),
+          ),
+      };
 
       await (service as any).sweepAbandonedKycUploads('rabotka-kyc');
 
@@ -1032,7 +1043,8 @@ describe('ProfileService', () => {
         'kyc-documents/old.jpg',
         'rabotka-kyc',
       );
-      expect(redis.zrem).toHaveBeenCalledTimes(2);
+      // A business document is attached too, and kept.
+      expect(redis.zrem).toHaveBeenCalledTimes(3);
     });
   });
 
@@ -1423,6 +1435,20 @@ describe('ProfileService', () => {
   });
 
   describe('updateProfileByAdmin() - profile type change', () => {
+    // A business is always an employer: the CHECK constraint would refuse it
+    // with a 500, so the service refuses it first, in words.
+    it('refuses to turn a business into a worker', async () => {
+      prisma.profile.findUnique.mockResolvedValue({
+        ...baseProfile,
+        profile_type: 'EMPLOYER',
+        is_business: true,
+      });
+      await expect(
+        service.updateProfileByAdmin('p-1', { profileType: 'WORKER' }),
+      ).rejects.toThrow('compte entreprise');
+      expect(prisma.profile.update).not.toHaveBeenCalled();
+    });
+
     it('removes from the old collection and indexes into the new one', async () => {
       // Existing profile is a WORKER; admin switches it to EMPLOYER.
       prisma.profile.findUnique.mockResolvedValue({
@@ -1696,6 +1722,293 @@ describe('ProfileService', () => {
       // credential, so nothing in it can expire or be forwarded.
       expect(JSON.stringify(result)).not.toContain('https://');
       expect(fileService.getPresignedUrl).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createProfile() - business sign-up', () => {
+    const businessDto = {
+      firstName: 'Awa',
+      lastName: 'Mabiala',
+      email: 'contact@ecole.cg',
+      phone: '+242061234567',
+      address: 'Avenue de la Paix, Brazzaville',
+      profileType: 'EMPLOYER' as any,
+      readAndApprovedPolicies: true,
+      signupToken: 't',
+      business: {
+        name: 'École Les Lauriers',
+        category: 'SCHOOL' as any,
+        legalForm: 'ASSOCIATION' as any,
+        address: 'Avenue de la Paix, Brazzaville',
+        documents: [
+          {
+            documentType: 'AUTORISATION_OUVERTURE' as any,
+            url: 'https://cdn.example.com/kyc-documents/autorisation.pdf',
+            key: 'kyc-documents/autorisation.pdf',
+            fileName: 'autorisation.pdf',
+          },
+        ],
+      },
+    };
+
+    const txWithBusiness = () => {
+      const tx = makePrisma() as any;
+      tx.business = {
+        create: jest.fn().mockResolvedValue({ id: 'b-1' }),
+        findMany: jest.fn().mockResolvedValue([]),
+      };
+      prisma.$transaction.mockImplementation((fn: any) => fn(tx));
+      return tx;
+    };
+
+    it('creates the business profile and its documents in one transaction', async () => {
+      const tx = txWithBusiness();
+
+      await service.createProfile(businessDto as any, 'business');
+
+      expect(tx.profile.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            is_business: true,
+            profile_type: 'EMPLOYER',
+            // The phone was never proven.
+            whatsapp_connected: false,
+            status: 'PENDING_ACTIVATION',
+          }),
+        }),
+      );
+      expect(tx.business.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          profile_id: 'new-p-1',
+          public_slug: 'ecole-les-lauriers',
+          name: 'École Les Lauriers',
+          category: 'SCHOOL',
+          email: 'contact@ecole.cg',
+          phone: '+242061234567',
+          documents: {
+            create: [
+              expect.objectContaining({
+                document_type: 'AUTORISATION_OUVERTURE',
+                storage_key: 'kyc-documents/autorisation.pdf',
+                mime_type: 'application/pdf',
+              }),
+            ],
+          },
+        }),
+      });
+      // No personal ID or selfie for a business.
+      expect(tx.kycDocument.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses a business missing a required document, before writing anything', async () => {
+      const tx = txWithBusiness();
+
+      await expect(
+        service.createProfile(
+          {
+            ...businessDto,
+            business: { ...businessDto.business, documents: [] },
+          } as any,
+          'business',
+        ),
+      ).rejects.toThrow(/Autorisation d.ouverture/);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(tx.profile.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses a legal form that does not fit the category', async () => {
+      txWithBusiness();
+
+      await expect(
+        service.createProfile(
+          {
+            ...businessDto,
+            business: { ...businessDto.business, legalForm: 'PUBLIC_ENTITY' },
+          } as any,
+          'business',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('records the attempt as completed under the email it proved', async () => {
+      txWithBusiness();
+      const attempts = { completed: jest.fn().mockResolvedValue(undefined) };
+      (service as any).onboardingAttempts = attempts;
+
+      await service.createProfile(businessDto as any, 'business');
+
+      expect(attempts.completed).toHaveBeenCalledWith(
+        'contact@ecole.cg',
+        'new-p-1',
+      );
+    });
+
+    it('flags nothing for a WhatsApp sign-up', async () => {
+      const tx = txWithBusiness();
+
+      await service.createProfile({
+        ...businessDto,
+        business: undefined,
+        documentType: 'CNI' as any,
+        kycDocumentUrl: 'https://cdn.example.com/kyc-documents/id.jpg',
+        kycSelfieUrl: 'https://cdn.example.com/kyc-documents/selfie.jpg',
+      } as any);
+
+      expect(tx.profile.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            is_business: false,
+            whatsapp_connected: true,
+          }),
+        }),
+      );
+      expect(tx.business.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('business review', () => {
+    const businessRow = {
+      id: 'b-1',
+      name: 'École Les Lauriers',
+      category: 'SCHOOL',
+      legal_form: 'ASSOCIATION',
+      size: null,
+      registration_number: null,
+      tax_id: null,
+      statistical_id: null,
+      address: 'Brazzaville',
+      country_code: 'CG',
+      city: 'Brazzaville',
+      email: 'contact@ecole.cg',
+      phone: '+242061234567',
+      website: null,
+      description: null,
+      verification_status: 'PENDING',
+      verified_at: null,
+      rejection_reason: null,
+      created_at: new Date('2026-10-23T10:00:00Z'),
+      profile: {
+        profile_type: 'EMPLOYER',
+        first_name: 'Awa',
+        last_name: 'Mabiala',
+        email: 'awa@ecole.cg',
+        phone: '+242061234567',
+        direct_phone: null,
+        created_at: new Date('2026-10-23T10:00:00Z'),
+      },
+      documents: [
+        {
+          id: 'd-1',
+          document_type: 'AGREMENT',
+          file_name: 'agrement.pdf',
+          mime_type: 'application/pdf',
+          verification_status: 'PENDING',
+          rejection_reason: null,
+          created_at: new Date('2026-10-23T10:00:00Z'),
+        },
+      ],
+    };
+
+    beforeEach(() => {
+      (prisma as any).business = {
+        findUnique: jest.fn().mockResolvedValue(businessRow),
+        update: jest.fn().mockResolvedValue({}),
+      };
+      (prisma as any).businessDocument = {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      };
+      prisma.$transaction.mockImplementation((calls: any) => Promise.resolve(calls));
+    });
+
+    it('shows the business with its papers, and none missing', async () => {
+      const detail = await service.getBusinessForAdmin('p-1');
+      expect(detail).toMatchObject({
+        name: 'École Les Lauriers',
+        countryCode: 'CG',
+        countryName: 'Congo-Brazzaville',
+        categoryLabel: expect.stringContaining('École'),
+        documents: [expect.objectContaining({ documentType: 'AGREMENT', label: expect.any(String) })],
+        missingDocuments: [],
+      });
+    });
+
+    it('names the account holder', async () => {
+      const detail = await service.getBusinessForAdmin('p-1');
+      expect(detail.owner).toEqual({
+        firstName: 'Awa',
+        lastName: 'Mabiala',
+        email: 'awa@ecole.cg',
+        phone: '+242061234567',
+        directPhone: null,
+        createdAt: '2026-10-23T10:00:00.000Z',
+      });
+    });
+
+    describe('once verified', () => {
+      beforeEach(() => {
+        (prisma as any).business.findUnique.mockResolvedValue({
+          ...businessRow,
+          verification_status: 'VERIFIED',
+          documents: businessRow.documents,
+        });
+      });
+
+      it('refuses the owner a change to what the review checked', async () => {
+        await expect(
+          service.updateBusiness('p-1', { name: 'Autre nom' } as any, 'owner'),
+        ).rejects.toThrow(ForbiddenException);
+        expect((prisma as any).business.update).not.toHaveBeenCalled();
+      });
+
+      it('still lets the owner change contact details', async () => {
+        const { reopened } = await service.updateBusiness(
+          'p-1',
+          { website: 'https://ecole.cg' } as any,
+          'owner',
+        );
+        expect(reopened).toBe(false);
+        expect((prisma as any).business.update).toHaveBeenCalled();
+      });
+
+      it('lets an admin change the identity', async () => {
+        await service.updateBusiness('p-1', { name: 'Autre nom' } as any, 'admin');
+        expect((prisma as any).business.update).toHaveBeenCalled();
+      });
+
+      it('refuses a new document', async () => {
+        await expect(
+          service.uploadBusinessDocument('p-1', {} as any, 'AGREMENT' as any),
+        ).rejects.toThrow(ForbiddenException);
+      });
+    });
+
+    it('approving verifies and activates the account, and leaves WhatsApp unconnected', async () => {
+      await service.verifyBusiness('p-1', 'admin-1', 'VERIFIED');
+
+      expect(prisma.profile.update).toHaveBeenCalledWith({
+        where: { id: 'p-1' },
+        data: expect.objectContaining({ verification_status: 'VERIFIED', status: 'ACTIVE' }),
+      });
+      const data = (prisma.profile.update as jest.Mock).mock.calls.at(-1)[0].data;
+      expect(data).not.toHaveProperty('whatsapp_connected');
+      expect((prisma as any).business.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ verification_status: 'VERIFIED' }) }),
+      );
+    });
+
+    it('refusing needs a reason, and does not activate', async () => {
+      await expect(service.verifyBusiness('p-1', 'admin-1', 'REJECTED')).rejects.toThrow(
+        BadRequestException,
+      );
+      await service.verifyBusiness('p-1', 'admin-1', 'REJECTED', 'RCCM illisible');
+      const data = (prisma.profile.update as jest.Mock).mock.calls.at(-1)[0].data;
+      expect(data).toMatchObject({ verification_status: 'REJECTED', rejection_reason: 'RCCM illisible' });
+      expect(data).not.toHaveProperty('status');
+    });
+
+    it('is a 404 for a profile without a business', async () => {
+      (prisma as any).business.findUnique.mockResolvedValue(null);
+      await expect(service.getBusinessForAdmin('p-2')).rejects.toThrow(NotFoundException);
     });
   });
 

@@ -89,6 +89,13 @@ const PROFILE_PREFIX = /^profile(\/|$)/;
  * which the caller reaches before having a session.
  */
 const AGENT_PREFIX = /^agent(\/|$)/;
+
+/**
+ * The business dashboard. A business is a profile, so everything under
+ * `business/` carries ProfileAuthGuard and BusinessProfileGuard — asserted
+ * below — never the admin's.
+ */
+const BUSINESS_PREFIX = /^business(\/|$)/;
 const AGENT_PUBLIC = new Map([
   [
     'agent/auth',
@@ -179,8 +186,24 @@ describe('admin route contract', () => {
       !PUBLIC_PREFIXES.has(c.prefix) &&
       !PROFILE_PREFIX.test(c.prefix) &&
       !AGENT_PREFIX.test(c.prefix) &&
+      !BUSINESS_PREFIX.test(c.prefix) &&
       !PUBLIC_NAMESPACE.test(c.prefix),
   );
+
+  it('guards every business controller with ProfileAuthGuard and BusinessProfileGuard', () => {
+    const business = controllers.filter((c) => BUSINESS_PREFIX.test(c.prefix));
+    expect(business.length).toBeGreaterThan(0);
+
+    const unguarded = business
+      .filter(
+        (c) =>
+          !/@UseGuards\([^)]*ProfileAuthGuard[^)]*BusinessProfileGuard[^)]*\)/s.test(
+            c.head,
+          ),
+      )
+      .map((c) => `${c.prefix} (${c.file})`);
+    expect(unguarded).toEqual([]);
+  });
 
   it('guards every agent controller with AgentAuthGuard', () => {
     const agentControllers = controllers.filter((c) =>

@@ -203,7 +203,7 @@ describe('InvoiceService', () => {
     it('stores generated PDF in Redis on cache miss', async () => {
       await service.download('inv-1', 'profile-1');
       expect(redis.set).toHaveBeenCalledWith(
-        expect.stringContaining('pdf:invoice:inv-1:tpl-invoice-1'),
+        expect.stringContaining('pdf:invoice:v2:inv-1:tpl-invoice-1'),
         expect.any(String),
       );
     });

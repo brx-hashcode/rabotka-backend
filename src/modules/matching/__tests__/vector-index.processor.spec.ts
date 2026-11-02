@@ -42,6 +42,10 @@ describe('VectorIndexProcessor', () => {
   it('onModuleInit creates worker and registers a repeatable scan', async () => {
     await processor.onModuleInit();
     expect(mockQueueService.createWorker).toHaveBeenCalled();
+    // Embedding blocks the event loop: the lock must outlast a whole scan.
+    const options = mockQueueService.createWorker.mock.calls[0][2];
+    expect(options.lockDuration).toBeGreaterThanOrEqual(5 * 60 * 1000);
+    expect(options.stalledInterval).toBeLessThan(options.lockDuration);
     expect(mockQueue.add).toHaveBeenCalledWith(
       'scan',
       { type: 'scan' },

@@ -1,3 +1,7 @@
+import {
+  fieldAgentsEligibleWhere,
+  PRIORITY_FIRST,
+} from '../business/subscription/subscription-where';
 import { EmploymentType, JobOfferStatus, Prisma } from '@prisma/client';
 
 /** Offers an agent can still do something about. */
@@ -6,11 +10,17 @@ export const OPEN_STATUSES: JobOfferStatus[] = [
   JobOfferStatus.PARTIALLY_FILLED,
 ];
 
+/**
+ * Agents place workers on missions only: a CDD, CDI or stage is recruited by
+ * the employer itself, so agents neither see nor work those offers.
+ */
+export const AGENT_EMPLOYMENT_TYPE = EmploymentType.MISSION;
+
 export type Zone = { country_code: string; city: string };
 
 /**
- * The jobs an agent may see: open, not deleted, and located in one of their
- * zones.
+ * The jobs an agent may see: open missions, not deleted, and located in one
+ * of their zones.
  *
  * "Located" uses the same fallback the ranker does (candidate-sources.ts): the
  * offer's own city, or the employer's when the offer names none — a job is
@@ -25,6 +35,8 @@ export function jobsInZonesWhere(zones: Zone[]): Prisma.JobOfferWhereInput {
   return {
     deleted_at: null,
     status: { in: OPEN_STATUSES },
+    employment_type: AGENT_EMPLOYMENT_TYPE,
+    AND: [fieldAgentsEligibleWhere()],
     OR: zones.flatMap((z) => [
       {
         country_code: z.country_code,
@@ -70,7 +82,7 @@ export function jobsOrderBy(
 ): Prisma.JobOfferOrderByWithRelationInput[] {
   return sort === 'start'
     ? [{ scheduled_at: { sort: 'asc', nulls: 'last' } }, { created_at: 'desc' }]
-    : [{ created_at: 'desc' }];
+    : [PRIORITY_FIRST, { created_at: 'desc' }];
 }
 
 /**
@@ -141,7 +153,9 @@ export function publicScopeWhere(
   return {
     deleted_at: null,
     status: { in: OPEN_STATUSES },
-    ...(location ? { AND: [location] } : {}),
+    employment_type: AGENT_EMPLOYMENT_TYPE,
+    // A business's offers reach agents only when its plan includes them.
+    AND: [fieldAgentsEligibleWhere(), ...(location ? [location] : [])],
   };
 }
 

@@ -111,6 +111,35 @@ describe('ResumeService', () => {
     expect(renderSpy).not.toHaveBeenCalled();
   });
 
+  it('leaves the contact details out of the employer copy, cached apart', async () => {
+    redis.get.mockResolvedValue(null);
+    prisma.profile.findUnique.mockResolvedValue(mockProfile);
+    prisma.assignment.findMany.mockResolvedValue([mockAssignment]);
+
+    await service.download(PROFILE_ID, { withContacts: false });
+    const employerHtml: string = renderSpy.mock.calls[0][0];
+    expect(employerHtml).toContain('Alex Makaya');
+    expect(employerHtml).not.toContain(mockProfile.email);
+    expect(employerHtml).not.toContain(mockProfile.phone);
+    expect(employerHtml).not.toContain(mockProfile.address);
+    expect(redis.get).toHaveBeenCalledWith(
+      expect.stringMatching(/pdf:resume:profile-uuid-1:employer$/),
+    );
+    expect(redis.setex).toHaveBeenCalledWith(
+      expect.stringMatching(/:employer$/),
+      3600,
+      expect.any(String),
+    );
+
+    await service.download(PROFILE_ID);
+    const ownHtml: string = renderSpy.mock.calls[1][0];
+    expect(ownHtml).toContain(mockProfile.email);
+    expect(ownHtml).toContain(mockProfile.phone);
+    expect(redis.get).toHaveBeenLastCalledWith(
+      expect.stringMatching(/pdf:resume:profile-uuid-1$/),
+    );
+  });
+
   it('throws NotFoundException when the profile does not exist', async () => {
     redis.get.mockResolvedValue(null);
     prisma.profile.findUnique.mockResolvedValue(null);

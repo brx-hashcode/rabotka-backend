@@ -57,6 +57,12 @@ const SAMPLES: NotificationInput[] = [
     counterpartName: 'Awa K.',
     jobTitle: 'Plombier',
   },
+  {
+    type: 'JOB_INVITATION',
+    jobOfferId: 'o-1',
+    jobTitle: 'Serveuse',
+    businessName: 'Love Life',
+  },
   { type: 'PAYMENT_SUCCEEDED', amount: 2500, kind: 'WALLET_TOP_UP' },
   { type: 'PAYMENT_FAILED', amount: 2500, kind: 'PENALTY' },
   { type: 'CLAIM_COMMENTED', claimId: 'c-1', claimTitle: 'Paiement' },
@@ -130,6 +136,36 @@ describe('renderNotification', () => {
         expect(out.body).toContain('WhatsApp');
       }
     }
+  });
+
+  it('invites a worker to apply to an offer, by name', () => {
+    expect(
+      renderNotification({
+        type: 'JOB_INVITATION',
+        jobOfferId: 'o-1',
+        jobTitle: 'Serveuse',
+        businessName: 'Love Life',
+      }),
+    ).toEqual({
+      title: 'Invitation à postuler',
+      body: 'Love Life vous invite à postuler à « Serveuse ».',
+      link: '/offres/o-1',
+    });
+  });
+
+  it('sends a business to its candidates, never to WhatsApp', () => {
+    const out = renderNotification({
+      type: 'CONTACT_UNLOCKED',
+      recipientRole: 'BUSINESS',
+      applicationId: 'a-1',
+      counterpartName: 'Awa K.',
+      jobTitle: 'Plombier',
+    });
+    expect(out.link).toBe('/espace/candidatures?candidature=a-1');
+    expect(out.body).not.toContain('WhatsApp');
+    // The space's words, not the mechanics.
+    expect(`${out.title} ${out.body}`).not.toMatch(/débloqu|déblocage/i);
+    expect(out.body).not.toContain('..');
   });
 
   it('never links to the hidden contacts list', () => {
@@ -279,5 +315,108 @@ describe('SIMILAR_PROFILE_HIRED', () => {
         renderNotification({ type: 'ACCOUNT_SUSPENDED', reason: null }).body,
       ).toContain('Motif : non précisé.');
     });
+  });
+});
+
+describe('admin subscription notices', () => {
+  const later = new Date(Date.now() + 10 * 86400000).toISOString();
+  const end = new Date(Date.now() + 40 * 86400000).toISOString();
+
+  it('says when a granted plan only takes over later', () => {
+    const out = renderNotification({
+      type: 'BUSINESS_SUBSCRIPTION_GRANTED',
+      planName: 'Pro',
+      startsAt: later,
+      endsAt: end,
+    });
+    expect(out.title).toBe('Formule attribuée');
+    expect(out.body).toContain('prendra le relais');
+    expect(out.link).toBe('/espace/abonnement');
+  });
+
+  it('says a plan granted to start now is active', () => {
+    const out = renderNotification({
+      type: 'BUSINESS_SUBSCRIPTION_GRANTED',
+      planName: 'Pro',
+      startsAt: new Date().toISOString(),
+      endsAt: end,
+    });
+    expect(out.body).toContain('active jusqu’au');
+    expect(out.body).not.toContain('prendra le relais');
+  });
+
+  it('adds the motif to a cancellation only when there is one', () => {
+    const base = {
+      type: 'BUSINESS_SUBSCRIPTION_CANCELLED',
+      planName: 'Pro',
+    } as const;
+    expect(
+      renderNotification({ ...base, reason: 'Fin du partenariat' }).body,
+    ).toContain('Motif : Fin du partenariat.');
+    expect(
+      renderNotification({ ...base, reason: 'Contrat terminé.' }).body,
+    ).toMatch(/Motif : Contrat terminé\.$/);
+    for (const reason of [null, '   ']) {
+      const out = renderNotification({ ...base, reason });
+      expect(out.body).not.toContain('Motif');
+      expect(out.body).not.toContain('null');
+    }
+  });
+});
+
+describe('business notices open the candidature they are about', () => {
+  it('links a business contact notice to its candidature', () => {
+    const out = renderNotification({
+      type: 'CONTACT_UNLOCKED',
+      recipientRole: 'BUSINESS',
+      applicationId: 'a-1',
+      counterpartName: 'Bakari Y.',
+      jobTitle: 'Encadreur',
+    });
+    expect(out.link).toBe('/espace/candidatures?candidature=a-1');
+  });
+
+  it('falls back to the list without an application', () => {
+    const out = renderNotification({
+      type: 'CONTACT_UNLOCKED',
+      recipientRole: 'BUSINESS',
+      applicationId: null,
+      counterpartName: 'Bakari Y.',
+      jobTitle: null,
+    });
+    expect(out.link).toBe('/espace/candidatures');
+  });
+
+  it('carries the candidature on mission notices, keeping the mission path', () => {
+    for (const type of [
+      'APPLICATION_CANCELLED',
+      'MISSION_COMPLETED',
+    ] as const) {
+      expect(
+        renderNotification({
+          type,
+          jobOfferId: 'o-1',
+          applicationId: 'a-1',
+          jobTitle: 'Plombier',
+          workerName: 'Awa K.',
+        }).link,
+      ).toBe('/missions/o-1?candidature=a-1');
+    }
+  });
+
+  it('opens the candidature of an answered interview, else the interviews', () => {
+    const base = {
+      type: 'INTERVIEW_ANSWERED',
+      candidateName: 'Awa K.',
+      jobTitle: 'Plombier',
+      when: 'jeudi 29 octobre à 10:00',
+      answer: 'CONFIRMED',
+    } as const;
+    expect(renderNotification({ ...base, applicationId: 'a-1' }).link).toBe(
+      '/espace/candidatures?candidature=a-1',
+    );
+    expect(renderNotification({ ...base, applicationId: null }).link).toBe(
+      '/espace/entretiens',
+    );
   });
 });

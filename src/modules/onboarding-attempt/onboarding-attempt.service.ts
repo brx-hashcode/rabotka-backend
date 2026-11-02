@@ -33,9 +33,19 @@ type Who = {
   profileType?: ProfileType | null;
 };
 
+/**
+ * An attempt is keyed by what its sign-up proves: the phone for a WhatsApp
+ * sign-up, the email for a business one. A phone never contains '@'.
+ */
+const keyOf = (contact: string): { email: string } | { phone: string } =>
+  contact.includes('@') ? { email: contact } : { phone: contact };
+
 export type AdminOnboardingAttemptItem = {
   id: string;
-  phone: string;
+  phone: string | null;
+  email: string | null;
+  /** 'business' for an email (business) sign-up, 'whatsapp' otherwise. */
+  entry: string;
   firstName: string | null;
   lastName: string | null;
   profileType: ProfileType | null;
@@ -64,19 +74,28 @@ export class OnboardingAttemptService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /** A WhatsApp code went out — a new attempt, or another code for one. */
-  async codeSent(phone: string, who: Who = {}): Promise<void> {
+  /**
+   * A code went out — on WhatsApp to a phone, or by email to a business — a
+   * new attempt, or another code for one.
+   */
+  async codeSent(contact: string, who: Who = {}): Promise<void> {
     await this.safely('codeSent', async () => {
       const now = new Date();
       const names = this.namesOf(who);
       const existing = await this.prisma.onboardingAttempt.findUnique({
-        where: { phone },
+        where: keyOf(contact),
       });
 
       if (!existing) {
         try {
           await this.prisma.onboardingAttempt.create({
-            data: { phone, ...names, started_at: now, last_activity_at: now },
+            data: {
+              ...keyOf(contact),
+              entry: contact.includes('@') ? 'business' : 'whatsapp',
+              ...names,
+              started_at: now,
+              last_activity_at: now,
+            },
           });
           return;
         } catch (err) {
@@ -90,7 +109,7 @@ export class OnboardingAttemptService {
         // number's account was deleted and they are starting over — a new
         // attempt, not the old one's history.
         await this.prisma.onboardingAttempt.update({
-          where: { phone },
+          where: keyOf(contact),
           data: {
             ...names,
             stage: OnboardingStage.CODE_SENT,
@@ -109,7 +128,7 @@ export class OnboardingAttemptService {
       }
 
       await this.prisma.onboardingAttempt.update({
-        where: { phone },
+        where: keyOf(contact),
         data: {
           ...names,
           code_sends: { increment: 1 },
@@ -119,24 +138,25 @@ export class OnboardingAttemptService {
     });
   }
 
-  async phoneVerified(phone: string): Promise<void> {
-    await this.advance(phone, OnboardingStage.PHONE_VERIFIED, {
+  /** The code was right: the phone — or the business's email — is proven. */
+  async phoneVerified(contact: string): Promise<void> {
+    await this.advance(contact, OnboardingStage.PHONE_VERIFIED, {
       phone_verified_at: new Date(),
     });
   }
 
   /** A screen the app reports reaching, past the number check. */
   async reached(
-    phone: string,
+    contact: string,
     stage: ReportableStage,
     who: Who = {},
   ): Promise<void> {
-    await this.advance(phone, stage, this.namesOf(who));
+    await this.advance(contact, stage, this.namesOf(who));
   }
 
   /** The account exists. Called for every account, however it was created. */
-  async completed(phone: string, profileId: string): Promise<void> {
-    await this.advance(phone, OnboardingStage.COMPLETED, {
+  async completed(contact: string, profileId: string): Promise<void> {
+    await this.advance(contact, OnboardingStage.COMPLETED, {
       completed_at: new Date(),
       profile_id: profileId,
     });
@@ -147,6 +167,7 @@ export class OnboardingAttemptService {
     limit?: number;
     q?: string;
     stage?: OnboardingStage[];
+    entry?: 'whatsapp' | 'business';
     /** Only attempts that never became an account. */
     incomplete?: boolean;
     contacted?: boolean;
@@ -200,10 +221,18 @@ export class OnboardingAttemptService {
    * The funnel: how many attempts reached each stage or further, inside the
    * window. "Reached or further" so each bar is a subset of the one before it.
    */
-  async statsForAdmin(params: { startedFrom?: string; startedTo?: string }) {
+  async statsForAdmin(params: {
+    startedFrom?: string;
+    startedTo?: string;
+    entry?: 'whatsapp' | 'business';
+  }) {
+    const where: Prisma.OnboardingAttemptWhereInput = {
+      ...this.windowWhere(params),
+      ...(params.entry ? { entry: params.entry } : {}),
+    };
     const groups = await this.prisma.onboardingAttempt.groupBy({
       by: ['stage'],
-      where: this.windowWhere(params),
+      where,
       _count: { _all: true },
     });
     const atStage = new Map(groups.map((g) => [g.stage, g._count._all]));
@@ -218,7 +247,7 @@ export class OnboardingAttemptService {
     const completed = atStage.get(OnboardingStage.COMPLETED) ?? 0;
     const contacted = await this.prisma.onboardingAttempt.count({
       where: {
-        ...this.windowWhere(params),
+        ...where,
         stage: { not: OnboardingStage.COMPLETED },
         contacted_at: { not: null },
       },
@@ -231,6 +260,35 @@ export class OnboardingAttemptService {
       completionRate: started ? completed / started : 0,
       funnel: reached,
     };
+  }
+
+  /**
+   * Sign-ups per day (or week), by the day they started: how many began and
+   * how many of those finished. Every bucket of the window is there, empty
+   * ones at zero, so a quiet day reads as one.
+   */
+  async timelineForAdmin(params: {
+    startedFrom?: string;
+    startedTo?: string;
+    entry?: 'whatsapp' | 'business';
+    bucket: TimelineBucket;
+  }): Promise<TimelinePoint[]> {
+    const rows = await this.prisma.onboardingAttempt.findMany({
+      where: {
+        ...this.windowWhere(params),
+        ...(params.entry ? { entry: params.entry } : {}),
+      },
+      select: { started_at: true, stage: true },
+    });
+    const from = params.startedFrom
+      ? new Date(params.startedFrom)
+      : rows.reduce<Date | null>(
+          (min, r) => (!min || r.started_at < min ? r.started_at : min),
+          null,
+        );
+    if (!from) return [];
+    const to = params.startedTo ? windowEnd(params.startedTo) : new Date();
+    return timeline(rows, { from, to, bucket: params.bucket });
   }
 
   async markContacted(
@@ -257,20 +315,20 @@ export class OnboardingAttemptService {
   }
 
   private async advance(
-    phone: string,
+    contact: string,
     stage: OnboardingStage,
     data: Prisma.OnboardingAttemptUpdateInput,
   ): Promise<void> {
     await this.safely(`advance:${stage}`, async () => {
       const existing = await this.prisma.onboardingAttempt.findUnique({
-        where: { phone },
+        where: keyOf(contact),
         select: { stage: true },
       });
       // No row: an attempt from before this table, or one whose code-sent
       // write failed. Nothing to advance.
       if (!existing) return;
       await this.prisma.onboardingAttempt.update({
-        where: { phone },
+        where: keyOf(contact),
         data: {
           ...data,
           last_activity_at: new Date(),
@@ -284,6 +342,7 @@ export class OnboardingAttemptService {
   private adminWhere(params: {
     q?: string;
     stage?: OnboardingStage[];
+    entry?: 'whatsapp' | 'business';
     incomplete?: boolean;
     contacted?: boolean;
     startedFrom?: string;
@@ -297,12 +356,14 @@ export class OnboardingAttemptService {
         : params.incomplete
           ? { stage: { not: OnboardingStage.COMPLETED } }
           : {}),
+      ...(params.entry ? { entry: params.entry } : {}),
       ...(params.contacted === true ? { contacted_at: { not: null } } : {}),
       ...(params.contacted === false ? { contacted_at: null } : {}),
       ...(q
         ? {
             OR: [
               { phone: { contains: q } },
+              { email: { contains: q, mode: 'insensitive' } },
               { first_name: { contains: q, mode: 'insensitive' } },
               { last_name: { contains: q, mode: 'insensitive' } },
             ],
@@ -319,9 +380,7 @@ export class OnboardingAttemptService {
     return {
       started_at: {
         ...(params.startedFrom ? { gte: new Date(params.startedFrom) } : {}),
-        ...(params.startedTo
-          ? { lte: new Date(`${params.startedTo}T23:59:59.999Z`) }
-          : {}),
+        ...(params.startedTo ? { lte: windowEnd(params.startedTo) } : {}),
       },
     };
   }
@@ -333,6 +392,8 @@ export class OnboardingAttemptService {
     return {
       id: row.id,
       phone: row.phone,
+      email: row.email,
+      entry: row.entry,
       firstName: row.first_name,
       lastName: row.last_name,
       profileType: row.profile_type,
@@ -378,4 +439,64 @@ export class OnboardingAttemptService {
       );
     }
   }
+}
+
+/**
+ * The window's last instant: a bare day (« 2026-10-31 ») runs to its end, a
+ * timestamp (what the admin's period comparison sends) is taken as given.
+ */
+export function windowEnd(startedTo: string): Date {
+  return /^\d{4}-\d{2}-\d{2}$/.test(startedTo)
+    ? new Date(`${startedTo}T23:59:59.999Z`)
+    : new Date(startedTo);
+}
+
+export type TimelineBucket = 'day' | 'week';
+export type TimelinePoint = {
+  /** The bucket's first day, YYYY-MM-DD, Brazzaville time. */
+  date: string;
+  started: number;
+  completed: number;
+};
+
+/** Brazzaville is UTC+1 all year (no daylight saving). */
+const BRAZZAVILLE_OFFSET_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The bucket a moment falls in: its local day, or that week's Monday. */
+function bucketOf(at: Date, bucket: TimelineBucket): string {
+  const local = new Date(at.getTime() + BRAZZAVILLE_OFFSET_MS);
+  const day = Date.UTC(
+    local.getUTCFullYear(),
+    local.getUTCMonth(),
+    local.getUTCDate(),
+  );
+  const start =
+    bucket === 'week' ? day - ((local.getUTCDay() + 6) % 7) * DAY_MS : day;
+  return new Date(start).toISOString().slice(0, 10);
+}
+
+/** Counts per bucket from `from` to `to`, every bucket present. */
+export function timeline(
+  rows: { started_at: Date; stage: OnboardingStage }[],
+  window: { from: Date; to: Date; bucket: TimelineBucket },
+): TimelinePoint[] {
+  const points = new Map<string, TimelinePoint>();
+  const step = window.bucket === 'week' ? 7 * DAY_MS : DAY_MS;
+  const last = bucketOf(window.to, window.bucket);
+  for (
+    let t = Date.parse(bucketOf(window.from, window.bucket));
+    t <= Date.parse(last);
+    t += step
+  ) {
+    const date = new Date(t).toISOString().slice(0, 10);
+    points.set(date, { date, started: 0, completed: 0 });
+  }
+  for (const r of rows) {
+    const point = points.get(bucketOf(r.started_at, window.bucket));
+    if (!point) continue;
+    point.started += 1;
+    if (r.stage === OnboardingStage.COMPLETED) point.completed += 1;
+  }
+  return [...points.values()];
 }

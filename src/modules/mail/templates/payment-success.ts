@@ -1,9 +1,11 @@
 import { escapeHtml } from './layout';
+import { signOff, type EmailAudience } from '../audience';
 
 export function paymentSuccessEmail(
   name: string,
   description: string,
   amount: number,
+  audience: EmailAudience = 'worker',
 ): string {
   return `
     <p>Bonjour <strong>${escapeHtml(name)}</strong>,</p>
@@ -47,7 +49,35 @@ export function paymentSuccessEmail(
 
     <p>
       Cordialement,<br />
-      <strong>L'équipe Rabotka</strong>
+      <strong>${signOff(audience)}</strong>
+    </p>
+  `;
+}
+
+/** Sent with the invoice PDF attached, after a confirmed payment. */
+export function invoiceEmail(
+  name: string,
+  description: string,
+  amount: number,
+  audience: EmailAudience = 'worker',
+): string {
+  return `
+    <p>Bonjour ${escapeHtml(name)},</p>
+
+    <p>
+      Veuillez trouver ci-joint votre facture pour
+      <strong>${escapeHtml(description)}</strong>, d'un montant de
+      <strong>${amount.toLocaleString('fr-FR')} FCFA</strong>.
+    </p>
+
+    <p>
+      Conservez-la pour vos références. Elle reste aussi disponible
+      ${audience === 'business' ? 'dans votre espace' : "dans l'application"}.
+    </p>
+
+    <p>
+      Cordialement,<br />
+      <strong>${signOff(audience)}</strong>
     </p>
   `;
 }

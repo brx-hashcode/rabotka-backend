@@ -127,6 +127,44 @@ describe('WhatsAppService', () => {
     messageLog = module.get(WhatsappMessageLogService);
   });
 
+  describe('business accounts', () => {
+    // Product rule: business accounts get email and in-app only, never WhatsApp.
+    beforeEach(() => {
+      (prisma.profile as unknown as { findFirst: jest.Mock }).findFirst = jest
+        .fn()
+        .mockResolvedValue({ is_business: true });
+    });
+
+    it('sends no template to a business profile, and reports it delivered', async () => {
+      await expect(
+        service.sendTemplateMessage(PHONE, 'kyc', 'Awa', 'p-business'),
+      ).resolves.toBe(true);
+      expect(provider.sendTemplate).not.toHaveBeenCalled();
+    });
+
+    it('sends no automated text to a business phone', async () => {
+      await expect(service.sendTextMessage(PHONE, 'Rappel')).resolves.toBe(
+        true,
+      );
+      expect(provider.sendText).not.toHaveBeenCalled();
+    });
+
+    it('still lets an admin write by hand', async () => {
+      await service.sendTextMessage(PHONE, 'Bonjour', 'p-business', 'admin-1');
+      expect(provider.sendText).toHaveBeenCalled();
+    });
+
+    it('sends to everyone else', async () => {
+      (
+        prisma.profile as unknown as { findFirst: jest.Mock }
+      ).findFirst.mockResolvedValue({
+        is_business: false,
+      });
+      await service.sendTemplateMessage(PHONE, 'kyc', 'Awa', 'p-worker');
+      expect(provider.sendTemplate).toHaveBeenCalled();
+    });
+  });
+
   describe('isConfigured()', () => {
     it('delegates to the provider', () => {
       expect(service.isConfigured()).toBe(true);

@@ -24,6 +24,7 @@ import { MatchingService } from '../../matching/matching.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 import { InteractionEventService } from '../../recommendation-engine/interaction-event.service';
 import { JobNotificationProcessor } from '../notification/job-notification.processor';
+import { BusinessSubscriptionService } from '../../business/subscription/business-subscription.service';
 
 const EMPLOYER_ID = 'employer-uuid-1';
 const OFFER_ID = 'offer-uuid-1';
@@ -68,6 +69,13 @@ const mockOffer = {
 describe('JobOfferService', () => {
   let service: JobOfferService;
   let prisma: jest.Mocked<PrismaService>;
+  // A regular employer by default: no plan, nothing charged.
+  const subscriptions = {
+    assertCanPublishOffer: jest.fn().mockResolvedValue(undefined),
+    consumeOffer: jest.fn().mockResolvedValue(null),
+    releaseOffer: jest.fn().mockResolvedValue(undefined),
+    priorityUntil: jest.fn().mockResolvedValue(null),
+  };
   let mailService: jest.Mocked<MailService>;
   let systemConfigService: jest.Mocked<SystemConfigService>;
   let walletService: jest.Mocked<WalletService>;
@@ -165,6 +173,7 @@ describe('JobOfferService', () => {
           provide: InteractionEventService,
           useValue: { record: jest.fn().mockResolvedValue(undefined) },
         },
+        { provide: BusinessSubscriptionService, useValue: subscriptions },
       ],
     }).compile();
 
@@ -187,6 +196,26 @@ describe('JobOfferService', () => {
         verification_status: 'VERIFIED',
       });
       (prisma.jobOffer.create as jest.Mock).mockResolvedValue(mockOffer);
+    });
+
+    it('charges a business one offer of its period, and gives it back if saving fails', async () => {
+      subscriptions.consumeOffer.mockResolvedValueOnce({
+        subscriptionId: 's1',
+      });
+      await service.create(EMPLOYER_ID, { ...baseDto });
+      expect(subscriptions.consumeOffer).toHaveBeenCalledWith(EMPLOYER_ID);
+      expect(subscriptions.releaseOffer).not.toHaveBeenCalled();
+
+      subscriptions.consumeOffer.mockResolvedValueOnce({
+        subscriptionId: 's1',
+      });
+      (prisma.jobOffer.create as jest.Mock).mockRejectedValueOnce(
+        new Error('db down'),
+      );
+      await expect(service.create(EMPLOYER_ID, { ...baseDto })).rejects.toThrow(
+        'db down',
+      );
+      expect(subscriptions.releaseOffer).toHaveBeenCalledWith('s1');
     });
 
     it('creates offer with valid data including quantity', async () => {
@@ -479,6 +508,28 @@ describe('JobOfferService', () => {
       ).toThrow(/clôture des candidatures/i);
     });
 
+    it.each([EmploymentType.CDI, EmploymentType.CDD, EmploymentType.STAGE])(
+      'lets a business publish a %s with no date: it closes those itself',
+      (employment_type) => {
+        const { scheduled_at: _omitted, ...noDate } = baseDto;
+
+        expect(() =>
+          service.validateCreateDto(
+            { ...noDate, employment_type } as typeof baseDto,
+            true,
+          ),
+        ).not.toThrow();
+      },
+    );
+
+    it('still asks a business for the day of a mission', () => {
+      const { scheduled_at: _omitted, ...noDate } = baseDto;
+
+      expect(() =>
+        service.validateCreateDto(noDate as typeof baseDto, true),
+      ).toThrow(/date de la mission/i);
+    });
+
     it('defaults to MISSION when the type is unspecified', () => {
       const { scheduled_at: _omitted, ...noDate } = baseDto;
 
@@ -645,6 +696,32 @@ describe('JobOfferService', () => {
       expect(prisma.jobOffer.update).not.toHaveBeenCalled();
     });
 
+    it('reopens a business open-ended offer with no date', async () => {
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
+        ...expiredOffer,
+        employment_type: EmploymentType.CDI,
+      });
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        verification_status: 'VERIFIED',
+        status: 'ACTIVE',
+        is_business: true,
+      });
+
+      await service.republish(OFFER_ID, OWNER_ID, null);
+
+      expect(
+        (prisma.jobOffer.update as jest.Mock).mock.calls[0][0].data
+          .scheduled_at,
+      ).toBeNull();
+    });
+
+    it('refuses no date on a mission, or for another employer', async () => {
+      await expect(service.republish(OFFER_ID, OWNER_ID, null)).rejects.toThrow(
+        'date est requise',
+      );
+      expect(prisma.jobOffer.update).not.toHaveBeenCalled();
+    });
+
     it('reopens the offer at the new date', async () => {
       const when = hoursFromNow(48);
       await service.republish(OFFER_ID, OWNER_ID, when);
@@ -652,7 +729,12 @@ describe('JobOfferService', () => {
       expect(prisma.jobOffer.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: OFFER_ID },
-          data: { scheduled_at: when, status: JobOfferStatus.ACTIVE },
+          data: {
+            scheduled_at: when,
+            status: JobOfferStatus.ACTIVE,
+            priority_until: null,
+            closed_at: null,
+          },
         }),
       );
     });

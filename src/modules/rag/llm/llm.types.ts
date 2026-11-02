@@ -12,9 +12,13 @@
  *
  * `cheap` exists for the pre-filter and for greetings — work where a smaller
  * model is indistinguishable and the volume is high. `standard` is everything
- * that can reach a tool or a corpus chunk.
+ * that can reach a tool or a corpus chunk. `document` reads files (CVs, scans
+ * and photos included) off any reply path, so it wants vision, not speed.
+ * `writing` is text a business reads as it is written — the CV conversations
+ * and the offer drafts — where the quality of the reasoning and the French is
+ * what is being sold, so it leads with the better writers, not the cheapest.
  */
-export type LlmTier = 'cheap' | 'standard';
+export type LlmTier = 'cheap' | 'standard' | 'document' | 'writing';
 
 export type LlmProviderName =
   'anthropic' | 'google' | 'mistral' | 'openai' | 'groq' | 'deepseek';

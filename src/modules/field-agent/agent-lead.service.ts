@@ -1,3 +1,4 @@
+import { fieldAgentsEligibleWhere } from '../business/subscription/subscription-where';
 import {
   BadRequestException,
   ConflictException,
@@ -26,7 +27,7 @@ import { NotificationDispatcher } from '../notification-dispatch/notification-di
 import { SystemConfigService } from '../system-config/system-config.service';
 import { toDigits, toE164 } from '../whatsapp/contracts/address';
 import { notifyAgentPlacement } from './agent-placement';
-import { jobsInZonesWhere } from './agent-zones';
+import { jobsInZonesWhere, OPEN_STATUSES } from './agent-zones';
 
 /**
  * Congo has one time zone, UTC+1, and no daylight saving — so "today" for the
@@ -55,7 +56,16 @@ const PLACEMENT_SELECT = {
   created_at: true,
   updated_at: true,
   worker: { select: LEAD_WORKER_SELECT },
-  job_offer: { select: { id: true, title: true, city: true } },
+  rejection_source: true,
+  job_offer: {
+    select: {
+      id: true,
+      title: true,
+      city: true,
+      status: true,
+      deleted_at: true,
+    },
+  },
   agent_lead: { select: { id: true } },
 } as const satisfies Prisma.ApplicationSelect;
 
@@ -523,6 +533,9 @@ export class AgentLeadService {
     options: { offList?: boolean } = {},
   ) {
     const lead = await this.requireClaim(agentId, leadId);
+    if (!(await this.agentsAllowedOn(lead.job_offer_id))) {
+      throw new ForbiddenException('Cette offre n’est pas ouverte aux agents.');
+    }
 
     // The consent is THIS agent's own call. A lead changes hands when a claim
     // lapses, and another agent's « Intéressé » let the new claimer place the
@@ -797,6 +810,14 @@ export class AgentLeadService {
    * the checks ApplicationService would fail, asked up front so the agent
    * sees them before confirming. Null when nothing stands in the way.
    */
+  /** A business's offer is open to agents only while its plan includes them. */
+  private async agentsAllowedOn(jobOfferId: string): Promise<boolean> {
+    const count = await this.prisma.jobOffer.count({
+      where: { id: jobOfferId, ...fieldAgentsEligibleWhere() },
+    });
+    return count > 0;
+  }
+
   private async placementBlocker(
     agentId: string,
     jobOfferId: string,
@@ -811,6 +832,9 @@ export class AgentLeadService {
     }
     if (worker.verification_status !== VerificationStatus.VERIFIED) {
       return 'L’identité de ce travailleur n’est pas encore vérifiée.';
+    }
+    if (!(await this.agentsAllowedOn(jobOfferId))) {
+      return 'Cette offre n’est pas ouverte aux agents.';
     }
     const [applied, heldElsewhere] = await Promise.all([
       this.prisma.application.count({
@@ -925,10 +949,10 @@ export class AgentLeadService {
   /**
    * The workers this agent placed on one job — every application credited to
    * them, however it came (direct placement, accepted invitation, placement by
-   * number), newest first, with where each application stands now.
+   * number), newest first, with where each application stands now. No job
+   * check: every row is already theirs, and they outlive the job being open.
    */
   async listPlacements(agentId: string, jobOfferId: string) {
-    await this.requireJobInZones(agentId, jobOfferId);
     const rows = await this.prisma.application.findMany({
       where: { job_offer_id: jobOfferId, agent_id: agentId, deleted_at: null },
       select: PLACEMENT_SELECT,
@@ -998,10 +1022,13 @@ export class AgentLeadService {
         placedAt: r.created_at,
         updatedAt: r.updated_at,
         leadId: r.agent_lead?.id ?? null,
+        rejectionSource: r.rejection_source,
         job: {
           id: r.job_offer.id,
           title: r.job_offer.title,
           city: r.job_offer.city,
+          status: r.job_offer.status,
+          available: r.job_offer.deleted_at === null,
         },
         worker: {
           id: r.worker.id,
@@ -1184,17 +1211,7 @@ export class AgentLeadService {
    * rule as the job routes. Anything else is answered "not found".
    */
   private async loadInZones(agentId: string, leadId: string) {
-    const lead = await this.prisma.agentLead.findUnique({
-      where: { id: leadId },
-      select: {
-        id: true,
-        status: true,
-        job_offer_id: true,
-        worker_id: true,
-        claimed_by_agent_id: true,
-        claim_expires_at: true,
-      },
-    });
+    const lead = await this.findLead(leadId);
     const zones = lead
       ? await this.prisma.agentZone.findMany({
           where: { agent_id: agentId },
@@ -1210,9 +1227,38 @@ export class AgentLeadService {
           })
         : 0;
     if (!lead || inZones === 0) {
+      // The agent's own lead on a job that closed under them: say so, rather
+      // than that the worker they were just talking to does not exist.
+      if (
+        lead?.claimed_by_agent_id === agentId &&
+        (await this.jobClosed(lead.job_offer_id))
+      ) {
+        throw new BadRequestException("Cette offre n'est plus disponible.");
+      }
       throw new NotFoundException('Candidat introuvable');
     }
     return lead;
+  }
+
+  private findLead(leadId: string) {
+    return this.prisma.agentLead.findUnique({
+      where: { id: leadId },
+      select: {
+        id: true,
+        status: true,
+        job_offer_id: true,
+        worker_id: true,
+        claimed_by_agent_id: true,
+        claim_expires_at: true,
+      },
+    });
+  }
+
+  private async jobClosed(jobOfferId: string): Promise<boolean> {
+    const closed = await this.prisma.jobOffer.count({
+      where: { id: jobOfferId, status: { notIn: OPEN_STATUSES } },
+    });
+    return closed > 0;
   }
 
   /** The job, only if it is open and inside this agent's zones. */
@@ -1232,12 +1278,12 @@ export class AgentLeadService {
 
   /**
    * As requireClaim, or a worker this agent placed — whom they may still need
-   * to call after the placement.
+   * to call after the placement, so even once the job has closed.
    */
   private async requireClaimOrPlacement(agentId: string, leadId: string) {
-    const lead = await this.loadInZones(agentId, leadId);
+    const lead = await this.findLead(leadId);
     if (
-      lead.status === AgentLeadStatus.CONFIRMED &&
+      lead?.status === AgentLeadStatus.CONFIRMED &&
       lead.claimed_by_agent_id === agentId
     ) {
       return lead;

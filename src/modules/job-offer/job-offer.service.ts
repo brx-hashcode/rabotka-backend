@@ -1,4 +1,8 @@
 import {
+  BUSINESS_IDENTITY_SELECT,
+  publicEmployerName,
+} from '../business/public-employer';
+import {
   AdminCacheService,
   ADMIN_LIST_TTL_SECONDS,
 } from '../../common/services/cache/admin-cache.service';
@@ -10,7 +14,10 @@ import {
   ForbiddenException,
   InternalServerErrorException,
   Inject,
+  Optional,
 } from '@nestjs/common';
+import { normalizeQuestions, ownerQuestion } from './offer-questions';
+import { BusinessSubscriptionService } from '../business/subscription/business-subscription.service';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { JobNotificationProcessor } from './notification/job-notification.processor';
@@ -25,6 +32,7 @@ import { MailService } from '../mail/mail.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
+import { JOB_OFFER_CLOSED, type JobOfferClosedEvent } from './job-offer.events';
 import { MIN_HOURS_FROM_NOW } from './job-offer.constants';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
@@ -60,8 +68,11 @@ import {
   JobOfferStatus,
   PaymentFlow,
   Prisma,
+  ApplicationCancelledBy,
+  ExternalApplicationStatus,
   RejectionSource,
 } from '@prisma/client';
+import { cancellationPatch } from '../application/application.constants';
 import { GeoService } from '../geo/geo.service';
 import { InteractionEventService } from '../recommendation-engine/interaction-event.service';
 import {
@@ -373,9 +384,19 @@ export type JobOfferListItem = {
   quantity: number;
   acceptedCount: number;
   status: string;
+  /** Set when the employer closed it themselves, cleared on republishing. */
+  closedAt: Date | null;
   employer_id: string;
   created_at: Date;
 };
+
+/** Everyone an offer's « N/M postes » counts. */
+const HIRED_APPLICATION_STATUSES: ApplicationStatus[] = [
+  ApplicationStatus.WAITING_PAYMENT,
+  ApplicationStatus.ACCEPTED,
+  ApplicationStatus.STARTED,
+  ApplicationStatus.END,
+];
 
 /**
  * An offer as a WORKER may see it.
@@ -391,6 +412,12 @@ export type JobOfferDetail = JobOfferListItem & {
   /** For the employer's edit form, which needs the ids behind the labels. */
   category_id: string | null;
   country_code: string | null;
+  /**
+   * « Questions aux candidats », with what the owner set as accepted. Only
+   * the owner may see `knockout` / `accepted`: other readers get
+   * `candidateQuestion` (see the controller).
+   */
+  questions?: ReturnType<typeof ownerQuestion>[];
   employer?: {
     id: string;
     first_name: string;
@@ -419,6 +446,9 @@ export class JobOfferService {
     private readonly geo: GeoService,
     private readonly jobNotification: JobNotificationProcessor,
     private readonly interactionEvents: InteractionEventService,
+    // Appended and optional: the specs build this service positionally.
+    @Optional()
+    private readonly subscriptions?: BusinessSubscriptionService,
   ) {}
 
   /**
@@ -463,6 +493,7 @@ export class JobOfferService {
         country_code: true,
         country_name: true,
         city: true,
+        is_business: true,
       },
     });
     if (!employer) {
@@ -501,7 +532,12 @@ export class JobOfferService {
       );
     }
 
-    this.validateCreateDto(dto);
+    this.validateCreateDto(dto, employer.is_business);
+    const questions = normalizeQuestions(dto.questions ?? []);
+    // A business publishes within its plan's offers for the period.
+    await this.subscriptions?.assertCanPublishOffer(employerId);
+    const priorityUntil =
+      (await this.subscriptions?.priorityUntil(employerId)) ?? null;
 
     const scheduledAt = dto.scheduled_at ? new Date(dto.scheduled_at) : null;
     const now = new Date();
@@ -545,33 +581,50 @@ export class JobOfferService {
       note: dto.note?.trim() ?? null,
       quantity: dto.quantity ?? 1,
       status: JobOfferStatus.ACTIVE,
+      priority_until: priorityUntil,
       ...(dto.category_id ? { category_id: dto.category_id } : {}),
     };
 
+    // A business's offer counts against its plan for the period, charged
+    // right before it is saved and given back if it can't be.
+    const charged =
+      (await this.subscriptions?.consumeOffer(employerId)) ?? null;
     let offer: Awaited<ReturnType<typeof this.prisma.jobOffer.create>> | null =
       null;
-    for (let attempt = 0; attempt < REFERENCE_MAX_ATTEMPTS; attempt++) {
-      try {
-        offer = await this.prisma.jobOffer.create({
-          data: { ...baseData, reference: generateJobReference() },
-        });
-        break;
-      } catch (err) {
-        if (
-          err instanceof Prisma.PrismaClientKnownRequestError &&
-          err.code === 'P2002' &&
-          Array.isArray(err.meta?.target) &&
-          (err.meta?.target as string[]).includes('reference')
-        ) {
-          continue;
+    try {
+      for (let attempt = 0; attempt < REFERENCE_MAX_ATTEMPTS; attempt++) {
+        try {
+          offer = await this.prisma.jobOffer.create({
+            data: { ...baseData, reference: generateJobReference() },
+          });
+          break;
+        } catch (err) {
+          if (
+            err instanceof Prisma.PrismaClientKnownRequestError &&
+            err.code === 'P2002' &&
+            Array.isArray(err.meta?.target) &&
+            (err.meta?.target as string[]).includes('reference')
+          ) {
+            continue;
+          }
+          throw err;
         }
-        throw err;
       }
-    }
-    if (!offer) {
-      throw new InternalServerErrorException(
-        "Impossible de générer une référence unique pour l'offre",
-      );
+      if (!offer) {
+        throw new InternalServerErrorException(
+          "Impossible de générer une référence unique pour l'offre",
+        );
+      }
+      if (questions.length > 0) {
+        const offerId = offer.id;
+        await this.prisma.offerQuestion.createMany({
+          data: questions.map((q) => ({ ...q, job_offer_id: offerId })),
+        });
+      }
+    } catch (err) {
+      if (charged)
+        await this.subscriptions?.releaseOffer(charged.subscriptionId);
+      throw err;
     }
 
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_CREATED, {
@@ -949,6 +1002,7 @@ export class JobOfferService {
     const offer = await this.prisma.jobOffer.findFirst({
       where: { id, deleted_at: null },
       include: {
+        questions: { orderBy: { position: 'asc' } },
         employer: {
           select: {
             id: true,
@@ -958,6 +1012,7 @@ export class JobOfferService {
             avatar_url: true,
             rating_avg: true,
             rating_count: true,
+            ...BUSINESS_IDENTITY_SELECT,
           },
         },
         _count: {
@@ -973,11 +1028,12 @@ export class JobOfferService {
       ...this.toListItem(offer, offer._count.applications),
       category_id: offer.category_id,
       country_code: offer.country_code,
+      questions: (offer.questions ?? []).map(ownerQuestion),
       employer: offer.employer
         ? {
             id: offer.employer.id,
-            first_name: offer.employer.first_name,
-            last_name: offer.employer.last_name,
+            // A business shows as itself to the workers reading its offer.
+            ...publicEmployerName(offer.employer),
             reliability_score: offer.employer.reliability_score,
             avatar_url: offer.employer.avatar_url,
             rating_avg: offer.employer.rating_avg,
@@ -1002,6 +1058,7 @@ export class JobOfferService {
             avatar_url: true,
             rating_avg: true,
             rating_count: true,
+            ...BUSINESS_IDENTITY_SELECT,
           },
         },
         _count: {
@@ -1020,8 +1077,8 @@ export class JobOfferService {
       employer: offer.employer
         ? {
             id: offer.employer.id,
-            first_name: offer.employer.first_name,
-            last_name: offer.employer.last_name,
+            // A business shows as itself to the workers reading its offer.
+            ...publicEmployerName(offer.employer),
             reliability_score: offer.employer.reliability_score,
             avatar_url: offer.employer.avatar_url,
             rating_avg: offer.employer.rating_avg,
@@ -1052,15 +1109,23 @@ export class JobOfferService {
   ): Promise<
     JobOfferListItem[] | { items: JobOfferListItem[]; total: number }
   > {
-    // Newest first, and count ACCEPTED applications so the "N/M postes" filled
-    // count is accurate (matches findById/findByReference).
+    // Newest first, counting everyone hired so the "N/M postes" filled count
+    // holds for an offer past ACCEPTED, and for hires from the careers page.
     const acceptedCount = {
       _count: {
         select: {
-          applications: { where: { status: ApplicationStatus.ACCEPTED } },
+          applications: {
+            where: { status: { in: HIRED_APPLICATION_STATUSES } },
+          },
+          external_applications: {
+            where: { status: ExternalApplicationStatus.RETAINED },
+          },
         },
       },
     } as const;
+    const hires = (o: {
+      _count: { applications: number; external_applications: number };
+    }) => o._count.applications + o._count.external_applications;
 
     // Hide soft-deleted offers from the employer's own list.
     const where: Prisma.JobOfferWhereInput = {
@@ -1077,7 +1142,7 @@ export class JobOfferService {
         orderBy: { created_at: 'desc' },
         include: acceptedCount,
       });
-      return offers.map((o) => this.toListItem(o, o._count.applications));
+      return offers.map((o) => this.toListItem(o, hires(o)));
     }
 
     const { page, pageSize } = pagination;
@@ -1093,7 +1158,7 @@ export class JobOfferService {
       this.prisma.jobOffer.count({ where }),
     ]);
     return {
-      items: offers.map((o) => this.toListItem(o, o._count.applications)),
+      items: offers.map((o) => this.toListItem(o, hires(o))),
       total,
     };
   }
@@ -1199,13 +1264,17 @@ export class JobOfferService {
   async republish(
     id: string,
     actorProfileId: string,
-    scheduledAt: Date,
+    scheduledAt: Date | null,
   ): Promise<JobOfferListItem> {
     const [offer, actor] = await Promise.all([
       this.prisma.jobOffer.findUnique({ where: { id } }),
       this.prisma.profile.findUnique({
         where: { id: actorProfileId },
-        select: { verification_status: true, status: true },
+        select: {
+          verification_status: true,
+          status: true,
+          is_business: true,
+        },
       }),
     ]);
     if (!offer || offer.deleted_at) {
@@ -1233,21 +1302,45 @@ export class JobOfferService {
         'Seule une offre expirée peut être republiée',
       );
     }
-    if (Number.isNaN(scheduledAt.getTime())) {
+    await this.subscriptions?.assertCanPublishOffer(actorProfileId);
+    const priorityUntil =
+      (await this.subscriptions?.priorityUntil(actorProfileId)) ?? null;
+    if (
+      scheduledAt === null &&
+      (isDatedMission(offer.employment_type) || !actor.is_business)
+    ) {
+      throw new BadRequestException('Une date est requise');
+    }
+    if (scheduledAt && Number.isNaN(scheduledAt.getTime())) {
       throw new BadRequestException('Date invalide');
     }
 
     const minDate = new Date(Date.now() + MIN_HOURS_FROM_NOW * 60 * 60 * 1000);
-    if (scheduledAt < minDate) {
+    if (scheduledAt && scheduledAt < minDate) {
       throw new BadRequestException(
         `La date doit être au moins ${MIN_HOURS_FROM_NOW} heures dans le futur`,
       );
     }
 
-    const updated = await this.prisma.jobOffer.update({
-      where: { id },
-      data: { scheduled_at: scheduledAt, status: JobOfferStatus.ACTIVE },
-    });
+    // Republishing is publishing: it counts for the period too.
+    const charged =
+      (await this.subscriptions?.consumeOffer(actorProfileId)) ?? null;
+    let updated: Awaited<ReturnType<typeof this.prisma.jobOffer.update>>;
+    try {
+      updated = await this.prisma.jobOffer.update({
+        where: { id },
+        data: {
+          scheduled_at: scheduledAt,
+          status: JobOfferStatus.ACTIVE,
+          priority_until: priorityUntil,
+          closed_at: null,
+        },
+      });
+    } catch (err) {
+      if (charged)
+        await this.subscriptions?.releaseOffer(charged.subscriptionId);
+      throw err;
+    }
 
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED, {
       event: AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED,
@@ -1306,7 +1399,7 @@ export class JobOfferService {
     return this.toListItem(updated);
   }
 
-  validateCreateDto(dto: CreateJobOfferDto): void {
+  validateCreateDto(dto: CreateJobOfferDto, isBusiness = false): void {
     if (
       !dto.title ||
       dto.title.trim().length < TITLE_MIN ||
@@ -1328,7 +1421,12 @@ export class JobOfferService {
     // Every offer needs this date, but it means two different things, so the
     // message names the one the employer is actually being asked for. Demanding
     // "la date de clôture" on a CDI is how you get an employer inventing one.
-    if (!dto.scheduled_at) {
+    //
+    // The exception is a business's CDD, CDI or stage: it closes those itself
+    // from its dashboard. Other employers have no such button, and an undated
+    // offer of theirs with a hire could never close.
+    const openEnded = isBusiness && !isDatedMission(dto.employment_type);
+    if (!dto.scheduled_at && !openEnded) {
       throw new BadRequestException(
         isDatedMission(dto.employment_type)
           ? 'La date de la mission est requise'
@@ -1861,6 +1959,91 @@ export class JobOfferService {
    * cancelled assignments, no longer stand in the way. Soft delete (reversible,
    * preserves history) mirroring {@link deleteJobOfferByAdmin}.
    */
+  /**
+   * The employer stops recruiting. With nobody hired it expires, and can be
+   * republished; with hires it is filled, and they carry on. Candidates still
+   * waiting are told, on Rabotka here and from the careers page by the event.
+   */
+  async closeByEmployer(id: string, actorProfileId: string): Promise<void> {
+    const offer = await this.prisma.jobOffer.findFirst({
+      where: { id, deleted_at: null },
+      select: { id: true, employer_id: true, status: true },
+    });
+    if (!offer) {
+      throw new NotFoundException('Offre introuvable');
+    }
+    if (offer.employer_id !== actorProfileId) {
+      throw new ForbiddenException(
+        "Vous n'êtes pas l'employeur de cette offre",
+      );
+    }
+    if (
+      offer.status !== JobOfferStatus.ACTIVE &&
+      offer.status !== JobOfferStatus.PARTIALLY_FILLED
+    ) {
+      throw new BadRequestException('Cette offre est déjà fermée.');
+    }
+
+    const closedIds = await this.prisma.$transaction(async (tx) => {
+      const now = new Date();
+      const paying = await tx.application.count({
+        where: {
+          job_offer_id: id,
+          deleted_at: null,
+          status: ApplicationStatus.WAITING_PAYMENT,
+        },
+      });
+      if (paying > 0) {
+        throw new BadRequestException(
+          "Un candidat retenu n'a pas encore confirmé : attendez sa réponse avant de fermer cette offre.",
+        );
+      }
+      const waiting = await tx.application.findMany({
+        where: {
+          job_offer_id: id,
+          status: {
+            in: [ApplicationStatus.PENDING, ApplicationStatus.VIEWED],
+          },
+        },
+        select: { id: true },
+      });
+      const ids = waiting.map((a) => a.id);
+      if (ids.length > 0) {
+        await tx.application.updateMany({
+          where: { id: { in: ids } },
+          // Cancelled by the system, as on expiry: a rejection would bar these
+          // candidates from applying again if the offer is republished.
+          data: {
+            ...cancellationPatch({
+              by: ApplicationCancelledBy.SYSTEM,
+              at: now,
+              reason: 'Offre fermée par l’employeur',
+            }),
+            rejection_source: RejectionSource.AUTO_FILL,
+          },
+        });
+      }
+      await tx.jobOffer.update({
+        where: { id },
+        data: {
+          closed_at: now,
+          status:
+            offer.status === JobOfferStatus.PARTIALLY_FILLED
+              ? JobOfferStatus.FILLED
+              : JobOfferStatus.EXPIRED,
+        },
+      });
+      return ids;
+    });
+
+    await this.cache.invalidate('jobs');
+    this.notifyClosedApplicants(closedIds, 'closeByEmployer');
+    this.eventEmitter.emit(JOB_OFFER_CLOSED, {
+      jobOfferId: id,
+      employerId: actorProfileId,
+    } satisfies JobOfferClosedEvent);
+  }
+
   async deleteByEmployer(id: string, actorProfileId: string): Promise<void> {
     const offer = await this.prisma.jobOffer.findFirst({
       where: { id, deleted_at: null },
@@ -2143,20 +2326,34 @@ export class JobOfferService {
     }
 
     const currentAmount = offer.amount == null ? null : Number(offer.amount);
-    this.validateCreateDto({
-      title: dto.title ?? offer.title,
-      description: dto.description ?? offer.description,
-      employment_type: dto.employment_type ?? offer.employment_type,
-      scheduled_at: dto.scheduled_at ?? offer.scheduled_at?.toISOString(),
-      amount:
-        dto.amount !== undefined ? dto.amount : (currentAmount ?? undefined),
-      address: dto.address ?? offer.address ?? undefined,
-      note: dto.note ?? offer.note ?? undefined,
-      quantity: dto.quantity ?? offer.quantity,
-    });
+    const undated = dto.scheduled_at === null || !offer.scheduled_at;
+    const owner = undated
+      ? await this.prisma.profile.findUnique({
+          where: { id: actorProfileId },
+          select: { is_business: true },
+        })
+      : null;
+    this.validateCreateDto(
+      {
+        title: dto.title ?? offer.title,
+        description: dto.description ?? offer.description,
+        employment_type: dto.employment_type ?? offer.employment_type,
+        scheduled_at:
+          dto.scheduled_at === null
+            ? undefined
+            : (dto.scheduled_at ?? offer.scheduled_at?.toISOString()),
+        amount:
+          dto.amount !== undefined ? dto.amount : (currentAmount ?? undefined),
+        address: dto.address ?? offer.address ?? undefined,
+        note: dto.note ?? offer.note ?? undefined,
+        quantity: dto.quantity ?? offer.quantity,
+      },
+      owner?.is_business ?? false,
+    );
 
-    const scheduledAt =
-      dto.scheduled_at !== undefined ? new Date(dto.scheduled_at) : undefined;
+    const scheduledAt = dto.scheduled_at
+      ? new Date(dto.scheduled_at)
+      : undefined;
     if (
       scheduledAt &&
       scheduledAt.getTime() !== offer.scheduled_at?.getTime() &&
@@ -2209,6 +2406,7 @@ export class JobOfferService {
     if (dto.description !== undefined)
       data.description = dto.description.trim();
     if (scheduledAt) data.scheduled_at = scheduledAt;
+    if (dto.scheduled_at === null) data.scheduled_at = null;
     if (dto.employment_type !== undefined)
       data.employment_type = dto.employment_type;
     if (dto.amount !== undefined) data.amount = dto.amount ?? null;
@@ -2240,7 +2438,22 @@ export class JobOfferService {
       }
     }
 
-    const updated = await this.prisma.jobOffer.update({ where: { id }, data });
+    const questions =
+      dto.questions === undefined ? null : normalizeQuestions(dto.questions);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.jobOffer.update({ where: { id }, data });
+      // The list replaces the offer's questions. Answers already given keep
+      // their own copy of the question (and lose only the link).
+      if (questions) {
+        await tx.offerQuestion.deleteMany({ where: { job_offer_id: id } });
+        if (questions.length > 0) {
+          await tx.offerQuestion.createMany({
+            data: questions.map((q) => ({ ...q, job_offer_id: id })),
+          });
+        }
+      }
+      return row;
+    });
 
     await this.afterJobOfferEdited(id, updated.title, "l'employeur");
 
@@ -2334,6 +2547,7 @@ export class JobOfferService {
       status: string;
       employer_id: string;
       created_at: Date;
+      closed_at?: Date | null;
     },
     acceptedCount = 0,
   ): JobOfferListItem {
@@ -2354,6 +2568,7 @@ export class JobOfferService {
       quantity: offer.quantity,
       acceptedCount,
       status: offer.status,
+      closedAt: offer.closed_at ?? null,
       employer_id: offer.employer_id,
       created_at: offer.created_at,
     };

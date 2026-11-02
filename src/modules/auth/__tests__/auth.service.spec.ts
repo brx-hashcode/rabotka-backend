@@ -216,10 +216,56 @@ describe('AuthService', () => {
       expect(result.signupToken).toMatch(/^[A-Za-z0-9_-]{40,}$/);
       expect(result.expiresIn).toBe(3600);
       // Stored hashed, never the token itself, bound to the number.
-      const [key, phone] = redis.set.mock.calls.at(-1)!;
+      const [key, record] = redis.set.mock.calls.at(-1)!;
       expect(key).toContain('signup:token:');
       expect(key).not.toContain(result.signupToken);
-      expect(phone).toBe('+24200000009');
+      expect(JSON.parse(record)).toEqual({
+        entry: 'whatsapp',
+        phone: '+24200000009',
+      });
+    });
+
+    it('sends a business its code by email, never on WhatsApp', async () => {
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await service.sendSignupOtp(' Contact@Ecole.cg ', { firstName: 'Awa' });
+
+      expect(redis.set).toHaveBeenCalledWith(
+        expect.stringContaining('signup:otp:contact@ecole.cg'),
+        expect.any(String),
+        'EX',
+        300,
+      );
+      expect(mailService.sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({ to: 'contact@ecole.cg' }),
+      );
+      expect(whatsAppService.sendTemplateMessage).not.toHaveBeenCalled();
+      // A business is an employer, whatever the form said.
+      expect(attempts.codeSent).toHaveBeenCalledWith('contact@ecole.cg', {
+        firstName: 'Awa',
+        profileType: ProfileType.EMPLOYER,
+      });
+    });
+
+    it('refuses an email that already has an account', async () => {
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(mockProfile);
+
+      await expect(
+        service.sendSignupOtp('contact@ecole.cg'),
+      ).rejects.toThrow(ConflictException);
+      expect(mailService.sendMail).not.toHaveBeenCalled();
+    });
+
+    it('marks a token verified by email as a business sign-up', async () => {
+      redis.eval.mockResolvedValue(1);
+
+      await service.verifySignupOtp('contact@ecole.cg', '123456');
+
+      const [, record] = redis.set.mock.calls.at(-1)!;
+      expect(JSON.parse(record)).toEqual({
+        entry: 'business',
+        email: 'contact@ecole.cg',
+      });
     });
 
     it('refuses a wrong or expired code', async () => {

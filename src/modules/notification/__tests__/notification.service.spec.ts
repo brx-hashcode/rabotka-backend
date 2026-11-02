@@ -75,7 +75,7 @@ describe('NotificationService', () => {
       expect(mockMailService.sendMail).toHaveBeenCalledWith(
         expect.objectContaining({
           to: 'user@example.com',
-          subject: 'Votre code de vérification Rabotka',
+          subject: "Votre code de connexion à l'administration Rabotka",
         }),
       );
     });

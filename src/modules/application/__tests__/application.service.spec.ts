@@ -105,6 +105,7 @@ describe('ApplicationService', () => {
   beforeEach(async () => {
     const mockPrismaService = {
       jobOffer: { findUnique: jest.fn(), update: jest.fn() },
+      offerQuestion: { findMany: jest.fn().mockResolvedValue([]) },
       profile: { findUnique: jest.fn(), update: jest.fn() },
       penalty: {
         count: jest.fn(),
@@ -123,6 +124,7 @@ describe('ApplicationService', () => {
         count: jest.fn(),
       },
       payment: { create: jest.fn() },
+      externalApplication: { count: jest.fn().mockResolvedValue(0) },
       assignment: {
         create: jest.fn(),
         updateMany: jest.fn(),
@@ -506,6 +508,62 @@ describe('ApplicationService', () => {
       const result = await service.create(JOB_OFFER_ID, WORKER_ID);
       expect(result.id).toBe(APPLICATION_ID);
       expect(result.status).toBe(ApplicationStatus.PENDING);
+    });
+
+    it('keeps the answers to the offer’s questions, and flags a wrong « éliminatoire » one', async () => {
+      (prisma as any).offerQuestion.findMany.mockResolvedValue([
+        {
+          id: 'q1',
+          kind: 'YES_NO',
+          label: 'Avez-vous le permis B ?',
+          options: [],
+          required: true,
+          knockout: true,
+          accepted: ['yes'],
+          position: 0,
+        },
+      ]);
+      await service.create(JOB_OFFER_ID, WORKER_ID, {
+        answers: [{ questionId: 'q1', value: 'no' }],
+      });
+      const data = (prisma.application.create as jest.Mock).mock.calls[0][0]
+        .data;
+      expect(data.knocked_out).toBe(true);
+      expect(data.answers).toEqual({
+        create: [
+          {
+            question_id: 'q1',
+            label: 'Avez-vous le permis B ?',
+            kind: 'YES_NO',
+            value: 'no',
+            passed: false,
+          },
+        ],
+      });
+    });
+
+    it('refuses incomplete answers before anything is created', async () => {
+      (prisma as any).offerQuestion.findMany.mockResolvedValue([
+        {
+          id: 'q1',
+          kind: 'SHORT_TEXT',
+          label: 'Pourquoi ce poste ?',
+          options: [],
+          required: true,
+          knockout: false,
+          accepted: [],
+          position: 0,
+        },
+      ]);
+      await expect(
+        service.create(JOB_OFFER_ID, WORKER_ID, { answers: [] }),
+      ).rejects.toThrow(/Répondez à la question/);
+      expect(prisma.application.create).not.toHaveBeenCalled();
+      // An app that asks nothing (mobile, a field agent) still applies.
+      await service.create(JOB_OFFER_ID, WORKER_ID);
+      expect(
+        (prisma.application.create as jest.Mock).mock.calls[0][0].data,
+      ).toMatchObject({ knocked_out: false });
     });
 
     it('throws ForbiddenException when worker has unpaid penalties', async () => {
@@ -945,6 +1003,76 @@ describe('ApplicationService', () => {
     });
   });
 
+  describe('reopening after a hire drops out', () => {
+    const reopen = (
+      offer: unknown,
+      status: JobOfferStatus,
+      undoing = false,
+    ) => {
+      const tx = {
+        jobOffer: {
+          findUnique: jest.fn().mockResolvedValue(offer),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        externalApplication: { count: jest.fn().mockResolvedValue(0) },
+      };
+      return {
+        tx,
+        run: (service as any).reopenOfferUnlessClosed(
+          tx,
+          'offer-1',
+          status,
+          undoing,
+        ) as Promise<void>,
+      };
+    };
+
+    it('never puts an offer the employer closed back online', async () => {
+      const { tx, run } = reopen(
+        { status: JobOfferStatus.FILLED, closed_at: new Date() },
+        JobOfferStatus.PARTIALLY_FILLED,
+      );
+      await run;
+      expect(tx.jobOffer.update).not.toHaveBeenCalled();
+    });
+
+    it('makes it republishable once nobody is left, even undoing a hire', async () => {
+      const { tx, run } = reopen(
+        { status: JobOfferStatus.FILLED, closed_at: new Date() },
+        JobOfferStatus.ACTIVE,
+        true,
+      );
+      await run;
+      expect(tx.jobOffer.update.mock.calls[0][0].data.status).toBe(
+        JobOfferStatus.EXPIRED,
+      );
+    });
+
+    it('keeps the post an outside hire took', async () => {
+      const { tx, run } = reopen(
+        { status: JobOfferStatus.FILLED, closed_at: null },
+        JobOfferStatus.ACTIVE,
+      );
+      tx.externalApplication.count.mockResolvedValue(1);
+      await run;
+      expect(tx.jobOffer.update.mock.calls[0][0].data.status).toBe(
+        JobOfferStatus.PARTIALLY_FILLED,
+      );
+    });
+
+    it('still lets an undone hire reopen a completed offer', async () => {
+      const { tx, run } = reopen(
+        { status: JobOfferStatus.COMPLETED, closed_at: null },
+        JobOfferStatus.ACTIVE,
+        true,
+      );
+      await run;
+      expect(tx.jobOffer.update.mock.calls[0][0].data.status).toBe(
+        JobOfferStatus.ACTIVE,
+      );
+    });
+  });
+
   describe('accept()', () => {
     beforeEach(() => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue(
@@ -998,6 +1126,20 @@ describe('ApplicationService', () => {
       expect(prisma.jobOffer.update as jest.Mock).toHaveBeenCalledWith(
         expect.objectContaining({ data: { status: JobOfferStatus.FILLED } }),
       );
+    });
+
+    it('refuses to hire on a mission that started, or an ended offer', async () => {
+      for (const status of [
+        JobOfferStatus.IN_PROGRESS,
+        JobOfferStatus.EXPIRED,
+      ]) {
+        (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValueOnce({
+          status,
+        });
+        await expect(
+          service.accept(APPLICATION_ID, EMPLOYER_ID),
+        ).rejects.toThrow('ne recrute plus');
+      }
     });
 
     it('accepts application and returns ACCEPTED status', async () => {

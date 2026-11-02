@@ -1,4 +1,8 @@
 import {
+  BUSINESS_SUBSCRIPTION_PAID_EVENT,
+  type BusinessSubscriptionPaidPayload,
+} from '../business/subscription/subscription.events';
+import {
   CFA_CURRENCIES,
   toAlpha3,
 } from '../../common/services/payment/payment-countries';
@@ -13,6 +17,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   AccountStatus,
   BillingStatus,
+  BusinessBillingPeriod,
   ContactRecordOrigin,
   InvoiceReason,
   PaymentMethod,
@@ -43,7 +48,8 @@ import { WhatsAppFeedbackService } from '../whatsapp/feedback/whatsapp-feedback.
 import { ReferralService } from '../referral/referral.service';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
-import { paymentSuccessEmail } from '../mail/templates';
+import { invoiceEmail, paymentSuccessEmail } from '../mail/templates';
+import { audienceOf, productOf } from '../mail/audience';
 import { PaymentGatewayService } from '../../common/services/payment/payment-gateway.service';
 import type {
   PaymentGatewayMetadata,
@@ -93,6 +99,7 @@ const PAYMENT_REQUEST_SELECT = {
       phone: true,
       status: true,
       profile_type: true,
+      is_business: true,
       country_code: true,
     },
   },
@@ -164,6 +171,13 @@ export class PaymentRequestService {
       recommendationWorkerId?: string;
       /** For a penalty request: the penalties its amount was priced for. */
       penaltyIds?: string[];
+      /**
+       * Where the pay page lives, when not the client app's `/pay/:token` —
+       * a business pays from its own dashboard.
+       */
+      urlFor?: (token: string) => string;
+      /** BUSINESS_SUBSCRIPTION: what this payment buys. */
+      businessPlan?: { planId: string; period: BusinessBillingPeriod };
     } = {},
   ): Promise<string> {
     const token = randomUUID();
@@ -181,8 +195,13 @@ export class PaymentRequestService {
           recommendation_worker_id: options.recommendationWorkerId,
         }),
         ...(options.penaltyIds?.length && { penalty_ids: options.penaltyIds }),
+        ...(options.businessPlan && {
+          business_plan_id: options.businessPlan.planId,
+          business_billing_period: options.businessPlan.period,
+        }),
       },
     });
+    if (options.urlFor) return options.urlFor(token);
     const frontendUrl = this.config.get<string>('FRONTEND_URL', '');
     return `${frontendUrl}/pay/${token}`;
   }
@@ -643,6 +662,13 @@ export class PaymentRequestService {
     this.emitAdminPaymentNotification(request, context);
     await this.handlePenaltyPostPayment(request);
     await this.handleWalletTopUpPostPayment(request, context);
+    // A business plan period: activated by BusinessSubscriptionService, which
+    // this module does not import (it depends on payments, not the reverse).
+    if (request.request_type === PaymentRequestType.BUSINESS_SUBSCRIPTION) {
+      this.eventEmitter.emit(BUSINESS_SUBSCRIPTION_PAID_EVENT, {
+        paymentRequestId: request.id,
+      } satisfies BusinessSubscriptionPaidPayload);
+    }
 
     // Compute unlock result first (needed for the confirmation message text).
     const unlockResult = await this.handleContactUnlockPostPayment(request);
@@ -953,7 +979,9 @@ export class PaymentRequestService {
               profileName,
               context.paymentDescription,
               context.amount,
+              audienceOf(request.profile),
             ),
+            { product: productOf(audienceOf(request.profile)) },
           ),
         })
         .catch((err) =>
@@ -991,7 +1019,9 @@ export class PaymentRequestService {
           ? InvoiceReason.CONTACT_UNLOCK
           : request.request_type === PaymentRequestType.WALLET_TOP_UP
             ? InvoiceReason.WALLET_TOP_UP
-            : InvoiceReason.PENALTY,
+            : request.request_type === PaymentRequestType.BUSINESS_SUBSCRIPTION
+              ? InvoiceReason.BUSINESS_SUBSCRIPTION
+              : InvoiceReason.PENALTY,
       relatedEntityType: relatedEntity?.type,
       relatedEntityId: relatedEntity?.id,
     });
@@ -1017,7 +1047,15 @@ export class PaymentRequestService {
         .sendMail({
           to: request.profile.email,
           subject: `Votre facture — ${context.paymentDescription}`,
-          html: `<p>Bonjour,</p><p>Veuillez trouver ci-joint votre facture pour le paiement de <strong>${context.amount.toLocaleString('fr-FR')} FCFA</strong>.</p>`,
+          html: await this.layoutService.wrap(
+            invoiceEmail(
+              request.profile.first_name,
+              context.paymentDescription,
+              context.amount,
+              audienceOf(request.profile),
+            ),
+            { product: productOf(audienceOf(request.profile)) },
+          ),
           attachments: [
             {
               filename,

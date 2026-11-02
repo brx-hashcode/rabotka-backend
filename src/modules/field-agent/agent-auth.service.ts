@@ -27,7 +27,11 @@ import {
 import { LogService } from '../log/log.service';
 import { LayoutService } from '../mail/layout.service';
 import { MailService } from '../mail/mail.service';
-import { sendOtpEmail } from '../mail/templates';
+import {
+  otpEmailPreview,
+  otpEmailSubject,
+  sendOtpEmail,
+} from '../mail/templates';
 import { normalizeAgentEmail } from './agent-identity';
 import { AGENT_SELF_SELECT, toAgentSelf } from './agent-selects';
 
@@ -233,10 +237,11 @@ export class AgentAuthService {
 
     await this.mailService.sendMail({
       to: email,
-      subject: 'Votre code de connexion Rabotka Agent',
-      html: await this.layoutService.wrap(sendOtpEmail(otp, agent.first_name), {
-        previewText: `Votre code de connexion : ${otp}`,
-      }),
+      subject: otpEmailSubject('agent'),
+      html: await this.layoutService.wrap(
+        sendOtpEmail(otp, agent.first_name, 'agent'),
+        { previewText: otpEmailPreview('agent', otp) },
+      ),
     });
   }
 

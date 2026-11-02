@@ -113,8 +113,7 @@ function formatIssues(error: z.ZodError, provider: string): string {
   });
   return (
     `Invalid WhatsApp configuration for WHATSAPP_PROVIDER="${provider}":\n` +
-    lines.join('\n') +
-    `\n\nSee docs/whatsapp-providers.md for the variables each provider needs.`
+    lines.join('\n')
   );
 }
 

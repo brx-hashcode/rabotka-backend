@@ -1,4 +1,5 @@
 import { PortfolioModule } from '../portfolio/portfolio.module';
+import { BusinessSubscriptionModule } from '../business/subscription/business-subscription.module';
 import { Module } from '@nestjs/common';
 import { ContactedProfilesModule } from '../recommendation/contacted-profiles.module';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
@@ -24,6 +25,8 @@ import { ProfileNotificationModule } from '../profile-notification/profile-notif
 @Module({
   imports: [
     PrismaModule,
+    // The preselection is a business plan feature.
+    BusinessSubscriptionModule,
     PortfolioModule,
     ContactedProfilesModule,
     AuthModule,

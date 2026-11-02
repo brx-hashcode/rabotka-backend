@@ -623,6 +623,39 @@ describe('WalletService', () => {
       expect(amount).toBe(0);
     });
 
+    it('gives a business nothing: it gets a trial subscription instead', async () => {
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        whatsapp_activation_bonus_granted: false,
+        is_business: true,
+      });
+      const sysConfig = (service as any).systemConfig;
+      sysConfig.getWelcomeCredits = jest
+        .fn()
+        .mockResolvedValue({ workerCreditFcfa: 500, employerCreditFcfa: 1000 });
+      const amount = await service.grantWelcomeCredit(
+        'business-1',
+        'EMPLOYER' as any,
+      );
+      expect(amount).toBe(0);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('still credits a regular employer', async () => {
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        whatsapp_activation_bonus_granted: false,
+        is_business: false,
+      });
+      const sysConfig = (service as any).systemConfig;
+      sysConfig.getWelcomeCredits = jest
+        .fn()
+        .mockResolvedValue({ workerCreditFcfa: 500, employerCreditFcfa: 1000 });
+      const amount = await service.grantWelcomeCredit(
+        'employer-1',
+        'EMPLOYER' as any,
+      );
+      expect(amount).toBe(1000);
+    });
+
     it('throws NotFoundException if profile not found', async () => {
       (prisma.profile.findUnique as jest.Mock).mockResolvedValue(null);
       await expect(

@@ -277,6 +277,8 @@ export class SystemConfigService implements OnModuleInit {
     'agent.commission_confirmation_hours',
     // 0 = only late cancellations cost reliability points.
     'fees.cancellation_score_deduction',
+    // 0 = no reminder before an offer ends.
+    'business.offer_expiry_reminder_days',
   ]);
 
   /** Keys whose value is one of a fixed set; anything else is refused. */
@@ -967,6 +969,13 @@ export class SystemConfigService implements OnModuleInit {
     };
   }
 
+  /** Days before an offer ends that its business is told. 0 = never. */
+  async getOfferExpiryReminderDays(): Promise<number> {
+    const val = await this.get('business.offer_expiry_reminder_days', '3');
+    const n = Number(val);
+    return Number.isInteger(n) && n >= 0 ? n : 3;
+  }
+
   /** Threshold for the agent app's suggested workers — see the seeded key. */
   async getAgentCandidateMinScore(): Promise<number> {
     const val = await this.get('agent.candidate_min_score', '0.3');
@@ -997,6 +1006,31 @@ export class SystemConfigService implements OnModuleInit {
     return {
       strength: Number.isFinite(s) ? Math.min(1, Math.max(0, s)) : 0.25,
       decayDays: Number.isFinite(d) && d > 0 ? d : 180,
+    };
+  }
+
+  /**
+   * The business trial and renewal reminders. The plans (prices, quotas) are
+   * the business_plans table. `trialDays` 0 or no `trialPlanCode`: no trial.
+   */
+  async getBusinessSubscriptionSettings(): Promise<{
+    trialDays: number;
+    trialPlanCode: string | null;
+    reminderDays: number[];
+  }> {
+    const [trialDays, trialPlanCode, reminderDays] = await this.mgetBatch([
+      { key: 'business.trial_days', fallback: '14' },
+      { key: 'business.trial_plan_code', fallback: '' },
+      { key: 'business.renewal_reminder_days', fallback: '7,1' },
+    ]);
+    return {
+      trialDays: Math.max(0, Math.floor(Number(trialDays) || 0)),
+      trialPlanCode: trialPlanCode?.trim() || null,
+      reminderDays: (reminderDays ?? '')
+        .split(',')
+        .map((d) => Math.floor(Number(d.trim())))
+        .filter((d) => Number.isFinite(d) && d > 0)
+        .sort((a, b) => b - a),
     };
   }
 

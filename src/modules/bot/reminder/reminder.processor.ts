@@ -1,4 +1,9 @@
 import {
+  BUSINESS_IDENTITY_SELECT,
+  publicEmployerContact,
+  publicEmployerFullName,
+} from '../../business/public-employer';
+import {
   Injectable,
   Logger,
   Inject,
@@ -30,8 +35,12 @@ import { APP_TIMEZONE } from '../utils/parse-date-time';
 import {
   ApplicationCancelledBy,
   ApplicationStatus,
+  AssignmentStatus,
   EmploymentType,
+  ExternalApplicationStatus,
   JobOfferStatus,
+  Prisma,
+  RejectionSource,
 } from '@prisma/client';
 import { cancellationPatch } from '../../application/application.constants';
 import { closeRecruitedOfferTx } from '../../job-offer/utils/close-recruited-offer';
@@ -39,6 +48,15 @@ import { SystemConfigService } from '../../system-config/system-config.service';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { BotNotificationService } from '../services/bot-notification.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { MailService } from '../../mail/mail.service';
+import { LayoutService } from '../../mail/layout.service';
+import { businessDashboardUrl } from '../../mail/audience';
+import {
+  jobOfferExpiredEmail,
+  jobOfferExpiringEmail,
+} from '../../mail/templates/job-offer-expiry';
+import { refuseOutsideCandidates } from '../../business/careers/refuse-closed-offer';
+import { TERMINAL_JOB_OFFER_STATUSES } from '../../job-offer/utils/job-offer-status.util';
 import {
   notificationDedupeKey,
   notifyProfile,
@@ -50,6 +68,22 @@ const SENT_KEY_TTL = 48 * 60 * 60;
 /** Absorbs job retries of the same in-app notification. */
 const IN_APP_DEDUPE_SECONDS = 7 * 24 * 60 * 60;
 const SCAN_INTERVAL_MS = 15 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Long enough to outlive the reminder window; a new date gets a new key. */
+const OFFER_REMINDER_KEY_TTL = 60 * 24 * 60 * 60;
+
+/** What keeps an overdue offer from expiring: someone was really hired. */
+const NO_HIRE: Prisma.ApplicationListRelationFilter = {
+  none: {
+    status: {
+      in: [
+        ApplicationStatus.ACCEPTED,
+        ApplicationStatus.STARTED,
+        ApplicationStatus.END,
+      ],
+    },
+  },
+};
 
 /**
  * How long an offer with no closing date stays open.
@@ -110,6 +144,11 @@ export class ReminderProcessor {
     // In-app notifications. Optional for the same positional-spec reason.
     @Optional()
     private readonly events?: EventEmitter2,
+    // Business accounts have no WhatsApp: their offer's end goes by email.
+    @Optional()
+    private readonly mail?: MailService,
+    @Optional()
+    private readonly layout?: LayoutService,
   ) {}
 
   /**
@@ -283,6 +322,127 @@ export class ReminderProcessor {
     // `reminder.processor.spec.ts` asserts on.
     await this.stopRecruitingOnDeadline(now);
     await this.closeRecruitedOffersAfterGrace(now);
+    await this.warnBusinessesOfEndingOffers(now).catch((err) =>
+      this.logger.warn(`Offer expiry reminders failed: ${String(err)}`),
+    );
+    await this.refuseOutsideCandidatesOfEndedOffers().catch((err) =>
+      this.logger.warn(`Refusing outside candidates failed: ${String(err)}`),
+    );
+  }
+
+  /**
+   * A business's offer ending soon with nobody retained. Businesses only: other
+   * employers are told at expiry, on WhatsApp.
+   */
+  private async warnBusinessesOfEndingOffers(now: Date): Promise<void> {
+    const days = await this.systemConfigService.getOfferExpiryReminderDays();
+    if (days <= 0) return;
+
+    const horizon = new Date(now.getTime() + days * DAY_MS);
+    const offers = await this.prisma.jobOffer.findMany({
+      where: {
+        deleted_at: null,
+        status: {
+          in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
+        },
+        employer: { is_business: true },
+        external_applications: {
+          none: { status: ExternalApplicationStatus.RETAINED },
+        },
+        scheduled_at: { gte: now, lte: horizon },
+        applications: NO_HIRE,
+      },
+      select: {
+        id: true,
+        title: true,
+        employer_id: true,
+        scheduled_at: true,
+        employer: { select: { first_name: true, email: true } },
+      },
+    });
+
+    for (const offer of offers) {
+      const endsAt = offer.scheduled_at as Date;
+      const claimed = await this.redis.set(
+        `reminder:sent:offer-ending:${offer.id}:${endsAt.toISOString()}`,
+        '1',
+        'EX',
+        OFFER_REMINDER_KEY_TTL,
+        'NX',
+      );
+      if (claimed !== 'OK') continue;
+
+      notifyProfile(this.events, {
+        recipientId: offer.employer_id,
+        input: {
+          type: 'JOB_OFFER_EXPIRING',
+          jobOfferId: offer.id,
+          jobTitle: offer.title,
+          endsAt: endsAt.toISOString(),
+        },
+      });
+      await this.emailBusiness(
+        offer.employer.email,
+        `Votre offre se termine bientôt : ${offer.title}`,
+        jobOfferExpiringEmail(
+          offer.employer.first_name,
+          offer.title,
+          formatDate(endsAt),
+          this.offerUrl(offer.id),
+        ),
+      );
+    }
+  }
+
+  /**
+   * Outside candidates still waiting on an offer that ended, however it ended.
+   * Scanning for them covers every path at once; `FILLED` stays out because a
+   * dropped hire can reopen it.
+   */
+  private async refuseOutsideCandidatesOfEndedOffers(): Promise<void> {
+    if (!this.mail || !this.layout) return;
+    const refused = await refuseOutsideCandidates(
+      { prisma: this.prisma, mail: this.mail, layout: this.layout },
+      {
+        job_offer: {
+          OR: [
+            { status: { in: TERMINAL_JOB_OFFER_STATUSES } },
+            { deleted_at: { not: null } },
+          ],
+        },
+      },
+      (err) => this.logger.warn(`Careers mail failed: ${String(err)}`),
+    );
+    if (refused > 0) {
+      this.logger.log(
+        `Refused ${refused} outside candidate(s) of ended offers`,
+      );
+    }
+  }
+
+  private offerUrl(id: string): string {
+    return `${businessDashboardUrl()}/espace/offres/${id}`;
+  }
+
+  /** Never fails the scan: the offer has already moved on. */
+  private async emailBusiness(
+    to: string | null,
+    subject: string,
+    content: string,
+  ): Promise<void> {
+    if (!to || !this.mail || !this.layout) return;
+    try {
+      await this.mail.sendMail({
+        to,
+        subject,
+        html: await this.layout.wrap(content, {
+          previewText: subject,
+          product: 'business',
+        }),
+      });
+    } catch (err) {
+      this.logger.warn(`Offer email failed: ${String(err)}`);
+    }
   }
 
   private async expireOverdueOffers(): Promise<void> {
@@ -320,17 +480,48 @@ export class ReminderProcessor {
           },
         },
       },
-      select: { id: true },
+      select: {
+        id: true,
+        title: true,
+        applications: {
+          where: {
+            status: {
+              in: [
+                ApplicationStatus.PENDING,
+                ApplicationStatus.VIEWED,
+                ApplicationStatus.WAITING_PAYMENT,
+              ],
+            },
+          },
+          select: { id: true, status: true, worker_id: true },
+        },
+      },
     });
 
     if (overdue.length === 0) return;
 
     const ids = overdue.map((o) => o.id);
+    const unconfirmedIds = overdue.flatMap((o) =>
+      (o.applications ?? [])
+        .filter((a) => a.status === ApplicationStatus.WAITING_PAYMENT)
+        .map((a) => a.id),
+    );
     await this.prisma.$transaction([
       this.prisma.jobOffer.updateMany({
         where: { id: { in: ids } },
         data: { status: JobOfferStatus.FILLED },
       }),
+      ...(unconfirmedIds.length > 0
+        ? [
+            this.prisma.assignment.updateMany({
+              where: { application_id: { in: unconfirmedIds } },
+              data: {
+                status: AssignmentStatus.CANCELLED_BY_EMPLOYER,
+                cancelled_at: now,
+              },
+            }),
+          ]
+        : []),
       // Whoever had not committed yet is out — recruiting is over. Mirrors what
       // `rejectLeftoversIfOfferFilled` does when an offer fills normally.
       this.prisma.application.updateMany({
@@ -344,13 +535,37 @@ export class ReminderProcessor {
             ],
           },
         },
-        data: { status: ApplicationStatus.REJECTED, rejected_at: now },
+        data: {
+          status: ApplicationStatus.REJECTED,
+          rejected_at: now,
+          rejection_source: RejectionSource.AUTO_FILL,
+        },
       }),
     ]);
 
     this.logger.log(
       `Stopped recruiting on ${overdue.length} ongoing engagement(s) past their application deadline`,
     );
+
+    for (const offer of overdue) {
+      for (const application of offer.applications ?? []) {
+        notifyProfile(this.events, {
+          recipientId: application.worker_id,
+          dedupeKey: notificationDedupeKey(
+            'offer-expired',
+            offer.id,
+            application.worker_id,
+          ),
+          dedupeTtlSeconds: IN_APP_DEDUPE_SECONDS,
+          input: {
+            type: 'JOB_OFFER_EXPIRED',
+            recipientRole: 'WORKER',
+            jobOfferId: offer.id,
+            jobTitle: offer.title,
+          },
+        });
+      }
+    }
   }
 
   /**
@@ -376,6 +591,8 @@ export class ReminderProcessor {
         status: JobOfferStatus.FILLED,
         employment_type: { not: EmploymentType.MISSION },
         updated_at: { lt: graceCutoff },
+        // A business closes these itself, from its dashboard.
+        employer: { is_business: false },
       },
       select: { id: true },
     });
@@ -599,30 +816,56 @@ export class ReminderProcessor {
     );
     const overdue = await this.prisma.jobOffer.findMany({
       where: {
-        status: {
-          in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
-        },
+        deleted_at: null,
         OR: [
           { scheduled_at: { lt: now } },
-          { scheduled_at: null, created_at: { lt: undatedCutoff } },
-        ],
-        applications: {
-          none: {
-            status: {
-              in: [
-                ApplicationStatus.ACCEPTED,
-                ApplicationStatus.STARTED,
-                ApplicationStatus.END,
-              ],
-            },
+          // A business closes its own open-ended offers.
+          {
+            scheduled_at: null,
+            created_at: { lt: undatedCutoff },
+            employer: { is_business: false },
           },
-        },
+        ],
+        AND: [
+          {
+            OR: [
+              {
+                status: {
+                  in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
+                },
+              },
+              // Filled for a candidate who then lapsed: nothing else moves it
+              // on, and neither close, delete nor republish accepts FILLED.
+              {
+                status: JobOfferStatus.FILLED,
+                applications: {
+                  none: { status: ApplicationStatus.WAITING_PAYMENT },
+                },
+                external_applications: {
+                  none: { status: ExternalApplicationStatus.RETAINED },
+                },
+              },
+            ],
+          },
+        ],
+        applications: NO_HIRE,
       },
       select: {
         id: true,
         title: true,
         employer_id: true,
-        employer: { select: { phone: true, first_name: true } },
+        employer: {
+          select: {
+            phone: true,
+            first_name: true,
+            email: true,
+            is_business: true,
+          },
+        },
+        external_applications: {
+          where: { status: ExternalApplicationStatus.RETAINED },
+          select: { id: true },
+        },
         applications: {
           where: {
             status: {
@@ -635,6 +878,7 @@ export class ReminderProcessor {
           },
           select: {
             id: true,
+            status: true,
             worker: {
               select: { id: true, phone: true, first_name: true },
             },
@@ -646,11 +890,40 @@ export class ReminderProcessor {
     if (overdue.length === 0) return;
 
     const overdueIds = overdue.map((o) => o.id);
+    // A retained candidate who never confirmed has an assignment too. Left
+    // CONFIRMED, it reads as an engagement and blocks deleting the offer.
+    const unconfirmedIds = overdue.flatMap((o) =>
+      (o.applications ?? [])
+        .filter((a) => a.status === ApplicationStatus.WAITING_PAYMENT)
+        .map((a) => a.id),
+    );
+
+    // Hired from the careers page: the post is filled, not left empty.
+    const staffedIds = overdue
+      .filter((o) => (o.external_applications ?? []).length > 0)
+      .map((o) => o.id);
 
     await this.prisma.$transaction([
+      ...(unconfirmedIds.length > 0
+        ? [
+            this.prisma.assignment.updateMany({
+              where: { application_id: { in: unconfirmedIds } },
+              data: {
+                status: AssignmentStatus.CANCELLED_BY_EMPLOYER,
+                cancelled_at: now,
+              },
+            }),
+          ]
+        : []),
       this.prisma.jobOffer.updateMany({
-        where: { id: { in: overdueIds } },
+        where: {
+          id: { in: overdueIds.filter((id) => !staffedIds.includes(id)) },
+        },
         data: { status: JobOfferStatus.EXPIRED },
+      }),
+      this.prisma.jobOffer.updateMany({
+        where: { id: { in: staffedIds } },
+        data: { status: JobOfferStatus.FILLED },
       }),
       // Cancel the uncommitted applicants left behind by the expired offers so
       // they don't linger as PENDING forever. Workers are notified below.
@@ -679,7 +952,9 @@ export class ReminderProcessor {
     );
 
     for (const offer of overdue) {
-      await this.notifyExpiredOffer(offer);
+      if (!staffedIds.includes(offer.id)) {
+        await this.notifyExpiredOffer(offer);
+      }
       for (const app of offer.applications ?? []) {
         await this.notifyExpiredApplicant(offer, app.worker);
       }
@@ -747,7 +1022,12 @@ export class ReminderProcessor {
     id: string;
     title: string;
     employer_id: string;
-    employer?: { phone?: string | null; first_name?: string | null } | null;
+    employer?: {
+      phone?: string | null;
+      first_name?: string | null;
+      email?: string | null;
+      is_business?: boolean;
+    } | null;
   }): Promise<void> {
     notifyProfile(this.events, {
       recipientId: offer.employer_id,
@@ -764,6 +1044,17 @@ export class ReminderProcessor {
         jobTitle: offer.title,
       },
     });
+    if (offer.employer?.is_business) {
+      await this.emailBusiness(
+        offer.employer.email ?? null,
+        `Votre offre a expiré : ${offer.title}`,
+        jobOfferExpiredEmail(
+          offer.employer.first_name ?? '',
+          offer.title,
+          this.offerUrl(offer.id),
+        ),
+      );
+    }
     const phone = offer.employer?.phone;
     if (!phone) return;
     // No bot state is armed alongside this template. Republishing is a CTA away
@@ -856,7 +1147,13 @@ export class ReminderProcessor {
     const app = await this.prisma.application.findUnique({
       where: { id: applicationId },
       include: {
-        job_offer: { include: { employer: true } },
+        job_offer: {
+          include: {
+            employer: {
+              include: { business: BUSINESS_IDENTITY_SELECT.business },
+            },
+          },
+        },
         worker: true,
       },
     });
@@ -883,8 +1180,8 @@ export class ReminderProcessor {
       date: formatDate(app.job_offer.scheduled_at),
       address: jobLocationLabel(app.job_offer),
       amount: Number(app.job_offer.amount).toLocaleString('fr-FR'),
-      employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
-      employerPhone: app.job_offer.employer.phone,
+      employerName: publicEmployerFullName(app.job_offer.employer),
+      employerPhone: publicEmployerContact(app.job_offer.employer).phone,
       cancellationThresholdHours: String(fees.cancellationThresholdHours),
       penaltyFcfa: fees.lateCancellationPenaltyFcfa.toLocaleString('fr-FR'),
       // URL suffix: the reminder deep-links to this exact mission rather
@@ -919,7 +1216,13 @@ export class ReminderProcessor {
     const app = await this.prisma.application.findUnique({
       where: { id: applicationId },
       include: {
-        job_offer: { include: { employer: true } },
+        job_offer: {
+          include: {
+            employer: {
+              include: { business: BUSINESS_IDENTITY_SELECT.business },
+            },
+          },
+        },
         worker: true,
       },
     });
@@ -967,8 +1270,8 @@ export class ReminderProcessor {
         offerTitle: app.job_offer.title,
         time,
         address: jobLocationLabel(app.job_offer),
-        employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
-        employerPhone: app.job_offer.employer.phone,
+        employerName: publicEmployerFullName(app.job_offer.employer),
+        employerPhone: publicEmployerContact(app.job_offer.employer).phone,
         applicationId,
       };
       notifyProfile(this.events, {

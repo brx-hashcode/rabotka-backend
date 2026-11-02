@@ -1,6 +1,5 @@
 import { RABOTKA_LOGO_CID } from './logo-asset';
 
-
 export type FooterInfo = {
   description?: string | null;
   email?: string | null;
@@ -11,6 +10,11 @@ export type EmailLayoutOptions = {
   previewText?: string;
   rawLayout?: boolean;
   footer?: FooterInfo;
+  /**
+   * « Business » beside the logo, as the dashboard's header lockup: every
+   * email to a business carries it, so it never reads as the worker app's.
+   */
+  product?: 'business';
 };
 
 export function wrapEmailHtml(
@@ -71,8 +75,21 @@ export function wrapEmailHtml(
                  clients honour only one of the two. -->
             <tr>
               <td align="left" style="padding:28px 32px 0;text-align:left;">
-                <img src="cid:${RABOTKA_LOGO_CID}" width="56" height="56" alt="Rabotka"
-                  style="display:block;width:56px;height:56px;border:0;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td valign="middle">
+                      <img src="cid:${RABOTKA_LOGO_CID}" width="36" height="36" alt="Rabotka"
+                        style="display:block;width:36px;height:36px;border:0;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic;">
+                    </td>${
+                      options?.product === 'business'
+                        ? `
+                    <td valign="middle" style="padding-left:12px;">
+                      <span style="display:inline-block;padding-left:12px;border-left:1px solid #d9d7cf;font-family:'Ubuntu',sans-serif;font-size:17px;line-height:24px;color:#2a322e;">Business</span>
+                    </td>`
+                        : ''
+                    }
+                  </tr>
+                </table>
               </td>
             </tr>
 

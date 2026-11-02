@@ -4,6 +4,7 @@ import {
   Get,
   NotFoundException,
   Param,
+  ParseUUIDPipe,
   Post,
   Req,
   UseGuards,
@@ -50,6 +51,30 @@ export class JobOfferController {
     return this.jobOfferService.create(req.user.profileId, dto);
   }
 
+  @Post(':id/close')
+  @UseGuards(ActiveProfileGuard)
+  @ApiBearerAuth()
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Stop recruiting on an open offer (employer).',
+    description:
+      'Expires it, or fills it if someone is hired. Candidates still waiting are told.',
+  })
+  @ApiResponse({ status: 201, description: 'The offer is closed' })
+  @ApiResponse({
+    status: 400,
+    description: 'Already closed, or a payment is due',
+  })
+  @ApiResponse({ status: 403, description: 'Not the offer owner' })
+  @ApiResponse({ status: 404, description: 'Job offer not found' })
+  async close(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
+    await this.jobOfferService.closeByEmployer(id, req.user.profileId);
+    return { closed: true };
+  }
+
   @Post(':id/republish')
   @UseGuards(ActiveProfileGuard, KycVerifiedGuard)
   @ApiBearerAuth()
@@ -74,7 +99,7 @@ export class JobOfferController {
     return this.jobOfferService.republish(
       id,
       req.user.profileId,
-      new Date(dto.scheduledAt),
+      dto.scheduledAt ? new Date(dto.scheduledAt) : null,
     );
   }
 
@@ -86,10 +111,24 @@ export class JobOfferController {
   })
   @ApiResponse({ status: 200, description: 'The job offer detail' })
   @ApiResponse({ status: 404, description: 'Job offer not found' })
-  async getById(@Param('id') id: string) {
+  // A malformed id (« me », an old link) is a 400, not a database error (500).
+  async getById(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     const offer = await this.jobOfferService.findById(id);
     if (!offer) {
       throw new NotFoundException('Offre introuvable');
+    }
+    // Only the owner sees which answers are accepted: a candidate reading it
+    // could otherwise tune theirs.
+    if (offer.employer_id !== req.user?.profileId) {
+      return {
+        ...offer,
+        questions: (offer.questions ?? []).map(
+          ({ knockout: _k, accepted: _a, ...q }) => q,
+        ),
+      };
     }
     return offer;
   }

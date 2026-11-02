@@ -5,6 +5,7 @@ import {
   IsBooleanString,
   IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -28,7 +29,9 @@ export class AdminListOnboardingAttemptsDto {
   @Max(100)
   limit?: number;
 
-  @ApiPropertyOptional({ description: 'Matches the phone or the name.' })
+  @ApiPropertyOptional({
+    description: 'Matches the phone, the email or the name.',
+  })
   @IsOptional()
   @IsString()
   q?: string;
@@ -38,6 +41,14 @@ export class AdminListOnboardingAttemptsDto {
   @Transform(({ value }) => (Array.isArray(value) ? value : [value]))
   @IsEnum(OnboardingStage, { each: true })
   stage?: OnboardingStage[];
+
+  @ApiPropertyOptional({
+    enum: ['whatsapp', 'business'],
+    description: 'business: email sign-ups of organisations only.',
+  })
+  @IsOptional()
+  @IsIn(['whatsapp', 'business'])
+  entry?: 'whatsapp' | 'business';
 
   @ApiPropertyOptional({
     description: 'Only attempts that never became an account.',
@@ -72,4 +83,22 @@ export class AdminOnboardingStatsDto {
   @IsOptional()
   @IsDateString()
   started_to?: string;
+
+  @ApiPropertyOptional({
+    enum: ['whatsapp', 'business'],
+    description: 'business: email sign-ups of organisations only.',
+  })
+  @IsOptional()
+  @IsIn(['whatsapp', 'business'])
+  entry?: 'whatsapp' | 'business';
+}
+
+export class AdminOnboardingTimelineDto extends AdminOnboardingStatsDto {
+  @ApiPropertyOptional({
+    enum: ['day', 'week'],
+    description: 'One point per day (default) or per week, Brazzaville time.',
+  })
+  @IsOptional()
+  @IsIn(['day', 'week'])
+  bucket?: 'day' | 'week';
 }

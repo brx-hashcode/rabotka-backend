@@ -90,6 +90,7 @@ describe('ApplicationService (extended)', () => {
   beforeEach(async () => {
     const mockPrismaService = {
       jobOffer: { findUnique: jest.fn(), update: jest.fn() },
+      offerQuestion: { findMany: jest.fn().mockResolvedValue([]) },
       profile: { findUnique: jest.fn(), update: jest.fn() },
       penalty: {
         count: jest.fn(),

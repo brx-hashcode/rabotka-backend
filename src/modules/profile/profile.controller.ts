@@ -12,20 +12,23 @@ import {
   Res,
   Query,
   BadRequestException,
-  ForbiddenException,
   Inject,
   Param,
   Logger,
+  Headers,
+  Optional,
 } from '@nestjs/common';
 import type Redis from 'ioredis';
 import { Throttle } from '@nestjs/throttler';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { sniffFileType } from '../../common/utils/file-signature.util';
-import {
-  consumeSignupToken,
-  phoneForSignupToken,
-} from '../auth/signup-token';
+import { consumeSignupToken, readSignupToken } from '../auth/signup-token';
+import { signupEntryFor } from '../business/business-signup';
 import { SignupUploadGuard } from '../auth/guards/signup-upload.guard';
+import { AuthService } from '../auth/auth.service';
+
+/** `bearer` on POST /profile: return the session tokens instead of a cookie. */
+const SESSION_MODE_HEADER = 'x-session';
 import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -36,6 +39,7 @@ import {
   ApiResponse,
   ApiBearerAuth,
   ApiCookieAuth,
+  ApiHeader,
 } from '@nestjs/swagger';
 import {
   ProfileService,
@@ -49,7 +53,13 @@ import {
   RequestPhoneChangeDto,
   ConfirmPhoneChangeDto,
 } from './dto/change-phone.dto';
-import { sendWelcomeEmail, WELCOME_EMAIL_PREVIEW } from '../mail/templates';
+import {
+  BUSINESS_WELCOME_EMAIL_PREVIEW,
+  businessWelcomeEmail,
+  sendWelcomeEmail,
+  WELCOME_EMAIL_PREVIEW,
+} from '../mail/templates';
+import { businessOrganisationUrl } from '../mail/audience';
 import { setAuthCookie } from '../auth/auth-cookie.util';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
@@ -85,6 +95,9 @@ export class ProfileController {
     private readonly whatsApp: WhatsAppService,
     private readonly contactedProfiles: ContactedProfilesService,
     @Inject(REDIS_CONNECTION) private readonly redis: Redis,
+    // Appended and @Optional(): the specs build this controller positionally.
+    // Only the bearer-session answer of createProfile uses it.
+    @Optional() private readonly authService?: AuthService,
   ) {}
 
   @Get('contacts')
@@ -138,23 +151,30 @@ export class ProfileController {
     status: 409,
     description: 'Conflict - email or phone already exists',
   })
+  @ApiHeader({
+    name: SESSION_MODE_HEADER,
+    required: false,
+    description:
+      '`bearer`: answer with `token` + `refreshToken` (as auth/mobile/verify-otp does) instead of setting the session cookie. For clients that keep the session themselves.',
+  })
   async createProfile(
     @Body() createProfileDto: CreateProfileDto,
     @Res({ passthrough: true }) res: Response,
+    @Headers(SESSION_MODE_HEADER) sessionMode?: string,
   ) {
     // The number must have been verified by WhatsApp code, by this caller,
-    // within the hour — or anyone could register someone else's number.
-    const verifiedPhone = await phoneForSignupToken(
-      this.redis,
-      createProfileDto.signupToken,
+    // within the hour — or anyone could register someone else's number. A
+    // business proves its email instead, and that is what makes it a business
+    // (signupEntryFor).
+    const entry = signupEntryFor(
+      await readSignupToken(this.redis, createProfileDto.signupToken),
+      createProfileDto,
     );
-    if (!verifiedPhone || verifiedPhone !== createProfileDto.phone) {
-      throw new ForbiddenException(
-        'Vérifiez votre numéro de téléphone avant de créer votre compte.',
-      );
-    }
 
-    const result = await this.profileService.createProfile(createProfileDto);
+    const result = await this.profileService.createProfile(
+      createProfileDto,
+      entry,
+    );
     // Spent: one verified number, one account.
     await consumeSignupToken(this.redis, createProfileDto.signupToken);
 
@@ -162,7 +182,21 @@ export class ProfileController {
     // drop this on its own, but rendering the welcome template is wasted work
     // and an unconditional-looking send here misreads as a bug. The WhatsApp
     // confirmation below is the real welcome, and it is not conditional.
-    if (createProfileDto.email) {
+    // A business gets its own welcome: its dashboard, by email only — the
+    // worker/employer one sends to the client app and promises WhatsApp.
+    if (entry === 'business' && createProfileDto.email) {
+      await this.mailService.sendMail({
+        to: createProfileDto.email,
+        subject: 'Bienvenue sur Rabotka Business',
+        html: await this.layoutService.wrap(
+          businessWelcomeEmail(createProfileDto.firstName, {
+            businessName: createProfileDto.business?.name ?? '',
+            organisationUrl: businessOrganisationUrl(),
+          }),
+          { previewText: BUSINESS_WELCOME_EMAIL_PREVIEW, product: 'business' },
+        ),
+      });
+    } else if (createProfileDto.email) {
       await this.mailService.sendMail({
         to: createProfileDto.email,
         subject: 'Bienvenue sur Rabotka',
@@ -183,23 +217,44 @@ export class ProfileController {
     // Role decides the closing line: workers are pointed at offers that match
     // them, employers at profiles that match them. Both land on /home, which is
     // already role-aware.
+    // Not for a business: its phone was never proven, so it is not a
+    // WhatsApp line we write to (whatsapp_connected = false); the email above
+    // is its welcome.
     const profileCreatedKey =
       createProfileDto.profileType === ProfileType.EMPLOYER
         ? ('profileCreatedEmployer' as const)
         : ('profileCreatedWorker' as const);
-    void this.whatsApp
-      .sendTemplateMessage(
-        createProfileDto.phone,
-        profileCreatedKey,
-        createProfileDto.firstName,
+    if (entry === 'whatsapp') {
+      void this.whatsApp
+        .sendTemplateMessage(
+          createProfileDto.phone,
+          profileCreatedKey,
+          createProfileDto.firstName,
+          result.profileId,
+        )
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `Failed to send profile_created WhatsApp template to ${createProfileDto.phone}`,
+            err,
+          ),
+        );
+    }
+
+    // A client holding its own session (rabotka-business keeps the tokens in
+    // its own httpOnly cookies, on its own domain) gets the bearer pair the
+    // mobile login gives, and no cookie on ours.
+    if (sessionMode === 'bearer' && this.authService) {
+      const session = await this.authService.issueBearerSession(
         result.profileId,
-      )
-      .catch((err: unknown) =>
-        this.logger.warn(
-          `Failed to send profile_created WhatsApp template to ${createProfileDto.phone}`,
-          err,
-        ),
       );
+      return {
+        message: result.message,
+        creditedBalance: result.creditedBalance,
+        token: session.token,
+        refreshToken: session.refreshToken,
+        user: session.user,
+      };
+    }
 
     // Sign a JWT and set the auth cookie so the user is logged in immediately.
     // Through `setAuthCookie` rather than an inline `res.cookie`: it is the one
@@ -627,8 +682,14 @@ export class ProfileController {
   })
   @ApiResponse({ status: 200, description: 'Code sent to the new number' })
   @ApiResponse({ status: 400, description: 'Invalid or unchanged number' })
-  @ApiResponse({ status: 409, description: 'Number already used by another account' })
-  @ApiResponse({ status: 503, description: 'WhatsApp unavailable or number unreachable' })
+  @ApiResponse({
+    status: 409,
+    description: 'Number already used by another account',
+  })
+  @ApiResponse({
+    status: 503,
+    description: 'WhatsApp unavailable or number unreachable',
+  })
   async requestPhoneChange(
     @Body() dto: RequestPhoneChangeDto,
     @Req() req: ProfileAuthenticatedRequest,

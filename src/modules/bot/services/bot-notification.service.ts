@@ -1,3 +1,9 @@
+import {
+  BUSINESS_IDENTITY_SELECT,
+  publicEmployerContact,
+  publicEmployerFullName,
+  publicEmployerName,
+} from '../../business/public-employer';
 import { joinFrench } from '../../job-offer/utils/job-offer-changes.util';
 import {
   Injectable,
@@ -308,7 +314,13 @@ export class BotNotificationService {
             select: {
               title: true,
               employer_id: true,
-              employer: { select: { first_name: true, last_name: true } },
+              employer: {
+                select: {
+                  first_name: true,
+                  last_name: true,
+                  ...BUSINESS_IDENTITY_SELECT,
+                },
+              },
             },
           },
           worker: { select: { phone: true } },
@@ -316,8 +328,7 @@ export class BotNotificationService {
       });
       if (!app?.job_offer?.employer) return;
 
-      const employerName =
-        `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`.trim();
+      const employerName = publicEmployerFullName(app.job_offer.employer);
 
       const attempt =
         await this.contactUnlock.getByApplicationId(applicationId);
@@ -399,6 +410,7 @@ export class BotNotificationService {
             first_name: true,
             last_name: true,
             email: true,
+            ...BUSINESS_IDENTITY_SELECT,
           },
         }),
         this.prisma.profile.findUnique({
@@ -431,7 +443,8 @@ export class BotNotificationService {
             recipientId: attempt.worker_id,
             actorId: attempt.employer_id,
             recipientRole: 'WORKER' as const,
-            counterpart: employer,
+            // A business is named as itself to the worker.
+            counterpart: { ...employer, ...publicEmployerName(employer) },
             fallback: 'l’employeur',
           },
         ];
@@ -488,10 +501,11 @@ export class BotNotificationService {
       }
 
       if (worker?.phone && employer && attempt.worker_id !== skipId) {
+        // A business hands over the organisation: its name, and its own
+        // phone and e-mail when it gave them — not its owner's.
         const contact = {
-          name: `${employer.first_name} ${employer.last_name}`.trim(),
-          phone: employer.phone,
-          email: employer.email,
+          name: publicEmployerFullName(employer),
+          ...publicEmployerContact(employer),
         };
         await this.notify({
           phone: worker.phone,
@@ -662,6 +676,7 @@ export class BotNotificationService {
         select: {
           worker_id: true,
           rejection_source: true,
+          rejection_message: true,
           job_offer: { select: { title: true } },
           worker: { select: { phone: true } },
         },
@@ -676,6 +691,7 @@ export class BotNotificationService {
           type: 'APPLICATION_REJECTED',
           jobTitle: app.job_offer?.title ?? null,
           automatic: app.rejection_source === RejectionSource.AUTO_FILL,
+          message: app.rejection_message,
         },
       });
       if (!app.worker?.phone) return;
@@ -685,7 +701,7 @@ export class BotNotificationService {
         profileId: app.worker_id,
         key: 'applicationRejected',
         params: undefined,
-        freeForm: applicationRejectedFreeForm(),
+        freeForm: applicationRejectedFreeForm(app.rejection_message),
       });
     } catch (err) {
       this.logger.warn(
@@ -828,6 +844,7 @@ export class BotNotificationService {
         input: {
           type: 'APPLICATION_CANCELLED',
           jobOfferId: app.job_offer.id,
+          applicationId,
           jobTitle: app.job_offer.title,
           workerName: personName(
             app.worker.first_name,

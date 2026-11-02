@@ -17,6 +17,8 @@ import {
   eventUpdatedEmail,
   advertisementCreatedEmail,
   advertisementCompletedEmail,
+  otpEmailPreview,
+  otpEmailSubject,
 } from '../mail/templates';
 import {
   AdStats,
@@ -80,9 +82,9 @@ export class NotificationService {
   async notifyOtp(to: string, code: string): Promise<void> {
     await this.mail.sendMail({
       to,
-      subject: 'Votre code de vérification Rabotka',
-      html: await this.layout.wrap(sendOtpEmail(code), {
-        previewText: `Votre code de vérification Rabotka : ${code}`,
+      subject: otpEmailSubject('admin'),
+      html: await this.layout.wrap(sendOtpEmail(code, undefined, 'admin'), {
+        previewText: otpEmailPreview('admin', code),
       }),
     });
   }

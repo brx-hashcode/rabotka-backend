@@ -1,4 +1,8 @@
 import {
+  BUSINESS_IDENTITY_SELECT,
+  publicEmployerName,
+} from '../business/public-employer';
+import {
   AdminCacheService,
   ADMIN_LIST_TTL_SECONDS,
 } from '../../common/services/cache/admin-cache.service';
@@ -31,6 +35,7 @@ import {
 } from '../penalty/penalty.utils';
 import { closesOnFill } from '../job-offer/utils/employment-type.util';
 import { isTerminalJobOfferStatus } from '../job-offer/utils/job-offer-status.util';
+import { takenSeats } from '../job-offer/utils/offer-seats';
 import { closeRecruitedOfferTx } from '../job-offer/utils/close-recruited-offer';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
@@ -45,12 +50,19 @@ import {
   InteractionKind,
   InteractionObject,
   InteractionSource,
+  ExternalApplicationStatus,
   JobOfferStatus,
   Prisma,
   RatingDirection,
   RejectionSource,
   SuspensionSource,
 } from '@prisma/client';
+import { detectContacts } from '../profile-chat/moderation/detect';
+import {
+  answerText,
+  checkAnswers,
+  type AnswerInput,
+} from '../job-offer/offer-questions';
 import { ContractService } from '../contract/contract.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { MatchingService } from '../matching/matching.service';
@@ -260,6 +272,7 @@ const WORKER_MISSION_SELECT = {
           avatar_url: true,
           rating_avg: true,
           rating_count: true,
+          ...BUSINESS_IDENTITY_SELECT,
         },
       },
     },
@@ -358,7 +371,7 @@ export class ApplicationService {
   async create(
     jobOfferId: string,
     workerId: string,
-    options: { agentId?: string } = {},
+    options: { agentId?: string; answers?: AnswerInput[] } = {},
   ): Promise<ApplicationListItem> {
     const [jobOffer, worker] = await Promise.all([
       this.prisma.jobOffer.findUnique({
@@ -473,6 +486,14 @@ export class ApplicationService {
     // A sliding window, not a stored counter: nothing resets it, the midnight
     // boundary simply moves. Enforced for both the WhatsApp bot and the mobile
     // apply endpoint.
+    // « Questions aux candidats »: checked before anything counts against
+    // the worker's day. No answers sent (the mobile app, a field agent) is
+    // accepted: the application simply has none.
+    const questions = await this.prisma.offerQuestion.findMany({
+      where: { job_offer_id: jobOfferId },
+    });
+    const answered = checkAnswers(questions, options.answers);
+
     const todayCount = await this.countApplicationsToday(workerId);
     if (todayCount >= fees.maxDailyApplications) {
       throw new ForbiddenException(
@@ -500,7 +521,11 @@ export class ApplicationService {
           job_offer_id: jobOfferId,
           worker_id: workerId,
           status: ApplicationStatus.PENDING,
+          knocked_out: answered.knockedOut,
           ...(options.agentId ? { agent_id: options.agentId } : {}),
+          ...(answered.rows.length > 0
+            ? { answers: { create: answered.rows } }
+            : {}),
         },
         include: { job_offer: true },
       });
@@ -718,8 +743,24 @@ export class ApplicationService {
         }),
         this.prisma.application.count({ where }),
       ]);
+      const finished = rows
+        .filter((a) => a.status === ApplicationStatus.END)
+        .map((a) => a.id);
+      const rated = finished.length
+        ? await this.prisma.rating.findMany({
+            where: {
+              rater_id: employerId,
+              assignment: { application_id: { in: finished } },
+            },
+            select: { assignment: { select: { application_id: true } } },
+          })
+        : [];
+      const ratedIds = new Set(rated.map((r) => r.assignment.application_id));
       return {
-        items: rows.map((a) => this.toApplicationWithOffer(a)),
+        items: rows.map((a) => ({
+          ...this.toApplicationWithOffer(a),
+          ratedByEmployer: ratedIds.has(a.id),
+        })),
         total,
       };
     }
@@ -755,6 +796,10 @@ export class ApplicationService {
         worker: { select: APPLICANT_PUBLIC_SELECT },
         contract: { select: { id: true } },
         assignment: { select: { id: true } },
+        answers: {
+          select: { label: true, kind: true, value: true, passed: true },
+          orderBy: { created_at: 'asc' },
+        },
       },
     });
 
@@ -783,6 +828,15 @@ export class ApplicationService {
       ratedByEmployer: a.assignment
         ? ratedAssignmentIds.has(a.assignment.id)
         : false,
+      // « Questions aux candidats »: what this candidate answered, and
+      // whether an « éliminatoire » answer set them aside.
+      knockedOut: a.knocked_out,
+      answers: (a.answers ?? []).map((x) => ({
+        label: x.label,
+        kind: x.kind,
+        value: answerText(x),
+        passed: x.passed,
+      })),
     }));
   }
 
@@ -871,17 +925,23 @@ export class ApplicationService {
       // Lock the job offer row to prevent concurrent over-acceptance
       await tx.$executeRaw`SELECT id FROM "job_offers" WHERE id = ${application.job_offer_id}::uuid FOR UPDATE`;
 
-      const currentAcceptedCount = await tx.application.count({
-        where: {
-          job_offer_id: application.job_offer_id,
-          status: {
-            in: [
-              ApplicationStatus.ACCEPTED,
-              'WAITING_PAYMENT' as ApplicationStatus,
-            ],
-          },
-        },
+      // A started or ended offer is past hiring. FILLED goes on to the capacity
+      // check below, which says why more precisely.
+      const lockedOffer = await tx.jobOffer.findUnique({
+        where: { id: application.job_offer_id },
+        select: { status: true },
       });
+      if (
+        lockedOffer?.status === JobOfferStatus.IN_PROGRESS ||
+        (lockedOffer && isTerminalJobOfferStatus(lockedOffer.status))
+      ) {
+        throw new BadRequestException('Cette offre ne recrute plus.');
+      }
+
+      const currentAcceptedCount = await takenSeats(
+        tx,
+        application.job_offer_id,
+      );
 
       const quantityNeeded = application.job_offer.quantity ?? 1;
       if (currentAcceptedCount >= quantityNeeded) {
@@ -1033,12 +1093,14 @@ export class ApplicationService {
     ) {
       throw new BadRequestException("Cette candidature n'est plus en attente");
     }
+    const message = refusalMessage(reason);
 
     const updated = await this.prisma.application.update({
       where: { id: applicationId },
       data: {
         status: ApplicationStatus.REJECTED,
         rejected_at: new Date(),
+        rejection_message: message,
         // An actual employer decision — distinct from AUTO_FILL, which is what
         // rejectPendingApplicants writes when an offer simply fills up. Only this
         // variant may ever be read as a negative preference signal.
@@ -1231,21 +1293,12 @@ export class ApplicationService {
           remainingAccepted > 0
             ? JobOfferStatus.PARTIALLY_FILLED
             : JobOfferStatus.ACTIVE;
-        if (isReversibleHire) {
-          // Deliberately bypasses the terminal guard. Undoing the hire is the
-          // one legitimate route back out of COMPLETED — the offer was closed
-          // *because* this person took the job, and they no longer have.
-          await tx.jobOffer.update({
-            where: { id: application.job_offer_id },
-            data: { status: reopenStatus },
-          });
-        } else {
-          await this.reopenOfferUnlessClosed(
-            tx,
-            application.job_offer_id,
-            reopenStatus,
-          );
-        }
+        await this.reopenOfferUnlessClosed(
+          tx,
+          application.job_offer_id,
+          reopenStatus,
+          isReversibleHire,
+        );
         await tx.assignment.updateMany({
           where: { application_id: applicationId },
           data: {
@@ -1730,21 +1783,50 @@ export class ApplicationService {
    * now closes the instant its last position is paid for, so an unguarded write
    * can land on a closed offer and put a fully-staffed post back on the feed
    * with its workers already at END.
+   *
+   * `undoingHire` passes that guard: it is the one legitimate route back out of
+   * COMPLETED, the offer having closed *because* this person took the job. An
+   * employer's own close passes nothing: the last hire leaving such an offer
+   * only makes it republishable, it never puts it back online.
    */
   private async reopenOfferUnlessClosed(
     tx: Prisma.TransactionClient,
     jobOfferId: string,
     status: JobOfferStatus,
+    undoingHire = false,
   ): Promise<void> {
     const offer = await tx.jobOffer.findUnique({
       where: { id: jobOfferId },
-      select: { status: true },
+      select: { status: true, closed_at: true },
     });
-    if (!offer || isTerminalJobOfferStatus(offer.status)) return;
+    if (!offer) return;
+    const nobodyLeft =
+      status === JobOfferStatus.ACTIVE &&
+      (await tx.externalApplication.count({
+        where: {
+          job_offer_id: jobOfferId,
+          status: ExternalApplicationStatus.RETAINED,
+        },
+      })) === 0;
+    if (offer.closed_at) {
+      if (nobodyLeft) {
+        await tx.jobOffer.update({
+          where: { id: jobOfferId },
+          data: { status: JobOfferStatus.EXPIRED },
+        });
+      }
+      return;
+    }
+    if (!undoingHire && isTerminalJobOfferStatus(offer.status)) return;
 
     await tx.jobOffer.update({
       where: { id: jobOfferId },
-      data: { status },
+      data: {
+        status:
+          status === JobOfferStatus.ACTIVE && !nobodyLeft
+            ? JobOfferStatus.PARTIALLY_FILLED
+            : status,
+      },
     });
   }
 
@@ -2267,6 +2349,7 @@ export class ApplicationService {
         input: {
           type: 'MISSION_COMPLETED',
           jobOfferId: application.job_offer_id,
+          applicationId,
           jobTitle: application.job_offer.title,
           workerName: personName(
             application.worker.first_name,
@@ -2488,8 +2571,9 @@ export class ApplicationService {
       },
       employer: {
         id: a.job_offer.employer.id,
-        firstName: a.job_offer.employer.first_name,
-        lastName: a.job_offer.employer.last_name,
+        // A business shows as itself on the worker's mission.
+        firstName: publicEmployerName(a.job_offer.employer).first_name,
+        lastName: publicEmployerName(a.job_offer.employer).last_name,
         reliabilityScore: a.job_offer.employer.reliability_score,
         avatarUrl: a.job_offer.employer.avatar_url,
         ratingAvg: a.job_offer.employer.rating_avg,
@@ -2586,20 +2670,12 @@ export class ApplicationService {
         remainingAccepted > 0
           ? JobOfferStatus.PARTIALLY_FILLED
           : JobOfferStatus.ACTIVE;
-      if (isReversibleHire) {
-        // Bypasses the terminal guard on purpose — undoing the hire is the one
-        // legitimate route back out of COMPLETED.
-        await tx.jobOffer.update({
-          where: { id: application.job_offer_id },
-          data: { status: reopenStatus },
-        });
-      } else {
-        await this.reopenOfferUnlessClosed(
-          tx,
-          application.job_offer_id,
-          reopenStatus,
-        );
-      }
+      await this.reopenOfferUnlessClosed(
+        tx,
+        application.job_offer_id,
+        reopenStatus,
+        isReversibleHire,
+      );
       await tx.assignment.updateMany({
         where: { application_id: applicationId },
         data: {
@@ -3331,4 +3407,23 @@ export class ApplicationService {
       contractId: app.contract?.id ?? null,
     } as ApplicationWithOffer;
   }
+}
+
+/** Longest employer message kept with a refusal. */
+const REFUSAL_MESSAGE_MAX = 500;
+
+/**
+ * The employer's words with a refusal, as the candidate will read them; null
+ * for none. A phone number, an e-mail or a link is refused: a refusal must
+ * not be a way round « obtenir le contact ».
+ */
+export function refusalMessage(reason?: string | null): string | null {
+  const text = reason?.trim().slice(0, REFUSAL_MESSAGE_MAX) ?? '';
+  if (!text) return null;
+  if (detectContacts(text).length > 0) {
+    throw new BadRequestException(
+      'Le message ne peut pas contenir de coordonnées (téléphone, e-mail, lien) : retirez-les.',
+    );
+  }
+  return text;
 }

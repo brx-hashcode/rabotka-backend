@@ -1,4 +1,4 @@
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsString,
   IsEmail,
@@ -11,12 +11,21 @@ import {
   Equals,
   Matches,
   MaxLength,
+  ValidateIf,
+  ValidateNested,
 } from 'class-validator';
 import { ProfileType, DocumentType, ReferralSource } from '@prisma/client';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { HasMxRecord } from '../../../common/validators/has-mx-record.validator';
 import { LocationDto } from '../../../common/dto/location.dto';
 import { REFERRAL_CODE_PATTERN } from '../../referral/utils/referral-code.util';
+import { BusinessSignupDto } from '../../business/dto/business-signup.dto';
+
+/**
+ * A business sign-up uploads no personal ID or selfie: the organisation's own
+ * documents are what gets reviewed (see `business`).
+ */
+const isPersonalSignup = (o: CreateProfileDto) => o.business === undefined;
 
 export class CreateProfileDto extends LocationDto {
   @ApiProperty({ description: 'First name of the profile' })
@@ -107,9 +116,10 @@ export class CreateProfileDto extends LocationDto {
     example: DocumentType.IDENTITY_CARD,
   })
   @Transform(({ value }) => value as DocumentType)
+  @ValidateIf(isPersonalSignup)
   @IsEnum(DocumentType)
   @IsNotEmpty()
-  documentType: DocumentType;
+  documentType?: DocumentType;
 
   @ApiProperty({ description: 'User has read and approved platform policies' })
   @Transform(({ value }) => value === true || value === 'true')
@@ -121,19 +131,21 @@ export class CreateProfileDto extends LocationDto {
 
   @ApiProperty({
     description:
-      'URL of the KYC identity document, pre-uploaded via POST /profile/kyc-upload',
+      'URL of the KYC identity document, pre-uploaded via POST /profile/kyc-upload. Not sent by a business sign-up.',
   })
+  @ValidateIf(isPersonalSignup)
   @IsString()
   @IsNotEmpty()
-  kycDocumentUrl: string;
+  kycDocumentUrl?: string;
 
   @ApiProperty({
     description:
-      'URL of the KYC selfie, pre-uploaded via POST /profile/kyc-upload',
+      'URL of the KYC selfie, pre-uploaded via POST /profile/kyc-upload. Not sent by a business sign-up.',
   })
+  @ValidateIf(isPersonalSignup)
   @IsString()
   @IsNotEmpty()
-  kycSelfieUrl: string;
+  kycSelfieUrl?: string;
 
   /**
    * Back of the identity document, pre-uploaded via POST /profile/kyc-upload.
@@ -248,13 +260,28 @@ export class CreateProfileDto extends LocationDto {
   referralSource?: ReferralSource;
 
   /**
-   * From POST /auth/signup/verify-otp: proves the caller controls `phone`.
-   * Must have been issued for that same number; spent once the profile
-   * exists.
+   * The organisation, for a business sign-up — and only for one: required
+   * with a signup token proven by email, refused with any other (checked in
+   * ProfileController.createProfile, which reads the token).
+   */
+  @ApiPropertyOptional({
+    type: BusinessSignupDto,
+    description:
+      'Business sign-up only (signup token verified by email): the organisation and its documents.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => BusinessSignupDto)
+  business?: BusinessSignupDto;
+
+  /**
+   * From POST /auth/signup/verify-otp: proves the caller controls `phone` —
+   * or, for a business, `email`. Must have been issued for that same number
+   * or address; spent once the profile exists.
    */
   @ApiProperty({
     description:
-      'Token returned by POST /auth/signup/verify-otp for this phone number.',
+      'Token returned by POST /auth/signup/verify-otp for this phone number (or, for a business, this email).',
   })
   @IsString()
   @IsNotEmpty()

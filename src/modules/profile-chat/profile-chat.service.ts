@@ -1,4 +1,8 @@
 import {
+  BUSINESS_IDENTITY_SELECT,
+  publicEmployerFullName,
+} from '../business/public-employer';
+import {
   BadRequestException,
   ForbiddenException,
   Injectable,
@@ -27,6 +31,7 @@ import { nudgeJobId, type MessagingNudgeJob } from './profile-chat.nudge';
 import { ModerationService } from './moderation/moderation.service';
 import { ProfileChatGateway } from './profile-chat.gateway';
 import { PresenceService } from './presence.service';
+import { BusinessSubscriptionService } from '../business/subscription/business-subscription.service';
 import type { RedactionCategory } from './moderation/patterns';
 
 /**
@@ -160,6 +165,7 @@ const CONVERSATION_VIEW_INCLUDE = {
       first_name: true,
       last_name: true,
       avatar_url: true,
+      ...BUSINESS_IDENTITY_SELECT,
     },
   },
   application: {
@@ -200,6 +206,7 @@ export class ProfileChatService {
     private readonly events: EventEmitter2,
     private readonly queue: QueueService,
     private readonly presence: PresenceService,
+    private readonly subscriptions: BusinessSubscriptionService,
   ) {}
 
   // ── Conversations ──────────────────────────────────────────────────────────
@@ -259,6 +266,8 @@ export class ProfileChatService {
         'Cette candidature est terminée, la discussion ne peut pas commencer',
       );
     }
+    // A business without a plan reads the threads it has and starts none.
+    await this.subscriptions.assertCanMessage(actorId);
 
     return this.createPair(workerId, employerId, applicationId);
   }
@@ -333,6 +342,7 @@ export class ProfileChatService {
     // already exists is not reaching out to anybody new, and counting it would
     // make the cap tighten every time somebody returns to a conversation they
     // are already in.
+    await this.subscriptions.assertCanMessage(actorId);
     await this.assertUnderDailyCap(actorId);
 
     return this.createPair(workerId, employerId, null);
@@ -499,7 +509,10 @@ export class ProfileChatService {
       return {
         id: row.id,
         counterpartId: counterpart.id,
-        counterpartName: `${counterpart.first_name} ${counterpart.last_name}`,
+        // A business shows as itself to the worker it talks to.
+        counterpartName: isWorker
+          ? publicEmployerFullName(row.employer)
+          : `${counterpart.first_name} ${counterpart.last_name}`,
         counterpartAvatarUrl: counterpart.avatar_url ?? null,
         counterpartOnline: online.has(counterpart.id),
         jobTitle: row.application?.job_offer.title ?? null,
@@ -644,6 +657,7 @@ export class ProfileChatService {
     if (conversation.closed_at) {
       throw new BadRequestException('Cette discussion est close');
     }
+    await this.subscriptions.assertCanMessage(senderId);
 
     // ALWAYS moderated. There used to be an exception — a pair that had paid
     // for each other's details could speak freely, on the reasoning that they
@@ -858,7 +872,11 @@ export class ProfileChatService {
     const [sender, application] = await Promise.all([
       this.prisma.profile.findUnique({
         where: { id: senderId },
-        select: { first_name: true, last_name: true },
+        select: {
+          first_name: true,
+          last_name: true,
+          ...BUSINESS_IDENTITY_SELECT,
+        },
       }),
       conversation.application_id
         ? this.prisma.application.findUnique({
@@ -877,7 +895,7 @@ export class ProfileChatService {
       input: {
         type: 'NEW_MESSAGE',
         conversationId: conversation.id,
-        senderName: `${sender.first_name} ${sender.last_name}`,
+        senderName: publicEmployerFullName(sender),
         jobTitle: application?.job_offer.title ?? null,
       },
     });

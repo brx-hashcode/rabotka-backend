@@ -1,3 +1,4 @@
+import { appUrlFor, audienceOf, productOf } from '../mail/audience';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -590,7 +591,12 @@ export class ReferralService {
       const [referrer, referee] = await Promise.all([
         this.prisma.profile.findUnique({
           where: { id: referrerId },
-          select: { first_name: true, email: true },
+          select: {
+            first_name: true,
+            email: true,
+            profile_type: true,
+            is_business: true,
+          },
         }),
         this.prisma.profile.findUnique({
           where: { id: refereeId },
@@ -599,7 +605,9 @@ export class ReferralService {
       ]);
       if (!referrer?.email || !referee) return;
 
-      const appUrl = this.config.get<string>('APP_URL') ?? '';
+      // Each product's own: a business parrain lands in its dashboard.
+      const audience = audienceOf(referrer);
+      const appUrl = appUrlFor(audience);
       await this.mail.sendMail({
         to: referrer.email,
         subject: 'Votre parrainage vous a rapporté un crédit',
@@ -608,8 +616,12 @@ export class ReferralService {
             refereeName: referee.first_name,
             creditedAmount: amount,
             appUrl,
+            audience,
           }),
-          { previewText: REFERRAL_REWARDED_EMAIL_PREVIEW },
+          {
+            previewText: REFERRAL_REWARDED_EMAIL_PREVIEW,
+            product: productOf(audience),
+          },
         ),
       });
     } catch (err) {

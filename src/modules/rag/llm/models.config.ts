@@ -156,6 +156,60 @@ export const TIER_CHAINS: Record<LlmTier, LlmProviderSpec[]> = {
       model: modelId('VOVA_MODEL_STANDARD_DEEPSEEK', 'deepseek-chat'),
     },
   ],
+  // Business CV screening: reading a CV (a scan or a phone photo as often as
+  // a text PDF) and scoring it against a job, in a background queue. All
+  // read images; only Google reads a PDF as such, which the caller handles by
+  // picking the Google entries for a scanned PDF. No tools.
+  //
+  // Flash-Lite leads on measured runs: it scored the same test CVs as
+  // 3.6-flash, in a few seconds, while 3.6-flash (a thinking model) took
+  // 10 s on one run and 46–90 s on the next. It stays second, for the day
+  // Flash-Lite is the one down.
+  document: [
+    {
+      provider: 'google',
+      model: modelId(
+        'CV_MODEL_DOCUMENT_GOOGLE_FAST',
+        'gemini-flash-lite-latest',
+      ),
+    },
+    {
+      provider: 'google',
+      model: modelId('CV_MODEL_DOCUMENT_GOOGLE', 'gemini-3.6-flash'),
+    },
+    {
+      provider: 'openai',
+      model: modelId('CV_MODEL_DOCUMENT_OPENAI', 'gpt-4o-mini'),
+    },
+  ],
+
+  // Answers a business reads: the conversation with one CV or several, and
+  // « Rédiger avec l'IA ». Text only (the CV arrives as its extracted text),
+  // streamed, and judged on substance: Flash-Lite, right for scoring CVs in
+  // the background, answered these in two thin lines and ranked a candidate
+  // with no skill for the post first. So the chain leads with the stronger
+  // writers and keeps Flash-Lite only as the last resort. 3.6-flash wrote
+  // both test answers well in 5–9 s (slow for background scoring, fine for a
+  // reply being read); gpt-4o-mini, older, comes after it. A provider without
+  // its key is skipped, so the chain starts wherever credentials do.
+  writing: [
+    {
+      provider: 'anthropic',
+      model: modelId('WRITING_MODEL_ANTHROPIC', 'claude-haiku-4-5'),
+    },
+    {
+      provider: 'google',
+      model: modelId('WRITING_MODEL_GOOGLE', 'gemini-3.6-flash'),
+    },
+    {
+      provider: 'openai',
+      model: modelId('WRITING_MODEL_OPENAI', 'gpt-4o-mini'),
+    },
+    {
+      provider: 'google',
+      model: modelId('WRITING_MODEL_GOOGLE_FAST', 'gemini-flash-lite-latest'),
+    },
+  ],
 };
 
 /**

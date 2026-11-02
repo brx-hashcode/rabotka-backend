@@ -1,4 +1,9 @@
 import {
+  BUSINESS_IDENTITY_SELECT,
+  publicEmployerName,
+} from '../business/public-employer';
+import { PRIORITY_FIRST } from '../business/subscription/subscription-where';
+import {
   CHATTABLE_APPLICATION_ORDER,
   CHATTABLE_APPLICATION_SELECT,
   applicationSummaries,
@@ -47,6 +52,8 @@ import {
   splitTiers,
 } from '../../common/queries/text-search';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { candidateQuestion } from '../job-offer/offer-questions';
+import { ApplyToJobDto } from './dto/apply-to-job.dto';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { KycVerifiedGuard } from '../auth/guards/kyc-verified.guard';
 import { ActiveProfileGuard } from '../auth/guards/active-profile.guard';
@@ -123,6 +130,7 @@ const JOB_SEARCH_SELECT = {
       avatar_url: true,
       rating_avg: true,
       rating_count: true,
+      ...BUSINESS_IDENTITY_SELECT,
     },
   },
   _count: {
@@ -452,8 +460,19 @@ export class MobileFeedController {
     // Built through toWorkerJobShape rather than field by field: the explicit
     // list here used to omit is_remote, employment_type, city and country_name
     // entirely, even though the shared select fetches all four.
-    const items = rows.map(({ category, _count, ...r }) => ({
-      ...toWorkerJobShape(r),
+    const items = rows.map(({ category, _count, employer, ...r }) => ({
+      ...toWorkerJobShape({
+        ...r,
+        // A business shows as itself, without its contact fields.
+        employer: employer && {
+          id: employer.id,
+          ...publicEmployerName(employer),
+          reliability_score: employer.reliability_score,
+          avatar_url: employer.avatar_url,
+          rating_avg: employer.rating_avg,
+          rating_count: employer.rating_count,
+        },
+      }),
       // Prisma Decimal → number, which is what the client's type declares.
       amount: r.amount == null ? null : Number(r.amount),
       acceptedCount: _count.applications,
@@ -521,7 +540,13 @@ export class MobileFeedController {
       requestId: req.requestId,
     });
 
-    return job;
+    // « Questions aux candidats », asked when applying — never which answers
+    // the employer accepts.
+    const questions = await this.prisma.offerQuestion.findMany({
+      where: { job_offer_id: jobOfferId },
+      orderBy: { position: 'asc' },
+    });
+    return { ...job, questions: questions.map(candidateQuestion) };
   }
 
   @Post('jobs/:jobOfferId/apply')
@@ -540,10 +565,13 @@ export class MobileFeedController {
   async applyToJob(
     @Req() req: ProfileAuthenticatedRequest,
     @Param('jobOfferId') jobOfferId: string,
+    @Body() dto: ApplyToJobDto,
   ) {
     const profileId = req.user.profileId;
     await this.assertProfileType(profileId, ProfileType.WORKER);
-    await this.applicationService.create(jobOfferId, profileId);
+    await this.applicationService.create(jobOfferId, profileId, {
+      answers: dto?.answers,
+    });
     const dailyQuota =
       await this.applicationService.getDailyApplicationQuota(profileId);
     return { success: true, dailyQuota };
@@ -856,7 +884,8 @@ export class MobileFeedController {
         { id: 'asc' },
       ];
     }
-    return [{ created_at: 'desc' }, { id: 'asc' }];
+    // Default order: a business plan with priority visibility first.
+    return [PRIORITY_FIRST, { created_at: 'desc' }, { id: 'asc' }];
   }
 
   private async assertProfileType(

@@ -389,10 +389,14 @@ export class WalletService {
   ): Promise<number> {
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
-      select: { whatsapp_activation_bonus_granted: true },
+      select: { whatsapp_activation_bonus_granted: true, is_business: true },
     });
     if (!profile) throw new NotFoundException('Profil introuvable');
     if (profile.whatsapp_activation_bonus_granted) return 0;
+    // A business starts with a trial subscription on approval, not a wallet
+    // credit — and never before its documents are reviewed. Checked here so
+    // every caller (sign-up, approval, activation, bot) is covered at once.
+    if (profile.is_business) return 0;
 
     const credits = await this.systemConfig.getWelcomeCredits();
     const amount =
@@ -819,6 +823,7 @@ export class WalletService {
       other: number;
     };
     walletTopUps: { amount: number; count: number };
+    businessSubscriptions: { amount: number; count: number };
   }> {
     const systemWallet = await this.getOrCreateSystemWallet();
 
@@ -865,6 +870,7 @@ export class WalletService {
     let penalty = 0;
     const contactUnlockByMethod = { mobileMoney: 0, wallet: 0, other: 0 };
     const walletTopUps = { amount: 0, count: 0 };
+    const businessSubscriptions = { amount: 0, count: 0 };
     for (const group of completedGroups) {
       const amount = Number(group._sum.amount ?? 0);
       completedPaymentsCount += group._count._all;
@@ -873,6 +879,9 @@ export class WalletService {
       } else if (group.type === PaymentType.WALLET_TOP_UP) {
         walletTopUps.amount += amount;
         walletTopUps.count += group._count._all;
+      } else if (group.type === PaymentType.BUSINESS_SUBSCRIPTION) {
+        businessSubscriptions.amount += amount;
+        businessSubscriptions.count += group._count._all;
       } else if (group.type === PaymentType.CONTACT_UNLOCK) {
         if (group.payment_method === PaymentMethod.MOBILE_MONEY) {
           contactUnlockByMethod.mobileMoney += amount;
@@ -900,6 +909,7 @@ export class WalletService {
       },
       contactUnlockByMethod,
       walletTopUps,
+      businessSubscriptions,
     };
   }
 

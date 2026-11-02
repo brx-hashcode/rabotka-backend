@@ -6,6 +6,7 @@ import { wrapEmailHtml, type EmailLayoutOptions } from './templates/layout';
 export class LayoutService {
   constructor(private readonly systemConfig: SystemConfigService) {}
 
+  /** `product: 'business'` for every email sent to a business account. */
   async wrap(
     content: string,
     options?: Omit<EmailLayoutOptions, 'footer'>,

@@ -13,7 +13,11 @@ import { joinFrench } from '../job-offer/utils/job-offer-changes.util';
  */
 
 export type PaymentKind =
-  'WALLET_TOP_UP' | 'PENALTY' | 'CONTACT_UNLOCK' | 'RECOMMENDATION_CONTACT';
+  | 'WALLET_TOP_UP'
+  | 'PENALTY'
+  | 'CONTACT_UNLOCK'
+  | 'RECOMMENDATION_CONTACT'
+  | 'BUSINESS_SUBSCRIPTION';
 
 export function paymentKindOf(
   requestType: PaymentRequestType | null | undefined,
@@ -25,6 +29,8 @@ export function paymentKindOf(
       return 'CONTACT_UNLOCK';
     case PaymentRequestType.RECOMMENDATION_CONTACT:
       return 'RECOMMENDATION_CONTACT';
+    case PaymentRequestType.BUSINESS_SUBSCRIPTION:
+      return 'BUSINESS_SUBSCRIPTION';
     default:
       // Null predates the column and was always a penalty — same fallback as
       // `resolvePaymentType`.
@@ -72,6 +78,8 @@ export type NotificationInput =
       jobTitle: string | null;
       /** Closed because the offer filled or ended, not by the employer. */
       automatic: boolean;
+      /** The employer's words with the refusal, if any. */
+      message?: string | null;
     }
   | { type: 'HIRE_CANCELLED'; jobTitle: string }
   | {
@@ -98,18 +106,23 @@ export type NotificationInput =
   | {
       type: 'APPLICATION_CANCELLED';
       jobOfferId: string;
+      /** Lets the business space open the candidature itself. */
+      applicationId?: string;
       jobTitle: string;
       workerName: string;
     }
   | {
       type: 'MISSION_COMPLETED';
       jobOfferId: string;
+      /** Lets the business space open the candidature itself. */
+      applicationId?: string;
       jobTitle: string;
       workerName: string;
     }
   | {
       type: 'CONTACT_UNLOCKED';
-      recipientRole: 'WORKER' | 'EMPLOYER';
+      /** BUSINESS: an employer that is a business account — no WhatsApp, its own space. */
+      recipientRole: 'WORKER' | 'EMPLOYER' | 'BUSINESS';
       applicationId: string | null;
       counterpartName: string;
       jobTitle: string | null;
@@ -191,9 +204,79 @@ export type NotificationInput =
       jobOfferId: string;
       jobTitle: string;
     }
+  | {
+      type: 'JOB_OFFER_EXPIRING';
+      jobOfferId: string;
+      jobTitle: string;
+      endsAt: string;
+    }
   | { type: 'KYC_REJECTED'; reason: string | null }
   | { type: 'ACCOUNT_SUSPENDED'; reason: string | null }
-  | { type: 'UNLOCK_CONVERTED_TO_CREDIT'; amount: number };
+  | { type: 'UNLOCK_CONVERTED_TO_CREDIT'; amount: number }
+  | { type: 'BUSINESS_VERIFIED'; businessName: string }
+  | { type: 'BUSINESS_REJECTED'; businessName: string; reason: string | null }
+  | {
+      type: 'BUSINESS_DOCUMENT_REJECTED';
+      documentLabel: string;
+      reason: string | null;
+    }
+  | { type: 'BUSINESS_TRIAL_STARTED'; planName: string; endsAt: string }
+  | { type: 'BUSINESS_SUBSCRIPTION_ACTIVE'; planName: string; endsAt: string }
+  | {
+      type: 'BUSINESS_SUBSCRIPTION_EXPIRING';
+      planName: string;
+      endsAt: string;
+      trial: boolean;
+    }
+  | { type: 'BUSINESS_SUBSCRIPTION_EXPIRED'; planName: string; trial: boolean }
+  | {
+      type: 'BUSINESS_SUBSCRIPTION_GRANTED';
+      planName: string;
+      startsAt: string;
+      endsAt: string;
+    }
+  | {
+      type: 'BUSINESS_SUBSCRIPTION_CANCELLED';
+      planName: string;
+      reason: string | null;
+    }
+  | {
+      type: 'JOB_INVITATION';
+      jobOfferId: string;
+      jobTitle: string;
+      businessName: string;
+    }
+  | {
+      type: 'INTERVIEW_INVITED';
+      applicationId: string;
+      businessName: string;
+      jobTitle: string;
+      when: string;
+      changed: boolean;
+    }
+  | {
+      type: 'INTERVIEW_CANCELLED';
+      applicationId: string;
+      businessName: string;
+      jobTitle: string;
+      when: string;
+    }
+  | {
+      type: 'INTERVIEW_ANSWERED';
+      /** The candidature the interview is for; null for an imported CV. */
+      applicationId?: string | null;
+      candidateName: string;
+      jobTitle: string;
+      when: string;
+      answer: 'CONFIRMED' | 'DECLINED' | 'RESCHEDULE_REQUESTED';
+    }
+  | {
+      type: 'CV_SCREENING_DONE';
+      screeningId: string;
+      jobTitle: string;
+      scored: number;
+      best: number | null;
+    };
 
 export type NotificationType = NotificationInput['type'];
 
@@ -215,12 +298,38 @@ export type RenderedNotification = {
   link: string | null;
 };
 
+/** « 23 octobre » — a business period end, read in Congo's time. */
+function shortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('fr-FR', {
+    day: 'numeric',
+    month: 'long',
+    timeZone: 'Africa/Brazzaville',
+  });
+}
+
 function fcfa(amount: number): string {
   // Plain spaces: `toLocaleString('fr-FR')` uses U+202F, which some Android
   // WebView fonts render as a box.
   return `${Math.round(amount)
     .toString()
     .replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} FCFA`;
+}
+
+/** The business space's candidatures, opened on one of them when known. */
+function candidatureLink(applicationId: string | null | undefined): string {
+  return applicationId
+    ? `/espace/candidatures?candidature=${applicationId}`
+    : '/espace/candidatures';
+}
+
+/**
+ * The client app's mission page. The `candidature` query is ignored there;
+ * the business space reads it to open that candidature.
+ */
+function missionLink(jobOfferId: string, applicationId?: string): string {
+  return applicationId
+    ? `/missions/${jobOfferId}?candidature=${applicationId}`
+    : `/missions/${jobOfferId}`;
 }
 
 function quoted(title: string | null | undefined): string {
@@ -233,10 +342,13 @@ const PAYMENT_LABEL: Record<PaymentKind, string> = {
   PENALTY: 'le règlement de votre pénalité',
   CONTACT_UNLOCK: 'le déblocage du contact',
   RECOMMENDATION_CONTACT: 'le déblocage du contact',
+  BUSINESS_SUBSCRIPTION: 'votre abonnement Rabotka Business',
 };
 
 function paymentLink(kind: PaymentKind, failed: boolean): string {
   if (kind === 'PENALTY' && failed) return '/penalites/paiement';
+  // The business dashboard's page, not the client app's wallet.
+  if (kind === 'BUSINESS_SUBSCRIPTION') return '/espace/abonnement';
   return '/portefeuille';
 }
 
@@ -300,7 +412,7 @@ export function renderNotification(
         title: 'Candidature non retenue',
         body: input.automatic
           ? `L’offre${quoted(input.jobTitle)} est pourvue ou fermée. Votre candidature n’a pas été retenue.`
-          : `Votre candidature${quoted(input.jobTitle)} n’a pas été retenue.`,
+          : `Votre candidature${quoted(input.jobTitle)} n’a pas été retenue.${input.message ? ` Le mot de l’employeur : « ${input.message} »` : ''}`,
         link: '/recherche-offres',
       };
 
@@ -347,17 +459,27 @@ export function renderNotification(
       return {
         title: 'Candidature annulée',
         body: `${input.workerName} a annulé sa participation à${quoted(input.jobTitle) || ' votre offre'}.`,
-        link: `/missions/${input.jobOfferId}`,
+        link: missionLink(input.jobOfferId, input.applicationId),
       };
 
     case 'MISSION_COMPLETED':
       return {
         title: 'Mission terminée',
         body: `${input.workerName} a indiqué avoir terminé la mission${quoted(input.jobTitle)}. Vous pouvez maintenant l’évaluer.`,
-        link: `/missions/${input.jobOfferId}`,
+        link: missionLink(input.jobOfferId, input.applicationId),
       };
 
     case 'CONTACT_UNLOCKED':
+      // A business never gets WhatsApp: the details are in its space.
+      if (input.recipientRole === 'BUSINESS') {
+        return {
+          title: 'Contact disponible',
+          body: `${input.counterpartName} a confirmé${
+            input.jobTitle ? ` pour${quoted(input.jobTitle)}` : ''
+          } : son contact s’affiche avec « Contact » sur sa candidature.`,
+          link: candidatureLink(input.applicationId),
+        };
+      }
       // Informational only: the details are delivered on WhatsApp, and the
       // in-app contacts list is hidden, so there is nowhere useful to open.
       // Worded so a name ending in an initial ("Awa K.") never doubles the
@@ -467,6 +589,13 @@ export function renderNotification(
             link: '/recherche-offres',
           };
 
+    case 'JOB_OFFER_EXPIRING':
+      return {
+        title: 'Votre offre se termine bientôt',
+        body: `${quoted(input.jobTitle).trim()} se termine le ${shortDate(input.endsAt)} et aucun candidat n’est encore retenu.`,
+        link: `/job-offers/${input.jobOfferId}`,
+      };
+
     case 'KYC_REJECTED':
       return {
         title: 'Vérification refusée',
@@ -479,6 +608,138 @@ export function renderNotification(
         title: 'Compte suspendu',
         body: `Votre compte a été suspendu. Motif : ${input.reason?.trim() || 'non précisé'}. Contactez-nous si vous pensez qu’il s’agit d’une erreur.`,
         link: '/claims/new',
+      };
+
+    case 'BUSINESS_VERIFIED':
+      return {
+        title: 'Organisation vérifiée',
+        body: `${input.businessName} est vérifiée : votre compte entreprise est actif. Vous pouvez publier vos offres.`,
+        link: '/espace',
+      };
+
+    case 'BUSINESS_REJECTED':
+      return {
+        title: 'Vérification de l’organisation refusée',
+        body: `Les documents de ${input.businessName} n’ont pas pu être validés. Motif : ${input.reason?.trim() || 'non précisé'}. Corrigez-les depuis votre espace.`,
+        link: '/espace/organisation',
+      };
+
+    case 'BUSINESS_TRIAL_STARTED':
+      return {
+        title: 'Essai gratuit activé',
+        body: `Votre essai de la formule ${input.planName} est actif jusqu’au ${shortDate(input.endsAt)}.`,
+        link: '/espace/abonnement',
+      };
+
+    case 'BUSINESS_SUBSCRIPTION_ACTIVE':
+      return {
+        title: 'Abonnement confirmé',
+        body: `Votre abonnement ${input.planName} est actif jusqu’au ${shortDate(input.endsAt)}.`,
+        link: '/espace/abonnement',
+      };
+
+    case 'BUSINESS_SUBSCRIPTION_EXPIRING':
+      return {
+        title: input.trial
+          ? 'Votre essai se termine bientôt'
+          : 'Abonnement bientôt échu',
+        body: input.trial
+          ? `Votre essai gratuit se termine le ${shortDate(input.endsAt)}. Choisissez une formule pour continuer.`
+          : `Votre abonnement ${input.planName} se termine le ${shortDate(input.endsAt)}. Renouvelez-le pour garder vos avantages.`,
+        link: '/espace/abonnement',
+      };
+
+    case 'BUSINESS_SUBSCRIPTION_GRANTED': {
+      // Granted while another period runs, it only takes over at its end.
+      const later = new Date(input.startsAt).getTime() > Date.now() + 60_000;
+      return {
+        title: 'Formule attribuée',
+        body: later
+          ? `L’équipe Rabotka vous a attribué la formule ${input.planName}, qui prendra le relais le ${shortDate(input.startsAt)}, jusqu’au ${shortDate(input.endsAt)}.`
+          : `L’équipe Rabotka vous a attribué la formule ${input.planName}, active jusqu’au ${shortDate(input.endsAt)}.`,
+        link: '/espace/abonnement',
+      };
+    }
+
+    case 'BUSINESS_SUBSCRIPTION_CANCELLED': {
+      const reason = input.reason?.trim();
+      // The admin often ends the reason with its own full stop.
+      const motif = reason
+        ? ` Motif : ${reason}${/[.!?…]$/.test(reason) ? '' : '.'}`
+        : '';
+      return {
+        title: 'Abonnement arrêté',
+        body: `Votre abonnement ${input.planName} a été arrêté par l’équipe Rabotka.${motif}`,
+        link: '/espace/abonnement',
+      };
+    }
+
+    case 'BUSINESS_SUBSCRIPTION_EXPIRED':
+      return {
+        title: input.trial ? 'Essai terminé' : 'Abonnement terminé',
+        body: input.trial
+          ? 'Votre essai gratuit est terminé. Choisissez une formule pour continuer à publier.'
+          : `Votre abonnement ${input.planName} est terminé. Renouvelez-le pour retrouver vos avantages.`,
+        link: '/espace/abonnement',
+      };
+
+    case 'JOB_INVITATION':
+      // To the worker, from a business that kept them: the same page as a
+      // recommended offer, where applying is one tap.
+      return {
+        title: 'Invitation à postuler',
+        body: `${input.businessName} vous invite à postuler à${quoted(input.jobTitle)}.`,
+        link: `/offres/${input.jobOfferId}`,
+      };
+
+    case 'INTERVIEW_INVITED':
+      return {
+        title: input.changed ? 'Entretien modifié' : 'Entretien proposé',
+        body: `${input.businessName} ${input.changed ? 'a déplacé votre entretien pour' : 'vous propose un entretien pour'}${quoted(input.jobTitle)} : ${input.when}. Répondez depuis l’e-mail reçu.`,
+        link: `/applications/${input.applicationId}`,
+      };
+
+    case 'INTERVIEW_CANCELLED':
+      return {
+        title: 'Entretien annulé',
+        body: `${input.businessName} a annulé l’entretien du ${input.when} pour${quoted(input.jobTitle)}.`,
+        link: `/applications/${input.applicationId}`,
+      };
+
+    case 'INTERVIEW_ANSWERED':
+      return {
+        title:
+          input.answer === 'CONFIRMED'
+            ? 'Entretien confirmé'
+            : input.answer === 'DECLINED'
+              ? 'Entretien décliné'
+              : 'Autre moment demandé',
+        body:
+          input.answer === 'CONFIRMED'
+            ? `${input.candidateName} confirme l’entretien du ${input.when} pour${quoted(input.jobTitle)}.`
+            : input.answer === 'DECLINED'
+              ? `${input.candidateName} a décliné l’entretien du ${input.when}.`
+              : `${input.candidateName} propose un autre moment que le ${input.when}.`,
+        link: input.applicationId
+          ? candidatureLink(input.applicationId)
+          : '/espace/entretiens',
+      };
+
+    case 'CV_SCREENING_DONE':
+      return {
+        title: 'Analyse de CV terminée',
+        body:
+          input.scored === 0
+            ? `Aucun CV n’a pu être lu pour${quoted(input.jobTitle)}. Ils ne sont pas décomptés.`
+            : `${input.scored} CV classé${input.scored > 1 ? 's' : ''} pour${quoted(input.jobTitle)}${input.best !== null ? ` : le meilleur obtient ${input.best}/100` : ''}.`,
+        link: `/espace/analyse-cv/${input.screeningId}`,
+      };
+
+    case 'BUSINESS_DOCUMENT_REJECTED':
+      return {
+        title: 'Document à remplacer',
+        body: `${input.documentLabel} n’a pas été accepté. Motif : ${input.reason?.trim() || 'non précisé'}. Envoyez une nouvelle version depuis votre espace.`,
+        link: '/espace/organisation',
       };
 
     case 'UNLOCK_CONVERTED_TO_CREDIT':

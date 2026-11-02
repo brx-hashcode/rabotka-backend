@@ -383,13 +383,16 @@ export function applicationAcceptedUnlockFreeForm(p: {
  * The template carries no employer name and no offer title, and neither does
  * this: the message exists to release the worker, not to dwell on it.
  */
-export function applicationRejectedFreeForm(): FreeFormMessage {
+export function applicationRejectedFreeForm(
+  message?: string | null,
+): FreeFormMessage {
   return {
     body: [
       '*Candidature non retenue*',
       '',
       'Votre candidature n’a pas été retenue cette fois.',
       '',
+      ...(message ? [`Le mot de l’employeur : « ${message} »`, ''] : []),
       'D’autres missions correspondant à votre profil sont disponibles.',
     ].join('\n'),
     buttonText: 'Voir les offres',

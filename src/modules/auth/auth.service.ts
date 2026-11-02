@@ -1,6 +1,6 @@
 import {
   issueSignupToken,
-  phoneForSignupToken,
+  readSignupToken,
   SIGNUP_TOKEN_TTL_SECONDS,
 } from './signup-token';
 import {
@@ -36,7 +36,12 @@ import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import { LogService } from '../log/log.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
-import { sendOtpEmail } from '../mail/templates';
+import {
+  otpEmailPreview,
+  otpEmailSubject,
+  sendOtpEmail,
+  type OtpPurpose,
+} from '../mail/templates';
 import {
   WhatsAppLoginLinkService,
   canMintLoginCode,
@@ -219,20 +224,30 @@ export class AuthService {
    * nobody can create an account on a number they do not hold. Refused when an
    * account already exists — the login says the same, so this reveals nothing
    * new. Same send cap as the login code (otp-store), on its own counter.
+   *
+   * A business signs up from a browser with its email instead: the code goes
+   * by email, and the token the verification hands back says so (see
+   * signup-token.ts). Same store, same cap, same refusal for a taken address.
    */
   async sendSignupOtp(
-    phone: string,
+    phoneOrEmail: string,
     who: {
       firstName?: string;
       lastName?: string;
       profileType?: ProfileType;
     } = {},
   ): Promise<{ success: boolean }> {
-    const normalized = this.normalize(phone);
-    if (!this.isPhone(normalized)) {
+    const normalized = this.normalize(phoneOrEmail);
+    const isEmail = this.isEmail(normalized);
+    if (!isEmail && !this.isPhone(normalized)) {
       throw new BadRequestException('Numéro de téléphone invalide');
     }
-    if (await this.findProfileByPhone(normalized)) {
+    if (isEmail && (await this.findProfileByEmail(normalized))) {
+      throw new ConflictException(
+        'Un compte existe déjà avec cette adresse e-mail. Connectez-vous.',
+      );
+    }
+    if (!isEmail && (await this.findProfileByPhone(normalized))) {
       throw new ConflictException(
         'Un compte existe déjà avec ce numéro. Connectez-vous.',
       );
@@ -247,10 +262,24 @@ export class AuthService {
       `${SIGNUP_OTP_ATTEMPTS_KEY_PREFIX}${normalized}`,
       otp,
     );
-    await this.sendOtpByWhatsApp(normalized, otp);
+    if (isEmail) {
+      // An email sign-up is a business sign-up (signupEntryFor).
+      await this.sendOtpByEmail(
+        normalized,
+        otp,
+        who.firstName ?? '',
+        'business-signup',
+      );
+    } else {
+      await this.sendOtpByWhatsApp(normalized, otp);
+    }
     // After the send, so a refused or failed code is not an attempt. Not
-    // awaited: the sign-up never waits on drop-off tracking.
-    void this.onboardingAttempts?.codeSent(normalized, who);
+    // awaited: the sign-up never waits on drop-off tracking. A business is
+    // always an employer, whatever the form said.
+    void this.onboardingAttempts?.codeSent(
+      normalized,
+      isEmail ? { ...who, profileType: ProfileType.EMPLOYER } : who,
+    );
 
     return { success: true };
   }
@@ -266,23 +295,28 @@ export class AuthService {
     who: { profileType?: ProfileType } = {},
   ): Promise<void> {
     if (!token || !this.onboardingAttempts) return;
-    const phone = await phoneForSignupToken(this.redis, token).catch(
-      () => null,
+    const identity = await readSignupToken(this.redis, token).catch(() => null);
+    if (!identity) return;
+    void this.onboardingAttempts.reached(
+      identity.entry === 'business' ? identity.email : identity.phone,
+      stage,
+      identity.entry === 'business'
+        ? { profileType: ProfileType.EMPLOYER }
+        : who,
     );
-    if (!phone) return;
-    void this.onboardingAttempts.reached(phone, stage, who);
   }
 
   /**
-   * Step two: the code checks out, so the number is theirs. Returns the
-   * signup token the KYC upload and the profile creation require (see
-   * signup-token.ts). Same attempt limit as the login code.
+   * Step two: the code checks out, so the number (or the business's address)
+   * is theirs. Returns the signup token the KYC upload and the profile
+   * creation require (see signup-token.ts). Same attempt limit as the login
+   * code.
    */
   async verifySignupOtp(
-    phone: string,
+    phoneOrEmail: string,
     code: string,
   ): Promise<{ signupToken: string; expiresIn: number }> {
-    const normalized = this.normalize(phone);
+    const normalized = this.normalize(phoneOrEmail);
     const matched = await this.consumeOtp(
       `${SIGNUP_OTP_KEY_PREFIX}${normalized}`,
       `${SIGNUP_OTP_ATTEMPTS_KEY_PREFIX}${normalized}`,
@@ -292,8 +326,12 @@ export class AuthService {
       throw new BadRequestException('Code incorrect ou expiré');
     }
     void this.onboardingAttempts?.phoneVerified(normalized);
+    // The entry is decided here, by what the code proved, and nowhere else.
+    const identity = this.isEmail(normalized)
+      ? ({ entry: 'business', email: normalized } as const)
+      : ({ entry: 'whatsapp', phone: normalized } as const);
     return {
-      signupToken: await issueSignupToken(this.redis, normalized),
+      signupToken: await issueSignupToken(this.redis, identity),
       expiresIn: SIGNUP_TOKEN_TTL_SECONDS,
     };
   }
@@ -335,6 +373,7 @@ export class AuthService {
         normalized,
         otp,
         profile.first_name ?? undefined,
+        profile.is_business ? 'business-login' : 'login',
       );
     } else {
       await this.sendOtpByWhatsApp(normalized, otp, profile.id);
@@ -388,6 +427,7 @@ export class AuthService {
         normalized,
         otp,
         profile.first_name ?? undefined,
+        profile.is_business ? 'business-login' : 'login',
       );
     } else {
       await this.sendOtpByWhatsApp(normalized, otp, profile.id);
@@ -615,6 +655,17 @@ export class AuthService {
     }
   }
 
+  /**
+   * A bearer session (access + rotating refresh token) for a profile that has
+   * just proven who it is some other way — a sign-up's verified code. The same
+   * pair the mobile login hands out, so `mobile/refresh` and `mobile/logout`
+   * work on it. For clients that keep tokens themselves rather than the API's
+   * cookie: the mobile app, and rabotka-business's server-side session routes.
+   */
+  issueBearerSession(profileId: string): Promise<MobileTokens> {
+    return this.issueMobileTokens(profileId);
+  }
+
   private async issueMobileTokens(profileId: string): Promise<MobileTokens> {
     const accessToken = this.jwtService.sign(
       { sub: profileId, type: 'profile', jti: randomUUID() },
@@ -710,7 +761,12 @@ export class AuthService {
       otp,
     );
 
-    await this.sendOtpByEmail(normalized, otp, user.first_name ?? undefined);
+    await this.sendOtpByEmail(
+      normalized,
+      otp,
+      user.first_name ?? undefined,
+      'admin',
+    );
 
     return { success: true };
   }
@@ -753,7 +809,12 @@ export class AuthService {
     );
     await this.redis.set(resendCooldownKey, '1', 'EX', RESEND_COOLDOWN_SECONDS);
 
-    await this.sendOtpByEmail(normalized, otp, user.first_name ?? undefined);
+    await this.sendOtpByEmail(
+      normalized,
+      otp,
+      user.first_name ?? undefined,
+      'admin',
+    );
 
     return { success: true };
   }
@@ -995,6 +1056,7 @@ export class AuthService {
         email: true,
         phone: true,
         first_name: true,
+        is_business: true,
         deleted_at: true,
       },
     });
@@ -1009,6 +1071,7 @@ export class AuthService {
         phone: true,
         first_name: true,
         whatsapp_connected: true,
+        is_business: true,
         deleted_at: true,
       },
     });
@@ -1026,17 +1089,27 @@ export class AuthService {
     });
   }
 
+  /**
+   * The subject and copy say what the code is for (OtpPurpose): a business
+   * creating its account or logging in reads « Rabotka Business », under the
+   * Business label, never the client app's wording.
+   */
   private async sendOtpByEmail(
     email: string,
     otp: string,
-    first_name: string,
+    first_name: string | undefined,
+    purpose: OtpPurpose,
   ): Promise<void> {
     await this.mailService.sendMail({
       to: email,
-      subject: 'Votre code de vérification Rabotka',
-      html: await this.layoutService.wrap(sendOtpEmail(otp, first_name), {
-        previewText: `Votre code de vérification Rabotka : ${otp}`,
-      }),
+      subject: otpEmailSubject(purpose),
+      html: await this.layoutService.wrap(
+        sendOtpEmail(otp, first_name, purpose),
+        {
+          previewText: otpEmailPreview(purpose, otp),
+          product: purpose.startsWith('business') ? 'business' : undefined,
+        },
+      ),
     });
     this.logger.log(`OTP email sent to ${email}`);
   }
