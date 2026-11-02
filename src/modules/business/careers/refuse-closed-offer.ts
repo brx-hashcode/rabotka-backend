@@ -5,7 +5,8 @@ import { LayoutService } from '../../mail/layout.service';
 import { MailService } from '../../mail/mail.service';
 import { applicationClosedEmail } from '../../mail/templates/external-application';
 
-const REFUSAL_MESSAGE = 'Cette offre est maintenant fermée.';
+/** Also how `apply` knows the candidate may try again on a republished offer. */
+export const CLOSED_OFFER_REFUSAL = 'Cette offre est maintenant fermée.';
 
 /**
  * Closes the outside applications matching `where`, one email each.
@@ -44,7 +45,7 @@ export async function refuseOutsideCandidates(
       data: {
         status: ExternalApplicationStatus.REFUSED,
         refused_at: new Date(),
-        refusal_message: REFUSAL_MESSAGE,
+        refusal_message: CLOSED_OFFER_REFUSAL,
       },
     });
     if (count === 0) continue;

@@ -17,7 +17,11 @@ export async function takenSeats(
       where: {
         job_offer_id: jobOfferId,
         status: {
-          in: [ApplicationStatus.ACCEPTED, ApplicationStatus.WAITING_PAYMENT],
+          in: [
+            ApplicationStatus.ACCEPTED,
+            ApplicationStatus.WAITING_PAYMENT,
+            ApplicationStatus.STARTED,
+          ],
         },
       },
     }),

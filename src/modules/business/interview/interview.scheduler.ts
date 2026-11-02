@@ -19,6 +19,8 @@ export class InterviewScheduler implements OnModuleInit {
     this.queueService.createWorker(
       INTERVIEW_QUEUE,
       async () => {
+        const closed = await this.interviews.closeEnded();
+        if (closed > 0) this.logger.log(`Interviews: ${closed} closed`);
         const sent = await this.interviews.remind();
         if (sent > 0) this.logger.log(`Interviews: ${sent} reminded`);
       },

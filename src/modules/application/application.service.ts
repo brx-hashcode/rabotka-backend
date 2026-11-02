@@ -50,6 +50,7 @@ import {
   InteractionKind,
   InteractionObject,
   InteractionSource,
+  ExternalApplicationStatus,
   JobOfferStatus,
   Prisma,
   RatingDirection,
@@ -908,6 +909,19 @@ export class ApplicationService {
       // Lock the job offer row to prevent concurrent over-acceptance
       await tx.$executeRaw`SELECT id FROM "job_offers" WHERE id = ${application.job_offer_id}::uuid FOR UPDATE`;
 
+      // A started or ended offer is past hiring. FILLED goes on to the capacity
+      // check below, which says why more precisely.
+      const lockedOffer = await tx.jobOffer.findUnique({
+        where: { id: application.job_offer_id },
+        select: { status: true },
+      });
+      if (
+        lockedOffer?.status === JobOfferStatus.IN_PROGRESS ||
+        (lockedOffer && isTerminalJobOfferStatus(lockedOffer.status))
+      ) {
+        throw new BadRequestException('Cette offre ne recrute plus.');
+      }
+
       const currentAcceptedCount = await takenSeats(
         tx,
         application.job_offer_id,
@@ -1263,21 +1277,12 @@ export class ApplicationService {
           remainingAccepted > 0
             ? JobOfferStatus.PARTIALLY_FILLED
             : JobOfferStatus.ACTIVE;
-        if (isReversibleHire) {
-          // Deliberately bypasses the terminal guard. Undoing the hire is the
-          // one legitimate route back out of COMPLETED — the offer was closed
-          // *because* this person took the job, and they no longer have.
-          await tx.jobOffer.update({
-            where: { id: application.job_offer_id },
-            data: { status: reopenStatus },
-          });
-        } else {
-          await this.reopenOfferUnlessClosed(
-            tx,
-            application.job_offer_id,
-            reopenStatus,
-          );
-        }
+        await this.reopenOfferUnlessClosed(
+          tx,
+          application.job_offer_id,
+          reopenStatus,
+          isReversibleHire,
+        );
         await tx.assignment.updateMany({
           where: { application_id: applicationId },
           data: {
@@ -1762,21 +1767,50 @@ export class ApplicationService {
    * now closes the instant its last position is paid for, so an unguarded write
    * can land on a closed offer and put a fully-staffed post back on the feed
    * with its workers already at END.
+   *
+   * `undoingHire` passes that guard: it is the one legitimate route back out of
+   * COMPLETED, the offer having closed *because* this person took the job. An
+   * employer's own close passes nothing: the last hire leaving such an offer
+   * only makes it republishable, it never puts it back online.
    */
   private async reopenOfferUnlessClosed(
     tx: Prisma.TransactionClient,
     jobOfferId: string,
     status: JobOfferStatus,
+    undoingHire = false,
   ): Promise<void> {
     const offer = await tx.jobOffer.findUnique({
       where: { id: jobOfferId },
-      select: { status: true },
+      select: { status: true, closed_at: true },
     });
-    if (!offer || isTerminalJobOfferStatus(offer.status)) return;
+    if (!offer) return;
+    const nobodyLeft =
+      status === JobOfferStatus.ACTIVE &&
+      (await tx.externalApplication.count({
+        where: {
+          job_offer_id: jobOfferId,
+          status: ExternalApplicationStatus.RETAINED,
+        },
+      })) === 0;
+    if (offer.closed_at) {
+      if (nobodyLeft) {
+        await tx.jobOffer.update({
+          where: { id: jobOfferId },
+          data: { status: JobOfferStatus.EXPIRED },
+        });
+      }
+      return;
+    }
+    if (!undoingHire && isTerminalJobOfferStatus(offer.status)) return;
 
     await tx.jobOffer.update({
       where: { id: jobOfferId },
-      data: { status },
+      data: {
+        status:
+          status === JobOfferStatus.ACTIVE && !nobodyLeft
+            ? JobOfferStatus.PARTIALLY_FILLED
+            : status,
+      },
     });
   }
 
@@ -2620,20 +2654,12 @@ export class ApplicationService {
         remainingAccepted > 0
           ? JobOfferStatus.PARTIALLY_FILLED
           : JobOfferStatus.ACTIVE;
-      if (isReversibleHire) {
-        // Bypasses the terminal guard on purpose — undoing the hire is the one
-        // legitimate route back out of COMPLETED.
-        await tx.jobOffer.update({
-          where: { id: application.job_offer_id },
-          data: { status: reopenStatus },
-        });
-      } else {
-        await this.reopenOfferUnlessClosed(
-          tx,
-          application.job_offer_id,
-          reopenStatus,
-        );
-      }
+      await this.reopenOfferUnlessClosed(
+        tx,
+        application.job_offer_id,
+        reopenStatus,
+        isReversibleHire,
+      );
       await tx.assignment.updateMany({
         where: { application_id: applicationId },
         data: {

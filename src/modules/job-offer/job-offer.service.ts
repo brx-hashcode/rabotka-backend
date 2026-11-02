@@ -68,8 +68,10 @@ import {
   JobOfferStatus,
   PaymentFlow,
   Prisma,
+  ApplicationCancelledBy,
   RejectionSource,
 } from '@prisma/client';
+import { cancellationPatch } from '../application/application.constants';
 import { GeoService } from '../geo/geo.service';
 import { InteractionEventService } from '../recommendation-engine/interaction-event.service';
 import {
@@ -381,6 +383,8 @@ export type JobOfferListItem = {
   quantity: number;
   acceptedCount: number;
   status: string;
+  /** Set when the employer closed it themselves, cleared on republishing. */
+  closedAt: Date | null;
   employer_id: string;
   created_at: Date;
 };
@@ -1301,6 +1305,7 @@ export class JobOfferService {
           scheduled_at: scheduledAt,
           status: JobOfferStatus.ACTIVE,
           priority_until: priorityUntil,
+          closed_at: null,
         },
       });
     } catch (err) {
@@ -1947,6 +1952,7 @@ export class JobOfferService {
     }
 
     const closedIds = await this.prisma.$transaction(async (tx) => {
+      const now = new Date();
       const paying = await tx.application.count({
         where: {
           job_offer_id: id,
@@ -1956,16 +1962,38 @@ export class JobOfferService {
       });
       if (paying > 0) {
         throw new BadRequestException(
-          'Un candidat attend un paiement : réglez-le avant de fermer cette offre.',
+          "Un candidat retenu n'a pas encore confirmé : attendez sa réponse avant de fermer cette offre.",
         );
       }
-      const ids = await this.rejectWaitingApplicants(tx, id, [
-        ApplicationStatus.PENDING,
-        ApplicationStatus.VIEWED,
-      ]);
+      const waiting = await tx.application.findMany({
+        where: {
+          job_offer_id: id,
+          status: {
+            in: [ApplicationStatus.PENDING, ApplicationStatus.VIEWED],
+          },
+        },
+        select: { id: true },
+      });
+      const ids = waiting.map((a) => a.id);
+      if (ids.length > 0) {
+        await tx.application.updateMany({
+          where: { id: { in: ids } },
+          // Cancelled by the system, as on expiry: a rejection would bar these
+          // candidates from applying again if the offer is republished.
+          data: {
+            ...cancellationPatch({
+              by: ApplicationCancelledBy.SYSTEM,
+              at: now,
+              reason: 'Offre fermée par l’employeur',
+            }),
+            rejection_source: RejectionSource.AUTO_FILL,
+          },
+        });
+      }
       await tx.jobOffer.update({
         where: { id },
         data: {
+          closed_at: now,
           status:
             offer.status === JobOfferStatus.PARTIALLY_FILLED
               ? JobOfferStatus.FILLED
@@ -2471,6 +2499,7 @@ export class JobOfferService {
       status: string;
       employer_id: string;
       created_at: Date;
+      closed_at?: Date | null;
     },
     acceptedCount = 0,
   ): JobOfferListItem {
@@ -2491,6 +2520,7 @@ export class JobOfferService {
       quantity: offer.quantity,
       acceptedCount,
       status: offer.status,
+      closedAt: offer.closed_at ?? null,
       employer_id: offer.employer_id,
       created_at: offer.created_at,
     };

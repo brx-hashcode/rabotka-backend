@@ -1003,6 +1003,76 @@ describe('ApplicationService', () => {
     });
   });
 
+  describe('reopening after a hire drops out', () => {
+    const reopen = (
+      offer: unknown,
+      status: JobOfferStatus,
+      undoing = false,
+    ) => {
+      const tx = {
+        jobOffer: {
+          findUnique: jest.fn().mockResolvedValue(offer),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        externalApplication: { count: jest.fn().mockResolvedValue(0) },
+      };
+      return {
+        tx,
+        run: (service as any).reopenOfferUnlessClosed(
+          tx,
+          'offer-1',
+          status,
+          undoing,
+        ) as Promise<void>,
+      };
+    };
+
+    it('never puts an offer the employer closed back online', async () => {
+      const { tx, run } = reopen(
+        { status: JobOfferStatus.FILLED, closed_at: new Date() },
+        JobOfferStatus.PARTIALLY_FILLED,
+      );
+      await run;
+      expect(tx.jobOffer.update).not.toHaveBeenCalled();
+    });
+
+    it('makes it republishable once nobody is left, even undoing a hire', async () => {
+      const { tx, run } = reopen(
+        { status: JobOfferStatus.FILLED, closed_at: new Date() },
+        JobOfferStatus.ACTIVE,
+        true,
+      );
+      await run;
+      expect(tx.jobOffer.update.mock.calls[0][0].data.status).toBe(
+        JobOfferStatus.EXPIRED,
+      );
+    });
+
+    it('keeps the post an outside hire took', async () => {
+      const { tx, run } = reopen(
+        { status: JobOfferStatus.FILLED, closed_at: null },
+        JobOfferStatus.ACTIVE,
+      );
+      tx.externalApplication.count.mockResolvedValue(1);
+      await run;
+      expect(tx.jobOffer.update.mock.calls[0][0].data.status).toBe(
+        JobOfferStatus.PARTIALLY_FILLED,
+      );
+    });
+
+    it('still lets an undone hire reopen a completed offer', async () => {
+      const { tx, run } = reopen(
+        { status: JobOfferStatus.COMPLETED, closed_at: null },
+        JobOfferStatus.ACTIVE,
+        true,
+      );
+      await run;
+      expect(tx.jobOffer.update.mock.calls[0][0].data.status).toBe(
+        JobOfferStatus.ACTIVE,
+      );
+    });
+  });
+
   describe('accept()', () => {
     beforeEach(() => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue(
@@ -1056,6 +1126,20 @@ describe('ApplicationService', () => {
       expect(prisma.jobOffer.update as jest.Mock).toHaveBeenCalledWith(
         expect.objectContaining({ data: { status: JobOfferStatus.FILLED } }),
       );
+    });
+
+    it('refuses to hire on a mission that started, or an ended offer', async () => {
+      for (const status of [
+        JobOfferStatus.IN_PROGRESS,
+        JobOfferStatus.EXPIRED,
+      ]) {
+        (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValueOnce({
+          status,
+        });
+        await expect(
+          service.accept(APPLICATION_ID, EMPLOYER_ID),
+        ).rejects.toThrow('ne recrute plus');
+      }
     });
 
     it('accepts application and returns ACCEPTED status', async () => {

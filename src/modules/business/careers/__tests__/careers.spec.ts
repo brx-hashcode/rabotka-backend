@@ -506,6 +506,39 @@ describe('CareersService', () => {
       ]);
     });
 
+    it('lets someone apply again when only the offer had closed', async () => {
+      const { service, prisma } = serviceWith(business, [], open);
+      prisma.externalApplication.findUnique.mockResolvedValue({
+        id: 'old',
+        status: 'REFUSED',
+        refusal_message: 'Cette offre est maintenant fermée.',
+        cv_storage_key: 'old-key',
+        cv_storage_bucket: null,
+      });
+      (prisma.externalApplication as unknown as { delete: jest.Mock }).delete =
+        jest.fn().mockResolvedValue({});
+
+      await service.apply('kamoa', 'RBT-AC5LF', pdf, { ...dto, answers });
+
+      expect(prisma.externalApplication.create).toHaveBeenCalled();
+      expect(storage.delete).toHaveBeenCalledWith('old-key', {
+        bucket: undefined,
+      });
+    });
+
+    it('keeps refusing someone the business turned down', async () => {
+      const { service, prisma } = serviceWith(business, [], open);
+      prisma.externalApplication.findUnique.mockResolvedValue({
+        id: 'old',
+        status: 'REFUSED',
+        refusal_message: 'Profil trop junior',
+      });
+
+      await expect(
+        service.apply('kamoa', 'RBT-AC5LF', pdf, { ...dto, answers }),
+      ).rejects.toThrow('déjà postulé');
+    });
+
     it('refuses a second application with the same email', async () => {
       const { prisma, service } = serviceWith(business, [], open);
       prisma.externalApplication.findUnique.mockResolvedValue({ id: 'a0' });

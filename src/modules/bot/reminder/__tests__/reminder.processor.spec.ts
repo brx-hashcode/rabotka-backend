@@ -719,6 +719,57 @@ describe('ReminderProcessor', () => {
       });
     });
 
+    it('stops recruiting silently no more: candidates hear, as automatic', async () => {
+      prisma.assignment = {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      };
+      prisma.jobOffer.findMany.mockImplementation(async ({ where }: any) =>
+        where.employment_type
+          ? [
+              {
+                id: 'offer-1',
+                title: 'Comptable',
+                applications: [
+                  {
+                    id: 'app-a',
+                    status: ApplicationStatus.WAITING_PAYMENT,
+                    worker_id: 'w-a',
+                  },
+                ],
+              },
+            ]
+          : [],
+      );
+
+      await processor.process({ data: { type: 'scan' } });
+
+      const rejected = prisma.application.updateMany.mock.calls.find(
+        ([q]: any[]) => q.data.status === ApplicationStatus.REJECTED,
+      );
+      expect(rejected[0].data.rejection_source).toBe('AUTO_FILL');
+      expect(prisma.assignment.updateMany.mock.calls[0][0].where).toEqual({
+        application_id: { in: ['app-a'] },
+      });
+      expect(
+        inAppNotifications(events.emit, 'JOB_OFFER_EXPIRED').map(
+          (p) => p.recipientId,
+        ),
+      ).toEqual(['w-a']);
+      expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+    });
+
+    it('moves a mission left FILLED with nobody on it', async () => {
+      await processor.process({ data: { type: 'scan' } });
+
+      const expiryQuery = prisma.jobOffer.findMany.mock.calls.find(
+        ([q]: any[]) => q.where?.OR?.[1]?.scheduled_at === null,
+      );
+      expect(expiryQuery[0].where.AND[0].OR[1]).toMatchObject({
+        status: JobOfferStatus.FILLED,
+        applications: { none: { status: ApplicationStatus.WAITING_PAYMENT } },
+      });
+    });
+
     it('never expires a deleted offer', async () => {
       await processor.process({ data: { type: 'scan' } });
 

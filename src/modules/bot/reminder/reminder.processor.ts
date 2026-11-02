@@ -40,6 +40,7 @@ import {
   ExternalApplicationStatus,
   JobOfferStatus,
   Prisma,
+  RejectionSource,
 } from '@prisma/client';
 import { cancellationPatch } from '../../application/application.constants';
 import { closeRecruitedOfferTx } from '../../job-offer/utils/close-recruited-offer';
@@ -492,17 +493,48 @@ export class ReminderProcessor {
           },
         },
       },
-      select: { id: true },
+      select: {
+        id: true,
+        title: true,
+        applications: {
+          where: {
+            status: {
+              in: [
+                ApplicationStatus.PENDING,
+                ApplicationStatus.VIEWED,
+                ApplicationStatus.WAITING_PAYMENT,
+              ],
+            },
+          },
+          select: { id: true, status: true, worker_id: true },
+        },
+      },
     });
 
     if (overdue.length === 0) return;
 
     const ids = overdue.map((o) => o.id);
+    const unconfirmedIds = overdue.flatMap((o) =>
+      (o.applications ?? [])
+        .filter((a) => a.status === ApplicationStatus.WAITING_PAYMENT)
+        .map((a) => a.id),
+    );
     await this.prisma.$transaction([
       this.prisma.jobOffer.updateMany({
         where: { id: { in: ids } },
         data: { status: JobOfferStatus.FILLED },
       }),
+      ...(unconfirmedIds.length > 0
+        ? [
+            this.prisma.assignment.updateMany({
+              where: { application_id: { in: unconfirmedIds } },
+              data: {
+                status: AssignmentStatus.CANCELLED_BY_EMPLOYER,
+                cancelled_at: now,
+              },
+            }),
+          ]
+        : []),
       // Whoever had not committed yet is out — recruiting is over. Mirrors what
       // `rejectLeftoversIfOfferFilled` does when an offer fills normally.
       this.prisma.application.updateMany({
@@ -516,13 +548,37 @@ export class ReminderProcessor {
             ],
           },
         },
-        data: { status: ApplicationStatus.REJECTED, rejected_at: now },
+        data: {
+          status: ApplicationStatus.REJECTED,
+          rejected_at: now,
+          rejection_source: RejectionSource.AUTO_FILL,
+        },
       }),
     ]);
 
     this.logger.log(
       `Stopped recruiting on ${overdue.length} ongoing engagement(s) past their application deadline`,
     );
+
+    for (const offer of overdue) {
+      for (const application of offer.applications ?? []) {
+        notifyProfile(this.events, {
+          recipientId: application.worker_id,
+          dedupeKey: notificationDedupeKey(
+            'offer-expired',
+            offer.id,
+            application.worker_id,
+          ),
+          dedupeTtlSeconds: IN_APP_DEDUPE_SECONDS,
+          input: {
+            type: 'JOB_OFFER_EXPIRED',
+            recipientRole: 'WORKER',
+            jobOfferId: offer.id,
+            jobTitle: offer.title,
+          },
+        });
+      }
+    }
   }
 
   /**
@@ -772,12 +828,31 @@ export class ReminderProcessor {
     const overdue = await this.prisma.jobOffer.findMany({
       where: {
         deleted_at: null,
-        status: {
-          in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
-        },
         OR: [
           { scheduled_at: { lt: now } },
           { scheduled_at: null, created_at: { lt: undatedCutoff } },
+        ],
+        AND: [
+          {
+            OR: [
+              {
+                status: {
+                  in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
+                },
+              },
+              // Filled for a candidate who then lapsed: nothing else moves it
+              // on, and neither close, delete nor republish accepts FILLED.
+              {
+                status: JobOfferStatus.FILLED,
+                applications: {
+                  none: { status: ApplicationStatus.WAITING_PAYMENT },
+                },
+                external_applications: {
+                  none: { status: ExternalApplicationStatus.RETAINED },
+                },
+              },
+            ],
+          },
         ],
         applications: NO_HIRE,
       },

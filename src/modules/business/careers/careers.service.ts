@@ -36,7 +36,10 @@ import {
   type JobOfferClosedEvent,
 } from '../../job-offer/job-offer.events';
 import { notifyProfile } from '../../profile-notification/profile-notification.events';
-import { refuseOutsideCandidates } from './refuse-closed-offer';
+import {
+  CLOSED_OFFER_REFUSAL,
+  refuseOutsideCandidates,
+} from './refuse-closed-offer';
 import { takenSeats } from '../../job-offer/utils/offer-seats';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { BUSINESS_CATEGORY_LABELS } from '../business-catalog';
@@ -203,9 +206,33 @@ export class CareersService {
     const email = dto.email.trim().toLowerCase();
     const seen = await this.prisma.externalApplication.findUnique({
       where: { job_offer_id_email: { job_offer_id: offer.id, email } },
-      select: { id: true },
+      select: {
+        id: true,
+        status: true,
+        refusal_message: true,
+        cv_storage_key: true,
+        cv_storage_bucket: true,
+      },
     });
-    if (seen) throw this.alreadyApplied();
+    if (seen) {
+      // Nobody turned them down: the offer closed, and it is open again.
+      if (
+        seen.status !== ExternalApplicationStatus.REFUSED ||
+        seen.refusal_message !== CLOSED_OFFER_REFUSAL
+      ) {
+        throw this.alreadyApplied();
+      }
+      await this.prisma.externalApplication.delete({ where: { id: seen.id } });
+      if (seen.cv_storage_key) {
+        void this.storage
+          .delete(seen.cv_storage_key, {
+            bucket: seen.cv_storage_bucket ?? undefined,
+          })
+          .catch((err) =>
+            this.logger.warn(`Old CV not deleted: ${String(err)}`),
+          );
+      }
+    }
 
     const { rows, knockedOut } = checkAnswers(
       offer.questions,
