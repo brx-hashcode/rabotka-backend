@@ -2104,13 +2104,34 @@ describe('ProfileService', () => {
       await service.getProfilesForAdmin({
         page: 1,
         limit: 10,
-        profileType: ['WORKER'] as any,
+        profileType: ['WORKER'],
       });
       expect(prisma.profile.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ profile_type: { in: ['WORKER'] } }),
+          where: expect.objectContaining({
+            AND: [{ OR: [{ profile_type: 'WORKER' }] }],
+          }),
         }),
       );
+    });
+
+    it('tells businesses apart from individual employers, alongside the search', async () => {
+      await service.getProfilesForAdmin({
+        page: 1,
+        limit: 10,
+        q: 'Zua',
+        profileType: ['BUSINESS', 'EMPLOYER'],
+      });
+      const where = prisma.profile.findMany.mock.calls.at(-1)[0].where;
+      expect(where.OR).toEqual(expect.any(Array)); // the search, untouched
+      expect(where.AND).toEqual([
+        {
+          OR: [
+            { is_business: true },
+            { profile_type: 'EMPLOYER', is_business: false },
+          ],
+        },
+      ]);
     });
 
     it('applies whatsappConnected filter', async () => {

@@ -1,17 +1,25 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  IsArray,
+  IsBoolean,
+  IsEnum,
+  IsIn,
+  IsInt,
   IsOptional,
   IsString,
-  IsInt,
-  Min,
   Max,
-  IsArray,
-  IsEnum,
-  IsBoolean,
+  Min,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
 import { ToBoolean } from '../../../common/utils/query-boolean.util';
+
+/**
+ * The kinds of profile admin tells apart. A business is an employer profile
+ * flagged `is_business`; an « employer » here is an individual one.
+ */
+export const ADMIN_PROFILE_KINDS = ['WORKER', 'EMPLOYER', 'BUSINESS'] as const;
+export type AdminProfileKind = (typeof ADMIN_PROFILE_KINDS)[number];
 
 function toArray(value: unknown): string[] {
   if (Array.isArray(value)) return value.filter((v) => typeof v === 'string');
@@ -60,15 +68,16 @@ export class AdminListProfilesDto {
   status?: AccountStatus[];
 
   @ApiPropertyOptional({
-    description: 'Filter by profile type',
-    enum: ProfileType,
+    description:
+      'Filter by kind of profile: WORKER, EMPLOYER (an individual employer) or BUSINESS (an organisation, is_business)',
+    enum: ADMIN_PROFILE_KINDS,
     isArray: true,
   })
   @IsOptional()
   @Transform(({ value }) => toArray(value))
   @IsArray()
-  @IsEnum(ProfileType, { each: true })
-  profile_type?: ProfileType[];
+  @IsIn(ADMIN_PROFILE_KINDS, { each: true })
+  profile_type?: AdminProfileKind[];
 
   @ApiPropertyOptional({ description: 'Filter by WhatsApp connected' })
   @IsOptional()
