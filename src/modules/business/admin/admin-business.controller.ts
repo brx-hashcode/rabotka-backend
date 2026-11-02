@@ -15,7 +15,15 @@ import {
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsInt, IsOptional, IsUUID, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { AdminAuthGuard } from '../../auth/guards/admin-auth.guard';
@@ -23,7 +31,7 @@ import type { AdminAuthenticatedRequest } from '../../auth/guards/jwt-auth.guard
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { LogService } from '../../log/log.service';
 import { STATS_PERIODS } from '../business-stats';
-import { AdminBusinessService } from './admin-business.service';
+import { AdminBusinessService, MAX_ADMIN_NOTE } from './admin-business.service';
 
 class ActivityQueryDto {
   @IsOptional()
@@ -35,6 +43,12 @@ class ActivityQueryDto {
   @IsOptional()
   @IsUUID()
   memberId?: string;
+}
+
+class AdminNoteDto {
+  @IsString()
+  @MaxLength(MAX_ADMIN_NOTE)
+  body!: string;
 }
 
 class DistributionDto {
@@ -107,6 +121,72 @@ export class AdminBusinessController {
   @ApiOperation({ summary: 'Connected mailboxes (no tokens)' })
   mailboxes(@Param('id', ParseUUIDPipe) id: string) {
     return this.business.mailboxesOf(id);
+  }
+
+  @Get('health')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({
+    summary: 'At a glance: plan, what is stuck, last activity, figures',
+  })
+  health(@Param('id', ParseUUIDPipe) id: string) {
+    return this.business.health(id);
+  }
+
+  @Get('interviews')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({ summary: "Its interviews and the candidates' answers" })
+  interviews(@Param('id', ParseUUIDPipe) id: string) {
+    return this.business.interviews(id);
+  }
+
+  @Get('cv-screenings')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({ summary: 'Its CV analyses: CVs read, files kept until' })
+  cvScreenings(@Param('id', ParseUUIDPipe) id: string) {
+    return this.business.cvScreenings(id);
+  }
+
+  // ── Admin notes (never shown to the business) ────────────────────────
+
+  @Get('notes')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({ summary: "Rabotka's own follow-up notes on this business" })
+  notes(@Param('id', ParseUUIDPipe) id: string) {
+    return this.business.notes(id);
+  }
+
+  @Post('notes')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({ summary: 'Add a follow-up note' })
+  addNote(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AdminNoteDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
+    return this.business.addNote(id, req.user.userId, dto.body);
+  }
+
+  @Patch('notes/:noteId')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({ summary: 'Edit one of my notes' })
+  editNote(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('noteId', ParseUUIDPipe) noteId: string,
+    @Body() dto: AdminNoteDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
+    return this.business.editNote(id, req.user.userId, noteId, dto.body);
+  }
+
+  @Delete('notes/:noteId')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({ summary: 'Delete one of my notes' })
+  deleteNote(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('noteId', ParseUUIDPipe) noteId: string,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
+    return this.business.deleteNote(id, req.user.userId, noteId);
   }
 
   // ── Support actions ──────────────────────────────────────────────────
