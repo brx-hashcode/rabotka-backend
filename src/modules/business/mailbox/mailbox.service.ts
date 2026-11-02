@@ -18,6 +18,7 @@ import { BusinessSubscriptionService } from '../subscription/business-subscripti
 import type { CvUpload } from '../cv-screening/cv-screening.service';
 import { cvFileType, DOCX_MIME } from '../cv-screening/cv-files';
 import { MAX_MAIL_ATTACHMENTS } from './cv-attachments';
+import { InboxService } from './inbox.service';
 import { MailboxCrypto } from './mailbox-crypto';
 import { GmailProvider } from './providers/gmail.provider';
 import { OutlookProvider } from './providers/outlook.provider';
@@ -65,6 +66,7 @@ export class MailboxService {
     private readonly jwt: JwtService,
     private readonly subscriptions: BusinessSubscriptionService,
     config: ConfigService,
+    private readonly inbox: InboxService,
   ) {
     this.crypto = null;
     const key = config.get<string>('MAILBOX_TOKEN_KEY');
@@ -106,18 +108,33 @@ export class MailboxService {
         expired_at: true,
       },
     });
+    // The forwarding address reads like one more mailbox: its id is the
+    // business's own, so it can never collide with a connected one.
+    const forward = this.inbox.available
+      ? {
+          id: businessId,
+          provider: 'forward' as const,
+          email: await this.inbox.address(businessId),
+          connectedAt: null,
+          expired: false,
+        }
+      : null;
     return {
       available: {
         gmail: this.available(MailProvider.GMAIL),
         outlook: this.available(MailProvider.OUTLOOK),
+        forward: this.inbox.available,
       },
-      mailboxes: rows.map((r) => ({
-        id: r.id,
-        provider: slugOf(r.provider),
-        email: r.email,
-        connectedAt: r.created_at,
-        expired: r.expired_at !== null,
-      })),
+      mailboxes: [
+        ...(forward ? [forward] : []),
+        ...rows.map((r) => ({
+          id: r.id,
+          provider: slugOf(r.provider),
+          email: r.email,
+          connectedAt: r.created_at,
+          expired: r.expired_at !== null,
+        })),
+      ],
     };
   }
 
@@ -202,6 +219,10 @@ export class MailboxService {
 
   /** The recent mails with a CV attached, newest first. */
   async mails(profileId: string, id: string, q?: string, page?: string) {
+    const businessId = await this.businessId(profileId);
+    if (id === businessId) {
+      return this.inbox.list(businessId, { q: q?.slice(0, 200), page });
+    }
     const box = await this.owned(profileId, id);
     return this.withAccess(box, (access) =>
       this.providers[box.provider].listCvMails(access, {
@@ -221,14 +242,13 @@ export class MailboxService {
     messageId: string,
     attachmentId: string,
   ) {
-    const box = await this.owned(profileId, id);
-    const file = await this.withAccess(box, (access) =>
-      this.providers[box.provider].attachment(access, messageId, attachmentId),
-    ).catch((err: unknown) => {
-      if (err instanceof ConflictException) throw err;
-      this.logger.warn(`Mail attachment preview failed: ${String(err)}`);
-      throw new NotFoundException('Cette pièce jointe n’a pas pu être lue.');
-    });
+    const file = await this.read(profileId, id, messageId, attachmentId).catch(
+      (err: unknown) => {
+        if (err instanceof ConflictException) throw err;
+        this.logger.warn(`Mail attachment preview failed: ${String(err)}`);
+        throw new NotFoundException('Cette pièce jointe n’a pas pu être lue.');
+      },
+    );
     if (file.buffer.length > MAX_ATTACHMENT_BYTES) {
       throw new BadRequestException('Fichier trop lourd pour un aperçu.');
     }
@@ -252,27 +272,16 @@ export class MailboxService {
         `${MAX_MAIL_ATTACHMENTS} CV au plus depuis votre messagerie.`,
       );
     }
-    const businessId = await this.businessId(profileId);
-    const ids = [...new Set(refs.map((r) => r.mailboxId))];
-    const boxes = await this.prisma.businessMailbox.findMany({
-      where: { id: { in: ids }, business_id: businessId },
-    });
-    if (boxes.length !== ids.length) {
-      throw new NotFoundException('Messagerie introuvable.');
-    }
-    const byId = new Map(boxes.map((b) => [b.id, b]));
-
     const files: CvUpload[] = [];
     for (const ref of refs) {
-      const box = byId.get(ref.mailboxId)!;
-      const file = await this.withAccess(box, (access) =>
-        this.providers[box.provider].attachment(
-          access,
-          ref.messageId,
-          ref.attachmentId,
-        ),
+      const file = await this.read(
+        profileId,
+        ref.mailboxId,
+        ref.messageId,
+        ref.attachmentId,
       ).catch((err: unknown) => {
         if (err instanceof ConflictException) throw err;
+        if (err instanceof NotFoundException) throw err;
         this.logger.warn(`Mail attachment read failed: ${String(err)}`);
         throw new BadRequestException(
           'Une pièce jointe n’a pas pu être lue depuis votre messagerie. Réessayez ou retirez-la.',
@@ -291,6 +300,46 @@ export class MailboxService {
       });
     }
     return files;
+  }
+
+  /** One attachment, from a connected mailbox or the forwarded mails. */
+  private async read(
+    profileId: string,
+    mailboxId: string,
+    messageId: string,
+    attachmentId: string,
+  ) {
+    const businessId = await this.businessId(profileId);
+    if (mailboxId === businessId) {
+      return this.inbox.attachment(businessId, messageId, attachmentId);
+    }
+    const box = await this.owned(profileId, mailboxId);
+    return this.withAccess(box, (access) =>
+      this.providers[box.provider].attachment(access, messageId, attachmentId),
+    );
+  }
+
+  /** The forwarding address, made on first use. */
+  async forwardAddress(profileId: string) {
+    if (!this.inbox.available) {
+      throw new ServiceUnavailableException(
+        'Le transfert de CV n’est pas disponible pour le moment.',
+      );
+    }
+    return {
+      email: await this.inbox.address(await this.businessId(profileId)),
+    };
+  }
+
+  async regenerateForwardAddress(profileId: string) {
+    if (!this.inbox.available) {
+      throw new ServiceUnavailableException(
+        'Le transfert de CV n’est pas disponible pour le moment.',
+      );
+    }
+    return {
+      email: await this.inbox.regenerate(await this.businessId(profileId)),
+    };
   }
 
   // ── Tokens ───────────────────────────────────────────────────────────

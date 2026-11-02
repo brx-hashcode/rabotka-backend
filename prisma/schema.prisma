@@ -3403,6 +3403,9 @@ model Business {
   photos              String[]           @default([])
   /// « Avantages »: a few short lines, on the careers page.
   benefits            String[]           @default([])
+  /// The local part of its CV forwarding address: <inbox_token>@cv.rabotka.work.
+  inbox_token         String?            @unique
+  inbox_mails         BusinessInboxMail[]
   /// Raison sociale.
   name                String
   category            BusinessCategory
@@ -3823,6 +3826,24 @@ enum MailProvider {
 /// A mailbox a business connected (OAuth) to pick CVs from its e-mails for
 /// « Analyse de CV ». Only the tokens are kept, encrypted (MAILBOX_TOKEN_KEY):
 /// mails are read on demand, never stored.
+/// A mail a business forwarded to its CV address, kept until it is picked for
+/// an analysis or the retention sweep removes it. Only CV attachments are kept.
+model BusinessInboxMail {
+  id          String   @id @default(uuid()) @db.Uuid
+  created_at  DateTime @default(now())
+  business_id String   @db.Uuid
+  /// The candidate as the mail names them, never an address.
+  from_name   String
+  subject     String
+  /// { id, name, mime, size, key, bucket }[]: the CV files, in the private bucket.
+  files       Json     @default("[]")
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@index([business_id, created_at], name: "idx_business_inbox_mail_business_created")
+  @@map("business_inbox_mails")
+}
+
 model BusinessMailbox {
   id                      String       @id @default(uuid()) @db.Uuid
   created_at              DateTime     @default(now())
