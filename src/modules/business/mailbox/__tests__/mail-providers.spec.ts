@@ -97,6 +97,75 @@ describe('mail providers', () => {
       );
     });
 
+    it('counts a picture only in a large mail (signatures are not CVs)', async () => {
+      fetchMock.mockResolvedValueOnce(json({ messages: [] }));
+      await gmail.listCvMails('tok', {});
+      const q = new URL(fetchMock.mock.calls[0][0]).searchParams.get('q')!;
+      expect(q).toContain('filename:pdf filename:docx');
+      expect(q).toContain('(filename:png larger:100K)');
+      expect(q).toContain('newer_than:120d');
+    });
+
+    const logoOnly = (id: string) =>
+      json({
+        id,
+        payload: {
+          parts: [
+            {
+              partId: '1',
+              filename: 'logo.png',
+              mimeType: 'image/png',
+              body: { attachmentId: 'l', size: 5_000 },
+            },
+          ],
+        },
+      });
+
+    it('reads on when a page holds no CV, rather than answering empty', async () => {
+      fetchMock
+        .mockResolvedValueOnce(
+          json({ messages: [{ id: 'a' }], nextPageToken: 'p2' }),
+        )
+        .mockResolvedValueOnce(logoOnly('a'))
+        .mockResolvedValueOnce(
+          json({ messages: [{ id: 'b' }], nextPageToken: 'p3' }),
+        )
+        .mockResolvedValueOnce(
+          json({
+            id: 'b',
+            payload: {
+              parts: [
+                {
+                  partId: '2',
+                  filename: 'cv.pdf',
+                  mimeType: 'application/pdf',
+                  body: { attachmentId: 'c', size: 90_000 },
+                },
+              ],
+            },
+          }),
+        );
+      const r = await gmail.listCvMails('tok', {});
+      expect(r.mails.map((m) => m.id)).toEqual(['b']);
+      expect(r.next).toBe('p3');
+      expect(
+        new URL(fetchMock.mock.calls[2][0]).searchParams.get('pageToken'),
+      ).toBe('p2');
+    });
+
+    it('stops reading on after a few pages, and says where to go on', async () => {
+      for (let i = 1; i <= 4; i++) {
+        fetchMock
+          .mockResolvedValueOnce(
+            json({ messages: [{ id: `m${i}` }], nextPageToken: `p${i + 1}` }),
+          )
+          .mockResolvedValueOnce(logoOnly(`m${i}`));
+      }
+      const r = await gmail.listCvMails('tok', {});
+      expect(r).toEqual({ mails: [], next: 'p5' });
+      expect(fetchMock).toHaveBeenCalledTimes(8);
+    });
+
     it('reads an attachment by its part, with a fresh attachment id', async () => {
       fetchMock
         .mockResolvedValueOnce(
