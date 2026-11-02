@@ -3397,6 +3397,12 @@ model Business {
   /// Its open offers go to Google and the job sites. Its careers page stays
   /// reachable by link either way.
   distribute_offers   Boolean            @default(true)
+  /// The careers page's wide photo, above the company's name.
+  cover_url           String?
+  /// Up to six photos of the place and the team, on the careers page.
+  photos              String[]           @default([])
+  /// « Avantages »: a few short lines, on the careers page.
+  benefits            String[]           @default([])
   /// Raison sociale.
   name                String
   category            BusinessCategory
