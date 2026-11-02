@@ -348,9 +348,6 @@ jobs:
           MS_MAIL_CLIENT_ID=$(echo "$VAULT_SECRET" | jq -r '.MS_MAIL_CLIENT_ID // ""')
           MS_MAIL_CLIENT_SECRET=$(echo "$VAULT_SECRET" | jq -r '.MS_MAIL_CLIENT_SECRET // ""')
           MAILBOX_TOKEN_KEY=$(echo "$VAULT_SECRET" | jq -r '.MAILBOX_TOKEN_KEY // ""')
-          # CVs forwarded to <token>@cv.rabotka.work: the Email Worker's shared secret.
-          # Empty turns forwarding off.
-          INBOUND_MAIL_SECRET=$(echo "$VAULT_SECRET" | jq -r '.INBOUND_MAIL_SECRET // ""')
           # --- static values ---
           BACKEND_IMAGE=ghcr.io/${{ github.repository_owner }}/rabotka-backend:${{ needs.build-and-push.outputs.image-sha-tag }}
           NODE_ENV=production

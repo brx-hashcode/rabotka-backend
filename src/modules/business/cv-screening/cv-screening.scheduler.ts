@@ -8,7 +8,6 @@ import {
   CvScreeningService,
   type CvScreeningJob,
 } from './cv-screening.service';
-import { InboxService } from '../mailbox/inbox.service';
 
 /** Hourly: a stuck CV is given up after two hours, a purge is by the day. */
 const SWEEP_INTERVAL_MS = 60 * 60 * 1000;
@@ -26,7 +25,6 @@ export class CvScreeningScheduler implements OnModuleInit {
   constructor(
     private readonly queueService: QueueService,
     private readonly screenings: CvScreeningService,
-    private readonly inbox: InboxService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -44,10 +42,6 @@ export class CvScreeningScheduler implements OnModuleInit {
           this.logger.log(
             `CV screenings: ${result.stuck} stuck given up, ${result.purged} purged`,
           );
-        }
-        const forwarded = await this.inbox.purge();
-        if (forwarded > 0) {
-          this.logger.log(`CV inbox: ${forwarded} forwarded mail(s) purged`);
         }
         const careers = await this.screenings.backfillCareers();
         if (careers > 0) {
