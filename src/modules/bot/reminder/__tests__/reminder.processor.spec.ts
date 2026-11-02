@@ -770,6 +770,21 @@ describe('ReminderProcessor', () => {
       });
     });
 
+    it('leaves a business its open-ended offers to close itself', async () => {
+      await processor.process({ data: { type: 'scan' } });
+
+      const expiryQuery = prisma.jobOffer.findMany.mock.calls.find(
+        ([q]: any[]) => q.where?.OR?.[1]?.scheduled_at === null,
+      );
+      expect(expiryQuery[0].where.OR[1].employer).toEqual({
+        is_business: false,
+      });
+      const graceQuery = prisma.jobOffer.findMany.mock.calls.find(
+        ([q]: any[]) => q.where?.updated_at,
+      );
+      expect(graceQuery[0].where.employer).toEqual({ is_business: false });
+    });
+
     it('never expires a deleted offer', async () => {
       await processor.process({ data: { type: 'scan' } });
 

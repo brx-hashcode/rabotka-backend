@@ -508,6 +508,28 @@ describe('JobOfferService', () => {
       ).toThrow(/clôture des candidatures/i);
     });
 
+    it.each([EmploymentType.CDI, EmploymentType.CDD, EmploymentType.STAGE])(
+      'lets a business publish a %s with no date: it closes those itself',
+      (employment_type) => {
+        const { scheduled_at: _omitted, ...noDate } = baseDto;
+
+        expect(() =>
+          service.validateCreateDto(
+            { ...noDate, employment_type } as typeof baseDto,
+            true,
+          ),
+        ).not.toThrow();
+      },
+    );
+
+    it('still asks a business for the day of a mission', () => {
+      const { scheduled_at: _omitted, ...noDate } = baseDto;
+
+      expect(() =>
+        service.validateCreateDto(noDate as typeof baseDto, true),
+      ).toThrow(/date de la mission/i);
+    });
+
     it('defaults to MISSION when the type is unspecified', () => {
       const { scheduled_at: _omitted, ...noDate } = baseDto;
 
@@ -671,6 +693,32 @@ describe('JobOfferService', () => {
       await expect(
         service.republish(OFFER_ID, OWNER_ID, hoursFromNow(48)),
       ).rejects.toThrow(ForbiddenException);
+      expect(prisma.jobOffer.update).not.toHaveBeenCalled();
+    });
+
+    it('reopens a business open-ended offer with no date', async () => {
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
+        ...expiredOffer,
+        employment_type: EmploymentType.CDI,
+      });
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        verification_status: 'VERIFIED',
+        status: 'ACTIVE',
+        is_business: true,
+      });
+
+      await service.republish(OFFER_ID, OWNER_ID, null);
+
+      expect(
+        (prisma.jobOffer.update as jest.Mock).mock.calls[0][0].data
+          .scheduled_at,
+      ).toBeNull();
+    });
+
+    it('refuses no date on a mission, or for another employer', async () => {
+      await expect(service.republish(OFFER_ID, OWNER_ID, null)).rejects.toThrow(
+        'date est requise',
+      );
       expect(prisma.jobOffer.update).not.toHaveBeenCalled();
     });
 

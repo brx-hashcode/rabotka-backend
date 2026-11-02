@@ -107,7 +107,7 @@ export class CreateJobOfferDto extends LocationDto {
   })
   @IsOptional()
   @IsDateString()
-  scheduled_at?: string;
+  scheduled_at?: string | null;
 
   @ApiPropertyOptional({
     example: 15000,

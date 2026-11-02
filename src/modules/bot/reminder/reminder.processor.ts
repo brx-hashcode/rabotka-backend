@@ -349,17 +349,7 @@ export class ReminderProcessor {
         external_applications: {
           none: { status: ExternalApplicationStatus.RETAINED },
         },
-        OR: [
-          { scheduled_at: { gte: now, lte: horizon } },
-          {
-            scheduled_at: null,
-            created_at: {
-              lte: new Date(
-                horizon.getTime() - UNDATED_OFFER_TTL_DAYS * DAY_MS,
-              ),
-            },
-          },
-        ],
+        scheduled_at: { gte: now, lte: horizon },
         applications: NO_HIRE,
       },
       select: {
@@ -367,15 +357,12 @@ export class ReminderProcessor {
         title: true,
         employer_id: true,
         scheduled_at: true,
-        created_at: true,
         employer: { select: { first_name: true, email: true } },
       },
     });
 
     for (const offer of offers) {
-      const endsAt =
-        offer.scheduled_at ??
-        new Date(offer.created_at.getTime() + UNDATED_OFFER_TTL_DAYS * DAY_MS);
+      const endsAt = offer.scheduled_at as Date;
       const claimed = await this.redis.set(
         `reminder:sent:offer-ending:${offer.id}:${endsAt.toISOString()}`,
         '1',
@@ -604,6 +591,8 @@ export class ReminderProcessor {
         status: JobOfferStatus.FILLED,
         employment_type: { not: EmploymentType.MISSION },
         updated_at: { lt: graceCutoff },
+        // A business closes these itself, from its dashboard.
+        employer: { is_business: false },
       },
       select: { id: true },
     });
@@ -830,7 +819,12 @@ export class ReminderProcessor {
         deleted_at: null,
         OR: [
           { scheduled_at: { lt: now } },
-          { scheduled_at: null, created_at: { lt: undatedCutoff } },
+          // A business closes its own open-ended offers.
+          {
+            scheduled_at: null,
+            created_at: { lt: undatedCutoff },
+            employer: { is_business: false },
+          },
         ],
         AND: [
           {
