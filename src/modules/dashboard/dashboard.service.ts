@@ -36,7 +36,23 @@ export type DashboardMetrics = {
   jobsTrend: number | null;
   applicationsCount: number;
   applicationsTrend: number | null;
+  /**
+   * What the trends are made of: how many arrived in the last 30 days and in
+   * the 30 days before. The totals above are all-time, so a percentage next to
+   * them read as « the total fell 80 % ». With counts this small the honest
+   * thing to show is the two numbers themselves.
+   */
+  last30Days: Record<DashboardMetricKey, PeriodCounts>;
 };
+
+export type DashboardMetricKey =
+  | 'connections'
+  | 'assignments'
+  | 'profiles'
+  | 'jobs'
+  | 'applications';
+
+export type PeriodCounts = { current: number; previous: number };
 
 const TIME_RANGE_DAYS: Record<TimeRange, number> = {
   [TimeRange.NINETY_DAYS]: 90,
@@ -80,8 +96,8 @@ export class DashboardService {
 
     const [
       connectionsTotal,
-      connectionsCurrent,
-      connectionsPrevious,
+      connectionsAt30DaysAgo,
+      connectionsAt60DaysAgo,
       assignmentsTotal,
       assignmentsCurrent,
       assignmentsPrevious,
@@ -97,10 +113,13 @@ export class DashboardService {
     ] = await Promise.all([
       // Connections: employers who paid to reach a worker. Counted as distinct
       // pairs, not payments — paying twice for the same worker is still one
-      // relationship, which is what the graph shows.
+      // relationship, which is what the graph shows. A period's NEW connections
+      // are the pairs that exist now minus those that already existed then, so
+      // an employer paying again for a worker they already reached doesn't
+      // count as a new connection.
       this.countConnections(),
-      this.countConnections({ since: thirtyDaysAgo }),
-      this.countConnections({ since: sixtyDaysAgo, until: thirtyDaysAgo }),
+      this.countConnections({ until: thirtyDaysAgo }),
+      this.countConnections({ until: sixtyDaysAgo }),
       // Total assignments (placements made)
       this.prisma.assignment.count(),
       // Assignments last 30 days
@@ -145,7 +164,32 @@ export class DashboardService {
       }),
     ]);
 
+    const connectionsCurrent = Math.max(
+      0,
+      connectionsTotal - connectionsAt30DaysAgo,
+    );
+    const connectionsPrevious = Math.max(
+      0,
+      connectionsAt30DaysAgo - connectionsAt60DaysAgo,
+    );
+
     return {
+      last30Days: {
+        connections: {
+          current: connectionsCurrent,
+          previous: connectionsPrevious,
+        },
+        assignments: {
+          current: assignmentsCurrent,
+          previous: assignmentsPrevious,
+        },
+        profiles: { current: profilesCurrent, previous: profilesPrevious },
+        jobs: { current: jobsCurrent, previous: jobsPrevious },
+        applications: {
+          current: applicationsCurrent,
+          previous: applicationsPrevious,
+        },
+      },
       connectionsCount: connectionsTotal,
       connectionsTrend: this.calcTrend(connectionsCurrent, connectionsPrevious),
       assignmentsCount: assignmentsTotal,

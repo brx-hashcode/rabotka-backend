@@ -46,20 +46,51 @@ describe('DashboardService', () => {
     });
 
     it('reports connections from the shared paid-contact query', async () => {
-      // Three windowed counts in order: total, last 30d, previous 30d.
+      // Three counts in order: pairs now, pairs 30 days ago, pairs 60 days ago.
       prisma.$queryRaw = jest
         .fn()
-        .mockResolvedValueOnce([{ count: 4 }])
-        .mockResolvedValueOnce([{ count: 3 }])
+        .mockResolvedValueOnce([{ count: 7 }])
+        .mockResolvedValueOnce([{ count: 5 }])
         .mockResolvedValueOnce([{ count: 1 }])
         .mockResolvedValue([]);
 
       const metrics = await service.getMetrics();
 
-      expect(metrics.connectionsCount).toBe(4);
-      // calcTrend clamps to ±100, so 3-vs-1 (+200%) reports as 100 like every
-      // other metric on this dashboard.
-      expect(metrics.connectionsTrend).toBe(100);
+      expect(metrics.connectionsCount).toBe(7);
+      // New pairs per period: 7 − 5 now, 5 − 1 the month before.
+      expect(metrics.last30Days.connections).toEqual({
+        current: 2,
+        previous: 4,
+      });
+      expect(metrics.connectionsTrend).toBe(-50);
+    });
+
+    it('reports the two 30-day counts behind every trend', async () => {
+      prisma.profile.count
+        .mockResolvedValueOnce(91)
+        .mockResolvedValueOnce(27)
+        .mockResolvedValueOnce(20);
+      prisma.jobOffer.count
+        .mockResolvedValueOnce(8)
+        .mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(5);
+      prisma.application.count
+        .mockResolvedValueOnce(9)
+        .mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(8);
+
+      const metrics = await service.getMetrics();
+
+      expect(metrics.last30Days.profiles).toEqual({ current: 27, previous: 20 });
+      expect(metrics.last30Days.jobs).toEqual({ current: 1, previous: 5 });
+      expect(metrics.last30Days.applications).toEqual({
+        current: 1,
+        previous: 8,
+      });
+      expect(metrics.last30Days.assignments).toEqual({
+        current: 0,
+        previous: 0,
+      });
     });
 
     it('counts a pair once when the same employer paid twice', async () => {
