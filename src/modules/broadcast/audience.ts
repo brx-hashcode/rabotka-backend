@@ -1,5 +1,6 @@
 import {
   AccountStatus,
+  DeliveryChannel,
   Prisma,
   ProfileType,
   VerificationStatus,
@@ -148,6 +149,50 @@ export function buildAudienceWhere(
   };
 
   return where;
+}
+
+/** What a profile needs to be reached on a channel, as read from the row. */
+export type ReachFields = {
+  email: string | null;
+  whatsapp_connected: boolean;
+  is_business: boolean;
+};
+
+/**
+ * Who a channel can reach at all, as a `where`: an email needs an address,
+ * WhatsApp a connected number and never a business account (business
+ * accounts get email and in-app only). In-app reaches everyone.
+ *
+ * The preview counts with this and the snapshot writes rows with
+ * `isReachable`, the same rule: a profile with no address gets no email row,
+ * instead of a row that can only fail.
+ */
+export function reachableWhere(
+  channel: DeliveryChannel,
+): Prisma.ProfileWhereInput {
+  switch (channel) {
+    case DeliveryChannel.EMAIL:
+      return { AND: [{ email: { not: null } }, { email: { not: '' } }] };
+    case DeliveryChannel.WHATSAPP:
+      return { whatsapp_connected: true, is_business: false };
+    default:
+      return {};
+  }
+}
+
+/** `reachableWhere`, on a profile already read. */
+export function isReachable(
+  profile: ReachFields,
+  channel: DeliveryChannel,
+): boolean {
+  switch (channel) {
+    case DeliveryChannel.EMAIL:
+      return !!profile.email?.trim();
+    case DeliveryChannel.WHATSAPP:
+      return profile.whatsapp_connected && !profile.is_business;
+    default:
+      return true;
+  }
 }
 
 export type AudiencePreview = {
