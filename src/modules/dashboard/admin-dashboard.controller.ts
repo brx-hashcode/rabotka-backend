@@ -1,4 +1,12 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -46,6 +54,21 @@ export class AdminDashboardController {
     return this.dashboardService.getJobStatusDistribution(
       dto.range ?? TimeRange.NINETY_DAYS,
     );
+  }
+
+  @Post('refresh')
+  // 200 with a body, not 204: the admin's API client always parses JSON.
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Drop cached admin figures (admin only)',
+    description:
+      'Clears the cached dashboard aggregates and admin lists, so the next reads are live. Behind the admin « Refresh » button.',
+  })
+  @ApiResponse({ status: 200, description: 'Cache cleared' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async refresh(): Promise<{ refreshedAt: string }> {
+    await this.dashboardService.refresh();
+    return { refreshedAt: new Date().toISOString() };
   }
 
   @Get('job-activity')
