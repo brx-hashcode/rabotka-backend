@@ -1,5 +1,4 @@
 import { GmailProvider } from '../providers/gmail.provider';
-import { OutlookProvider } from '../providers/outlook.provider';
 import { MailboxAuthError } from '../providers/mail-provider';
 
 const json = (body: unknown, status = 200) =>
@@ -98,6 +97,75 @@ describe('mail providers', () => {
       );
     });
 
+    it('counts a picture only in a large mail (signatures are not CVs)', async () => {
+      fetchMock.mockResolvedValueOnce(json({ messages: [] }));
+      await gmail.listCvMails('tok', {});
+      const q = new URL(fetchMock.mock.calls[0][0]).searchParams.get('q')!;
+      expect(q).toContain('filename:pdf filename:docx');
+      expect(q).toContain('(filename:png larger:100K)');
+      expect(q).toContain('newer_than:120d');
+    });
+
+    const logoOnly = (id: string) =>
+      json({
+        id,
+        payload: {
+          parts: [
+            {
+              partId: '1',
+              filename: 'logo.png',
+              mimeType: 'image/png',
+              body: { attachmentId: 'l', size: 5_000 },
+            },
+          ],
+        },
+      });
+
+    it('reads on when a page holds no CV, rather than answering empty', async () => {
+      fetchMock
+        .mockResolvedValueOnce(
+          json({ messages: [{ id: 'a' }], nextPageToken: 'p2' }),
+        )
+        .mockResolvedValueOnce(logoOnly('a'))
+        .mockResolvedValueOnce(
+          json({ messages: [{ id: 'b' }], nextPageToken: 'p3' }),
+        )
+        .mockResolvedValueOnce(
+          json({
+            id: 'b',
+            payload: {
+              parts: [
+                {
+                  partId: '2',
+                  filename: 'cv.pdf',
+                  mimeType: 'application/pdf',
+                  body: { attachmentId: 'c', size: 90_000 },
+                },
+              ],
+            },
+          }),
+        );
+      const r = await gmail.listCvMails('tok', {});
+      expect(r.mails.map((m) => m.id)).toEqual(['b']);
+      expect(r.next).toBe('p3');
+      expect(
+        new URL(fetchMock.mock.calls[2][0]).searchParams.get('pageToken'),
+      ).toBe('p2');
+    });
+
+    it('stops reading on after a few pages, and says where to go on', async () => {
+      for (let i = 1; i <= 4; i++) {
+        fetchMock
+          .mockResolvedValueOnce(
+            json({ messages: [{ id: `m${i}` }], nextPageToken: `p${i + 1}` }),
+          )
+          .mockResolvedValueOnce(logoOnly(`m${i}`));
+      }
+      const r = await gmail.listCvMails('tok', {});
+      expect(r).toEqual({ mails: [], next: 'p5' });
+      expect(fetchMock).toHaveBeenCalledTimes(8);
+    });
+
     it('reads an attachment by its part, with a fresh attachment id', async () => {
       fetchMock
         .mockResolvedValueOnce(
@@ -133,71 +201,6 @@ describe('mail providers', () => {
     it('calls a refused refresh token gone', async () => {
       fetchMock.mockResolvedValueOnce(json({ error: 'invalid_grant' }, 400));
       await expect(gmail.refresh('r')).rejects.toBeInstanceOf(MailboxAuthError);
-    });
-  });
-
-  describe('Outlook', () => {
-    const outlook = new OutlookProvider('id', 'secret');
-
-    it('keeps file attachments that can be CVs', async () => {
-      fetchMock.mockResolvedValueOnce(
-        json({
-          value: [
-            {
-              id: 'o1',
-              subject: 'CV',
-              receivedDateTime: new Date().toISOString(),
-              hasAttachments: true,
-              from: { emailAddress: { name: '', address: 'jean@x.cg' } },
-              attachments: [
-                {
-                  '@odata.type': '#microsoft.graph.fileAttachment',
-                  id: 'a1',
-                  name: 'cv.docx',
-                  contentType: '',
-                  size: 50_000,
-                  isInline: false,
-                },
-                {
-                  '@odata.type': '#microsoft.graph.itemAttachment',
-                  id: 'a2',
-                  name: 'fwd.pdf',
-                  contentType: 'application/pdf',
-                  size: 50_000,
-                  isInline: false,
-                },
-              ],
-            },
-          ],
-          '@odata.nextLink':
-            'https://graph.microsoft.com/v1.0/me/messages?$skip=15',
-        }),
-      );
-      const r = await outlook.listCvMails('tok', {});
-      expect(r.mails).toEqual([
-        {
-          id: 'o1',
-          fromName: 'jean',
-          subject: 'CV',
-          date: expect.any(String),
-          attachments: [
-            {
-              id: 'a1',
-              name: 'cv.docx',
-              size: 50_000,
-              mime: 'application/octet-stream',
-            },
-          ],
-        },
-      ]);
-      expect(r.next).toContain('$skip=15');
-    });
-
-    it('follows only its own next links', async () => {
-      await expect(
-        outlook.listCvMails('tok', { page: 'https://evil.example/steal' }),
-      ).rejects.toThrow(/page link/);
-      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 });

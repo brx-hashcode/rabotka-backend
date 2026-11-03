@@ -1,8 +1,10 @@
+import ExcelJS from 'exceljs';
 import {
   buildReportHtml,
   reportFilename,
   type ReportInput,
 } from '../business-report';
+import { reportCsv, reportTables, reportXlsx } from '../business-report-sheets';
 
 const stats = {
   period: {
@@ -46,9 +48,16 @@ const stats = {
     ratingsReceivedCount: 0,
   },
   contacts: { unlocked: 3, unlockedPrevious: 1 },
-  series: [],
+  series: [
+    { date: '2026-10-27', applications: 2, hires: 0 },
+    { date: '2026-10-28', applications: 3, hires: 1 },
+  ],
   topOffers: [],
   categories: [],
+  sources: [
+    { source: 'carrieres', received: 5, hired: 1 },
+    { source: 'rabotka', received: 40, hired: 7 },
+  ],
 } as unknown as ReportInput['stats'];
 
 const input = (over: Partial<ReportInput> = {}): ReportInput => ({
@@ -106,6 +115,79 @@ describe('business report', () => {
   it('names the file after the business and the period', () => {
     expect(reportFilename(input())).toBe(
       'rapport-recrutement-zuafood-cie-2026-09-28_2026-10-28.pdf',
+    );
+  });
+});
+
+describe('business report exports', () => {
+  it('lays the PDF sections out as tables, numbers kept raw', () => {
+    const tables = reportTables(input());
+    expect(tables.map((t) => t.name)).toEqual([
+      'Résumé',
+      'Parcours',
+      'Offres',
+      'Par jour',
+      'Sources',
+    ]);
+    const summary = tables[0].rows;
+    expect(summary).toContainEqual(['Candidatures reçues', 45, 12, '']);
+    expect(summary).toContainEqual([
+      'Coût par recrutement',
+      6250,
+      null,
+      'FCFA',
+    ]);
+    expect(tables[1].rows[1]).toEqual(['Examinées', 31, 69]);
+    expect(tables[2].rows).toEqual([['Hôtesse <salon>', 'En ligne', 9, 0, 3]]);
+    expect(tables[4].rows[0]).toEqual(['Page carrières', 5, 1]);
+  });
+
+  it('writes a CSV a French spreadsheet opens as is', () => {
+    const csv = reportCsv(input());
+    expect(csv.startsWith('\uFEFF')).toBe(true);
+    expect(csv).toContain('Indicateur;Valeur;Période précédente;Unité');
+    // Decimal comma, empty cell for « no previous figure ».
+    expect(csv).toContain('Premier candidat après la publication;3,5;;h');
+    expect(csv).toContain(
+      'Par jour\r\nDate;Candidatures;Recrutements\r\n2026-10-27;2;0',
+    );
+  });
+
+  it('quotes a cell holding the separator or a quote', () => {
+    const csv = reportCsv(
+      input({
+        offers: [
+          {
+            title: 'Chef; « le "grand" »',
+            status: 'FILLED',
+            positions: 1,
+            received: 1,
+            hired: 1,
+          },
+        ],
+      }),
+    );
+    expect(csv).toContain('"Chef; « le ""grand"" »";Pourvue;1;1;1');
+  });
+
+  it('builds a workbook with one sheet per section', async () => {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(await reportXlsx(input()));
+    expect(workbook.worksheets.map((w) => w.name)).toEqual([
+      'Résumé',
+      'Parcours',
+      'Offres',
+      'Par jour',
+      'Sources',
+    ]);
+    const offers = workbook.getWorksheet('Offres')!;
+    expect(offers.getRow(4).getCell(1).value).toBe('Offre');
+    expect(offers.getRow(5).getCell(3).value).toBe(9);
+  });
+
+  it('names the files after the period', () => {
+    expect(reportFilename(input(), 'xlsx')).toBe(
+      'rapport-recrutement-zuafood-cie-2026-09-28_2026-10-28.xlsx',
     );
   });
 });

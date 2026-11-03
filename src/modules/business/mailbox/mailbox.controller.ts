@@ -51,7 +51,7 @@ export class MailboxController {
 
   @Post(':provider/connect')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  @ApiOperation({ summary: 'The consent screen to open, for gmail or outlook' })
+  @ApiOperation({ summary: 'The consent screen to open (gmail)' })
   connect(
     @Req() req: ProfileAuthenticatedRequest,
     @Param('provider') provider: string,
@@ -73,7 +73,7 @@ export class MailboxController {
   @Get(':id/mails/:messageId/attachments/:attachmentId')
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
-    summary: 'One attachment, shown inline before it is ticked (PDF or photo)',
+    summary: 'One attachment, shown before it is ticked (PDF, Word or photo)',
   })
   async preview(
     @Req() req: ProfileAuthenticatedRequest,
@@ -111,7 +111,7 @@ export class MailboxController {
   }
 }
 
-/** Where Google and Microsoft send the business back after consenting. */
+/** Where Google sends the business back after consenting. */
 @ApiTags('Public')
 @Controller('public/mailbox')
 export class MailboxCallbackController {

@@ -1,6 +1,6 @@
 /** One attachment of a listed mail, enough to tick it and fetch it later. */
 export type MailAttachment = {
-  /** Gmail: the part id (its attachment ids change on each read); Outlook: the attachment id. */
+  /** Gmail: the part id (its attachment ids change on each read). */
   id: string;
   name: string;
   size: number;
@@ -19,7 +19,7 @@ export type CvMail = {
 
 export type ProviderTokens = {
   access: string;
-  /** Some refreshes hand a new refresh token (Outlook); keep it when they do. */
+  /** Some refreshes hand a new refresh token; keep it when they do. */
   refresh?: string;
   expiresAt: Date;
 };

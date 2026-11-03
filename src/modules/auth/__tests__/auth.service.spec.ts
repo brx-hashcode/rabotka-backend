@@ -77,6 +77,12 @@ describe('AuthService', () => {
       // profile sign-in path.
       profile: { findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}) },
       user: { findUnique: jest.fn(), update: jest.fn() },
+      businessMember: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findUnique: jest.fn().mockResolvedValue(null),
+        findUniqueOrThrow: jest.fn().mockResolvedValue({ joined_at: null }),
+        update: jest.fn().mockResolvedValue({}),
+      },
     };
 
     const mockJwtService = {
@@ -752,6 +758,147 @@ describe('AuthService', () => {
         await expect(
           service.refreshMobileTokens('expired'),
         ).rejects.toThrow(UnauthorizedException);
+      });
+    });
+
+    describe('business space sign-in', () => {
+      const MEMBER_ID = 'member-1';
+      const BUSINESS_PROFILE = 'business-profile-1';
+      const member = {
+        id: MEMBER_ID,
+        name: 'Awa Mbemba',
+        business: { profile_id: BUSINESS_PROFILE },
+      };
+      const tokens = () => {
+        jwtService.sign
+          .mockReturnValueOnce('access-token')
+          .mockReturnValueOnce('refresh-token');
+        (jwtService.decode as jest.Mock).mockReturnValue({
+          exp: Math.floor(Date.now() / 1000) + 86400,
+        });
+      };
+
+      it('sends a team member a business sign-in code, greeted by name', async () => {
+        (prisma.profile.findUnique as jest.Mock).mockResolvedValue(null);
+        (prisma.businessMember.findFirst as jest.Mock).mockResolvedValue(member);
+
+        await service.sendBusinessOtp(' Awa@Entreprise.cg ');
+
+        expect(prisma.businessMember.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              email: 'awa@entreprise.cg',
+              is_owner: false,
+              status: { in: ['INVITED', 'ACTIVE'] },
+            }),
+          }),
+        );
+        expect(mailService.sendMail).toHaveBeenCalledWith(
+          expect.objectContaining({ to: 'awa@entreprise.cg' }),
+        );
+      });
+
+      it('answers an unknown e-mail as today: no such account', async () => {
+        (prisma.profile.findUnique as jest.Mock).mockResolvedValue(null);
+        await expect(service.sendBusinessOtp('x@y.cg')).rejects.toThrow(
+          NotFoundException,
+        );
+        expect(mailService.sendMail).not.toHaveBeenCalled();
+      });
+
+      it("opens a member's session as the business, with the member in both tokens", async () => {
+        redis.eval.mockResolvedValue(1);
+        (prisma.profile.findUnique as jest.Mock)
+          .mockResolvedValueOnce(null) // the e-mail is no profile
+          .mockResolvedValueOnce(mobileProfile); // the business's session user
+        (prisma.businessMember.findFirst as jest.Mock).mockResolvedValue(member);
+        tokens();
+
+        const result = await service.verifyBusinessOtp('awa@entreprise.cg', '123456');
+
+        expect(result.token).toBe('access-token');
+        expect(jwtService.sign).toHaveBeenCalledWith(
+          expect.objectContaining({ sub: BUSINESS_PROFILE, type: 'profile', mid: MEMBER_ID }),
+          expect.any(Object),
+        );
+        expect(jwtService.sign).toHaveBeenCalledWith(
+          expect.objectContaining({ sub: BUSINESS_PROFILE, type: 'refresh', mid: MEMBER_ID }),
+          expect.any(Object),
+        );
+        expect(redis.set).toHaveBeenCalledWith(
+          expect.stringContaining('mobile:refresh:'),
+          `${BUSINESS_PROFILE}|${MEMBER_ID}`,
+          'EX',
+          expect.any(Number),
+        );
+        // The first sign-in accepts the invitation.
+        expect(prisma.businessMember.update).toHaveBeenCalledWith({
+          where: { id: MEMBER_ID },
+          data: expect.objectContaining({ status: 'ACTIVE', joined_at: expect.any(Date) }),
+        });
+      });
+
+      it('signs the account holder in as before, without a member', async () => {
+        redis.eval.mockResolvedValue(1);
+        (prisma.profile.findUnique as jest.Mock)
+          .mockResolvedValueOnce({ ...mockProfile, is_business: true, deleted_at: null })
+          .mockResolvedValueOnce(mobileProfile);
+        tokens();
+
+        await service.verifyBusinessOtp('user@example.com', '123456');
+
+        expect(jwtService.sign).toHaveBeenCalledWith(
+          expect.not.objectContaining({ mid: expect.anything() }),
+          expect.any(Object),
+        );
+        expect(prisma.businessMember.findFirst).not.toHaveBeenCalled();
+      });
+
+      it('keeps the member through a refresh', async () => {
+        jwtService.verify.mockReturnValue({
+          sub: BUSINESS_PROFILE,
+          type: 'refresh',
+          jti: 'r-1',
+          mid: MEMBER_ID,
+        });
+        redis.get.mockResolvedValue(`${BUSINESS_PROFILE}|${MEMBER_ID}`);
+        (prisma.profile.findUnique as jest.Mock)
+          .mockResolvedValueOnce({ id: BUSINESS_PROFILE })
+          .mockResolvedValueOnce(mobileProfile);
+        (prisma.businessMember.findUnique as jest.Mock).mockResolvedValue({
+          status: 'ACTIVE',
+          business: { profile_id: BUSINESS_PROFILE, deleted_at: null },
+        });
+        tokens();
+
+        await service.refreshMobileTokens('old-refresh');
+
+        expect(jwtService.sign).toHaveBeenCalledWith(
+          expect.objectContaining({ type: 'profile', mid: MEMBER_ID }),
+          expect.any(Object),
+        );
+      });
+
+      it('refuses to refresh a member removed since', async () => {
+        jwtService.verify.mockReturnValue({
+          sub: BUSINESS_PROFILE,
+          type: 'refresh',
+          jti: 'r-1',
+          mid: MEMBER_ID,
+        });
+        redis.get.mockResolvedValue(`${BUSINESS_PROFILE}|${MEMBER_ID}`);
+        (prisma.profile.findUnique as jest.Mock).mockResolvedValueOnce({
+          id: BUSINESS_PROFILE,
+        });
+        (prisma.businessMember.findUnique as jest.Mock).mockResolvedValue({
+          status: 'REMOVED',
+          business: { profile_id: BUSINESS_PROFILE, deleted_at: null },
+        });
+
+        await expect(service.refreshMobileTokens('old-refresh')).rejects.toThrow(
+          UnauthorizedException,
+        );
+        expect(jwtService.sign).not.toHaveBeenCalled();
       });
     });
 

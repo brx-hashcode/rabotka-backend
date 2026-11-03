@@ -21,8 +21,9 @@ import {
   reportFilename,
   type ReportInput,
 } from './business-report';
+import { reportCsv, reportXlsx } from './business-report-sheets';
 
-/** Offers listed in the report: the busiest of the period. */
+/** Offers listed in the PDF: the busiest of the period. The exports list them all. */
 const MAX_OFFERS = 30;
 /** A hire who later cancelled or was dropped does not count as recruited. */
 const STAYED_HIRED: ApplicationStatus[] = [
@@ -68,10 +69,26 @@ export class BusinessReportService {
     }
   }
 
+  /** The same period as a workbook: one sheet per section, every offer. */
+  async xlsx(profileId: string, days: StatsPeriod, now = new Date()) {
+    const input = await this.input(profileId, days, now, Infinity);
+    return {
+      buffer: await reportXlsx(input),
+      filename: reportFilename(input, 'xlsx'),
+    };
+  }
+
+  /** The same sections in one CSV, for any other tool. */
+  async csv(profileId: string, days: StatsPeriod, now = new Date()) {
+    const input = await this.input(profileId, days, now, Infinity);
+    return { text: reportCsv(input), filename: reportFilename(input, 'csv') };
+  }
+
   async input(
     profileId: string,
     days: StatsPeriod,
     now = new Date(),
+    maxOffers = MAX_OFFERS,
   ): Promise<ReportInput> {
     const businessId = await this.subscriptions.businessOf(profileId);
     if (!businessId) {
@@ -168,7 +185,7 @@ export class BusinessReportService {
             ).length,
         }))
         .sort((a, b) => b.received - a.received || b.hired - a.hired)
-        .slice(0, MAX_OFFERS),
+        .slice(0, maxOffers),
       interviews: {
         proposed: interviewCount(),
         confirmed: interviewCount(InterviewStatus.CONFIRMED),

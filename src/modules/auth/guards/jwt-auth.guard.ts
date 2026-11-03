@@ -25,6 +25,8 @@ export interface JwtPayload {
    */
   type?: 'profile' | 'admin' | 'agent';
   jti?: string;
+  /** A business team member's id, on a profile token of the business it acts as. */
+  mid?: string;
   iat?: number;
   exp?: number;
 }
@@ -38,6 +40,8 @@ export interface AuthenticatedRequest extends Request {
   user: {
     profileId?: string;
     userId?: string;
+    /** A business team member signed in as the business's profile. */
+    memberId?: string;
     type: 'profile' | 'admin';
   };
   adminAccount?: AdminAccount;
@@ -46,6 +50,8 @@ export interface AuthenticatedRequest extends Request {
 export interface ProfileAuthenticatedRequest extends Request {
   user: {
     profileId: string;
+    /** A business team member signed in as the business's profile. */
+    memberId?: string;
     type: 'profile';
   };
 }
@@ -109,7 +115,10 @@ export class JwtAuthGuard implements CanActivate {
 
       (request as AuthenticatedRequest).user = {
         ...(tokenType === 'profile'
-          ? { profileId: payload.sub }
+          ? {
+              profileId: payload.sub,
+              ...(payload.mid ? { memberId: payload.mid } : {}),
+            }
           : { userId: payload.sub }),
         type: tokenType,
       };

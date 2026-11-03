@@ -12,6 +12,8 @@ import { CareersService } from './careers.service';
 import { CareersPageController } from './careers-page.controller';
 import { CareersPageService } from './careers-page.service';
 import { FileModule } from '../../file/file.module';
+import { LogModule } from '../../log/log.module';
+import { AdminExternalApplicationsController } from './admin-external-applications.controller';
 
 /** A business's public careers page, and who applied from it. */
 @Module({
@@ -23,12 +25,16 @@ import { FileModule } from '../../file/file.module';
     CvScreeningModule,
     BusinessSubscriptionModule,
     FileModule,
+    LogModule,
   ],
   controllers: [
     CareersController,
     ExternalApplicationsController,
     CareersPageController,
+    AdminExternalApplicationsController,
   ],
   providers: [CareersService, CareersPageService],
+  // For rabotka-admin's view of a business (AdminBusinessService).
+  exports: [CareersPageService],
 })
 export class CareersModule {}

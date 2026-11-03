@@ -388,6 +388,7 @@ export class CareersService {
       input: {
         type: 'NEW_APPLICATION',
         applicationId: id,
+        jobOfferId: offer.id,
         jobTitle: offer.title,
         workerName: name,
       },
@@ -403,7 +404,8 @@ export class CareersService {
       newExternalApplicationEmail(
         name,
         offer.title,
-        `${businessDashboardUrl()}/candidatures`,
+        // The offer, where its candidates are, rather than every candidature.
+        `${businessDashboardUrl()}/offres/${offer.id}`,
       ),
     );
     // Scored at once, on the plan's « CV inclus ». The candidate is not kept
@@ -560,6 +562,118 @@ export class CareersService {
       chunks.push(Buffer.from(chunk));
     }
     return Buffer.concat(chunks);
+  }
+
+  // ── Admin (rabotka-admin) ────────────────────────────────────────────
+
+  /**
+   * Every careers-page application, across businesses, for admin: newest
+   * first, by offer, business, status or a search on the candidate.
+   */
+  async listForAdmin(params: {
+    page: number;
+    limit: number;
+    q?: string;
+    status?: ExternalApplicationStatus[];
+    jobOfferId?: string;
+    employerId?: string;
+  }) {
+    const q = params.q?.trim();
+    const where: Prisma.ExternalApplicationWhereInput = {
+      ...(params.status?.length ? { status: { in: params.status } } : {}),
+      ...(params.jobOfferId ? { job_offer_id: params.jobOfferId } : {}),
+      ...(params.employerId
+        ? { job_offer: { employer_id: params.employerId } }
+        : {}),
+      ...(q
+        ? {
+            OR: [
+              { first_name: { contains: q, mode: 'insensitive' } },
+              { last_name: { contains: q, mode: 'insensitive' } },
+              { email: { contains: q, mode: 'insensitive' } },
+              { phone: { contains: q } },
+              { job_offer: { title: { contains: q, mode: 'insensitive' } } },
+            ],
+          }
+        : {}),
+    };
+    const [rows, total] = await Promise.all([
+      this.prisma.externalApplication.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip: (params.page - 1) * params.limit,
+        take: params.limit,
+        include: {
+          job_offer: {
+            select: {
+              id: true,
+              title: true,
+              employer_id: true,
+              employer: { select: { business: { select: { name: true } } } },
+            },
+          },
+          cv_resume: { select: { score: true } },
+        },
+      }),
+      this.prisma.externalApplication.count({ where }),
+    ]);
+    return {
+      data: rows.map((a) => ({
+        id: a.id,
+        firstName: a.first_name,
+        lastName: a.last_name,
+        email: a.email,
+        phone: a.phone,
+        status: a.status,
+        source: a.source,
+        knockedOut: a.knocked_out,
+        answers: (Array.isArray(a.answers)
+          ? (a.answers as {
+              label: string;
+              kind: OfferQuestionKind;
+              value: string;
+            }[])
+          : []
+        ).map((x) => ({ label: x.label, value: answerText(x) })),
+        hasCv: a.cv_storage_key !== null,
+        // So admin's viewer knows how to draw it (PDF, Word, photo).
+        cvMimeType: a.cv_mime_type,
+        score: a.cv_resume?.score ?? null,
+        createdAt: a.created_at.toISOString(),
+        viewedAt: a.viewed_at?.toISOString() ?? null,
+        retainedAt: a.retained_at?.toISOString() ?? null,
+        refusedAt: a.refused_at?.toISOString() ?? null,
+        offer: { id: a.job_offer.id, title: a.job_offer.title },
+        business: {
+          profileId: a.job_offer.employer_id,
+          name: a.job_offer.employer.business?.name ?? null,
+        },
+      })),
+      total,
+      page: params.page,
+      limit: params.limit,
+    };
+  }
+
+  /** The CV for admin: the business's « vue » is left as it was. */
+  async cvFileForAdmin(id: string) {
+    const application = await this.prisma.externalApplication.findUnique({
+      where: { id },
+    });
+    if (!application) throw new NotFoundException('Application not found.');
+    if (!application.cv_storage_key) {
+      throw new NotFoundException(
+        'This CV was deleted at the end of its retention.',
+      );
+    }
+    const downloaded = await this.storage.download(application.cv_storage_key, {
+      bucket: application.cv_storage_bucket ?? undefined,
+    });
+    return {
+      ...downloaded,
+      contentType: application.cv_mime_type,
+      filename: `cv-${application.id.slice(0, 8)}.${CV_EXTENSION[application.cv_mime_type as CvFileType] ?? 'bin'}`,
+    };
   }
 
   async cvFile(profileId: string, id: string) {

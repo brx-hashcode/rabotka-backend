@@ -663,6 +663,8 @@ model User {
   @@index([email], name: "idx_user_email")
   @@index([role], name: "idx_user_role")
   @@index([deleted_at], name: "idx_user_deleted_at")
+  business_notes AdminBusinessNote[]
+
   @@map("users")
   payouts_requested MobileMoneyPayout[] @relation("PayoutRequestedBy")
 }
@@ -1461,6 +1463,8 @@ model Application {
   /// conversations became one per pair: the key is the pair, not this row.
   conversations          ProfileConversation[]
   interviews             Interview[]
+  team_notes             CandidateNote[]
+  team_opinions          CandidateOpinion[]
   deleted_at             DateTime?             @db.Timestamptz
 
   /// NOT unique any more. Uniqueness is enforced by a PARTIAL index created in
@@ -3434,6 +3438,11 @@ model Business {
   cv_screenings CvScreening[]
   interviews    Interview[]
   mailboxes     BusinessMailbox[]
+  members       BusinessMember[]
+  activities    BusinessActivity[]
+  candidate_notes    CandidateNote[]
+  candidate_opinions CandidateOpinion[]
+  admin_notes        AdminBusinessNote[]
 
   @@index([verification_status], name: "idx_business_verification_status")
   @@index([category], name: "idx_business_category")
@@ -3511,6 +3520,10 @@ model BusinessPlan {
   cv_chat_questions     Int      @default(20)
   /// Offers the AI writes per period (« Rédiger avec l'IA »). Null: unlimited; 0: not included.
   offer_drafts_per_period Int?   @default(20)
+  /// Recruteurs a business may invite (the account holder is its only administrator). Null: unlimited; 0: none.
+  recruiters_limit      Int?     @default(0)
+  /// Évaluateurs a business may invite. Null: unlimited; 0: none.
+  reviewers_limit       Int?     @default(0)
   is_active             Boolean  @default(true)
   sort_order            Int      @default(0)
   /// Deleted by an admin: hidden everywhere, kept for the periods and payments that point to it.
@@ -3541,6 +3554,11 @@ model BusinessSubscription {
   offer_drafts_used   Int                        @default(0)
   /// Offers published (or republished) during this period.
   offers_published    Int                        @default(0)
+  /// Recruiters / evaluators added to the team during this period (an
+  /// invitation, or a member moved to the role). Counted from 0 each period:
+  /// the people already in the team stay.
+  recruiters_added    Int                        @default(0)
+  reviewers_added     Int                        @default(0)
   payment_request_id  String?                    @unique @db.Uuid
   /// The admin who granted or cancelled it by hand.
   granted_by          String?                    @db.Uuid
@@ -3817,7 +3835,6 @@ model ApplicationAssessment {
 /// A mail service a business reads candidates' CVs from.
 enum MailProvider {
   GMAIL
-  OUTLOOK
 }
 
 /// A mailbox a business connected (OAuth) to pick CVs from its e-mails for
@@ -3844,6 +3861,149 @@ model BusinessMailbox {
 
   @@unique([business_id, provider, email])
   @@map("business_mailboxes")
+}
+
+/// Rabotka's own follow-up notes on a business (rabotka-admin only, never
+/// shown to the business): calls, promises, context for the next person.
+model AdminBusinessNote {
+  id          String    @id @default(uuid()) @db.Uuid
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
+  business_id String    @db.Uuid
+  author_id   String    @db.Uuid
+  body        String    @db.Text
+  deleted_at  DateTime?
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  author   User     @relation(fields: [author_id], references: [id], onDelete: Cascade)
+
+  @@index([business_id, created_at], name: "idx_admin_business_note_business_created")
+  @@map("admin_business_notes")
+}
+
+/// What a member may do in the business space. ADMIN is the account holder
+/// only: a business has one administrator, and invites Recruteurs and
+/// Évaluateurs, each up to its plan's limit.
+enum BusinessMemberRole {
+  /// Everything, including the plan, invoices, the organisation and the team.
+  ADMIN
+  /// Offers, candidates, interviews, messages, missions.
+  RECRUITER
+  /// Reads candidates and leaves notes and opinions.
+  REVIEWER
+}
+
+enum BusinessMemberStatus {
+  /// Invited, has not signed in yet.
+  INVITED
+  ACTIVE
+  /// Removed by an administrator: its sessions are refused on their next call.
+  REMOVED
+}
+
+/// A person of the organisation who signs in to the business space. Not a
+/// Profile: once signed in, a member acts as the business's profile (its
+/// session carries `mid`), so offers, candidates and messages stay the
+/// business's. The account holder has a row too (`is_owner`), for authorship
+/// and their e-mail switch.
+model BusinessMember {
+  id                   String               @id @default(uuid()) @db.Uuid
+  created_at           DateTime             @default(now())
+  updated_at           DateTime             @updatedAt
+  business_id          String               @db.Uuid
+  /// Lower-cased. The holder's row follows its profile's e-mail.
+  email                String
+  name                 String
+  role                 BusinessMemberRole
+  status               BusinessMemberStatus @default(INVITED)
+  is_owner             Boolean              @default(false)
+  /// Receives the business's e-mails (new candidates, replies, expiring offers…).
+  emails_on            Boolean              @default(true)
+  invited_by_member_id String?              @db.Uuid
+  invited_at           DateTime?
+  joined_at            DateTime?
+  last_seen_at         DateTime?
+  removed_at           DateTime?
+  /// The period whose place this member took (invitation or role change):
+  /// an invitation cancelled before it is accepted gives it back.
+  seat_subscription_id String?              @db.Uuid
+
+  business   Business           @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  activities BusinessActivity[]
+  notes      CandidateNote[]
+  opinions   CandidateOpinion[]
+
+  @@unique([business_id, email])
+  @@index([email, status], name: "idx_business_member_email_status")
+  @@map("business_members")
+}
+
+/// Who did what in the business space: one row per successful change.
+model BusinessActivity {
+  id          String   @id @default(uuid()) @db.Uuid
+  created_at  DateTime @default(now())
+  business_id String   @db.Uuid
+  member_id   String?  @db.Uuid
+  /// `METHOD /route/:pattern`, as the API matched it: stable, labelled by the app.
+  action      String
+  /// The first id in the route (the offer, the application…), when there is one.
+  target_id   String?
+
+  business Business        @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  member   BusinessMember? @relation(fields: [member_id], references: [id], onDelete: SetNull)
+
+  @@index([business_id, created_at], name: "idx_business_activity_business_created")
+  @@map("business_activities")
+}
+
+enum CandidateOpinionVerdict {
+  YES
+  MAYBE
+  NO
+}
+
+/// A team member's private note on an application, never shown to the
+/// candidate. Exactly one of the two applications is set.
+model CandidateNote {
+  id                      String    @id @default(uuid()) @db.Uuid
+  created_at              DateTime  @default(now())
+  updated_at              DateTime  @updatedAt
+  business_id             String    @db.Uuid
+  member_id               String    @db.Uuid
+  application_id          String?   @db.Uuid
+  external_application_id String?   @db.Uuid
+  body                    String    @db.Text
+  deleted_at              DateTime?
+
+  business             Business             @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  member               BusinessMember       @relation(fields: [member_id], references: [id], onDelete: Cascade)
+  application          Application?         @relation(fields: [application_id], references: [id], onDelete: Cascade)
+  external_application ExternalApplication? @relation(fields: [external_application_id], references: [id], onDelete: Cascade)
+
+  @@index([application_id], name: "idx_candidate_note_application")
+  @@index([external_application_id], name: "idx_candidate_note_external")
+  @@map("candidate_notes")
+}
+
+/// A team member's Oui / Peut-être / Non on an application: one per member.
+model CandidateOpinion {
+  id                      String                  @id @default(uuid()) @db.Uuid
+  created_at              DateTime                @default(now())
+  updated_at              DateTime                @updatedAt
+  business_id             String                  @db.Uuid
+  member_id               String                  @db.Uuid
+  application_id          String?                 @db.Uuid
+  external_application_id String?                 @db.Uuid
+  verdict                 CandidateOpinionVerdict
+
+  business             Business             @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  member               BusinessMember       @relation(fields: [member_id], references: [id], onDelete: Cascade)
+  application          Application?         @relation(fields: [application_id], references: [id], onDelete: Cascade)
+  external_application ExternalApplication? @relation(fields: [external_application_id], references: [id], onDelete: Cascade)
+
+  @@unique([member_id, application_id])
+  @@unique([member_id, external_application_id])
+  @@map("candidate_opinions")
 }
 
 enum ExternalApplicationStatus {
@@ -3889,6 +4049,8 @@ model ExternalApplication {
 
   job_offer JobOffer @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
   cv_resume CvScreeningResume? @relation(fields: [cv_resume_id], references: [id], onDelete: SetNull)
+  team_notes    CandidateNote[]
+  team_opinions CandidateOpinion[]
 
   @@unique([job_offer_id, email])
   @@index([created_at], name: "idx_external_application_created")

@@ -130,6 +130,7 @@ import {
   BUSINESS_VERIFIED_EVENT,
   type BusinessVerifiedPayload,
 } from '../business/subscription/subscription.events';
+import type { AdminProfileKind } from './dto/admin-list-profiles.dto';
 
 const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
   [ProfileType.WORKER]: 'Travailleur',
@@ -1759,7 +1760,7 @@ export class ProfileService {
     limit: number;
     q?: string;
     status?: AccountStatus[];
-    profileType?: ProfileType[];
+    profileType?: AdminProfileKind[];
     whatsappConnected?: boolean;
     verificationStatus?: VerificationStatus[];
     deleted?: boolean;
@@ -1776,7 +1777,7 @@ export class ProfileService {
     limit: number;
     q?: string;
     status?: AccountStatus[];
-    profileType?: ProfileType[];
+    profileType?: AdminProfileKind[];
     whatsappConnected?: boolean;
     verificationStatus?: VerificationStatus[];
     deleted?: boolean;
@@ -1841,7 +1842,23 @@ export class ProfileService {
       where.status = { in: status };
     }
     if (profileType != null && profileType.length > 0) {
-      where.profile_type = { in: profileType };
+      // Business vs individual employer is `is_business`, not the type.
+      const kinds: Prisma.ProfileWhereInput[] = profileType.map((k) =>
+        k === 'BUSINESS'
+          ? { is_business: true }
+          : k === 'EMPLOYER'
+            ? { profile_type: ProfileType.EMPLOYER, is_business: false }
+            : { profile_type: ProfileType.WORKER },
+      );
+      // Its own AND: `where.OR` already holds the text search.
+      where.AND = [
+        ...(Array.isArray(where.AND)
+          ? where.AND
+          : where.AND
+            ? [where.AND]
+            : []),
+        { OR: kinds },
+      ];
     }
     if (whatsappConnected !== undefined) {
       where.whatsapp_connected = whatsappConnected;

@@ -16,22 +16,20 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { businessDashboardUrl } from '../../mail/audience';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
 import type { CvUpload } from '../cv-screening/cv-screening.service';
-import { cvFileType, DOCX_MIME } from '../cv-screening/cv-files';
+import { cvFileType } from '../cv-screening/cv-files';
 import { MAX_MAIL_ATTACHMENTS } from './cv-attachments';
 import { MailboxCrypto } from './mailbox-crypto';
 import { GmailProvider } from './providers/gmail.provider';
-import { OutlookProvider } from './providers/outlook.provider';
 import {
   MailboxAuthError,
   type MailProviderClient,
 } from './providers/mail-provider';
 
-/** How a provider is named in urls: `gmail`, `outlook`. */
-export type ProviderSlug = 'gmail' | 'outlook';
+/** How a provider is named in urls: `gmail`. */
+export type ProviderSlug = 'gmail';
 
 export const PROVIDER_OF: Record<ProviderSlug, MailProvider> = {
   gmail: MailProvider.GMAIL,
-  outlook: MailProvider.OUTLOOK,
 };
 
 /** One CV ticked in a mail, to read into an analysis. */
@@ -79,10 +77,6 @@ export class MailboxService {
         config.get<string>('GOOGLE_MAIL_CLIENT_ID'),
         config.get<string>('GOOGLE_MAIL_CLIENT_SECRET'),
       ),
-      OUTLOOK: new OutlookProvider(
-        config.get<string>('MS_MAIL_CLIENT_ID'),
-        config.get<string>('MS_MAIL_CLIENT_SECRET'),
-      ),
     };
   }
 
@@ -109,7 +103,6 @@ export class MailboxService {
     return {
       available: {
         gmail: this.available(MailProvider.GMAIL),
-        outlook: this.available(MailProvider.OUTLOOK),
       },
       mailboxes: rows.map((r) => ({
         id: r.id,
@@ -232,10 +225,12 @@ export class MailboxService {
     if (file.buffer.length > MAX_ATTACHMENT_BYTES) {
       throw new BadRequestException('Fichier trop lourd pour un aperçu.');
     }
+    // PDF, photo or Word, checked on the bytes: the business app draws a
+    // .docx itself, in the page.
     const type = cvFileType(file.buffer, file.mime);
-    if (!type || type === DOCX_MIME) {
+    if (!type) {
       throw new UnsupportedMediaTypeException(
-        'L’aperçu est disponible pour les PDF et les photos.',
+        'L’aperçu est disponible pour les PDF, les fichiers Word et les photos.',
       );
     }
     return { name: file.name, type, buffer: file.buffer };
@@ -374,7 +369,10 @@ export class MailboxService {
 }
 
 export function slugOf(provider: MailProvider): ProviderSlug {
-  return provider === MailProvider.GMAIL ? 'gmail' : 'outlook';
+  switch (provider) {
+    case MailProvider.GMAIL:
+      return 'gmail';
+  }
 }
 
 /** The consent screens come back here, through the business portal's origin. */

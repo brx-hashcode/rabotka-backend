@@ -46,6 +46,11 @@ function make(
     businessPlan: { findUnique: jest.fn().mockResolvedValue(plan()) },
     jobOffer: { count: jest.fn().mockResolvedValue(0), updateMany: jest.fn() },
     paymentRequest: { findUnique: jest.fn() },
+    // No team yet: e-mails go to the account holder.
+    businessMember: {
+      findMany: jest.fn().mockResolvedValue([]),
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
   };
   const systemConfig: any = {
     getBusinessSubscriptionSettings: jest.fn().mockResolvedValue(
@@ -435,6 +440,53 @@ describe('BusinessSubscriptionService', () => {
       await expect(noPlan.service.consumeOfferDraft('b1')).rejects.toThrow(
         /formules supérieures/,
       );
+    });
+  });
+
+  describe('consumeSeat', () => {
+    const message = (limit: number) => `limit ${limit}`;
+
+    it('takes a place of the role on the current period, never past the plan', async () => {
+      const { service, prisma } = make({
+        sub: running({
+          plan: plan({ recruiters_limit: 2, reviewers_limit: 1 }),
+        }),
+      });
+      await expect(
+        service.consumeSeat('b1', 'REVIEWER', message),
+      ).resolves.toEqual({ subscriptionId: 'sub-1' });
+      expect(prisma.businessSubscription.updateMany).toHaveBeenCalledWith({
+        where: { id: 'sub-1', reviewers_added: { lt: 1 } },
+        data: { reviewers_added: { increment: 1 } },
+      });
+
+      prisma.businessSubscription.updateMany.mockResolvedValue({ count: 0 });
+      await expect(
+        service.consumeSeat('b1', 'RECRUITER', message),
+      ).rejects.toThrow('limit 2');
+    });
+
+    it('has no ceiling for an unlimited role', async () => {
+      const { service, prisma } = make({
+        sub: running({ plan: plan({ recruiters_limit: null }) }),
+      });
+      await service.consumeSeat('b1', 'RECRUITER', message);
+      expect(prisma.businessSubscription.updateMany).toHaveBeenCalledWith({
+        where: { id: 'sub-1' },
+        data: { recruiters_added: { increment: 1 } },
+      });
+    });
+
+    it('is refused without a plan or with a plan that has none', async () => {
+      const none = make({
+        sub: running({ plan: plan({ recruiters_limit: 0 }) }),
+      });
+      await expect(
+        none.service.consumeSeat('b1', 'RECRUITER', message),
+      ).rejects.toThrow('limit 0');
+      await expect(
+        make().service.consumeSeat('b1', 'RECRUITER', message),
+      ).rejects.toBeInstanceOf(ForbiddenException);
     });
   });
 

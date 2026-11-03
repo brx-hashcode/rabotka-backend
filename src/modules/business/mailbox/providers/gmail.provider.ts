@@ -19,6 +19,19 @@ const REVOKE = 'https://oauth2.googleapis.com/revoke';
 const API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const PAGE_SIZE = 15;
+/** Gmail pages read for one listing at most, when the first ones hold no CV. */
+const MAX_PAGES_PER_CALL = 4;
+/**
+ * The files a CV comes as. A picture counts only in a mail over 100 KB: the
+ * small ones are signatures and logos, which otherwise fill whole pages
+ * (Gmail's `larger:` is about the whole mail, a scanned CV is bigger).
+ */
+const CV_FILES_QUERY =
+  '{filename:pdf filename:docx' +
+  ['jpg', 'jpeg', 'png', 'webp']
+    .map((e) => ` (filename:${e} larger:100K)`)
+    .join('') +
+  '}';
 
 type Part = {
   partId?: string;
@@ -131,14 +144,30 @@ export class GmailProvider implements MailProviderClient {
     const auth = { headers: { Authorization: `Bearer ${access}` } };
     const q = [
       'has:attachment',
-      '{filename:pdf filename:docx filename:jpg filename:jpeg filename:png filename:webp}',
+      CV_FILES_QUERY,
       `newer_than:${MAIL_WINDOW_DAYS}d`,
       opts.q?.trim() ?? '',
     ]
       .filter(Boolean)
       .join(' ');
+    // A page can still hold no CV (every hit a logo, say): read on, a few
+    // pages at most, rather than hand back an empty page while CVs remain.
+    let page = opts.page;
+    for (let round = 1; ; round++) {
+      const r = await this.cvMailsPage(auth, q, page);
+      if (r.mails.length > 0 || !r.next || round >= MAX_PAGES_PER_CALL)
+        return r;
+      page = r.next;
+    }
+  }
+
+  private async cvMailsPage(
+    auth: { headers: Record<string, string> },
+    q: string,
+    page: string | undefined,
+  ): Promise<{ mails: CvMail[]; next: string | null }> {
     const params = new URLSearchParams({ q, maxResults: String(PAGE_SIZE) });
-    if (opts.page) params.set('pageToken', opts.page);
+    if (page) params.set('pageToken', page);
     const list = await fetchJson<{
       messages?: { id: string }[];
       nextPageToken?: string;
