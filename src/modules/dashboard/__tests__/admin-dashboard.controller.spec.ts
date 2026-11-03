@@ -7,6 +7,7 @@ function makeService() {
     getJobActivity: jest
       .fn()
       .mockResolvedValue([{ date: '2026-01-01', created: 5, filled: 2 }]),
+    refresh: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -23,6 +24,13 @@ describe('AdminDashboardController', () => {
     const result = await controller.getMetrics();
     expect(service.getMetrics).toHaveBeenCalled();
     expect(result).toEqual({ totalProfiles: 10 });
+  });
+
+  it('refresh() clears the cached figures through the service', async () => {
+    await expect(controller.refresh()).resolves.toEqual({
+      refreshedAt: expect.any(String),
+    });
+    expect(service.refresh).toHaveBeenCalledTimes(1);
   });
 
   it('getJobActivity() uses provided range', async () => {

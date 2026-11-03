@@ -152,4 +152,29 @@ describe('AdminCacheService', () => {
       expect(redis.del).not.toHaveBeenCalled();
     });
   });
+
+  describe('invalidateAll()', () => {
+    it('clears every admin list and every dashboard aggregate', async () => {
+      redis.scan
+        .mockResolvedValueOnce(['0', ['l1']])
+        .mockResolvedValueOnce(['0', ['d1', 'd2']]);
+
+      await service.invalidateAll();
+
+      const patterns = redis.scan.mock.calls.map((c: unknown[]) => c[2]);
+      expect(patterns).toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(/admin:list:\*$/),
+          expect.stringMatching(/admin:dashboard:\*$/),
+        ]),
+      );
+      expect(redis.del).toHaveBeenCalledWith('l1');
+      expect(redis.del).toHaveBeenCalledWith('d1', 'd2');
+    });
+
+    it('does not throw when Redis is unavailable', async () => {
+      redis.scan.mockRejectedValue(new Error('redis down'));
+      await expect(service.invalidateAll()).resolves.toBeUndefined();
+    });
+  });
 });

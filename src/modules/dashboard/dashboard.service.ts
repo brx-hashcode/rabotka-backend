@@ -75,6 +75,11 @@ export class DashboardService {
     );
   }
 
+  /** Forget every cached admin figure; the next reads come from the database. */
+  async refresh(): Promise<void> {
+    await this.cache.invalidateAll();
+  }
+
   /** Distinct paid employer↔worker pairs, optionally within a window. */
   private async countConnections(where?: {
     since?: Date;
