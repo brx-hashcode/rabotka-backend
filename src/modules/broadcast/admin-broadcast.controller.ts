@@ -123,6 +123,7 @@ export class AdminBroadcastController {
       page: dto.page ?? 1,
       limit: dto.limit ?? 50,
       ...(dto.channel ? { channel: dto.channel } : {}),
+      ...(dto.status ? { status: dto.status } : {}),
     });
   }
 

@@ -348,11 +348,17 @@ export class BroadcastService {
 
   async listRecipients(
     id: string,
-    params: { page: number; limit: number; channel?: DeliveryChannel },
+    params: {
+      page: number;
+      limit: number;
+      channel?: DeliveryChannel;
+      status?: BroadcastRecipientStatus;
+    },
   ) {
     const where: Prisma.BroadcastRecipientWhereInput = {
       broadcast_id: id,
       ...(params.channel ? { channel: params.channel } : {}),
+      ...(params.status ? { status: params.status } : {}),
     };
 
     const [data, total] = await Promise.all([
@@ -365,6 +371,8 @@ export class BroadcastService {
               first_name: true,
               last_name: true,
               phone: true,
+              email: true,
+              avatar_url: true,
             },
           },
         },
