@@ -1,5 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
-import { BroadcastStatus, DeliveryChannel } from '@prisma/client';
+import {
+  BroadcastRecipientStatus,
+  BroadcastStatus,
+  DeliveryChannel,
+} from '@prisma/client';
 import {
   BroadcastService,
   MAX_RECIPIENTS,
@@ -139,7 +143,22 @@ describe('BroadcastService', () => {
           if (take === 5) return Promise.resolve([]);
           snapshotPage += 1;
           return Promise.resolve(
-            snapshotPage === 1 ? [{ id: 'p1' }, { id: 'p2' }] : [],
+            snapshotPage === 1
+              ? [
+                  {
+                    id: 'p1',
+                    email: 'a@b.com',
+                    whatsapp_connected: true,
+                    is_business: false,
+                  },
+                  {
+                    id: 'p2',
+                    email: 'a@b.com',
+                    whatsapp_connected: true,
+                    is_business: false,
+                  },
+                ]
+              : [],
           );
         },
       );
@@ -153,6 +172,47 @@ describe('BroadcastService', () => {
       expect(data).toHaveLength(4);
       expect(result.recipientCount).toBe(4);
       expect(deps.queue.addJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('writes no row on a channel the profile cannot be reached on', async () => {
+      deps.prisma.broadcast.findUnique.mockResolvedValue(draft());
+      deps.prisma.profile.count.mockResolvedValue(2);
+      let snapshotPage = 0;
+      deps.prisma.profile.findMany.mockImplementation(
+        ({ take }: { take: number }) => {
+          if (take === 5) return Promise.resolve([]);
+          snapshotPage += 1;
+          return Promise.resolve(
+            snapshotPage === 1
+              ? [
+                  {
+                    id: 'p1',
+                    email: 'a@b.com',
+                    whatsapp_connected: true,
+                    is_business: false,
+                  },
+                  {
+                    id: 'p2',
+                    email: null,
+                    whatsapp_connected: false,
+                    is_business: false,
+                  },
+                ]
+              : [],
+          );
+        },
+      );
+      deps.prisma.broadcastRecipient.createMany.mockResolvedValue({ count: 3 });
+
+      await service.send(BROADCAST_ID);
+
+      const [{ data }] = deps.prisma.broadcastRecipient.createMany.mock
+        .calls[0] as [{ data: { profile_id: string; channel: string }[] }];
+      // p1 on both channels; p2 in-app only.
+      expect(data).toHaveLength(3);
+      expect(data.filter((r) => r.profile_id === 'p2')).toEqual([
+        expect.objectContaining({ channel: 'IN_APP' }),
+      ]);
     });
 
     it('prices only the billable half of the WhatsApp leg', async () => {
@@ -355,6 +415,69 @@ describe('BroadcastService', () => {
       // the retry silently dropped as a duplicate.
       expect(opts.jobId).not.toBe(`broadcast-${BROADCAST_ID}`);
       expect(opts.jobId).toContain(BROADCAST_ID);
+    });
+  });
+
+  describe('summary', () => {
+    it('counts broadcasts by status and sums what went out', async () => {
+      (deps.prisma.broadcast as Record<string, jest.Mock>).groupBy = jest
+        .fn()
+        .mockResolvedValue([
+          { status: BroadcastStatus.SENT, _count: { _all: 3 } },
+          { status: BroadcastStatus.SCHEDULED, _count: { _all: 1 } },
+        ]);
+      (deps.prisma.broadcast as Record<string, jest.Mock>).aggregate = jest
+        .fn()
+        .mockResolvedValue({
+          _sum: {
+            recipient_count: 130,
+            sent_count: 126,
+            failed_count: 4,
+            read_count: 20,
+          },
+        });
+      (deps.prisma.broadcastRecipient as Record<string, jest.Mock>).count = jest
+        .fn()
+        .mockResolvedValue(80);
+      (deps.prisma.broadcast as Record<string, jest.Mock>).findFirst = jest
+        .fn()
+        .mockResolvedValue({ sent_at: new Date('2026-10-30T10:00:00Z') });
+
+      const summary = await service.summary();
+
+      expect(summary.byStatus.SENT).toBe(3);
+      expect(summary.byStatus.SCHEDULED).toBe(1);
+      expect(summary.byStatus.DRAFT).toBe(0);
+      expect(summary).toMatchObject({
+        recipients: 130,
+        delivered: 126,
+        failed: 4,
+        inAppDelivered: 80,
+        read: 20,
+        lastSentAt: '2026-10-30T10:00:00.000Z',
+      });
+    });
+  });
+
+  describe('listRecipients', () => {
+    it('narrows to one channel and one outcome', async () => {
+      await service.listRecipients(BROADCAST_ID, {
+        page: 2,
+        limit: 20,
+        channel: DeliveryChannel.EMAIL,
+        status: BroadcastRecipientStatus.FAILED,
+      });
+
+      const [arg] = deps.prisma.broadcastRecipient.findMany.mock.calls[0] as [
+        { where: Record<string, unknown>; skip: number; take: number },
+      ];
+      expect(arg.where).toEqual({
+        broadcast_id: BROADCAST_ID,
+        channel: DeliveryChannel.EMAIL,
+        status: BroadcastRecipientStatus.FAILED,
+      });
+      expect(arg.skip).toBe(20);
+      expect(arg.take).toBe(20);
     });
   });
 });

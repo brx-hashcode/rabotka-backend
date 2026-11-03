@@ -3419,7 +3419,8 @@ model Business {
   tax_id              String?
   /// SCIEN / SCIET (CNSEE).
   statistical_id      String?
-  address             String
+  /// Null for an organisation that works online only; the country is required.
+  address             String?
   country_code        String?            @db.VarChar(2)
   city                String?
   email               String?

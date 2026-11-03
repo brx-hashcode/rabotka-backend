@@ -17,6 +17,7 @@ import { flattenForTemplateVariable } from '../../common/utils/whatsapp-template
 import { broadcastEmail } from '../mail/templates/broadcast';
 import { audienceOf, productOf } from '../mail/audience';
 import { CHUNK_SIZE } from './broadcast.service';
+import { isReachable } from './audience';
 import type { BroadcastJobData } from './broadcast.types';
 
 /**
@@ -136,7 +137,18 @@ export class BroadcastProcessor {
       await this.settle(r.id, GONE_SINCE_SCHEDULING);
     }
     const goneIds = new Set(gone.map((r) => r.id));
-    const live = recipients.filter((r) => !goneIds.has(r.id));
+
+    // Unreachable on its channel since the snapshot (address removed, WhatsApp
+    // disconnected, now a business): not a failure, nothing to send it to.
+    // The row leaves the broadcast, as if it had never been in it.
+    const unreachable = recipients.filter(
+      (r) => !goneIds.has(r.id) && !isReachable(r.profile, r.channel),
+    );
+    for (const r of unreachable) {
+      await this.skip(r.id, broadcastId);
+    }
+    const skipped = new Set([...goneIds, ...unreachable.map((r) => r.id)]);
+    const live = recipients.filter((r) => !skipped.has(r.id));
 
     // In-app first, and in one insert: it is free, it never fails for a missing
     // phone or address, and it is the record the other channels point back to.
@@ -360,6 +372,15 @@ export class BroadcastProcessor {
       // The reason is a nicety; the failure itself is already recorded.
       return 'Non délivré';
     }
+  }
+
+  /** Drop a row nobody can be reached on: out of the list and the total. */
+  private async skip(recipientId: string, broadcastId: string) {
+    await this.prisma.broadcastRecipient.delete({ where: { id: recipientId } });
+    await this.prisma.broadcast.update({
+      where: { id: broadcastId },
+      data: { recipient_count: { decrement: 1 } },
+    });
   }
 
   /** Record one recipient's outcome and move the broadcast's counters. */

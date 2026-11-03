@@ -62,32 +62,36 @@ describe('signupEntryFor', () => {
 });
 
 describe('assertBusinessSignupComplete', () => {
-  it('accepts a PME with its RCCM and NIU', () => {
+  it('accepts an organisation with no document and no address', () => {
     expect(() =>
-      assertBusinessSignupComplete({
-        category: 'PME',
-        legalForm: 'SARL',
-        documents: [{ documentType: 'RCCM' }, { documentType: 'NIU' }],
-      }),
+      assertBusinessSignupComplete({ category: 'ASSOCIATION' }, 'CD'),
     ).not.toThrow();
-  });
-
-  it('names the missing document', () => {
     expect(() =>
-      assertBusinessSignupComplete({
-        category: 'PME',
-        documents: [{ documentType: 'RCCM' }],
-      }),
-    ).toThrow(/NIU/);
+      assertBusinessSignupComplete(
+        { category: 'PME', legalForm: 'SARL' },
+        'cg',
+      ),
+    ).not.toThrow();
   });
 
   it('refuses a legal form that does not fit', () => {
     expect(() =>
-      assertBusinessSignupComplete({
-        category: 'PME',
-        legalForm: 'PUBLIC_ENTITY',
-        documents: [{ documentType: 'RCCM' }, { documentType: 'NIU' }],
-      }),
+      assertBusinessSignupComplete(
+        { category: 'PME', legalForm: 'PUBLIC_ENTITY' },
+        'CG',
+      ),
     ).toThrow(BadRequestException);
+  });
+
+  it('needs a country, even online, and one Rabotka Business is open in', () => {
+    expect(() =>
+      assertBusinessSignupComplete({ category: 'STARTUP' }, undefined),
+    ).toThrow(/Choisissez le pays/);
+    expect(() =>
+      assertBusinessSignupComplete({ category: 'STARTUP' }, ' '),
+    ).toThrow(/Choisissez le pays/);
+    expect(() =>
+      assertBusinessSignupComplete({ category: 'STARTUP' }, 'NG'),
+    ).toThrow(/disponible au Congo-Brazzaville/);
   });
 });

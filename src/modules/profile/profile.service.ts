@@ -111,13 +111,17 @@ import {
   type SessionEndedEvent,
 } from '../../common/events/session-ended.events';
 import { assertBusinessIsEmployer } from '../business/business-rules';
-import { assertBusinessSignupComplete } from '../business/business-signup';
 import {
+  assertBusinessCountry,
+  assertBusinessSignupComplete,
+} from '../business/business-signup';
+import {
+  acceptedDocuments,
   BUSINESS_CATEGORY_LABELS,
-  BUSINESS_DOCUMENT_LABELS,
   BUSINESS_LEGAL_FORM_LABELS,
-  DOCUMENTS_BY_CATEGORY,
-  missingRequiredDocuments,
+  documentLabel,
+  documentsFor,
+  missingRecommendedDocuments,
 } from '../business/business-catalog';
 import type { SignupIdentity } from '../auth/signup-token';
 import {
@@ -392,7 +396,7 @@ export type AdminBusinessDetail = {
   registrationNumber: string | null;
   taxId: string | null;
   statisticalId: string | null;
-  address: string;
+  address: string | null;
   countryCode: string | null;
   /** The country's name, from the same list as the public geo API. */
   countryName: string | null;
@@ -423,7 +427,13 @@ export type AdminBusinessDetail = {
     /** What was sent before, newest first — kept for the reviewer. */
     previousVersions: BusinessDocumentView[];
   })[];
-  /** « One of » groups the type must provide, and those not yet covered. */
+  /** The papers recommended for its country and type, and those not sent. */
+  recommendedDocuments: { type: BusinessDocumentType; label: string }[];
+  missingRecommended: { type: BusinessDocumentType; label: string }[];
+  /**
+   * The same, as one-paper groups, for the admin released before every paper
+   * became optional.
+   */
   requiredDocuments: { type: BusinessDocumentType; label: string }[][];
   missingDocuments: { type: BusinessDocumentType; label: string }[][];
 };
@@ -474,11 +484,14 @@ type BusinessDocumentRow = {
   replaces_id: string | null;
 };
 
-function documentView(d: BusinessDocumentRow): BusinessDocumentView {
+function documentView(
+  d: BusinessDocumentRow,
+  country: string | null,
+): BusinessDocumentView {
   return {
     id: d.id,
     documentType: d.document_type,
-    label: BUSINESS_DOCUMENT_LABELS[d.document_type],
+    label: documentLabel(country, d.document_type),
     fileName: d.file_name,
     mimeType: d.mime_type,
     verificationStatus: d.verification_status,
@@ -2285,7 +2298,20 @@ export class ProfileService {
     if (!business) {
       throw new NotFoundException("Ce profil n'a pas d'organisation.");
     }
-    const requirement = DOCUMENTS_BY_CATEGORY[business.category];
+    const country = business.country_code;
+    const view = (d: BusinessDocumentRow) => documentView(d, country);
+    const named = (t: BusinessDocumentType) => ({
+      type: t,
+      label: documentLabel(country, t),
+    });
+    const recommended = documentsFor(country, business.category).recommended;
+    const missing = missingRecommendedDocuments(
+      country,
+      business.category,
+      business.documents
+        .filter((d) => !d.superseded_at)
+        .map((d) => d.document_type),
+    );
     const current = business.documents.filter((d) => !d.superseded_at);
     const byId = new Map(business.documents.map((d) => [d.id, d]));
     return {
@@ -2334,19 +2360,14 @@ export class ProfileService {
             (b.previous.at(-1) ?? b.doc).created_at.getTime(),
         )
         .map(({ doc, previous }) => ({
-          ...documentView(doc),
+          ...view(doc),
           resubmitted: doc.replaces_id !== null,
-          previousVersions: previous.map(documentView),
+          previousVersions: previous.map(view),
         })),
-      requiredDocuments: requirement.required.map((group) =>
-        group.map((t) => ({ type: t, label: BUSINESS_DOCUMENT_LABELS[t] })),
-      ),
-      missingDocuments: missingRequiredDocuments(
-        business.category,
-        current.map((d) => d.document_type),
-      ).map((group) =>
-        group.map((t) => ({ type: t, label: BUSINESS_DOCUMENT_LABELS[t] })),
-      ),
+      recommendedDocuments: recommended.map(named),
+      missingRecommended: missing.map(named),
+      requiredDocuments: recommended.map((t) => [named(t)]),
+      missingDocuments: missing.map((t) => [named(t)]),
     };
   }
 
@@ -2539,6 +2560,7 @@ export class ProfileService {
       changed.length > 0 &&
       business.verification_status !== VerificationStatus.PENDING;
 
+    if (dto.countryCode !== undefined) assertBusinessCountry(dto.countryCode);
     const location =
       dto.countryCode !== undefined || dto.city !== undefined
         ? this.geo.resolveLocation({
@@ -2605,9 +2627,8 @@ export class ProfileService {
         'Votre organisation est vérifiée : ses documents ne se modifient plus. Pour en ajouter un, faites une demande à l’équipe Rabotka depuis Aide.',
       );
     }
-    const accepted = DOCUMENTS_BY_CATEGORY[business.category];
     if (
-      ![...accepted.required.flat(), ...accepted.optional].includes(
+      !acceptedDocuments(business.country_code, business.category).includes(
         documentType,
       )
     ) {
@@ -2680,7 +2701,7 @@ export class ProfileService {
 
     this.emitBusinessResubmitted(
       profileId,
-      `${business.name} a ${replaced ? 'renvoyé' : 'ajouté'} : ${BUSINESS_DOCUMENT_LABELS[documentType]}.`,
+      `${business.name} a ${replaced ? 'renvoyé' : 'ajouté'} : ${documentLabel(business.country_code, documentType)}.`,
     );
     return this.getBusinessForAdmin(profileId);
   }
@@ -3145,12 +3166,12 @@ export class ProfileService {
         'Renseignez les informations de votre entreprise.',
       );
     }
-    assertBusinessSignupComplete(business);
+    assertBusinessSignupComplete(business, createProfileDto.countryCode);
 
     const documentKeys = await Promise.all(
       business.documents.map((doc) =>
         this.resolveKycObject(
-          BUSINESS_DOCUMENT_LABELS[doc.documentType],
+          documentLabel(createProfileDto.countryCode, doc.documentType),
           doc.url,
           doc.key,
         ),
@@ -3177,7 +3198,7 @@ export class ProfileService {
           registration_number: business.registrationNumber ?? null,
           tax_id: business.taxId ?? null,
           statistical_id: business.statisticalId ?? null,
-          address: business.address,
+          address: business.address ?? null,
           country_code: location.country_code ?? null,
           city: location.city ?? null,
           email: business.email ?? createProfileDto.email ?? null,

@@ -66,7 +66,8 @@ export function invoiceClient(profile: {
     email: string | null;
     tax_id: string | null;
     registration_number: string | null;
-    address: string;
+    /** Null for an organisation that works online only. */
+    address: string | null;
     city: string | null;
     deleted_at: Date | null;
   } | null;
@@ -84,7 +85,8 @@ export function invoiceClient(profile: {
     BUSINESS_NAME: b?.name ?? '-',
     BUSINESS_NIU: b?.tax_id ?? '-',
     BUSINESS_RCCM: b?.registration_number ?? '-',
-    BUSINESS_ADDRESS: b ? [b.address, b.city].filter(Boolean).join(', ') : '-',
+    BUSINESS_ADDRESS:
+      (b && [b.address, b.city].filter(Boolean).join(', ')) || '-',
     /** The person who holds the account, for templates that name a contact. */
     ACCOUNT_HOLDER: `${profile.first_name} ${profile.last_name}`.trim(),
   };

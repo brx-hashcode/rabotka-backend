@@ -1732,6 +1732,7 @@ describe('ProfileService', () => {
       email: 'contact@ecole.cg',
       phone: '+242061234567',
       address: 'Avenue de la Paix, Brazzaville',
+      countryCode: 'CG',
       profileType: 'EMPLOYER' as any,
       readAndApprovedPolicies: true,
       signupToken: 't',
@@ -1800,18 +1801,45 @@ describe('ProfileService', () => {
       expect(tx.kycDocument.create).not.toHaveBeenCalled();
     });
 
-    it('refuses a business missing a required document, before writing anything', async () => {
+    it('creates a business online only: no document, no address', async () => {
+      const tx = txWithBusiness();
+
+      await service.createProfile(
+        {
+          ...businessDto,
+          business: {
+            ...businessDto.business,
+            address: undefined,
+            documents: [],
+          },
+        } as any,
+        'business',
+      );
+
+      expect(tx.business.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          address: null,
+          country_code: 'CG',
+          documents: { create: [] },
+        }),
+      });
+    });
+
+    it('refuses a business without a country, or outside the CEMAC and the RDC, before writing anything', async () => {
       const tx = txWithBusiness();
 
       await expect(
         service.createProfile(
-          {
-            ...businessDto,
-            business: { ...businessDto.business, documents: [] },
-          } as any,
+          { ...businessDto, countryCode: undefined } as any,
           'business',
         ),
-      ).rejects.toThrow(/Autorisation d.ouverture/);
+      ).rejects.toThrow(/Choisissez le pays/);
+      await expect(
+        service.createProfile(
+          { ...businessDto, countryCode: 'NG' } as any,
+          'business',
+        ),
+      ).rejects.toThrow(/disponible au Congo-Brazzaville/);
       expect(prisma.$transaction).not.toHaveBeenCalled();
       expect(tx.profile.create).not.toHaveBeenCalled();
     });
@@ -1920,15 +1948,25 @@ describe('ProfileService', () => {
       prisma.$transaction.mockImplementation((calls: any) => Promise.resolve(calls));
     });
 
-    it('shows the business with its papers, and none missing', async () => {
+    it('shows the business with its papers, and the recommended ones not sent', async () => {
       const detail = await service.getBusinessForAdmin('p-1');
       expect(detail).toMatchObject({
         name: 'École Les Lauriers',
         countryCode: 'CG',
         countryName: 'Congo-Brazzaville',
         categoryLabel: expect.stringContaining('École'),
-        documents: [expect.objectContaining({ documentType: 'AGREMENT', label: expect.any(String) })],
-        missingDocuments: [],
+        documents: [expect.objectContaining({ documentType: 'AGREMENT', label: 'Agrément' })],
+        recommendedDocuments: [
+          { type: 'AUTORISATION_OUVERTURE', label: expect.any(String) },
+          { type: 'AGREMENT', label: 'Agrément' },
+        ],
+        missingRecommended: [
+          { type: 'AUTORISATION_OUVERTURE', label: expect.any(String) },
+        ],
+        // The admin released before: one-paper groups.
+        missingDocuments: [
+          [{ type: 'AUTORISATION_OUVERTURE', label: expect.any(String) }],
+        ],
       });
     });
 
@@ -1973,6 +2011,23 @@ describe('ProfileService', () => {
       it('lets an admin change the identity', async () => {
         await service.updateBusiness('p-1', { name: 'Autre nom' } as any, 'admin');
         expect((prisma as any).business.update).toHaveBeenCalled();
+      });
+
+      it('moves only to a country Rabotka Business is open in, and clears the address', async () => {
+        await expect(
+          service.updateBusiness('p-1', { countryCode: 'FR' } as any, 'owner'),
+        ).rejects.toThrow(/disponible au Congo-Brazzaville/);
+        expect((prisma as any).business.update).not.toHaveBeenCalled();
+
+        await service.updateBusiness(
+          'p-1',
+          { countryCode: 'GA', address: null } as any,
+          'owner',
+        );
+        expect((prisma as any).business.update).toHaveBeenCalledWith({
+          where: { id: 'b-1' },
+          data: expect.objectContaining({ country_code: 'GA', address: null }),
+        });
       });
 
       it('refuses a new document', async () => {

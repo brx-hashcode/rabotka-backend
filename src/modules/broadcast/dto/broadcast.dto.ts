@@ -12,7 +12,11 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { BroadcastStatus, DeliveryChannel } from '@prisma/client';
+import {
+  BroadcastRecipientStatus,
+  BroadcastStatus,
+  DeliveryChannel,
+} from '@prisma/client';
 import { BROADCAST_MESSAGE_VAR_MAX } from '../../../common/constants/whatsapp-templates';
 import { AudienceFiltersDto } from './audience-filters.dto';
 
@@ -119,4 +123,10 @@ export class ListRecipientsDto {
   @IsOptional()
   @IsEnum(DeliveryChannel)
   channel?: DeliveryChannel;
+
+  /** Only the deliveries in this state (« Failed » to see what went wrong). */
+  @ApiPropertyOptional({ enum: BroadcastRecipientStatus })
+  @IsOptional()
+  @IsEnum(BroadcastRecipientStatus)
+  status?: BroadcastRecipientStatus;
 }
