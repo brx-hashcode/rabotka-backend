@@ -1,17 +1,16 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import {
   BusinessCategory,
-  BusinessDocumentType,
   BusinessLegalForm,
   ProfileType,
 } from '@prisma/client';
 import type { SignupIdentity } from '../auth/signup-token';
 import {
   BUSINESS_CATEGORY_LABELS,
-  BUSINESS_DOCUMENT_LABELS,
+  BUSINESS_COUNTRIES_SENTENCE,
   BUSINESS_LEGAL_FORM_LABELS,
+  isBusinessCountry,
   legalFormFits,
-  missingRequiredDocuments,
 } from './business-catalog';
 import { assertBusinessIsEmployer } from './business-rules';
 
@@ -64,14 +63,15 @@ export function signupEntryFor(
 
 /**
  * Checks a business against the catalog before anything is written: a legal
- * form that does not fit the category, or a required document missing, is a
- * 400 that says which.
+ * form that does not fit the category is a 400 that says which. Every paper
+ * is optional (the review asks for what is missing), but the country is not:
+ * an organisation that works only online still has one, and it must be one
+ * Rabotka Business is open in.
  */
-export function assertBusinessSignupComplete(business: {
-  category: BusinessCategory;
-  legalForm?: BusinessLegalForm;
-  documents: { documentType: BusinessDocumentType }[];
-}): void {
+export function assertBusinessSignupComplete(
+  business: { category: BusinessCategory; legalForm?: BusinessLegalForm },
+  countryCode: string | null | undefined,
+): void {
   if (
     business.legalForm &&
     !legalFormFits(business.category, business.legalForm)
@@ -80,16 +80,17 @@ export function assertBusinessSignupComplete(business: {
       `La forme juridique « ${BUSINESS_LEGAL_FORM_LABELS[business.legalForm]} » ne correspond pas à « ${BUSINESS_CATEGORY_LABELS[business.category]} ».`,
     );
   }
-  const missing = missingRequiredDocuments(
-    business.category,
-    business.documents.map((d) => d.documentType),
-  );
-  if (missing.length > 0) {
-    const names = missing
-      .map((group) =>
-        group.map((t) => BUSINESS_DOCUMENT_LABELS[t]).join(' ou '),
-      )
-      .join(', ');
-    throw new BadRequestException(`Document manquant : ${names}.`);
+  assertBusinessCountry(countryCode);
+}
+
+/** The organisation's country: given, and one Rabotka Business is open in. */
+export function assertBusinessCountry(
+  countryCode: string | null | undefined,
+): void {
+  if (!countryCode?.trim()) {
+    throw new BadRequestException('Choisissez le pays de votre organisation.');
+  }
+  if (!isBusinessCountry(countryCode.trim())) {
+    throw new BadRequestException(BUSINESS_COUNTRIES_SENTENCE);
   }
 }

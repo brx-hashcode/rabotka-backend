@@ -74,15 +74,21 @@ export class UpdateBusinessDto {
   @MaxLength(100)
   statisticalId?: string | null;
 
-  @ApiPropertyOptional()
-  @Transform(trim)
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Null (or empty) for an organisation that works online only.',
+  })
+  @Transform(clearable)
   @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @MaxLength(500)
-  address?: string;
+  address?: string | null;
 
-  @ApiPropertyOptional({ description: 'ISO 3166-1 alpha-2', example: 'CG' })
+  @ApiPropertyOptional({
+    description:
+      'ISO 3166-1 alpha-2, one of the countries Rabotka Business is open in (CEMAC + RDC)',
+    example: 'CG',
+  })
   @Transform(trim)
   @IsOptional()
   @IsString()

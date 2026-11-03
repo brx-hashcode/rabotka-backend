@@ -5,13 +5,14 @@ import {
 } from '@prisma/client';
 
 /**
- * Business categories, legal forms and documents for Congo-Brazzaville, with
- * their French labels and which papers each category provides. A fixed list
+ * Business categories, legal forms and documents, with their French labels and
+ * which papers each category is recommended to send, per country. A fixed list
  * (product decision): adding a value is a migration plus an entry here.
  *
- * OHADA company law; registration at the CFE (RCCM); NIU from the tax
- * administration; SCIEN / SCIET from the CNSEE; associations are declared and
- * receive a récépissé.
+ * Rabotka Business is open in the CEMAC and the RDC only: seven OHADA
+ * countries, so the legal forms (OHADA uniform act) are the same everywhere;
+ * the papers' names and a few of the papers differ. No paper is required: an
+ * organisation sends what it has, the review asks for the rest.
  */
 
 /** Headcount brackets offered at sign-up. */
@@ -114,85 +115,327 @@ export const LEGAL_FORMS_BY_CATEGORY: Record<
   OTHER: Object.values(BusinessLegalForm),
 };
 
-/**
- * Which papers a category must provide, and which it may. « One of » groups
- * are alternatives: any one of the group satisfies it (an école has an
- * autorisation d'ouverture OR an agrément).
- */
-export type DocumentRequirement = {
-  required: BusinessDocumentType[][];
+/** The countries an organisation can sign up in: the CEMAC and the RDC. */
+export const BUSINESS_COUNTRIES = [
+  'CG',
+  'CD',
+  'CM',
+  'GA',
+  'TD',
+  'CF',
+  'GQ',
+] as const;
+export type BusinessCountry = (typeof BUSINESS_COUNTRIES)[number];
+
+/** Where an organisation with no (or an older, other) country is read from. */
+export const DEFAULT_BUSINESS_COUNTRY: BusinessCountry = 'CG';
+
+export const BUSINESS_COUNTRY_NAMES: Record<BusinessCountry, string> = {
+  CG: 'Congo-Brazzaville',
+  CD: 'Congo-Kinshasa (RDC)',
+  CM: 'Cameroun',
+  GA: 'Gabon',
+  TD: 'Tchad',
+  CF: 'République centrafricaine',
+  GQ: 'Guinée équatoriale',
+};
+
+export const BUSINESS_COUNTRIES_SENTENCE =
+  'Rabotka Business est disponible au Congo-Brazzaville, en RDC, au Cameroun, au Gabon, au Tchad, en Centrafrique et en Guinée équatoriale.';
+
+export function isBusinessCountry(
+  code: string | null | undefined,
+): code is BusinessCountry {
+  return (
+    !!code &&
+    (BUSINESS_COUNTRIES as readonly string[]).includes(code.toUpperCase())
+  );
+}
+
+/** The papers shown for a category: the usual ones first, then the others. */
+export type DocumentList = {
+  recommended: BusinessDocumentType[];
   optional: BusinessDocumentType[];
 };
 
-const COMPANY_DOCS: DocumentRequirement = {
-  required: [['RCCM'], ['NIU']],
-  optional: ['STATUTS', 'PATENTE', 'SCIEN_SCIET', 'CNSS', 'MANDATE'],
+/** One official identifier field of the form; null: the country has none. */
+export type IdentifierField = { label: string; placeholder?: string } | null;
+
+export type BusinessIdentifiers = {
+  registrationNumber: IdentifierField;
+  taxId: IdentifierField;
+  statisticalId: IdentifierField;
 };
 
-export const DOCUMENTS_BY_CATEGORY: Record<
-  BusinessCategory,
-  DocumentRequirement
-> = {
+type CountryRules = {
+  /** Each paper's local name, over the Congo-Brazzaville one. */
+  documentLabels: Partial<Record<BusinessDocumentType, string>>;
+  identifiers: BusinessIdentifiers;
+  /** Categories whose papers differ from the OHADA base. */
+  documents: Partial<Record<BusinessCategory, DocumentList>>;
+  /** Papers that do not exist there (no SCIEN / SCIET outside the Congo). */
+  without: BusinessDocumentType[];
+};
+
+const COMPANY_DOCS: DocumentList = {
+  recommended: ['RCCM', 'NIU'],
+  optional: ['STATUTS', 'PATENTE', 'SCIEN_SCIET', 'CNSS', 'MANDATE'],
+};
+const REGISTERED_GROUP_DOCS: DocumentList = {
+  recommended: ['RCCM', 'NIU'],
+  optional: ['STATUTS', 'MANDATE'],
+};
+const DECLARED_DOCS: DocumentList = {
+  recommended: ['RECEPISSE', 'STATUTS'],
+  optional: ['AGREMENT', 'NIU', 'MANDATE'],
+};
+const AUTHORISED_DOCS: DocumentList = {
+  recommended: ['AUTORISATION_OUVERTURE', 'AGREMENT'],
+  optional: ['RCCM', 'NIU', 'MANDATE'],
+};
+
+/**
+ * The OHADA base: companies and GIE at the RCCM with a tax number,
+ * associations declared (récépissé) with their statuts, schools and health
+ * authorised by their ministry, public bodies created by an act.
+ */
+const BASE_DOCUMENTS: Record<BusinessCategory, DocumentList> = {
   INDIVIDUAL_BUSINESS: COMPANY_DOCS,
   TPE: COMPANY_DOCS,
   PME: COMPANY_DOCS,
   LARGE_COMPANY: COMPANY_DOCS,
   STARTUP: COMPANY_DOCS,
-  COOPERATIVE: {
-    required: [['RCCM'], ['NIU']],
-    optional: ['STATUTS', 'MANDATE'],
+  COOPERATIVE: REGISTERED_GROUP_DOCS,
+  GIE: REGISTERED_GROUP_DOCS,
+  ASSOCIATION: DECLARED_DOCS,
+  NGO: DECLARED_DOCS,
+  FOUNDATION: DECLARED_DOCS,
+  RELIGIOUS: { recommended: ['RECEPISSE', 'STATUTS'], optional: ['MANDATE'] },
+  INTERNATIONAL_NGO: {
+    recommended: ['AGREMENT'],
+    optional: ['NIU', 'MANDATE'],
   },
-  GIE: { required: [['RCCM'], ['NIU']], optional: ['STATUTS', 'MANDATE'] },
-  ASSOCIATION: {
-    required: [['RECEPISSE'], ['STATUTS']],
-    optional: ['AGREMENT', 'NIU', 'MANDATE'],
-  },
-  NGO: {
-    required: [['RECEPISSE'], ['STATUTS']],
-    optional: ['AGREMENT', 'NIU', 'MANDATE'],
-  },
-  FOUNDATION: {
-    required: [['RECEPISSE'], ['STATUTS']],
-    optional: ['AGREMENT', 'NIU', 'MANDATE'],
-  },
-  INTERNATIONAL_NGO: { required: [['AGREMENT']], optional: ['NIU', 'MANDATE'] },
-  INTERNATIONAL_ORG: { required: [['AGREMENT']], optional: ['MANDATE'] },
-  RELIGIOUS: { required: [['RECEPISSE'], ['STATUTS']], optional: ['MANDATE'] },
-  SCHOOL: {
-    required: [['AUTORISATION_OUVERTURE', 'AGREMENT']],
-    optional: ['RCCM', 'NIU', 'MANDATE'],
-  },
-  HIGHER_EDUCATION: {
-    required: [['AUTORISATION_OUVERTURE', 'AGREMENT']],
-    optional: ['RCCM', 'NIU', 'MANDATE'],
-  },
-  TRAINING_CENTER: {
-    required: [['AUTORISATION_OUVERTURE', 'AGREMENT']],
-    optional: ['RCCM', 'NIU', 'MANDATE'],
-  },
-  HEALTH: {
-    required: [['AUTORISATION_OUVERTURE', 'AGREMENT']],
-    optional: ['RCCM', 'NIU', 'MANDATE'],
-  },
+  INTERNATIONAL_ORG: { recommended: ['AGREMENT'], optional: ['MANDATE'] },
+  SCHOOL: AUTHORISED_DOCS,
+  HIGHER_EDUCATION: AUTHORISED_DOCS,
+  TRAINING_CENTER: AUTHORISED_DOCS,
+  HEALTH: AUTHORISED_DOCS,
   PUBLIC_ADMINISTRATION: {
-    required: [['ARRETE']],
+    recommended: ['ARRETE'],
     optional: ['NIU', 'MANDATE'],
   },
   PUBLIC_ENTERPRISE: {
-    required: [['ARRETE']],
+    recommended: ['ARRETE'],
     optional: ['NIU', 'RCCM', 'MANDATE'],
   },
-  OTHER: { required: [], optional: Object.values(BusinessDocumentType) },
+  OTHER: { recommended: [], optional: Object.values(BusinessDocumentType) },
 };
 
-/** The required groups a set of provided documents does not cover. */
-export function missingRequiredDocuments(
+const COMPANIES: BusinessCategory[] = [
+  'INDIVIDUAL_BUSINESS',
+  'TPE',
+  'PME',
+  'LARGE_COMPANY',
+  'STARTUP',
+];
+const DECLARED: BusinessCategory[] = [
+  'ASSOCIATION',
+  'NGO',
+  'FOUNDATION',
+  'RELIGIOUS',
+];
+
+/** One list of papers for several categories. */
+function sameFor(
+  categories: BusinessCategory[],
+  list: DocumentList,
+): Partial<Record<BusinessCategory, DocumentList>> {
+  return Object.fromEntries(categories.map((c) => [c, list]));
+}
+
+/** The OHADA register number, in each country's usual shape. */
+const rccm = (placeholder: string): IdentifierField => ({
+  label: 'N° RCCM',
+  placeholder,
+});
+const NIF: IdentifierField = { label: 'NIF' };
+
+/**
+ * What changes from one country to the next. Sources: OHADA uniform acts
+ * (RCCM everywhere); tax numbers (NIU in the Congo and Cameroon, NIF
+ * elsewhere); social security (CNSS, CNPS in Cameroon and Chad, INSESO in
+ * Equatorial Guinea); associations — Congo and Gabon declare under the 1901
+ * model (récépissé), Cameroon at the préfecture (loi 90/053) with an agrément
+ * for NGOs (loi 99/014), Chad's récépissé is followed by an authorisation to
+ * operate (ordonnance 023/PR/2018), the RDC grants legal personality by
+ * ministerial arrêté (loi 004/2001) and adds the identification nationale.
+ */
+const COUNTRY_RULES: Record<BusinessCountry, CountryRules> = {
+  CG: {
+    documentLabels: {},
+    identifiers: {
+      registrationNumber: rccm('CG-BZV-01-2024-B12-00123'),
+      taxId: { label: 'NIU', placeholder: 'M2024000123456A' },
+      statisticalId: { label: 'SCIEN / SCIET' },
+    },
+    documents: {},
+    without: [],
+  },
+  CD: {
+    documentLabels: {
+      NIU: 'Attestation NIF (numéro impôt)',
+      SCIEN_SCIET: 'Identification nationale (Id. Nat.)',
+      CNSS: "Attestation d'affiliation CNSS",
+      RECEPISSE: 'Récépissé de dépôt (demande de personnalité juridique)',
+      ARRETE: 'Arrêté ministériel (personnalité juridique ou création)',
+    },
+    identifiers: {
+      registrationNumber: rccm('CD/KNG/RCCM/24-B-01234'),
+      taxId: NIF,
+      statisticalId: { label: 'Id. Nat.' },
+    },
+    documents: {
+      ...sameFor(COMPANIES, {
+        recommended: ['RCCM', 'SCIEN_SCIET', 'NIU'],
+        optional: ['STATUTS', 'PATENTE', 'CNSS', 'MANDATE'],
+      }),
+      ...sameFor(DECLARED, {
+        recommended: ['ARRETE', 'STATUTS'],
+        optional: ['RECEPISSE', 'AGREMENT', 'NIU', 'MANDATE'],
+      }),
+    },
+    without: [],
+  },
+  CM: {
+    documentLabels: {
+      NIU: "Attestation d'immatriculation (NIU)",
+      CNSS: "Attestation d'immatriculation CNPS",
+      RECEPISSE: 'Récépissé de déclaration (préfecture)',
+    },
+    identifiers: {
+      registrationNumber: rccm('RC/DLA/2024/B/1234'),
+      taxId: { label: 'NIU', placeholder: 'M012400012345A' },
+      statisticalId: null,
+    },
+    documents: {
+      NGO: {
+        recommended: ['RECEPISSE', 'AGREMENT', 'STATUTS'],
+        optional: ['NIU', 'MANDATE'],
+      },
+    },
+    without: ['SCIEN_SCIET'],
+  },
+  GA: {
+    documentLabels: {
+      NIU: 'Attestation NIF',
+      CNSS: "Attestation d'immatriculation CNSS",
+    },
+    identifiers: {
+      registrationNumber: rccm('GA-LBV-01-2024-B12-00123'),
+      taxId: NIF,
+      statisticalId: null,
+    },
+    documents: {},
+    without: ['SCIEN_SCIET'],
+  },
+  TD: {
+    documentLabels: {
+      NIU: 'Attestation NIF',
+      CNSS: "Attestation d'immatriculation CNPS",
+      AGREMENT: 'Autorisation de fonctionner / agrément',
+    },
+    identifiers: {
+      registrationNumber: rccm('TD-NDJ-01-2024-B12-00123'),
+      taxId: NIF,
+      statisticalId: null,
+    },
+    documents: sameFor(DECLARED, {
+      recommended: ['RECEPISSE', 'AGREMENT', 'STATUTS'],
+      optional: ['NIU', 'MANDATE'],
+    }),
+    without: ['SCIEN_SCIET'],
+  },
+  CF: {
+    documentLabels: {
+      NIU: 'Attestation NIF',
+      CNSS: "Attestation d'immatriculation CNSS",
+    },
+    identifiers: {
+      registrationNumber: rccm('CF-BGF-01-2024-B12-00123'),
+      taxId: NIF,
+      statisticalId: null,
+    },
+    documents: {},
+    without: ['SCIEN_SCIET'],
+  },
+  GQ: {
+    documentLabels: {
+      RCCM: 'Extrait du RCCM (Registro Mercantil)',
+      NIU: 'Attestation NIF',
+      CNSS: "Attestation d'immatriculation INSESO",
+      RECEPISSE: 'Inscription au registre des associations',
+    },
+    identifiers: {
+      registrationNumber: rccm('GQ-MAL-01-2024-B12-00123'),
+      taxId: NIF,
+      statisticalId: null,
+    },
+    documents: {},
+    without: ['SCIEN_SCIET'],
+  },
+};
+
+/** A country's rules; an organisation from before the list reads as Congo's. */
+function rulesFor(country: string | null | undefined): CountryRules {
+  return COUNTRY_RULES[
+    isBusinessCountry(country)
+      ? (country.toUpperCase() as BusinessCountry)
+      : DEFAULT_BUSINESS_COUNTRY
+  ];
+}
+
+/** A paper's name in the organisation's country. */
+export function documentLabel(
+  country: string | null | undefined,
+  type: BusinessDocumentType,
+): string {
+  return (
+    rulesFor(country).documentLabels[type] ?? BUSINESS_DOCUMENT_LABELS[type]
+  );
+}
+
+/** The papers shown to a category in a country: recommended, then optional. */
+export function documentsFor(
+  country: string | null | undefined,
+  category: BusinessCategory,
+): DocumentList {
+  const rules = rulesFor(country);
+  const list = rules.documents[category] ?? BASE_DOCUMENTS[category];
+  const exists = (t: BusinessDocumentType) => !rules.without.includes(t);
+  return {
+    recommended: list.recommended.filter(exists),
+    optional: list.optional.filter(exists),
+  };
+}
+
+/** Every paper an organisation may send (a dashboard upload is checked against it). */
+export function acceptedDocuments(
+  country: string | null | undefined,
+  category: BusinessCategory,
+): BusinessDocumentType[] {
+  const { recommended, optional } = documentsFor(country, category);
+  return [...recommended, ...optional];
+}
+
+/** The recommended papers a set of provided ones does not include. */
+export function missingRecommendedDocuments(
+  country: string | null | undefined,
   category: BusinessCategory,
   provided: readonly BusinessDocumentType[],
-): BusinessDocumentType[][] {
+): BusinessDocumentType[] {
   const have = new Set(provided);
-  return DOCUMENTS_BY_CATEGORY[category].required.filter(
-    (group) => !group.some((t) => have.has(t)),
+  return documentsFor(country, category).recommended.filter(
+    (t) => !have.has(t),
   );
 }
 
@@ -205,30 +448,45 @@ export function legalFormFits(
 }
 
 export type BusinessCatalog = {
+  country: BusinessCountry;
+  /** The countries an organisation can sign up in, for the form's picker. */
+  countries: { code: BusinessCountry; name: string }[];
   categories: {
     value: BusinessCategory;
     label: string;
     legalForms: BusinessLegalForm[];
-    documents: DocumentRequirement;
+    /**
+     * `required` stays for the forms released before every paper became
+     * optional: always empty.
+     */
+    documents: DocumentList & { required: BusinessDocumentType[][] };
   }[];
   legalForms: { value: BusinessLegalForm; label: string }[];
   documentTypes: { value: BusinessDocumentType; label: string }[];
+  identifiers: BusinessIdentifiers;
   sizes: readonly string[];
 };
 
 /**
- * Everything a sign-up form needs, in one answer (GET /public/business/catalog):
- * the categories in display order, with the legal forms and documents each
- * one takes. The same tables the server checks a sign-up against, so the form
- * can never ask for something different.
+ * Everything a sign-up form needs for one country, in one answer
+ * (GET /public/business/catalog?country=CG): the categories in display order,
+ * with the legal forms and the papers each one is recommended to send, the
+ * papers' and identifiers' local names, and the countries to choose from.
  */
-export function businessCatalog(): BusinessCatalog {
+export function businessCatalog(
+  country: BusinessCountry = DEFAULT_BUSINESS_COUNTRY,
+): BusinessCatalog {
   return {
+    country,
+    countries: BUSINESS_COUNTRIES.map((code) => ({
+      code,
+      name: BUSINESS_COUNTRY_NAMES[code],
+    })),
     categories: Object.values(BusinessCategory).map((value) => ({
       value,
       label: BUSINESS_CATEGORY_LABELS[value],
       legalForms: LEGAL_FORMS_BY_CATEGORY[value],
-      documents: DOCUMENTS_BY_CATEGORY[value],
+      documents: { required: [], ...documentsFor(country, value) },
     })),
     legalForms: Object.values(BusinessLegalForm).map((value) => ({
       value,
@@ -236,8 +494,9 @@ export function businessCatalog(): BusinessCatalog {
     })),
     documentTypes: Object.values(BusinessDocumentType).map((value) => ({
       value,
-      label: BUSINESS_DOCUMENT_LABELS[value],
+      label: documentLabel(country, value),
     })),
+    identifiers: COUNTRY_RULES[country].identifiers,
     sizes: BUSINESS_SIZES,
   };
 }
