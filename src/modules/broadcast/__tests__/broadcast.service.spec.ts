@@ -1,5 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
-import { BroadcastStatus, DeliveryChannel } from '@prisma/client';
+import {
+  BroadcastRecipientStatus,
+  BroadcastStatus,
+  DeliveryChannel,
+} from '@prisma/client';
 import {
   BroadcastService,
   MAX_RECIPIENTS,
@@ -452,6 +456,28 @@ describe('BroadcastService', () => {
         read: 20,
         lastSentAt: '2026-10-30T10:00:00.000Z',
       });
+    });
+  });
+
+  describe('listRecipients', () => {
+    it('narrows to one channel and one outcome', async () => {
+      await service.listRecipients(BROADCAST_ID, {
+        page: 2,
+        limit: 20,
+        channel: DeliveryChannel.EMAIL,
+        status: BroadcastRecipientStatus.FAILED,
+      });
+
+      const [arg] = deps.prisma.broadcastRecipient.findMany.mock.calls[0] as [
+        { where: Record<string, unknown>; skip: number; take: number },
+      ];
+      expect(arg.where).toEqual({
+        broadcast_id: BROADCAST_ID,
+        channel: DeliveryChannel.EMAIL,
+        status: BroadcastRecipientStatus.FAILED,
+      });
+      expect(arg.skip).toBe(20);
+      expect(arg.take).toBe(20);
     });
   });
 });
