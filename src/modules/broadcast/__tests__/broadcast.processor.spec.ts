@@ -40,6 +40,7 @@ function recipient(overrides: Record<string, unknown> = {}) {
       email: 'a@b.com',
       first_name: 'Alice',
       whatsapp_connected: true,
+      is_business: false,
     },
     ...overrides,
   };
@@ -54,6 +55,7 @@ function makeDeps() {
     broadcastRecipient: {
       findMany: jest.fn().mockResolvedValue([]),
       update: jest.fn().mockResolvedValue({}),
+      delete: jest.fn().mockResolvedValue({}),
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       findUnique: jest.fn().mockResolvedValue({ broadcast_id: BROADCAST_ID }),
     },
@@ -218,7 +220,15 @@ describe('BroadcastProcessor', () => {
 
   it('skips a recipient with no phone rather than failing the page', async () => {
     deps.prisma.broadcastRecipient.findMany.mockResolvedValue([
-      recipient({ profile: { id: 'p-1', phone: null, first_name: 'Alice' } }),
+      recipient({
+        profile: {
+          id: 'p-1',
+          phone: null,
+          first_name: 'Alice',
+          whatsapp_connected: true,
+          is_business: false,
+        },
+      }),
     ]);
 
     await run();
@@ -228,6 +238,53 @@ describe('BroadcastProcessor', () => {
       data: { status: BroadcastRecipientStatus };
     };
     expect(update.data.status).toBe(BroadcastRecipientStatus.FAILED);
+  });
+
+  it('drops an email row whose profile has no address since, instead of failing it', async () => {
+    deps.prisma.broadcastRecipient.findMany.mockResolvedValue([
+      recipient({
+        channel: DeliveryChannel.EMAIL,
+        profile: {
+          id: 'p-1',
+          phone: '+24200000001',
+          email: null,
+          first_name: 'Alice',
+          whatsapp_connected: true,
+          is_business: false,
+        },
+      }),
+    ]);
+
+    await run();
+
+    expect(deps.prisma.broadcastRecipient.delete).toHaveBeenCalledWith({
+      where: { id: 'r-1' },
+    });
+    expect(deps.prisma.broadcast.update).toHaveBeenCalledWith({
+      where: { id: BROADCAST_ID },
+      data: { recipient_count: { decrement: 1 } },
+    });
+    expect(deps.prisma.broadcastRecipient.update).not.toHaveBeenCalled();
+  });
+
+  it('never sends WhatsApp to a business account', async () => {
+    deps.prisma.broadcastRecipient.findMany.mockResolvedValue([
+      recipient({
+        profile: {
+          id: 'p-1',
+          phone: '+24200000001',
+          email: 'a@b.com',
+          first_name: 'Alice',
+          whatsapp_connected: true,
+          is_business: true,
+        },
+      }),
+    ]);
+
+    await run();
+
+    expect(deps.dispatcher.send).not.toHaveBeenCalled();
+    expect(deps.prisma.broadcastRecipient.delete).toHaveBeenCalled();
   });
 
   it('queues the next page with an advanced cursor', async () => {

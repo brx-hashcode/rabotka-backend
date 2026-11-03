@@ -90,6 +90,18 @@ export class AdminBroadcastController {
     });
   }
 
+  // Before `:id`, which would take « summary » for an id.
+  @Get('summary')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({
+    summary: 'Broadcasts at a glance',
+    description:
+      'Counts by status, and what every sent broadcast delivered: messages, failures, in-app reads.',
+  })
+  async summary() {
+    return this.broadcasts.summary();
+  }
+
   @Get(':id')
   @Roles(UserRole.MODERATOR)
   @ApiOperation({ summary: 'Get one broadcast' })

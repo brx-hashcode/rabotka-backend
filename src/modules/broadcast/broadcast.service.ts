@@ -20,6 +20,8 @@ import {
   buildAudienceWhere,
   type AudienceFilters,
   type AudiencePreview,
+  isReachable,
+  reachableWhere,
 } from './audience';
 import type { BroadcastJobData } from './broadcast.types';
 
@@ -98,16 +100,16 @@ export class BroadcastService {
     const [total, whatsapp, email, freeWhatsapp, sample] = await Promise.all([
       this.prisma.profile.count({ where }),
       this.prisma.profile.count({
-        where: { AND: [where, { whatsapp_connected: true }] },
+        where: { AND: [where, reachableWhere(DeliveryChannel.WHATSAPP)] },
       }),
       this.prisma.profile.count({
-        where: { AND: [where, { email: { not: null } }] },
+        where: { AND: [where, reachableWhere(DeliveryChannel.EMAIL)] },
       }),
       this.prisma.profile.count({
         where: {
           AND: [
             where,
-            { whatsapp_connected: true },
+            reachableWhere(DeliveryChannel.WHATSAPP),
             { last_inbound_at: { gt: windowOpensAfter } },
           ],
         },
@@ -240,6 +242,75 @@ export class BroadcastService {
       );
     }
     await this.prisma.broadcast.delete({ where: { id } });
+  }
+
+  /**
+   * The list page's tiles: how many broadcasts in each state, and what the
+   * ones that went out delivered. Read rate is on the in-app rows, the only
+   * channel that reports an open.
+   */
+  async summary(): Promise<{
+    byStatus: Record<BroadcastStatus, number>;
+    recipients: number;
+    delivered: number;
+    failed: number;
+    inAppDelivered: number;
+    read: number;
+    lastSentAt: string | null;
+  }> {
+    const went = {
+      status: {
+        in: [
+          BroadcastStatus.SENT,
+          BroadcastStatus.SENDING,
+          BroadcastStatus.FAILED,
+        ],
+      },
+    };
+    const [groups, totals, inAppDelivered, last] = await Promise.all([
+      this.prisma.broadcast.groupBy({
+        by: ['status'],
+        _count: { _all: true },
+      }),
+      this.prisma.broadcast.aggregate({
+        where: went,
+        _sum: {
+          recipient_count: true,
+          sent_count: true,
+          failed_count: true,
+          read_count: true,
+        },
+      }),
+      this.prisma.broadcastRecipient.count({
+        where: {
+          channel: DeliveryChannel.IN_APP,
+          status: {
+            in: [BroadcastRecipientStatus.SENT, BroadcastRecipientStatus.READ],
+          },
+          broadcast: went,
+        },
+      }),
+      this.prisma.broadcast.findFirst({
+        where: { sent_at: { not: null } },
+        orderBy: { sent_at: 'desc' },
+        select: { sent_at: true },
+      }),
+    ]);
+
+    const byStatus = Object.fromEntries(
+      Object.values(BroadcastStatus).map((s) => [s, 0]),
+    ) as Record<BroadcastStatus, number>;
+    for (const g of groups) byStatus[g.status] = g._count._all;
+
+    return {
+      byStatus,
+      recipients: totals._sum.recipient_count ?? 0,
+      delivered: totals._sum.sent_count ?? 0,
+      failed: totals._sum.failed_count ?? 0,
+      inAppDelivered,
+      read: totals._sum.read_count ?? 0,
+      lastSentAt: last?.sent_at?.toISOString() ?? null,
+    };
   }
 
   async list(params: {
@@ -532,7 +603,9 @@ export class BroadcastService {
   }
 
   /**
-   * Write one recipient row per (profile, channel), in batches.
+   * Write one recipient row per (profile, channel), in batches — only on the
+   * channels that can reach the profile (`isReachable`): someone with no
+   * address gets no email row, so it is never counted as a failure.
    *
    * `skipDuplicates` rather than a transaction: this can be re-entered after a
    * crash mid-snapshot, and the unique constraint already says what a duplicate
@@ -551,7 +624,12 @@ export class BroadcastService {
     for (;;) {
       const batch = await this.prisma.profile.findMany({
         where,
-        select: { id: true },
+        select: {
+          id: true,
+          email: true,
+          whatsapp_connected: true,
+          is_business: true,
+        },
         orderBy: { id: 'asc' },
         take: SNAPSHOT_BATCH,
         ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
@@ -559,11 +637,13 @@ export class BroadcastService {
       if (batch.length === 0) break;
 
       const rows = batch.flatMap((profile) =>
-        channels.map((channel) => ({
-          broadcast_id: broadcast.id,
-          profile_id: profile.id,
-          channel,
-        })),
+        channels
+          .filter((channel) => isReachable(profile, channel))
+          .map((channel) => ({
+            broadcast_id: broadcast.id,
+            profile_id: profile.id,
+            channel,
+          })),
       );
 
       const result = await this.prisma.broadcastRecipient.createMany({
