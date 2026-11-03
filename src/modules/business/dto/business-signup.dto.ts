@@ -60,8 +60,10 @@ export class BusinessDocumentInputDto {
 
 /**
  * The organisation, sent with POST /profile by a business sign-up (a signup
- * token proven by email) and refused from any other. Which documents are
- * required depends on the category — see business-catalog.ts.
+ * token proven by email) and refused from any other. Its country is the
+ * profile's `countryCode`, one of the CEMAC + RDC. Every document is optional;
+ * which ones are recommended depends on the country and the category — see
+ * business-catalog.ts.
  */
 export class BusinessSignupDto {
   @ApiProperty({
@@ -109,12 +111,15 @@ export class BusinessSignupDto {
   @MaxLength(100)
   statisticalId?: string;
 
-  @ApiProperty({ description: 'Adresse du siège ou de l’établissement' })
+  @ApiPropertyOptional({
+    description:
+      'Adresse du siège ou de l’établissement; absente pour une organisation en ligne. Le pays (countryCode du profil) reste obligatoire.',
+  })
   @Transform(trim)
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @MaxLength(500)
-  address: string;
+  address?: string;
 
   @ApiPropertyOptional({
     description: 'Contact email; the sign-up email when omitted.',
@@ -150,7 +155,10 @@ export class BusinessSignupDto {
   @MaxLength(2000)
   description?: string;
 
-  @ApiProperty({ type: [BusinessDocumentInputDto] })
+  @ApiProperty({
+    type: [BusinessDocumentInputDto],
+    description: 'May be empty.',
+  })
   @IsArray()
   @ArrayMaxSize(10)
   @ValidateNested({ each: true })
