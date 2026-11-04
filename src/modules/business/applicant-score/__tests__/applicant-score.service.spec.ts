@@ -253,3 +253,66 @@ describe('ApplicantScoreService.analyseOnArrival', () => {
     await expect(service.analyseOnArrival(event)).resolves.toBeUndefined();
   });
 });
+
+describe('ApplicantScoreService.catchUpAnalyses', () => {
+  const now = new Date('2026-11-05T10:00:00Z');
+  const make = (rows: { job_offer_id: string; employer: string }[]) => {
+    const prisma: any = {
+      application: {
+        findMany: jest.fn().mockResolvedValue(
+          rows.map((r) => ({
+            job_offer_id: r.job_offer_id,
+            job_offer: { employer_id: r.employer },
+          })),
+        ),
+      },
+    };
+    const service = new ApplicantScoreService(
+      prisma,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const analyse = jest.spyOn(service, 'analyse');
+    return { service, prisma, analyse };
+  };
+
+  it('picks waiting applications to recruiting business offers, never one that just arrived', async () => {
+    const { service, prisma, analyse } = make([]);
+    await service.catchUpAnalyses(now);
+    const { where } = prisma.application.findMany.mock.calls[0][0];
+    expect(where).toMatchObject({
+      cv_resume_id: null,
+      status: { in: ['PENDING', 'VIEWED'] },
+      job_offer: {
+        status: { in: ['ACTIVE', 'PARTIALLY_FILLED'] },
+        employer: { is_business: true },
+      },
+    });
+    expect(where.created_at.lte).toEqual(new Date('2026-11-05T09:55:00Z'));
+    expect(analyse).not.toHaveBeenCalled();
+  });
+
+  it('analyses each offer’s waiting ones, older than the arrival grace', async () => {
+    const { service, analyse } = make([{ job_offer_id: 'o1', employer: 'e1' }]);
+    analyse.mockResolvedValue({ screeningId: 's1', analysed: 2, left: 0 });
+    expect(await service.catchUpAnalyses(now)).toBe(2);
+    expect(analyse).toHaveBeenCalledWith(
+      'e1',
+      'o1',
+      undefined,
+      new Date('2026-11-05T09:55:00Z'),
+    );
+  });
+
+  it('moves on when a plan has no « CV inclus » left', async () => {
+    const { service, analyse } = make([
+      { job_offer_id: 'o1', employer: 'e1' },
+      { job_offer_id: 'o2', employer: 'e2' },
+    ]);
+    analyse
+      .mockRejectedValueOnce(new Error('Plus de CV inclus'))
+      .mockResolvedValueOnce({ screeningId: 's2', analysed: 1, left: 0 });
+    expect(await service.catchUpAnalyses(now)).toBe(1);
+  });
+});

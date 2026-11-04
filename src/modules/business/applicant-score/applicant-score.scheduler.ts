@@ -22,6 +22,8 @@ export class ApplicantScoreScheduler implements OnModuleInit {
       APPLICANT_SCORE_QUEUE,
       async () => {
         const done = await this.scores.sweep();
+        // Then the waiting Rabotka applications still without a CV analysis.
+        await this.scores.catchUpAnalyses();
         if (done > 0) this.logger.log(`Applicants scored: ${done}`);
       },
       { concurrency: 1, lockDuration: LOCK_MS, stalledInterval: LOCK_MS / 2 },

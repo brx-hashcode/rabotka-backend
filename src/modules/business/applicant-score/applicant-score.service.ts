@@ -7,7 +7,12 @@ import {
 } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
-import { ApplicationStatus, AssignmentStatus, Prisma } from '@prisma/client';
+import {
+  ApplicationStatus,
+  AssignmentStatus,
+  JobOfferStatus,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { LlmService } from '../../rag/llm/llm.service';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
@@ -41,6 +46,10 @@ const PER_SWEEP = 20;
 const RECENT_DAYS = 120;
 const MAX_MISSIONS = 15;
 const MAX_PORTFOLIO = 8;
+/** Offers whose waiting applicants get their CV analysed, per sweep. */
+const CATCH_UP_OFFERS = 5;
+/** Left to the analysis on arrival before the sweep takes over. */
+const ARRIVAL_GRACE_MS = 5 * 60 * 1000;
 
 /**
  * Ranks the applicants of a business's offers like CV analysis ranks CVs:
@@ -210,6 +219,59 @@ export class ApplicantScoreService {
   }
 
   /**
+   * The waiting Rabotka applications to business offers that have no CV
+   * analysis yet: those that came before analysis on arrival, or that found the
+   * plan with no « CV inclus » left. A few offers per sweep, each analysed as
+   * « Analyser tout » would. Never one that just arrived: analysis on arrival
+   * may still be running for it, and the same CV must not be paid twice.
+   */
+  async catchUpAnalyses(now = new Date()): Promise<number> {
+    const waiting = await this.prisma.application.findMany({
+      where: {
+        cv_resume_id: null,
+        deleted_at: null,
+        status: { in: [ApplicationStatus.PENDING, ApplicationStatus.VIEWED] },
+        created_at: {
+          gte: new Date(now.getTime() - RECENT_DAYS * 86_400_000),
+          lte: new Date(now.getTime() - ARRIVAL_GRACE_MS),
+        },
+        job_offer: {
+          deleted_at: null,
+          status: {
+            in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
+          },
+          employer: { is_business: true },
+        },
+      },
+      distinct: ['job_offer_id'],
+      take: CATCH_UP_OFFERS,
+      select: {
+        job_offer_id: true,
+        job_offer: { select: { employer_id: true } },
+      },
+    });
+    let analysed = 0;
+    for (const w of waiting) {
+      try {
+        analysed += (
+          await this.analyse(
+            w.job_offer.employer_id,
+            w.job_offer_id,
+            undefined,
+            new Date(now.getTime() - ARRIVAL_GRACE_MS),
+          )
+        ).analysed;
+      } catch (err) {
+        // A plan without « CV inclus » left: tried again on a later sweep.
+        this.logger.debug(
+          `CV analysis catch-up skipped for offer ${w.job_offer_id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    return analysed;
+  }
+
+  /**
    * A Rabotka application to a business offer is analysed as it arrives, like a
    * careers-page CV: on the plan's « CV inclus », so every candidate can be
    * compared at once. A plan with none left simply leaves it to analyse later.
@@ -241,7 +303,13 @@ export class ApplicantScoreService {
    * about and compared. What is read is `applicantCvText`, never a file with
    * the contacts on it.
    */
-  async analyse(profileId: string, offerId: string, applicationId?: string) {
+  async analyse(
+    profileId: string,
+    offerId: string,
+    applicationId?: string,
+    /** Only those that applied before: leaves the newest to analysis on arrival. */
+    appliedBefore?: Date,
+  ) {
     const businessId = await this.subscriptions.businessOf(profileId);
     if (!businessId) {
       throw new ForbiddenException('Espace réservé aux comptes entreprise.');
@@ -256,6 +324,7 @@ export class ApplicantScoreService {
         ? { notIn: [ApplicationStatus.CANCELLED, ApplicationStatus.REJECTED] }
         : { in: [ApplicationStatus.PENDING, ApplicationStatus.VIEWED] },
       ...(applicationId ? { id: applicationId } : {}),
+      ...(appliedBefore ? { created_at: { lte: appliedBefore } } : {}),
     };
     const [due, total] = await Promise.all([
       this.prisma.application.findMany({
