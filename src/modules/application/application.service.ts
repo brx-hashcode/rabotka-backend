@@ -52,6 +52,7 @@ import {
   InteractionSource,
   ExternalApplicationStatus,
   JobOfferStatus,
+  OfferQuestionKind,
   Prisma,
   RatingDirection,
   RejectionSource,
@@ -315,6 +316,11 @@ export type WorkerMissionCard = {
     ratingAvg: number | null;
     ratingCount: number;
   };
+  /**
+   * The worker's own answers to the offer's questions. Detail only, and never
+   * `passed`: a candidate must not learn which answers count against them.
+   */
+  answers?: { label: string; kind: OfferQuestionKind; value: string }[];
 };
 
 /**
@@ -2520,10 +2526,22 @@ export class ApplicationService {
       }
     }
 
-    const [card] = await this.toWorkerMissionCards(workerId, [
-      { ...application, contract },
+    const [[card], answers] = await Promise.all([
+      this.toWorkerMissionCards(workerId, [{ ...application, contract }]),
+      this.prisma.applicationAnswer.findMany({
+        where: { application_id: applicationId },
+        select: { label: true, kind: true, value: true },
+        orderBy: { created_at: 'asc' },
+      }),
     ]);
-    return card;
+    return {
+      ...card,
+      answers: answers.map((a) => ({
+        label: a.label,
+        kind: a.kind,
+        value: answerText(a),
+      })),
+    };
   }
 
   private async toWorkerMissionCards(
