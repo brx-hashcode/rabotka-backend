@@ -3,6 +3,11 @@ import {
   publicEmployerName,
 } from '../business/public-employer';
 import {
+  cvForApplication,
+  cvOpen,
+  unlockedWorkers,
+} from '../profile-cv/profile-cv.rules';
+import {
   AdminCacheService,
   ADMIN_LIST_TTL_SECONDS,
 } from '../../common/services/cache/admin-cache.service';
@@ -45,6 +50,7 @@ import {
   ApplicationStatus,
   AssignmentStatus,
   BillingStatus,
+  CvChoice,
   EmploymentType,
   InteractionActor,
   InteractionKind,
@@ -377,7 +383,7 @@ export class ApplicationService {
   async create(
     jobOfferId: string,
     workerId: string,
-    options: { agentId?: string; answers?: AnswerInput[] } = {},
+    options: { agentId?: string; answers?: AnswerInput[]; cv?: CvChoice } = {},
   ): Promise<ApplicationListItem> {
     const [jobOffer, worker] = await Promise.all([
       this.prisma.jobOffer.findUnique({
@@ -522,12 +528,15 @@ export class ApplicationService {
       ) {
         throw new BadRequestException("Cette offre n'est plus disponible");
       }
+      // « Mon CV » when chosen (or the worker's default); else the Rabotka CV.
+      const profileCvId = await cvForApplication(tx, workerId, options.cv);
       return tx.application.create({
         data: {
           job_offer_id: jobOfferId,
           worker_id: workerId,
           status: ApplicationStatus.PENDING,
           knocked_out: answered.knockedOut,
+          profile_cv_id: profileCvId,
           ...(options.agentId ? { agent_id: options.agentId } : {}),
           ...(answered.rows.length > 0
             ? { answers: { create: answered.rows } }
@@ -807,6 +816,9 @@ export class ApplicationService {
           select: { label: true, kind: true, value: true, passed: true },
           orderBy: { created_at: 'asc' },
         },
+        profile_cv: {
+          select: { file_name: true, mime_type: true, purged_at: true },
+        },
       },
     });
 
@@ -830,8 +842,27 @@ export class ApplicationService {
           ).map((r) => r.assignment_id),
     );
 
+    // « Mon CV »: the file has the contacts on it, so it opens only once they
+    // are unlocked or the application retained.
+    const unlocked = employerId
+      ? await unlockedWorkers(
+          this.prisma,
+          employerId,
+          applications.filter((a) => a.profile_cv).map((a) => a.worker_id),
+        )
+      : new Set<string>();
+
     return applications.map((a) => ({
       ...this.toApplicationWithOffer(a),
+      cv:
+        a.profile_cv && !a.profile_cv.purged_at
+          ? {
+              kind: CvChoice.UPLOADED,
+              fileName: a.profile_cv.file_name,
+              mimeType: a.profile_cv.mime_type,
+              available: cvOpen(a.status, a.worker_id, unlocked),
+            }
+          : { kind: CvChoice.RABOTKA },
       ratedByEmployer: a.assignment
         ? ratedAssignmentIds.has(a.assignment.id)
         : false,
