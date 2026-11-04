@@ -819,6 +819,18 @@ export class ApplicationService {
         profile_cv: {
           select: { file_name: true, mime_type: true, purged_at: true },
         },
+        cv_resume: {
+          select: {
+            id: true,
+            status: true,
+            score: true,
+            summary: true,
+            strengths: true,
+            gaps: true,
+            criteria: true,
+            screening_id: true,
+          },
+        },
       },
     });
 
@@ -863,6 +875,20 @@ export class ApplicationService {
               available: cvOpen(a.status, a.worker_id, unlocked),
             }
           : { kind: CvChoice.RABOTKA },
+      // Its CV analysis, in the offer's screening: asked about and compared
+      // with the careers-page CVs.
+      analysis: a.cv_resume
+        ? {
+            resumeId: a.cv_resume.id,
+            screeningId: a.cv_resume.screening_id,
+            status: a.cv_resume.status,
+            score: a.cv_resume.score,
+            summary: a.cv_resume.summary,
+            strengths: a.cv_resume.strengths,
+            gaps: a.cv_resume.gaps,
+            criteria: a.cv_resume.criteria,
+          }
+        : null,
       ratedByEmployer: a.assignment
         ? ratedAssignmentIds.has(a.assignment.id)
         : false,

@@ -39,7 +39,7 @@ function make() {
   const llm: any = { invoke: jest.fn() };
   const subscriptions: any = { businessOf: jest.fn().mockResolvedValue('b1') };
   return {
-    service: new ApplicantScoreService(prisma, llm, subscriptions),
+    service: new ApplicantScoreService(prisma, llm, subscriptions, {} as never),
     prisma,
     llm,
   };
@@ -124,5 +124,94 @@ describe('ApplicantScoreService', () => {
     await expect(service.forOffer('p1', 'o2')).rejects.toThrow(
       'Offre introuvable.',
     );
+  });
+});
+
+describe('ApplicantScoreService.analyse', () => {
+  const facts = {
+    app: { worker: { first_name: 'Awa', last_name: 'Ngoma' } },
+    applicant: {
+      trades: ['Comptabilité'],
+      description: 'Joignable au +242 06 123 45 67',
+      city: 'Brazzaville',
+      country: 'Congo',
+      memberSince: new Date('2025-01-01T00:00:00Z'),
+      reliabilityScore: null,
+      ratingAvg: null,
+      ratingCount: 0,
+      missions: [],
+      portfolio: [],
+    },
+  };
+
+  function setup(due: string[]) {
+    const prisma: any = {
+      application: {
+        findMany: jest.fn().mockResolvedValue(due.map((id) => ({ id }))),
+        count: jest.fn().mockResolvedValue(due.length + 1),
+        update: jest.fn(),
+      },
+    };
+    const subscriptions: any = {
+      businessOf: jest.fn().mockResolvedValue('b1'),
+      entitlements: jest.fn().mockResolvedValue({ cvBatchMax: 5 }),
+    };
+    const screenings: any = {
+      addToOffer: jest.fn().mockResolvedValue({
+        screeningId: 's1',
+        resumeIds: new Map(due.map((id) => [id, `r-${id}`])),
+      }),
+    };
+    const service = new ApplicantScoreService(
+      prisma,
+      {} as never,
+      subscriptions,
+      screenings,
+    );
+    jest.spyOn(service, 'facts').mockResolvedValue(facts as never);
+    return { service, prisma, screenings };
+  }
+
+  it('reads a text CV without contacts into the offer’s screening, and links it', async () => {
+    const { service, prisma, screenings } = setup(['a1']);
+
+    const out = await service.analyse('p1', 'o1');
+
+    const [, offerId, files] = screenings.addToOffer.mock.calls[0];
+    expect(offerId).toBe('o1');
+    expect(files[0]).toMatchObject({
+      originalname: 'Awa Ngoma a1.txt',
+      internalType: 'text/plain',
+      tag: 'a1',
+    });
+    const text = files[0].buffer.toString('utf8');
+    expect(text).toContain('Comptabilité');
+    expect(text).not.toContain('123 45 67');
+    expect(prisma.application.update).toHaveBeenCalledWith({
+      where: { id: 'a1' },
+      data: { cv_resume_id: 'r-a1' },
+    });
+    expect(out).toEqual({ screeningId: 's1', analysed: 1, left: 1 });
+  });
+
+  it('takes only those of the offer not read yet, waiting, up to the plan’s batch', async () => {
+    const { service, prisma } = setup(['a1']);
+
+    await service.analyse('p1', 'o1');
+
+    const query = prisma.application.findMany.mock.calls[0][0];
+    expect(query.take).toBe(5);
+    expect(query.where).toMatchObject({
+      job_offer_id: 'o1',
+      job_offer: { employer_id: 'p1' },
+      cv_resume_id: null,
+      status: { in: ['PENDING', 'VIEWED'] },
+    });
+  });
+
+  it('says so when there is nobody to read', async () => {
+    const { service, screenings } = setup([]);
+    await expect(service.analyse('p1', 'o1')).rejects.toThrow('Aucun candidat');
+    expect(screenings.addToOffer).not.toHaveBeenCalled();
   });
 });

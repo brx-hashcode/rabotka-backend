@@ -1423,6 +1423,9 @@ model Application {
   /// The worker's own CV sent with this application; null when it went with
   /// the Rabotka CV. Kept even after the worker replaces it.
   profile_cv_id       String?                 @db.Uuid
+  /// Its CV analysis, once the business ran one: it then sits in the offer's
+  /// screening with the careers-page CVs, to be asked about and compared.
+  cv_resume_id        String?                 @unique @db.Uuid
   cancelled_at        DateTime?
   cancellation_reason String?
   /// Who cancelled, and therefore whether the worker may apply again: only a
@@ -1496,6 +1499,7 @@ model Application {
   assessment ApplicationAssessment?
   answers    ApplicationAnswer[]
   profile_cv ProfileCv?             @relation(fields: [profile_cv_id], references: [id], onDelete: SetNull)
+  cv_resume  CvScreeningResume?     @relation(fields: [cv_resume_id], references: [id], onDelete: SetNull)
 }
 
 model Assignment {
@@ -3660,6 +3664,7 @@ model CvScreeningResume {
   error          String?
 
   external_application ExternalApplication?
+  application          Application?
   screening CvScreening          @relation(fields: [screening_id], references: [id], onDelete: Cascade)
   messages  CvResumeMessage[]
   interviews Interview[]

@@ -60,6 +60,11 @@ export type CvUpload = {
   mimetype: string;
   size: number;
   buffer: Buffer;
+  /**
+   * Set by server code only, for a CV it wrote (an applicant's, as text):
+   * multer never sets it, so an upload is always sniffed.
+   */
+  internalType?: CvFileType;
 };
 
 const EMPLOYMENT_LABEL: Record<string, string> = {
@@ -141,7 +146,7 @@ export class CvScreeningService {
           `« ${name} » dépasse ${e.cvFileMaxMb} Mo.`,
         );
       }
-      const type = cvFileType(file.buffer, file.mimetype);
+      const type = file.internalType ?? cvFileType(file.buffer, file.mimetype);
       if (!type) {
         throw new BadRequestException(
           `« ${name} » n'est pas reconnu : envoyez un PDF, un fichier Word (.docx) ou une photo (JPG, PNG, WEBP).`,
@@ -228,6 +233,55 @@ export class CvScreeningService {
       });
     }
     return screeningDetail(screening);
+  }
+
+  /**
+   * Adds CVs to the offer's one shared screening (opened on first use): the
+   * careers-page CVs and the Rabotka applicants' land together, so any of them
+   * can be compared. `tag` is a token in each file name that tells which
+   * resume came from which file; it is taken out once they are matched.
+   */
+  async addToOffer(
+    profileId: string,
+    offerId: string,
+    files: (CvUpload & { tag: string })[],
+  ): Promise<{ screeningId: string; resumeIds: Map<string, string> }> {
+    const businessId = await this.requireBusiness(profileId);
+    const open = await this.prisma.cvScreening.findFirst({
+      where: {
+        business_id: businessId,
+        offer_id: offerId,
+        external: true,
+        purged_at: null,
+        expires_at: { gt: new Date() },
+      },
+      select: { id: true },
+    });
+    const screening = await this.create(
+      profileId,
+      files,
+      { offerId },
+      open?.id,
+    );
+    if (!open) {
+      await this.prisma.cvScreening.update({
+        where: { id: screening.id },
+        data: { external: true },
+      });
+    }
+    const resumeIds = new Map<string, string>();
+    for (const file of files) {
+      const resume = screening.resumes.find((r) =>
+        r.fileName.includes(` ${file.tag}`),
+      );
+      if (!resume) continue;
+      resumeIds.set(file.tag, resume.id);
+      await this.prisma.cvScreeningResume.update({
+        where: { id: resume.id },
+        data: { file_name: resume.fileName.replace(` ${file.tag}`, '') },
+      });
+    }
+    return { screeningId: screening.id, resumeIds };
   }
 
   /** The job the CVs are measured against: an offer of the business, or one described by hand. */

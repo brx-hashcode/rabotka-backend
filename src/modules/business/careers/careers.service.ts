@@ -429,6 +429,9 @@ export class CareersService {
             status: true,
             score: true,
             summary: true,
+            strengths: true,
+            gaps: true,
+            criteria: true,
             screening_id: true,
           },
         },
@@ -460,6 +463,9 @@ export class CareersService {
         status: a.cv_resume.status,
         score: a.cv_resume.score,
         summary: a.cv_resume.summary,
+        strengths: a.cv_resume.strengths,
+        gaps: a.cv_resume.gaps,
+        criteria: a.cv_resume.criteria,
       },
     }));
   }
@@ -506,45 +512,25 @@ export class CareersService {
         mimetype: a.cv_mime_type,
         size: a.cv_size_bytes,
         buffer: await this.readCv(a),
+        tag: a.id,
       })),
     );
 
-    const open = await this.prisma.cvScreening.findFirst({
-      where: {
-        business_id: businessId,
-        offer_id: offerId,
-        external: true,
-        purged_at: null,
-        expires_at: { gt: new Date() },
-      },
-      select: { id: true },
-    });
-    const screening = await this.screenings.create(
+    const screening = await this.screenings.addToOffer(
       profileId,
+      offerId,
       files,
-      { offerId },
-      open?.id,
     );
-    if (!open) {
-      await this.prisma.cvScreening.update({
-        where: { id: screening.id },
-        data: { external: true },
-      });
-    }
     for (const a of due) {
-      const resume = screening.resumes.find((r) => r.fileName.includes(a.id));
-      if (!resume) continue;
+      const resumeId = screening.resumeIds.get(a.id);
+      if (!resumeId) continue;
       await this.prisma.externalApplication.update({
         where: { id: a.id },
-        data: { cv_resume_id: resume.id },
-      });
-      await this.prisma.cvScreeningResume.update({
-        where: { id: resume.id },
-        data: { file_name: resume.fileName.replace(` ${a.id}`, '') },
+        data: { cv_resume_id: resumeId },
       });
     }
     return {
-      screeningId: screening.id,
+      screeningId: screening.screeningId,
       analysed: due.length,
       left: total - due.length,
     };
