@@ -79,6 +79,18 @@ export class AdminCacheService {
     ]);
   }
 
+  /**
+   * Drops every cached admin read — all lists and all dashboard aggregates.
+   * Behind the admin's « Refresh » button: without it a refresh could hand back
+   * the same figures for up to two minutes.
+   */
+  async invalidateAll(): Promise<void> {
+    await Promise.all([
+      this.deleteByPattern(`${REDIS_KEY_PREFIX}admin:list:*`),
+      this.deleteByPattern(`${REDIS_KEY_PREFIX}admin:dashboard:*`),
+    ]);
+  }
+
   private async deleteByPattern(pattern: string): Promise<void> {
     try {
       let cursor = '0';
