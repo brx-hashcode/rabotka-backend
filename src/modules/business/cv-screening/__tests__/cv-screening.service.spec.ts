@@ -420,6 +420,25 @@ describe('CvScreeningService', () => {
       expect(prisma.cvScreeningResume.updateMany).not.toHaveBeenCalled();
     });
 
+    it('says nothing when an offer’s own screening closes: candidates arrive one by one', async () => {
+      const { service, prisma, storage, events } = make();
+      prisma.cvScreeningResume.findUnique.mockResolvedValue(queued());
+      storage.download.mockResolvedValue({ body: Readable.from([PNG]) });
+      prisma.cvScreening.findUnique.mockResolvedValue({
+        ...closing(['SCORED']),
+        external: true,
+      });
+
+      await service.process('r1');
+
+      expect(prisma.cvScreening.updateMany).toHaveBeenCalled();
+      expect(
+        events.emit.mock.calls.some(
+          ([name]: [string]) => name === 'profile.notification.create',
+        ),
+      ).toBe(false);
+    });
+
     it('closes the screening after its last CV and tells the business, once', async () => {
       const { service, prisma, storage, events } = make();
       prisma.cvScreeningResume.findUnique.mockResolvedValue(queued());

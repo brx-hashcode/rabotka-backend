@@ -3,6 +3,10 @@ import {
   publicEmployerName,
 } from '../business/public-employer';
 import {
+  APPLICATION_SUBMITTED,
+  type ApplicationSubmitted,
+} from './application.events';
+import {
   cvForApplication,
   cvOpen,
   unlockedWorkers,
@@ -545,6 +549,12 @@ export class ApplicationService {
         include: { job_offer: true },
       });
     });
+
+    this.eventEmitter.emit(APPLICATION_SUBMITTED, {
+      applicationId: application.id,
+      jobOfferId: application.job_offer_id,
+      employerId: application.job_offer.employer_id,
+    } satisfies ApplicationSubmitted);
 
     this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_CREATED, {
       event: AdminNotificationEvent.APPLICATION_CREATED,

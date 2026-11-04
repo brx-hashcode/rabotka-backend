@@ -5,12 +5,17 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { ApplicationStatus, AssignmentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { LlmService } from '../../rag/llm/llm.service';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
 import { answerText } from '../../job-offer/offer-questions';
+import {
+  APPLICATION_SUBMITTED,
+  type ApplicationSubmitted,
+} from '../../application/application.events';
 import {
   CvScreeningService,
   type CvUpload,
@@ -202,6 +207,31 @@ export class ApplicantScoreService {
       update: data,
     });
     return true;
+  }
+
+  /**
+   * A Rabotka application to a business offer is analysed as it arrives, like a
+   * careers-page CV: on the plan's « CV inclus », so every candidate can be
+   * compared at once. A plan with none left simply leaves it to analyse later.
+   */
+  @OnEvent(APPLICATION_SUBMITTED, { async: true })
+  async analyseOnArrival({
+    applicationId,
+    jobOfferId,
+    employerId,
+  }: ApplicationSubmitted): Promise<void> {
+    const employer = await this.prisma.profile.findUnique({
+      where: { id: employerId },
+      select: { is_business: true },
+    });
+    if (!employer?.is_business) return;
+    try {
+      await this.analyse(employerId, jobOfferId, applicationId);
+    } catch (err) {
+      this.logger.warn(
+        `Automatic CV analysis of application ${applicationId} skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   /**

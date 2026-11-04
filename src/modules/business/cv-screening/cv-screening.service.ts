@@ -505,6 +505,7 @@ export class CvScreeningService {
         id: true,
         job_title: true,
         status: true,
+        external: true,
         business: { select: { profile_id: true } },
         resumes: { select: { status: true, score: true } },
       },
@@ -528,6 +529,9 @@ export class CvScreeningService {
       data: { status: CvScreeningStatus.DONE },
     });
     if (count === 0) return;
+    // An offer's own screening fills as candidates apply: their score shows on
+    // the offer, and « Analyse terminée » on each arrival would only be noise.
+    if (screening.external) return;
     const scored = screening.resumes.filter(
       (r) => r.status === CvScreeningResumeStatus.SCORED,
     );

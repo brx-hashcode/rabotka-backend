@@ -215,3 +215,41 @@ describe('ApplicantScoreService.analyse', () => {
     expect(screenings.addToOffer).not.toHaveBeenCalled();
   });
 });
+
+describe('ApplicantScoreService.analyseOnArrival', () => {
+  const event = { applicationId: 'a1', jobOfferId: 'o1', employerId: 'e1' };
+  const make = (isBusiness: boolean) => {
+    const prisma: any = {
+      profile: {
+        findUnique: jest.fn().mockResolvedValue({ is_business: isBusiness }),
+      },
+    };
+    const service = new ApplicantScoreService(
+      prisma,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const analyse = jest.spyOn(service, 'analyse');
+    return { service, analyse };
+  };
+
+  it('analyses an application to a business offer as it arrives', async () => {
+    const { service, analyse } = make(true);
+    analyse.mockResolvedValue({ screeningId: 's1', analysed: 1, left: 0 });
+    await service.analyseOnArrival(event);
+    expect(analyse).toHaveBeenCalledWith('e1', 'o1', 'a1');
+  });
+
+  it('leaves the other employers alone', async () => {
+    const { service, analyse } = make(false);
+    await service.analyseOnArrival(event);
+    expect(analyse).not.toHaveBeenCalled();
+  });
+
+  it('never fails the application: no « CV inclus » left, it waits', async () => {
+    const { service, analyse } = make(true);
+    analyse.mockRejectedValue(new Error('Plus de CV inclus'));
+    await expect(service.analyseOnArrival(event)).resolves.toBeUndefined();
+  });
+});
