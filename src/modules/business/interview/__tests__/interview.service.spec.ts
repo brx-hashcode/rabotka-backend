@@ -165,6 +165,32 @@ describe('InterviewService', () => {
       ).toBe('prince@example.com');
     });
 
+    it('plans a CV analysed for a Rabotka applicant on their application', async () => {
+      const { service, prisma } = make();
+      prisma.application.findFirst
+        // The application that CV was analysed for…
+        .mockResolvedValueOnce({ id: 'a1' })
+        // …then the application itself, as the applicant path reads it.
+        .mockResolvedValueOnce({
+          id: 'a1',
+          job_offer: { id: 'o1', title: 'Vendeur', status: 'ACTIVE' },
+          worker: { first_name: 'Awa', last_name: 'K.' },
+        });
+
+      await service.create('p1', { ...slot, cvResumeId: 'r1' });
+
+      expect(prisma.application.findFirst.mock.calls[0][0].where).toEqual({
+        cv_resume_id: 'r1',
+        cv_resume: { screening: { business_id: 'b1' } },
+      });
+      const { data } = prisma.interview.create.mock.calls[0][0];
+      expect(data.application_id).toBe('a1');
+      expect(data.cv_resume_id).toBeNull();
+      // Read from their profile at send time, as for any applicant.
+      expect(data.candidate_email).toBeNull();
+      expect(prisma.cvScreeningResume.findFirst).not.toHaveBeenCalled();
+    });
+
     it('invites an applicant in-app, by their own e-mail, never kept for the business', async () => {
       const { service, prisma, mail, events } = make();
       prisma.application.findFirst.mockResolvedValue({

@@ -10,12 +10,16 @@ import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import {
   ApplicationStatus,
   AssignmentStatus,
+  CvScreeningResumeStatus,
   JobOfferStatus,
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { LlmService } from '../../rag/llm/llm.service';
-import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
+import {
+  BusinessSubscriptionService,
+  cvBatchRoom,
+} from '../subscription/business-subscription.service';
 import { answerText } from '../../job-offer/offer-questions';
 import {
   APPLICATION_SUBMITTED,
@@ -50,6 +54,8 @@ const MAX_PORTFOLIO = 8;
 const CATCH_UP_OFFERS = 5;
 /** Left to the analysis on arrival before the sweep takes over. */
 const ARRIVAL_GRACE_MS = 5 * 60 * 1000;
+/** A failed analysis is tried again after this: not at every sweep. */
+const FAILED_RETRY_MS = 6 * 60 * 60 * 1000;
 /** Older applications are not worth a « CV inclus » any more. */
 const CATCH_UP_DAYS = 30;
 
@@ -230,7 +236,16 @@ export class ApplicantScoreService {
   async catchUpAnalyses(now = new Date()): Promise<number> {
     const waiting = await this.prisma.application.findMany({
       where: {
-        cv_resume_id: null,
+        // Not analysed yet, or whose analysis failed long enough ago.
+        OR: [
+          { cv_resume_id: null },
+          {
+            cv_resume: {
+              status: CvScreeningResumeStatus.FAILED,
+              updated_at: { lte: new Date(now.getTime() - FAILED_RETRY_MS) },
+            },
+          },
+        ],
         deleted_at: null,
         status: { in: [ApplicationStatus.PENDING, ApplicationStatus.VIEWED] },
         created_at: {
@@ -264,6 +279,7 @@ export class ApplicantScoreService {
             w.job_offer_id,
             undefined,
             new Date(now.getTime() - ARRIVAL_GRACE_MS),
+            new Date(now.getTime() - FAILED_RETRY_MS),
           )
         ).analysed;
       } catch (err) {
@@ -314,17 +330,44 @@ export class ApplicantScoreService {
     applicationId?: string,
     /** Only those that applied before: leaves the newest to analysis on arrival. */
     appliedBefore?: Date,
+    /** Also those whose analysis failed before then: tried again, not forever. */
+    retryFailedBefore?: Date,
   ) {
     const businessId = await this.subscriptions.businessOf(profileId);
     if (!businessId) {
       throw new ForbiddenException('Espace réservé aux comptes entreprise.');
     }
     const e = await this.subscriptions.entitlements(businessId);
+    const room = cvBatchRoom(e);
+    if (room === 0) {
+      throw new ForbiddenException(
+        'Vous avez utilisé tous les CV inclus dans votre formule pour cette période. Changez de formule pour en analyser davantage.',
+      );
+    }
     const where: Prisma.ApplicationWhereInput = {
       job_offer_id: offerId,
-      job_offer: { employer_id: profileId, deleted_at: null },
+      // Only while the offer recruits, as for a careers-page CV.
+      job_offer: {
+        employer_id: profileId,
+        deleted_at: null,
+        status: {
+          in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
+        },
+      },
       deleted_at: null,
-      cv_resume_id: null,
+      OR: [
+        { cv_resume_id: null },
+        ...(retryFailedBefore
+          ? [
+              {
+                cv_resume: {
+                  status: CvScreeningResumeStatus.FAILED,
+                  updated_at: { lte: retryFailedBefore },
+                },
+              },
+            ]
+          : []),
+      ],
       status: applicationId
         ? { notIn: [ApplicationStatus.CANCELLED, ApplicationStatus.REJECTED] }
         : { in: [ApplicationStatus.PENDING, ApplicationStatus.VIEWED] },
@@ -335,8 +378,8 @@ export class ApplicantScoreService {
       this.prisma.application.findMany({
         where,
         orderBy: { created_at: 'desc' },
-        take: e.cvBatchMax,
-        select: { id: true },
+        take: room,
+        select: { id: true, cv_resume_id: true },
       }),
       this.prisma.application.count({ where }),
     ]);
@@ -369,13 +412,19 @@ export class ApplicantScoreService {
       offerId,
       files,
     );
-    for (const { id } of due) {
+    for (const { id, cv_resume_id: failed } of due) {
       const resumeId = screening.resumeIds.get(id);
       if (!resumeId) continue;
       await this.prisma.application.update({
         where: { id },
         data: { cv_resume_id: resumeId },
       });
+      // The failed try it replaces: gone, rather than a dead row in the screening.
+      if (failed) {
+        await this.prisma.cvScreeningResume
+          .delete({ where: { id: failed } })
+          .catch(() => undefined);
+      }
     }
     return {
       screeningId: screening.screeningId,

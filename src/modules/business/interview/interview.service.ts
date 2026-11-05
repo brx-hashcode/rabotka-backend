@@ -101,16 +101,22 @@ export class InterviewService {
       );
     }
     const slot = this.slot(input);
-    const who = input.cvResumeId
-      ? await this.fromCv(businessId, input.cvResumeId, input.candidateEmail)
-      : await this.fromApplication(profileId, input.applicationId!);
+    // A CV analysed for a Rabotka applicant is their application: invited as
+    // one (profile e-mail, in-app notice), never through the CV's masked
+    // contacts, and closed with it if they are turned down.
+    const applicationId =
+      input.applicationId ??
+      (await this.applicationOfResume(businessId, input.cvResumeId!));
+    const who = applicationId
+      ? await this.fromApplication(profileId, applicationId)
+      : await this.fromCv(businessId, input.cvResumeId!, input.candidateEmail);
 
     const token = randomBytes(24).toString('base64url');
     const created = await this.prisma.interview.create({
       data: {
         business_id: businessId,
-        cv_resume_id: input.cvResumeId ?? null,
-        application_id: input.applicationId ?? null,
+        cv_resume_id: applicationId ? null : (input.cvResumeId ?? null),
+        application_id: applicationId ?? null,
         offer_id: who.offerId,
         job_title: who.jobTitle,
         candidate_name: who.name,
@@ -405,6 +411,21 @@ export class InterviewService {
       location: location?.slice(0, 500) ?? null,
       message: input.message?.trim().slice(0, 2000) || null,
     };
+  }
+
+  /** The Rabotka application a CV of this business was analysed for, if any. */
+  private async applicationOfResume(
+    businessId: string,
+    resumeId: string,
+  ): Promise<string | null> {
+    const app = await this.prisma.application.findFirst({
+      where: {
+        cv_resume_id: resumeId,
+        cv_resume: { screening: { business_id: businessId } },
+      },
+      select: { id: true },
+    });
+    return app?.id ?? null;
   }
 
   private async fromCv(

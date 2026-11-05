@@ -59,6 +59,11 @@ export class ProfileFilesService {
           select: { storage_key: true, image_url: true },
         },
         files: { select: { storage_key: true } },
+        // « Mon CV », every version: the phone and e-mail are printed on it.
+        cvs: {
+          where: { purged_at: null },
+          select: { storage_key: true, storage_bucket: true },
+        },
         portfolio_items: {
           select: {
             images: { select: { storage_key: true, image_url: true } },
@@ -118,6 +123,13 @@ export class ProfileFilesService {
       }
 
       for (const f of p.files) out.push({ key: f.storage_key });
+
+      for (const cv of p.cvs) {
+        out.push({
+          key: cv.storage_key,
+          ...(cv.storage_bucket ? { bucket: cv.storage_bucket } : {}),
+        });
+      }
 
       for (const item of p.portfolio_items) {
         for (const img of item.images) {

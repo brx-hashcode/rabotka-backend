@@ -121,6 +121,17 @@ export type BusinessEntitlements = {
 };
 
 /**
+ * How many CVs one analysis may read now: the plan's batch, but never more
+ * than the « CV inclus » left. The charge is all or nothing, so a batch above
+ * what is left read nothing at all, and the sweep asked again every time.
+ */
+export function cvBatchRoom(
+  e: Pick<BusinessEntitlements, 'cvBatchMax' | 'cvRemaining'>,
+): number {
+  return Math.max(0, Math.min(e.cvBatchMax, e.cvRemaining ?? e.cvBatchMax));
+}
+
+/**
  * Business plans: the trial, purchases and renewals, the quotas they carry,
  * and their expiry. Prices and quotas are the business_plans table (admin);
  * the trial and reminders are SystemConfig. Messages go by email and in-app,
