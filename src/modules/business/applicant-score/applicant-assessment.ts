@@ -134,29 +134,38 @@ const mark = z
       ? null
       : Math.round(Math.min(100, Math.max(0, n))),
   );
-const line = z
-  .string()
-  .trim()
-  .transform((s) => s.slice(0, 200));
+/** `null` where there is nothing to say reads as absent, so the default applies. */
+const absentIfNull = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((v) => (v === null ? undefined : v), schema);
+/** Up to three lines of 200; null, or null items, read as none. */
+const lines = absentIfNull(
+  z
+    .array(z.string().trim().nullish())
+    .default([])
+    .transform((a) =>
+      a
+        .filter((s): s is string => !!s)
+        .map((s) => s.slice(0, 200))
+        .slice(0, 3),
+    ),
+);
 
 const answerSchema = z.object({
-  criteria: z
-    .object({ trade: mark, experience: mark, location: mark })
-    .partial()
-    .default({}),
-  summary: z
-    .string()
-    .trim()
-    .default('')
-    .transform((s) => s.slice(0, 500)),
-  strengths: z
-    .array(line)
-    .default([])
-    .transform((a) => a.filter(Boolean).slice(0, 3)),
-  gaps: z
-    .array(line)
-    .default([])
-    .transform((a) => a.filter(Boolean).slice(0, 3)),
+  criteria: absentIfNull(
+    z
+      .object({ trade: mark, experience: mark, location: mark })
+      .partial()
+      .default({}),
+  ),
+  summary: absentIfNull(
+    z
+      .string()
+      .trim()
+      .default('')
+      .transform((s) => s.slice(0, 500)),
+  ),
+  strengths: lines,
+  gaps: lines,
 });
 
 /** The AI's part (trade, experience, location), or null when it is not the JSON asked for. */
