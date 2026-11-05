@@ -203,9 +203,49 @@ describe('ApplicantScoreService.analyse', () => {
     expect(query.take).toBe(5);
     expect(query.where).toMatchObject({
       job_offer_id: 'o1',
-      job_offer: { employer_id: 'p1' },
-      cv_resume_id: null,
+      // Only while the offer recruits, as for a careers-page CV.
+      job_offer: {
+        employer_id: 'p1',
+        status: { in: ['ACTIVE', 'PARTIALLY_FILLED'] },
+      },
+      OR: [{ cv_resume_id: null }],
       status: { in: ['PENDING', 'VIEWED'] },
+    });
+  });
+
+  it('never takes more than the « CV inclus » left: the charge is all or nothing', async () => {
+    const { service, prisma } = setup(['a1']);
+    (service as any).subscriptions.entitlements.mockResolvedValue({
+      cvBatchMax: 5,
+      cvRemaining: 2,
+    });
+    await service.analyse('p1', 'o1');
+    expect(prisma.application.findMany.mock.calls[0][0].take).toBe(2);
+  });
+
+  it('says so, without querying, when none is left', async () => {
+    const { service, prisma } = setup(['a1']);
+    (service as any).subscriptions.entitlements.mockResolvedValue({
+      cvBatchMax: 5,
+      cvRemaining: 0,
+    });
+    await expect(service.analyse('p1', 'o1')).rejects.toThrow('CV inclus');
+    expect(prisma.application.findMany).not.toHaveBeenCalled();
+  });
+
+  it('replaces a failed try, and deletes it', async () => {
+    const { service, prisma } = setup(['a1']);
+    prisma.application.findMany.mockResolvedValue([
+      { id: 'a1', cv_resume_id: 'r-old' },
+    ]);
+    prisma.cvScreeningResume = { delete: jest.fn().mockResolvedValue({}) };
+    await service.analyse('p1', 'o1', undefined, undefined, new Date());
+    expect(prisma.application.update).toHaveBeenCalledWith({
+      where: { id: 'a1' },
+      data: { cv_resume_id: 'r-a1' },
+    });
+    expect(prisma.cvScreeningResume.delete).toHaveBeenCalledWith({
+      where: { id: 'r-old' },
     });
   });
 
@@ -281,8 +321,16 @@ describe('ApplicantScoreService.catchUpAnalyses', () => {
     const { service, prisma, analyse } = make([]);
     await service.catchUpAnalyses(now);
     const { where } = prisma.application.findMany.mock.calls[0][0];
+    expect(where.OR).toEqual([
+      { cv_resume_id: null },
+      {
+        cv_resume: {
+          status: 'FAILED',
+          updated_at: { lte: new Date('2026-11-05T04:00:00Z') },
+        },
+      },
+    ]);
     expect(where).toMatchObject({
-      cv_resume_id: null,
       status: { in: ['PENDING', 'VIEWED'] },
       job_offer: {
         status: { in: ['ACTIVE', 'PARTIALLY_FILLED'] },
@@ -306,6 +354,7 @@ describe('ApplicantScoreService.catchUpAnalyses', () => {
       'o1',
       undefined,
       new Date('2026-11-05T09:55:00Z'),
+      new Date('2026-11-05T04:00:00Z'),
     );
   });
 

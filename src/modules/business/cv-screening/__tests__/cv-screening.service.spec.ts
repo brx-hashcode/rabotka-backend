@@ -263,6 +263,51 @@ describe('CvScreeningService', () => {
     });
   });
 
+  describe('get', () => {
+    it('says which CVs are a Rabotka applicant’s', async () => {
+      const { service, prisma } = make();
+      const resume = (id: string) => ({
+        id,
+        status: 'SCORED',
+        score: 80,
+        created_at: new Date(),
+        file_name: `${id}.txt`,
+        mime_type: 'text/plain',
+        size_bytes: 3,
+        storage_key: 'k',
+        criteria: {},
+        summary: '',
+        strengths: [],
+        gaps: [],
+        candidate: null,
+        error: null,
+      });
+      prisma.cvScreening.findFirst = jest.fn().mockResolvedValue({
+        id: 's1',
+        job_title: 'Dev',
+        job_text: '…',
+        status: 'DONE',
+        created_at: new Date(),
+        expires_at: new Date(),
+        purged_at: null,
+        offer_id: 'o1',
+        external: true,
+        resumes: [resume('r1'), resume('r2')],
+      });
+      prisma.application = {
+        findMany: jest
+          .fn()
+          .mockResolvedValue([{ id: 'a1', cv_resume_id: 'r1' }]),
+      };
+
+      const detail = await service.get('p1', 's1');
+
+      expect(
+        Object.fromEntries(detail.resumes.map((r) => [r.id, r.applicationId])),
+      ).toEqual({ r1: 'a1', r2: null });
+    });
+  });
+
   describe('addToOffer', () => {
     const files = [
       {

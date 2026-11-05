@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -47,7 +48,10 @@ import { feedSite, jobsFeedXml } from './job-feed';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { BUSINESS_CATEGORY_LABELS } from '../business-catalog';
 import { CvScreeningService } from '../cv-screening/cv-screening.service';
-import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
+import {
+  BusinessSubscriptionService,
+  cvBatchRoom,
+} from '../subscription/business-subscription.service';
 import {
   CV_EXTENSION,
   cvFileType,
@@ -479,6 +483,12 @@ export class CareersService {
     const businessId = await this.subscriptions.businessOf(profileId);
     if (!businessId) throw new NotFoundException('Organisation introuvable.');
     const e = await this.subscriptions.entitlements(businessId);
+    const room = cvBatchRoom(e);
+    if (room === 0) {
+      throw new ForbiddenException(
+        'Vous avez utilisé tous les CV inclus dans votre formule pour cette période. Changez de formule pour en analyser davantage.',
+      );
+    }
     const where = {
       job_offer_id: offerId,
       job_offer: {
@@ -497,7 +507,7 @@ export class CareersService {
       this.prisma.externalApplication.findMany({
         where,
         orderBy: { created_at: 'asc' },
-        take: e.cvBatchMax,
+        take: room,
       }),
       this.prisma.externalApplication.count({ where }),
     ]);

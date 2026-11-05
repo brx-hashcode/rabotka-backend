@@ -283,6 +283,19 @@ describe('CareersService', () => {
       });
     });
 
+    it('never takes more CVs than the « CV inclus » left', async () => {
+      const { service, prisma } = withDue(null);
+      subscriptions.entitlements.mockResolvedValueOnce({
+        cvBatchMax: 2,
+        cvRemaining: 1,
+        cvFileMaxMb: 5,
+      });
+
+      await service.analyse('p1', 'o1');
+
+      expect(prisma.externalApplication.findMany.mock.calls[0][0].take).toBe(1);
+    });
+
     it('says so when there is nothing to read', async () => {
       const { service } = withDue(null, []);
 

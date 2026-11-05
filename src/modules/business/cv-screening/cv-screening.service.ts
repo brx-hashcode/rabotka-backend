@@ -354,7 +354,22 @@ export class CvScreeningService {
   }
 
   async get(profileId: string, id: string) {
-    return screeningDetail(await this.owned(profileId, id));
+    const screening = await this.owned(profileId, id);
+    // Which CVs are a Rabotka applicant's: their interview goes on the
+    // application (profile e-mail, in-app notice), not on the CV's contacts.
+    const links = await this.prisma.application.findMany({
+      where: { cv_resume_id: { in: screening.resumes.map((r) => r.id) } },
+      select: { id: true, cv_resume_id: true },
+    });
+    const applicationOf = new Map(links.map((l) => [l.cv_resume_id, l.id]));
+    const detail = screeningDetail(screening);
+    return {
+      ...detail,
+      resumes: detail.resumes.map((r) => ({
+        ...r,
+        applicationId: applicationOf.get(r.id) ?? null,
+      })),
+    };
   }
 
   /** One CV's file, for its business only, until the purge. */
