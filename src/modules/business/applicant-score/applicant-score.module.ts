@@ -3,6 +3,7 @@ import { AuthModule } from '../../auth/auth.module';
 import { LlmModule } from '../../rag/llm/llm.module';
 import { BusinessSubscriptionModule } from '../subscription/business-subscription.module';
 import { CvScreeningModule } from '../cv-screening/cv-screening.module';
+import { CareersModule } from '../careers/careers.module';
 import { ApplicantScoreController } from './applicant-score.controller';
 import { ApplicantScoreScheduler } from './applicant-score.scheduler';
 import { ApplicantScoreService } from './applicant-score.service';
@@ -15,6 +16,7 @@ import { ApplicantScoreService } from './applicant-score.service';
     LlmModule,
     BusinessSubscriptionModule,
     CvScreeningModule,
+    CareersModule,
   ],
   controllers: [ApplicantScoreController],
   providers: [ApplicantScoreService, ApplicantScoreScheduler],

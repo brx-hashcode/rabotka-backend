@@ -19,6 +19,8 @@ import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { kycBucket } from '../../../common/services/storage/kyc-bucket';
 import { StorageService } from '../../../common/services/storage/storage.service';
+import { QueueService } from '../../../common/services/queue/queue.service';
+import { enqueueCvAnalysis } from '../applicant-score/cv-analysis-jobs';
 import {
   answerText,
   type AnswerInput,
@@ -118,6 +120,7 @@ export class CareersService {
     private readonly events: EventEmitter2,
     private readonly screenings: CvScreeningService,
     private readonly subscriptions: BusinessSubscriptionService,
+    private readonly queue: QueueService,
   ) {}
 
   /** Verified businesses that are hiring now, those with the most offers first. */
@@ -414,8 +417,13 @@ export class CareersService {
     );
     // Scored at once, on the plan's « CV inclus ». The candidate is not kept
     // waiting, and a plan with none left simply shows the CV unscored.
-    void this.analyse(business.profile_id, offer.id, id).catch((err) =>
-      this.logger.warn(`Automatic analysis of ${id} failed: ${String(err)}`),
+    void enqueueCvAnalysis(this.queue, {
+      kind: 'careers',
+      applicationId: id,
+      offerId: offer.id,
+      employerId: business.profile_id,
+    }).catch((err) =>
+      this.logger.warn(`CV analysis of ${id} not queued: ${String(err)}`),
     );
     return { sent: true };
   }

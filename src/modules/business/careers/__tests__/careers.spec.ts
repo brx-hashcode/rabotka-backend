@@ -49,6 +49,8 @@ const storage = {
   delete: jest.fn().mockResolvedValue(undefined),
 };
 const screenings = { create: jest.fn(), addToOffer: jest.fn() };
+const queueAdd = jest.fn().mockResolvedValue({});
+const queue = { getQueue: jest.fn(() => ({ add: queueAdd })) };
 const subscriptions = {
   businessOf: jest.fn().mockResolvedValue('b1'),
   entitlements: jest.fn().mockResolvedValue({ cvBatchMax: 2, cvFileMaxMb: 5 }),
@@ -80,6 +82,7 @@ const serviceWith = (found: unknown, offers: unknown[] = [], one?: unknown) => {
     { emit } as never,
     screenings as never,
     subscriptions as never,
+    queue as never,
   );
   return { prisma, service };
 };
@@ -492,17 +495,28 @@ describe('CareersService', () => {
       ).toBe('jooble');
     });
 
-    it('scores the CV as it arrives, and never fails the application for it', async () => {
+    it('queues the CV for analysis as it arrives, and never fails the application for it', async () => {
       const { service } = serviceWith(business, [], open);
-      const analyse = jest
-        .spyOn(service, 'analyse')
-        .mockRejectedValue(new Error('no CV left'));
+      queueAdd.mockRejectedValueOnce(new Error('redis down'));
 
       await expect(
         service.apply('kamoa', 'RBT-AC5LF', pdf, { ...dto, answers }),
       ).resolves.toEqual({ sent: true });
 
-      expect(analyse).toHaveBeenCalledWith('p1', 'o1', expect.any(String));
+      expect(queueAdd).toHaveBeenCalledWith(
+        'cv-analysis-queue',
+        {
+          kind: 'careers',
+          applicationId: expect.any(String),
+          offerId: 'o1',
+          employerId: 'p1',
+        },
+        expect.objectContaining({
+          jobId: expect.stringMatching(/^careers-/),
+          removeOnComplete: true,
+          removeOnFail: true,
+        }),
+      );
     });
 
     it('tells the business and the candidate', async () => {
