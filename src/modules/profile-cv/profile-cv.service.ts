@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CvChoice, ProfileType } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -20,6 +21,10 @@ import {
   type CvFileType,
 } from '../business/cv-screening/cv-files';
 import { cvOpen, unlockedWorkers } from './profile-cv.rules';
+import {
+  CANDIDATE_VIEWED,
+  type CandidateViewed,
+} from '../application/application.events';
 import { stripContacts } from './strip-contacts';
 
 export const MAX_PROFILE_CV_BYTES = 10 * 1024 * 1024;
@@ -47,6 +52,7 @@ export class ProfileCvService {
     private readonly storage: StorageService,
     private readonly systemConfig: SystemConfigService,
     private readonly config: ConfigService,
+    private readonly events: EventEmitter2,
   ) {}
 
   async get(profileId: string): Promise<ProfileCvView> {
@@ -203,6 +209,11 @@ export class ProfileCvService {
         'Le CV joint s’ouvre une fois le contact débloqué.',
       );
     }
+    this.events.emit(CANDIDATE_VIEWED, {
+      employerId,
+      workerId: application.worker_id,
+      applicationId,
+    } satisfies CandidateViewed);
     return this.file(application.profile_cv);
   }
 

@@ -39,17 +39,28 @@ function setup({
     ),
   };
   const res = { setHeader: jest.fn(), send: jest.fn() };
+  const events = { emit: jest.fn() };
   const ctrl = new BusinessResumeController(
     resume as any,
     prisma as any,
     subscriptions as any,
+    events as any,
   );
   const call = () =>
     ctrl.view({ user: { profileId: BIZ } } as any, WORKER, res as any);
-  return { resume, prisma, subscriptions, res, call };
+  return { resume, prisma, subscriptions, res, events, call };
 }
 
 describe('BusinessResumeController', () => {
+  it('marks the candidate « Vue » once the business opened the CV', async () => {
+    const t = setup({ applied: 1, preselection: false });
+    await t.call();
+    expect(t.events.emit).toHaveBeenCalledWith('application.candidate-viewed', {
+      employerId: BIZ,
+      workerId: WORKER,
+    });
+  });
+
   it('serves an applicant the CV without contacts, whatever the plan', async () => {
     const t = setup({ applied: 1, preselection: false });
     await t.call();

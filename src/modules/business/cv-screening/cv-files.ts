@@ -3,7 +3,14 @@ import { sniffFileType } from '../../../common/utils/file-signature.util';
 export const DOCX_MIME =
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
+/**
+ * A CV Rabotka writes itself, for an applicant: never accepted from an upload
+ * (`cvFileType` cannot return it), so only server code produces one.
+ */
+export const TEXT_MIME = 'text/plain';
+
 export type CvFileType =
+  | typeof TEXT_MIME
   | 'application/pdf'
   | typeof DOCX_MIME
   | 'image/jpeg'
@@ -31,6 +38,7 @@ export function cvFileType(
 }
 
 export const CV_EXTENSION: Record<CvFileType, string> = {
+  [TEXT_MIME]: 'txt',
   'application/pdf': 'pdf',
   [DOCX_MIME]: 'docx',
   'image/jpeg': 'jpg',
@@ -45,7 +53,9 @@ export async function extractCvText(
 ): Promise<string> {
   try {
     let raw = '';
-    if (type === 'application/pdf') {
+    if (type === TEXT_MIME) {
+      raw = buffer.toString('utf8');
+    } else if (type === 'application/pdf') {
       const { extractText, getDocumentProxy } = await import('unpdf');
       const pdf = await getDocumentProxy(new Uint8Array(buffer));
       const { text } = await extractText(pdf, { mergePages: true });

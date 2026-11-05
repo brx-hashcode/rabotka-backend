@@ -3,6 +3,12 @@ import {
   publicEmployerName,
 } from '../business/public-employer';
 import {
+  APPLICATION_SUBMITTED,
+  CANDIDATE_VIEWED,
+  type ApplicationSubmitted,
+  type CandidateViewed,
+} from './application.events';
+import {
   cvForApplication,
   cvOpen,
   unlockedWorkers,
@@ -20,7 +26,7 @@ import {
   Inject,
   forwardRef,
 } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { jobLocationLabel } from '../../common/utils/job-location.util';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -546,6 +552,12 @@ export class ApplicationService {
       });
     });
 
+    this.eventEmitter.emit(APPLICATION_SUBMITTED, {
+      applicationId: application.id,
+      jobOfferId: application.job_offer_id,
+      employerId: application.job_offer.employer_id,
+    } satisfies ApplicationSubmitted);
+
     this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_CREATED, {
       event: AdminNotificationEvent.APPLICATION_CREATED,
       title: 'Nouvelle candidature',
@@ -819,6 +831,18 @@ export class ApplicationService {
         profile_cv: {
           select: { file_name: true, mime_type: true, purged_at: true },
         },
+        cv_resume: {
+          select: {
+            id: true,
+            status: true,
+            score: true,
+            summary: true,
+            strengths: true,
+            gaps: true,
+            criteria: true,
+            screening_id: true,
+          },
+        },
       },
     });
 
@@ -863,6 +887,20 @@ export class ApplicationService {
               available: cvOpen(a.status, a.worker_id, unlocked),
             }
           : { kind: CvChoice.RABOTKA },
+      // Its CV analysis, in the offer's screening: asked about and compared
+      // with the careers-page CVs.
+      analysis: a.cv_resume
+        ? {
+            resumeId: a.cv_resume.id,
+            screeningId: a.cv_resume.screening_id,
+            status: a.cv_resume.status,
+            score: a.cv_resume.score,
+            summary: a.cv_resume.summary,
+            strengths: a.cv_resume.strengths,
+            gaps: a.cv_resume.gaps,
+            criteria: a.cv_resume.criteria,
+          }
+        : null,
       ratedByEmployer: a.assignment
         ? ratedAssignmentIds.has(a.assignment.id)
         : false,
@@ -2799,6 +2837,26 @@ export class ApplicationService {
       );
 
     return updated;
+  }
+
+  /** The business looked at a candidate's CV: their waiting applications are « Vues ». */
+  @OnEvent(CANDIDATE_VIEWED, { async: true })
+  async onCandidateViewed({
+    employerId,
+    workerId,
+    applicationId,
+  }: CandidateViewed): Promise<void> {
+    const waiting = await this.prisma.application.findMany({
+      where: {
+        worker_id: workerId,
+        status: ApplicationStatus.PENDING,
+        deleted_at: null,
+        job_offer: { employer_id: employerId },
+        ...(applicationId ? { id: applicationId } : {}),
+      },
+      select: { id: true },
+    });
+    for (const { id } of waiting) await this.markAsViewed(id);
   }
 
   async markAsViewed(applicationId: string): Promise<void> {

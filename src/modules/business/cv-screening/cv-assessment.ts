@@ -158,6 +158,9 @@ export function parseAssessment(
     const value = parsed.data.criteria[key];
     if (typeof value === 'number') criteria[key] = value;
   }
+  // A CV judged on nothing: the model gave the person but no marks. Scored as
+  // is, it read 0/100 and « SCORED »; it is an answer to ask again for instead.
+  if (parsed.data.isCv && Object.keys(criteria).length === 0) return null;
   return { ...parsed.data, candidate, criteria };
 }
 

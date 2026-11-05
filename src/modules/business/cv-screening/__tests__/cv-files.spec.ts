@@ -1,4 +1,10 @@
-import { DOCX_MIME, cvFileType, foldWhitespace } from '../cv-files';
+import {
+  DOCX_MIME,
+  TEXT_MIME,
+  cvFileType,
+  extractCvText,
+  foldWhitespace,
+} from '../cv-files';
 
 const pad = (head: number[]) =>
   Buffer.concat([Buffer.from(head), Buffer.alloc(16)]);
@@ -31,5 +37,22 @@ describe('foldWhitespace', () => {
     expect(foldWhitespace('  Nom :  Awa \n\n\n\n Ville  ')).toBe(
       'Nom : Awa\n\nVille',
     );
+  });
+});
+
+describe('the internal text CV', () => {
+  it('is never taken from an upload, whatever it declares', () => {
+    expect(
+      cvFileType(Buffer.from('Awa Ngoma, comptable'), TEXT_MIME),
+    ).toBeNull();
+  });
+
+  it('is read as it is', async () => {
+    expect(
+      await extractCvText(
+        Buffer.from('Awa  Ngoma\ncomptable', 'utf8'),
+        TEXT_MIME,
+      ),
+    ).toBe('Awa Ngoma\ncomptable');
   });
 });
