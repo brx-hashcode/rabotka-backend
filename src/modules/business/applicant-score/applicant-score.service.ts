@@ -50,6 +50,8 @@ const MAX_PORTFOLIO = 8;
 const CATCH_UP_OFFERS = 5;
 /** Left to the analysis on arrival before the sweep takes over. */
 const ARRIVAL_GRACE_MS = 5 * 60 * 1000;
+/** Older applications are not worth a « CV inclus » any more. */
+const CATCH_UP_DAYS = 30;
 
 /**
  * Ranks the applicants of a business's offers like CV analysis ranks CVs:
@@ -232,7 +234,7 @@ export class ApplicantScoreService {
         deleted_at: null,
         status: { in: [ApplicationStatus.PENDING, ApplicationStatus.VIEWED] },
         created_at: {
-          gte: new Date(now.getTime() - RECENT_DAYS * 86_400_000),
+          gte: new Date(now.getTime() - CATCH_UP_DAYS * 86_400_000),
           lte: new Date(now.getTime() - ARRIVAL_GRACE_MS),
         },
         job_offer: {
@@ -243,6 +245,9 @@ export class ApplicantScoreService {
           employer: { is_business: true },
         },
       },
+      // The newest first: a plan's last « CV inclus » go to who just applied,
+      // not to applications long left waiting.
+      orderBy: { created_at: 'desc' },
       distinct: ['job_offer_id'],
       take: CATCH_UP_OFFERS,
       select: {
@@ -329,7 +334,7 @@ export class ApplicantScoreService {
     const [due, total] = await Promise.all([
       this.prisma.application.findMany({
         where,
-        orderBy: { created_at: 'asc' },
+        orderBy: { created_at: 'desc' },
         take: e.cvBatchMax,
         select: { id: true },
       }),

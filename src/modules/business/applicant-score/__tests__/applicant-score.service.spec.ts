@@ -290,6 +290,10 @@ describe('ApplicantScoreService.catchUpAnalyses', () => {
       },
     });
     expect(where.created_at.lte).toEqual(new Date('2026-11-05T09:55:00Z'));
+    expect(where.created_at.gte).toEqual(new Date('2026-10-06T10:00:00Z'));
+    expect(prisma.application.findMany.mock.calls[0][0].orderBy).toEqual({
+      created_at: 'desc',
+    });
     expect(analyse).not.toHaveBeenCalled();
   });
 
