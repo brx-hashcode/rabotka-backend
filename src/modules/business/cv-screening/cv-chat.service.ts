@@ -18,7 +18,10 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { LlmService } from '../../rag/llm/llm.service';
-import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
+import {
+  BusinessSubscriptionService,
+  TRIAL_AI_REFUSAL,
+} from '../subscription/business-subscription.service';
 import { CvScreeningService } from './cv-screening.service';
 import type { ChatReportCandidate, ChatReportInput } from './cv-chat-report';
 import { experiencesText, type CvExperience } from './cv-experience';
@@ -172,7 +175,7 @@ export class CvChatService {
   ): Promise<CvChatTurn> {
     const text = question.trim();
     if (text.length < 2) throw new BadRequestException('Posez votre question.');
-    const { resume, screening, limit } = await this.owned(
+    const { resume, screening, limit, trialLocked } = await this.owned(
       profileId,
       screeningId,
       resumeId,
@@ -195,9 +198,11 @@ export class CvChatService {
     const asked = past.filter((m) => m.role === CvChatRole.USER).length;
     if (asked >= limit) {
       throw new ForbiddenException(
-        limit === 0
-          ? 'La conversation avec un CV n’est pas incluse dans votre formule.'
-          : `Vous avez posé les ${limit} questions prévues pour ce CV.`,
+        trialLocked
+          ? TRIAL_AI_REFUSAL
+          : limit === 0
+            ? 'La conversation avec un CV n’est pas incluse dans votre formule.'
+            : `Vous avez posé les ${limit} questions prévues pour ce CV.`,
       );
     }
 
@@ -355,7 +360,12 @@ export class CvChatService {
     if (!resume) throw new NotFoundException('CV introuvable.');
     const e = await this.subscriptions.entitlements(businessId);
     const { screening, ...row } = resume;
-    return { resume: row, screening, limit: e.cvChatQuestions };
+    return {
+      resume: row,
+      screening,
+      limit: e.cvChatQuestions,
+      trialLocked: e.trialLocked.includes('cvChat'),
+    };
   }
 }
 

@@ -997,6 +997,17 @@ describe('BusinessSubscriptionService', () => {
       expect(e.trialLocked).not.toContain('cvAnalysis');
     });
 
+    it('refuses to charge a CV or an AI draft on a trial, saying why', async () => {
+      const { service, prisma } = make({ sub: period('TRIAL') });
+      await expect(service.consumeCv('b1', 1)).rejects.toThrow(
+        /après votre essai/,
+      );
+      await expect(service.consumeOfferDraft('b1')).rejects.toThrow(
+        /après votre essai/,
+      );
+      expect(prisma.businessSubscription.updateMany).not.toHaveBeenCalled();
+    });
+
     it('locks nothing the plan does not include anyway', async () => {
       const { service } = make({
         sub: running({

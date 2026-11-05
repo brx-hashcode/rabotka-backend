@@ -22,6 +22,7 @@ const entitlements = (over: Record<string, unknown> = {}) => ({
   cvBatchMax: 3,
   cvFileMaxMb: 1,
   cvRetentionDays: 30,
+  trialLocked: [],
   ...over,
 });
 
@@ -199,6 +200,16 @@ describe('CvScreeningService', () => {
       expect(data.offer_id).toBe('o1');
       expect(data.job_text).toContain('Type : CDI');
       expect(data.job_text).toContain('Lieu : Pointe-Noire, Congo');
+    });
+
+    it('says a trial gets it with a paid plan', async () => {
+      const { service, subscriptions } = make();
+      subscriptions.entitlements.mockResolvedValue(
+        entitlements({ cvQuota: 0, trialLocked: ['cvAnalysis'] }),
+      );
+      await expect(service.create('p1', [file('a.pdf')], JOB)).rejects.toThrow(
+        /après votre essai/,
+      );
     });
 
     it('refuses when the plan does not include it', async () => {

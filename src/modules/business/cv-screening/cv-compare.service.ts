@@ -16,7 +16,10 @@ import {
   type CvScreeningResume,
 } from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
-import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
+import {
+  BusinessSubscriptionService,
+  TRIAL_AI_REFUSAL,
+} from '../subscription/business-subscription.service';
 import {
   ANSWER_STYLE,
   CHAT_RULES,
@@ -158,7 +161,7 @@ export class CvCompareService {
   ): Promise<CvCompareTurn> {
     const text = question.trim();
     if (text.length < 2) throw new BadRequestException('Posez votre question.');
-    const { businessId, limit } = await this.business(profileId);
+    const { businessId, limit, trialLocked } = await this.business(profileId);
     const comparison = await this.prisma.cvComparison.findFirst({
       where: {
         id: comparisonId,
@@ -176,9 +179,11 @@ export class CvCompareService {
     ).length;
     if (asked >= limit) {
       throw new ForbiddenException(
-        limit === 0
-          ? 'La conversation avec les CV n’est pas incluse dans votre formule.'
-          : `Vous avez posé les ${limit} questions prévues pour cette comparaison.`,
+        trialLocked
+          ? TRIAL_AI_REFUSAL
+          : limit === 0
+            ? 'La conversation avec les CV n’est pas incluse dans votre formule.'
+            : `Vous avez posé les ${limit} questions prévues pour cette comparaison.`,
       );
     }
 
@@ -261,7 +266,11 @@ export class CvCompareService {
       throw new ForbiddenException('Espace réservé aux comptes entreprise.');
     }
     const e = await this.subscriptions.entitlements(businessId);
-    return { businessId, limit: e.cvChatQuestions };
+    return {
+      businessId,
+      limit: e.cvChatQuestions,
+      trialLocked: e.trialLocked.includes('cvChat'),
+    };
   }
 }
 

@@ -50,7 +50,10 @@ function make(
     businessOf: jest.fn().mockResolvedValue('b1'),
     entitlements: jest
       .fn()
-      .mockResolvedValue({ cvChatQuestions: opts.limit ?? 20 }),
+      .mockResolvedValue({
+        cvChatQuestions: opts.limit ?? 20,
+        trialLocked: [],
+      }),
   };
   const chat: any = {
     cvTextOf: jest.fn((r: { cv_text: string }) => Promise.resolve(r.cv_text)),

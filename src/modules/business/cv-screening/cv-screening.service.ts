@@ -26,7 +26,10 @@ import { QueueService } from '../../../common/services/queue/queue.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { LlmService } from '../../rag/llm/llm.service';
 import { notifyProfile } from '../../profile-notification/profile-notification.events';
-import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
+import {
+  BusinessSubscriptionService,
+  TRIAL_AI_REFUSAL,
+} from '../subscription/business-subscription.service';
 import {
   CV_EXTENSION,
   MIN_TEXT_CHARS,
@@ -126,7 +129,9 @@ export class CvScreeningService {
     const e = await this.subscriptions.entitlements(businessId);
     if (e.cvQuota === 0) {
       throw new ForbiddenException(
-        'L’analyse de CV est incluse dans les formules supérieures. Changez de formule depuis votre espace, rubrique « Abonnement ».',
+        e.trialLocked.includes('cvAnalysis')
+          ? TRIAL_AI_REFUSAL
+          : 'L’analyse de CV est incluse dans les formules supérieures. Changez de formule depuis votre espace, rubrique « Abonnement ».',
       );
     }
     if (files.length === 0) {

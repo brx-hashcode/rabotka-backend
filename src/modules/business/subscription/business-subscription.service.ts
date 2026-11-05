@@ -125,6 +125,10 @@ export type BusinessEntitlements = {
 /** The AI features a trial may leave out (SystemConfig `business.trial_*`). */
 export type TrialAiFeature = 'cvAnalysis' | 'cvChat' | 'offerWriter';
 
+/** Why an AI feature is refused during the trial: it comes with a paid plan. */
+export const TRIAL_AI_REFUSAL =
+  'Disponible avec une formule payante, après votre essai gratuit. Choisissez une formule depuis votre espace, rubrique « Abonnement ».';
+
 /**
  * Whether a business may have this plan: every catalog plan, and a custom
  * plan only for the business it was made for.
@@ -253,21 +257,7 @@ export class BusinessSubscriptionService {
     }
     // A trial leaves out the AI features not switched on for it: their quotas
     // read 0, so every gate (and the dashboard) treats them as not included.
-    const locked = new Set<TrialAiFeature>();
-    if (sub.billing_period === BusinessBillingPeriod.TRIAL) {
-      const { trialAi } =
-        await this.systemConfig.getBusinessSubscriptionSettings();
-      const plan = sub.plan;
-      if (!trialAi.cvAnalysis && plan.cv_screenings_per_period !== 0) {
-        locked.add('cvAnalysis');
-      }
-      if (!trialAi.cvChat && plan.cv_chat_questions !== 0) {
-        locked.add('cvChat');
-      }
-      if (!trialAi.offerWriter && plan.offer_drafts_per_period !== 0) {
-        locked.add('offerWriter');
-      }
-    }
+    const locked = await this.trialLocks(sub);
     const cvLocked = locked.has('cvAnalysis');
     const draftsLocked = locked.has('offerWriter');
     return {
@@ -309,6 +299,36 @@ export class BusinessSubscriptionService {
       reviewers,
       trialLocked: [...locked],
     };
+  }
+
+  /**
+   * The AI features this period's plan includes but its trial leaves out
+   * (none for a paid period). Read by entitlements() and by the consume
+   * methods, which charge the plan directly.
+   */
+  private async trialLocks(sub: {
+    billing_period: BusinessBillingPeriod;
+    plan: {
+      cv_screenings_per_period: number | null;
+      cv_chat_questions: number;
+      offer_drafts_per_period: number | null;
+    };
+  }): Promise<Set<TrialAiFeature>> {
+    const locked = new Set<TrialAiFeature>();
+    if (sub.billing_period !== BusinessBillingPeriod.TRIAL) return locked;
+    const { trialAi } =
+      await this.systemConfig.getBusinessSubscriptionSettings();
+    const plan = sub.plan;
+    if (!trialAi.cvAnalysis && plan.cv_screenings_per_period !== 0) {
+      locked.add('cvAnalysis');
+    }
+    if (!trialAi.cvChat && plan.cv_chat_questions !== 0) {
+      locked.add('cvChat');
+    }
+    if (!trialAi.offerWriter && plan.offer_drafts_per_period !== 0) {
+      locked.add('offerWriter');
+    }
+    return locked;
   }
 
   /** The business dashboard's « Abonnement » page, in one read. */
@@ -1011,6 +1031,9 @@ export class BusinessSubscriptionService {
     db: Db = this.prisma,
   ): Promise<{ subscriptionId: string }> {
     const sub = await this.current(businessId, db);
+    if (sub && (await this.trialLocks(sub)).has('cvAnalysis')) {
+      throw new ForbiddenException(TRIAL_AI_REFUSAL);
+    }
     const quota = sub ? sub.plan.cv_screenings_per_period : 0;
     if (!sub || quota === 0) {
       throw new ForbiddenException(
@@ -1043,6 +1066,9 @@ export class BusinessSubscriptionService {
     businessId: string,
   ): Promise<{ subscriptionId: string }> {
     const sub = await this.current(businessId);
+    if (sub && (await this.trialLocks(sub)).has('offerWriter')) {
+      throw new ForbiddenException(TRIAL_AI_REFUSAL);
+    }
     const quota = sub ? sub.plan.offer_drafts_per_period : 0;
     if (!sub || quota === 0) {
       throw new ForbiddenException(
