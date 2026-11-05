@@ -3453,6 +3453,8 @@ model Business {
   profile       Profile                @relation(fields: [profile_id], references: [id], onDelete: Cascade)
   documents     BusinessDocument[]
   subscriptions BusinessSubscription[]
+  /// Plans made for it alone (« sur mesure »).
+  custom_plans  BusinessPlan[]
   cv_screenings CvScreening[]
   interviews    Interview[]
   mailboxes     BusinessMailbox[]
@@ -3547,9 +3549,14 @@ model BusinessPlan {
   sort_order            Int      @default(0)
   /// Deleted by an admin: hidden everywhere, kept for the periods and payments that point to it.
   deleted_at            DateTime?
+  /// A custom plan (« sur mesure »): made for this business alone, which is
+  /// the only one to see, buy or be granted it. Null: the public catalog.
+  business_id           String?  @db.Uuid
 
+  business      Business?             @relation(fields: [business_id], references: [id], onDelete: Cascade)
   subscriptions BusinessSubscription[]
 
+  @@index([business_id], name: "idx_business_plan_business")
   @@map("business_plans")
 }
 

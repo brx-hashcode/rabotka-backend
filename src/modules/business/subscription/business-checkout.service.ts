@@ -39,8 +39,15 @@ export class BusinessCheckoutService {
     }
     const plan = await this.prisma.businessPlan.findUnique({
       where: { id: planId },
+      include: { business: { select: { profile_id: true } } },
     });
-    if (!plan || !plan.is_active) {
+    // Another business's custom plan reads as not there at all.
+    if (
+      !plan ||
+      !plan.is_active ||
+      plan.deleted_at ||
+      (plan.business && plan.business.profile_id !== profileId)
+    ) {
       throw new NotFoundException('Cette formule n’est pas disponible.');
     }
     const amount = priceFor(plan, period);

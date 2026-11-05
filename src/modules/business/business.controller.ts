@@ -65,9 +65,13 @@ export class BusinessController {
   ) {}
 
   @Get('plans')
-  @ApiOperation({ summary: 'The plans a business can choose' })
-  async plans() {
-    return (await this.subscriptions.listPlans(true)).map(planView);
+  @ApiOperation({
+    summary:
+      'The plans a business can choose: the catalog, and its own custom plans',
+  })
+  async plans(@Req() req: ProfileAuthenticatedRequest) {
+    const businessId = await this.subscriptions.businessOf(req.user.profileId);
+    return (await this.subscriptions.plansFor(businessId!)).map(planView);
   }
 
   @Get('me/subscription')

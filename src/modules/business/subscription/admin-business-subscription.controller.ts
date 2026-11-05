@@ -29,6 +29,11 @@ import {
 } from './dto/business-plan.dto';
 import { planData, planView } from './plan-view';
 
+/** Who a custom plan is made for, as the plan view shows it. */
+const PLAN_BUSINESS = {
+  business: { select: { id: true, name: true, profile_id: true } },
+} as const;
+
 /**
  * Business plans (the catalog: prices, quotas, features) and each business's
  * subscription, for the admin. A deleted plan stays in the database, hidden,
@@ -66,12 +71,15 @@ export class AdminBusinessSubscriptionController {
     @Body() dto: CreateBusinessPlanDto,
     @Req() req: AdminAuthenticatedRequest,
   ) {
+    if (dto.businessId) await this.assertBusiness(dto.businessId);
     try {
       const plan = await this.prisma.businessPlan.create({
-        data: planData(dto) as Prisma.BusinessPlanCreateInput,
+        data: planData(dto) as Prisma.BusinessPlanUncheckedCreateInput,
+        include: PLAN_BUSINESS,
       });
       await this.log(req, 'BUSINESS_PLAN_CREATED', plan.id, {
         code: plan.code,
+        ...(plan.business_id && { businessId: plan.business_id }),
       });
       return planView(plan);
     } catch (err) {
@@ -89,10 +97,14 @@ export class AdminBusinessSubscriptionController {
     @Body() dto: UpdateBusinessPlanDto,
     @Req() req: AdminAuthenticatedRequest,
   ) {
+    if (dto.businessId !== undefined) {
+      await this.assertOwnerChange(planId, dto.businessId ?? null);
+    }
     try {
       const plan = await this.prisma.businessPlan.update({
         where: { id: planId, deleted_at: null },
         data: planData(dto),
+        include: PLAN_BUSINESS,
       });
       await this.log(req, 'BUSINESS_PLAN_UPDATED', plan.id, {
         fields: Object.keys(dto),
@@ -170,6 +182,33 @@ export class AdminBusinessSubscriptionController {
     return this.subscriptions.overview(businessId);
   }
 
+  @Post('profiles/:id/business/subscription/trial')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({
+    summary:
+      'Start the free trial now (once per business, ever): for a business approved without it',
+  })
+  async startTrial(
+    @Param('id', ParseUUIDPipe) profileId: string,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
+    const businessId = await this.businessId(profileId);
+    const sub = await this.subscriptions.startTrial(businessId);
+    if (!sub) {
+      throw new ConflictException(
+        "L'essai n'a pas pu commencer : cette organisation a déjà eu une formule ou un essai, ou aucun essai n'est configuré.",
+      );
+    }
+    await this.log(
+      req,
+      'BUSINESS_TRIAL_STARTED',
+      sub.id,
+      { endsAt: sub.ends_at.toISOString() },
+      profileId,
+    );
+    return this.subscriptions.overview(businessId);
+  }
+
   @Post('profiles/:id/business/subscription/:subscriptionId/cancel')
   @Roles(UserRole.MANAGER)
   @ApiOperation({
@@ -198,6 +237,39 @@ export class AdminBusinessSubscriptionController {
       profileId,
     );
     return this.subscriptions.overview(businessId);
+  }
+
+  private async assertBusiness(businessId: string) {
+    const business = await this.prisma.business.findUnique({
+      where: { id: businessId },
+      select: { deleted_at: true },
+    });
+    if (!business || business.deleted_at) {
+      throw new NotFoundException('Organisation introuvable.');
+    }
+  }
+
+  /**
+   * A plan changes hands (catalog ⇄ custom, or another business) only while
+   * no period was ever taken on it: those periods would end up on a plan
+   * their business can no longer see.
+   */
+  private async assertOwnerChange(planId: string, businessId: string | null) {
+    const plan = await this.prisma.businessPlan.findFirst({
+      where: { id: planId, deleted_at: null },
+      select: {
+        business_id: true,
+        _count: { select: { subscriptions: true } },
+      },
+    });
+    if (!plan) throw new NotFoundException('Formule introuvable.');
+    if (plan.business_id === businessId) return;
+    if (plan._count.subscriptions > 0) {
+      throw new ConflictException(
+        'Cette formule a déjà servi : créez-en une autre plutôt que de changer à qui elle est destinée.',
+      );
+    }
+    if (businessId) await this.assertBusiness(businessId);
   }
 
   private async businessId(profileId: string): Promise<string> {
