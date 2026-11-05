@@ -606,6 +606,10 @@ model Profile {
   conversations_as_employer       ProfileConversation[]         @relation("ConversationEmployer")
   messages_sent                   ProfileMessage[]
   redaction_reports_filed         RedactionReport[]
+  /// « Mon CV »: what a worker uploaded, every version an application was sent with.
+  cvs                             ProfileCv[]
+  /// Which CV an application carries when none is chosen (WhatsApp, agents).
+  preferred_cv                    CvChoice                      @default(RABOTKA)
   deleted_at                      DateTime?                     @db.Timestamptz
 
   @@index([email], name: "idx_profile_email")
@@ -1416,6 +1420,12 @@ model Application {
   /// A wrong answer to one of the offer's « éliminatoire » questions: the
   /// application is kept, flagged, and listed after the others.
   knocked_out         Boolean                 @default(false)
+  /// The worker's own CV sent with this application; null when it went with
+  /// the Rabotka CV. Kept even after the worker replaces it.
+  profile_cv_id       String?                 @db.Uuid
+  /// Its CV analysis, once the business ran one: it then sits in the offer's
+  /// screening with the careers-page CVs, to be asked about and compared.
+  cv_resume_id        String?                 @unique @db.Uuid
   cancelled_at        DateTime?
   cancellation_reason String?
   /// Who cancelled, and therefore whether the worker may apply again: only a
@@ -1488,6 +1498,8 @@ model Application {
   @@map("applications")
   assessment ApplicationAssessment?
   answers    ApplicationAnswer[]
+  profile_cv ProfileCv?             @relation(fields: [profile_cv_id], references: [id], onDelete: SetNull)
+  cv_resume  CvScreeningResume?     @relation(fields: [cv_resume_id], references: [id], onDelete: SetNull)
 }
 
 model Assignment {
@@ -3395,9 +3407,14 @@ model Business {
   /// business must be able to see it again to add it to another agenda; it
   /// only reads the interviews, and replacing it cuts the old one off.
   calendar_token      String?            @unique
-  /// Its public careers page: /carrieres/<public_slug>. Null only for a row
-  /// created before the migration ran; every sign-up sets it.
+  /// Its public careers page: /carrieres/<public_slug>, made from `name` and
+  /// remade when the business is renamed (careers-slug.ts). Null only for a
+  /// row created before the migration ran; every sign-up sets it.
   public_slug         String?            @unique
+  /// Its slugs before a rename. They still lead to the careers page (a
+  /// redirect to `public_slug`), so links already shared keep working, and
+  /// no other business is given one.
+  previous_slugs      String[]           @default([])
   /// Its open offers go to Google and the job sites. Its careers page stays
   /// reachable by link either way.
   distribute_offers   Boolean            @default(true)
@@ -3448,6 +3465,7 @@ model Business {
   @@index([verification_status], name: "idx_business_verification_status")
   @@index([category], name: "idx_business_category")
   @@index([deleted_at], name: "idx_business_deleted_at")
+  @@index([previous_slugs], name: "idx_business_previous_slugs", type: Gin)
   @@map("businesses")
 }
 
@@ -3652,6 +3670,7 @@ model CvScreeningResume {
   error          String?
 
   external_application ExternalApplication?
+  application          Application?
   screening CvScreening          @relation(fields: [screening_id], references: [id], onDelete: Cascade)
   messages  CvResumeMessage[]
   interviews Interview[]
@@ -4111,4 +4130,35 @@ model ApplicationAnswer {
 
   @@unique([application_id, question_id])
   @@map("application_answers")
+}
+
+/// Which CV goes with an application: the one Rabotka builds, or the worker's own.
+enum CvChoice {
+  RABOTKA
+  UPLOADED
+}
+
+/// A CV a worker uploaded to their profile (« Mon CV »). One live row per
+/// profile; replacing it soft-deletes the old row, which stays as long as an
+/// application points at it, so a recruiter reads what was actually sent.
+model ProfileCv {
+  id             String    @id @default(uuid()) @db.Uuid
+  created_at     DateTime  @default(now())
+  profile_id     String    @db.Uuid
+  file_name      String
+  mime_type      String
+  size_bytes     Int
+  storage_key    String
+  storage_bucket String?
+  /// The text, contacts removed: what the scoring reads before any unlock.
+  cv_text        String    @default("") @db.Text
+  deleted_at     DateTime? @db.Timestamptz
+  /// Set once the stored file is gone (deleted and no longer sent anywhere).
+  purged_at      DateTime? @db.Timestamptz
+
+  profile      Profile       @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  applications Application[]
+
+  @@index([profile_id, deleted_at], name: "idx_profile_cv_live")
+  @@map("profile_cvs")
 }

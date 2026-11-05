@@ -1,6 +1,11 @@
 import { NotFoundException } from '@nestjs/common';
 import { OfferQuestionKind } from '@prisma/client';
-import { slugBase, uniqueBusinessSlug } from '../careers-slug';
+import {
+  slugAfterRename,
+  slugBase,
+  slugFitsName,
+  uniqueBusinessSlug,
+} from '../careers-slug';
 import { CareersService } from '../careers.service';
 
 const business = {
@@ -48,7 +53,9 @@ const storage = {
   upload: jest.fn().mockResolvedValue({ key: 'cv-key' }),
   delete: jest.fn().mockResolvedValue(undefined),
 };
-const screenings = { create: jest.fn() };
+const screenings = { create: jest.fn(), addToOffer: jest.fn() };
+const queueAdd = jest.fn().mockResolvedValue({});
+const queue = { getQueue: jest.fn(() => ({ add: queueAdd })) };
 const subscriptions = {
   businessOf: jest.fn().mockResolvedValue('b1'),
   entitlements: jest.fn().mockResolvedValue({ cvBatchMax: 2, cvFileMaxMb: 5 }),
@@ -80,6 +87,7 @@ const serviceWith = (found: unknown, offers: unknown[] = [], one?: unknown) => {
     { emit } as never,
     screenings as never,
     subscriptions as never,
+    queue as never,
   );
   return { prisma, service };
 };
@@ -107,6 +115,86 @@ describe('careers slug', () => {
     await expect(uniqueBusinessSlug(tx as never, 'Kamoa')).resolves.toBe(
       'kamoa-3',
     );
+  });
+
+  it("never hands out another business's old slug, but gives one back to its owner", async () => {
+    const tx = {
+      business: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue([
+            { id: 'b1', public_slug: 'sna', previous_slugs: ['kamoa'] },
+          ]),
+      },
+    };
+    await expect(uniqueBusinessSlug(tx as never, 'Kamoa')).resolves.toBe(
+      'kamoa-2',
+    );
+    await expect(uniqueBusinessSlug(tx as never, 'Kamoa', 'b1')).resolves.toBe(
+      'kamoa',
+    );
+  });
+
+  it('tells a slug made from the name', () => {
+    expect(slugFitsName('kamoa', 'Kamoa')).toBe(true);
+    expect(slugFitsName('kamoa-3', 'Kamoa')).toBe(true);
+    expect(slugFitsName('rabotka-review', 'The Yellow Team')).toBe(false);
+    expect(slugFitsName('kamoa-sarl', 'Kamoa')).toBe(false);
+    expect(slugFitsName(null, 'Kamoa')).toBe(false);
+  });
+
+  it('follows a rename and keeps the old slug', async () => {
+    const tx = { business: { findMany: jest.fn().mockResolvedValue([]) } };
+    await expect(
+      slugAfterRename(
+        tx as never,
+        { id: 'b1', public_slug: 'rabotka-review', previous_slugs: [] },
+        'THE YELLOW TEAM',
+      ),
+    ).resolves.toEqual({
+      public_slug: 'the-yellow-team',
+      previous_slugs: ['rabotka-review'],
+    });
+  });
+
+  it('changes nothing when the slug already fits the name', async () => {
+    const tx = { business: { findMany: jest.fn() } };
+    await expect(
+      slugAfterRename(
+        tx as never,
+        { id: 'b1', public_slug: 'kamoa-2', previous_slugs: [] },
+        'Kamoa',
+      ),
+    ).resolves.toBeNull();
+    expect(tx.business.findMany).not.toHaveBeenCalled();
+  });
+
+  it('takes back its own old slug on a return to a former name', async () => {
+    const tx = {
+      business: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'b1',
+            public_slug: 'the-yellow-team',
+            previous_slugs: ['rabotka-review'],
+          },
+        ]),
+      },
+    };
+    await expect(
+      slugAfterRename(
+        tx as never,
+        {
+          id: 'b1',
+          public_slug: 'the-yellow-team',
+          previous_slugs: ['rabotka-review'],
+        },
+        'Rabotka Review',
+      ),
+    ).resolves.toEqual({
+      public_slug: 'rabotka-review',
+      previous_slugs: ['the-yellow-team'],
+    });
   });
 });
 
@@ -147,6 +235,22 @@ describe('CareersService', () => {
     );
     expect(prisma.business.findFirst.mock.calls[0][0].where).toMatchObject({
       public_slug: 'kamoa',
+      deleted_at: null,
+      verification_status: 'VERIFIED',
+    });
+  });
+
+  it('finds a business by a slug it had before a rename', async () => {
+    const { prisma, service } = serviceWith(null);
+    prisma.business.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(business);
+
+    const page = await service.company('rabotka-review');
+
+    expect(page.company.slug).toBe('kamoa');
+    expect(prisma.business.findFirst.mock.calls[1][0].where).toMatchObject({
+      previous_slugs: { has: 'rabotka-review' },
       deleted_at: null,
       verification_status: 'VERIFIED',
     });
@@ -243,45 +347,29 @@ describe('CareersService', () => {
             })(),
           }),
         );
-      screenings.create.mockResolvedValue({
-        id: 's1',
-        resumes: ids.map((id) => ({
-          id: `r-${id}`,
-          fileName: `Awa Ngoma ${id}.pdf`,
-        })),
+      screenings.addToOffer.mockResolvedValue({
+        screeningId: 's1',
+        resumeIds: new Map(ids.map((id) => [id, `r-${id}`])),
       });
       return { service: made.service, prisma };
     };
 
     beforeEach(() => jest.clearAllMocks());
 
-    it('opens the offer’s screening and links each CV to its resume', async () => {
+    it('adds the CVs to the offer’s screening and links each to its resume', async () => {
       const { service, prisma } = withDue(null);
 
       const result = await service.analyse('p1', 'o1');
 
       expect(result).toEqual({ screeningId: 's1', analysed: 2, left: 1 });
-      expect(screenings.create.mock.calls[0][3]).toBeUndefined();
-      expect(prisma.cvScreening.update.mock.calls[0][0].data).toEqual({
-        external: true,
-      });
+      const [, offerId, files] = screenings.addToOffer.mock.calls[0];
+      expect(offerId).toBe('o1');
+      expect(files.map((f: { tag: string }) => f.tag)).toEqual(['a1', 'a2']);
       expect(
         prisma.externalApplication.update.mock.calls.map(
           ([call]) => call.data.cv_resume_id,
         ),
       ).toEqual(['r-a1', 'r-a2']);
-      expect(prisma.cvScreeningResume.update.mock.calls[0][0].data).toEqual({
-        file_name: 'Awa Ngoma.pdf',
-      });
-    });
-
-    it('joins the screening already open, so they can be compared', async () => {
-      const { service, prisma } = withDue({ id: 's0' });
-
-      await service.analyse('p1', 'o1');
-
-      expect(screenings.create.mock.calls[0][3]).toBe('s0');
-      expect(prisma.cvScreening.update).not.toHaveBeenCalled();
     });
 
     it('only takes what the plan allows at once, not yet read and waiting', async () => {
@@ -299,11 +387,24 @@ describe('CareersService', () => {
       });
     });
 
+    it('never takes more CVs than the « CV inclus » left', async () => {
+      const { service, prisma } = withDue(null);
+      subscriptions.entitlements.mockResolvedValueOnce({
+        cvBatchMax: 2,
+        cvRemaining: 1,
+        cvFileMaxMb: 5,
+      });
+
+      await service.analyse('p1', 'o1');
+
+      expect(prisma.externalApplication.findMany.mock.calls[0][0].take).toBe(1);
+    });
+
     it('says so when there is nothing to read', async () => {
       const { service } = withDue(null, []);
 
       await expect(service.analyse('p1', 'o1')).rejects.toThrow('Aucun CV');
-      expect(screenings.create).not.toHaveBeenCalled();
+      expect(screenings.addToOffer).not.toHaveBeenCalled();
     });
   });
 
@@ -495,17 +596,28 @@ describe('CareersService', () => {
       ).toBe('jooble');
     });
 
-    it('scores the CV as it arrives, and never fails the application for it', async () => {
+    it('queues the CV for analysis as it arrives, and never fails the application for it', async () => {
       const { service } = serviceWith(business, [], open);
-      const analyse = jest
-        .spyOn(service, 'analyse')
-        .mockRejectedValue(new Error('no CV left'));
+      queueAdd.mockRejectedValueOnce(new Error('redis down'));
 
       await expect(
         service.apply('kamoa', 'RBT-AC5LF', pdf, { ...dto, answers }),
       ).resolves.toEqual({ sent: true });
 
-      expect(analyse).toHaveBeenCalledWith('p1', 'o1', expect.any(String));
+      expect(queueAdd).toHaveBeenCalledWith(
+        'cv-analysis-queue',
+        {
+          kind: 'careers',
+          applicationId: expect.any(String),
+          offerId: 'o1',
+          employerId: 'p1',
+        },
+        expect.objectContaining({
+          jobId: expect.stringMatching(/^careers-/),
+          removeOnComplete: true,
+          removeOnFail: true,
+        }),
+      );
     });
 
     it('tells the business and the candidate', async () => {

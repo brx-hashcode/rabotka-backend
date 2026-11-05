@@ -1,8 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { CvChoice } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsEnum,
   IsOptional,
   IsString,
   IsUUID,
@@ -36,4 +38,10 @@ export class ApplyToJobDto {
   @ValidateNested({ each: true })
   @Type(() => ApplyAnswerDto)
   answers?: ApplyAnswerDto[];
+
+  /** Which CV goes with it; left out, the worker's default (« Mon CV » settings). */
+  @ApiPropertyOptional({ enum: CvChoice })
+  @IsOptional()
+  @IsEnum(CvChoice)
+  cv?: CvChoice;
 }

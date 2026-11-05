@@ -231,6 +231,39 @@ describe('JobOfferService (extended)', () => {
       (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([]);
       expect(await service.findByEmployerId(EMPLOYER_ID)).toHaveLength(0);
     });
+
+    it('finds by title or reference, before paginating', async () => {
+      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.jobOffer.count as jest.Mock).mockResolvedValue(0);
+      await service.findByEmployerId(EMPLOYER_ID, {
+        page: 0,
+        pageSize: 20,
+        q: '  ingénieur ',
+      });
+      const { where } = (prisma.jobOffer.findMany as jest.Mock).mock.calls.at(
+        -1,
+      )[0];
+      expect(where.OR).toEqual([
+        { title: { contains: 'ingénieur', mode: 'insensitive' } },
+        { reference: { contains: 'ingénieur', mode: 'insensitive' } },
+      ]);
+      expect(
+        (prisma.jobOffer.count as jest.Mock).mock.calls.at(-1)[0].where,
+      ).toEqual(where);
+    });
+
+    it('ignores a blank search', async () => {
+      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.jobOffer.count as jest.Mock).mockResolvedValue(0);
+      await service.findByEmployerId(EMPLOYER_ID, {
+        page: 0,
+        pageSize: 20,
+        q: '  ',
+      });
+      expect(
+        (prisma.jobOffer.findMany as jest.Mock).mock.calls.at(-1)[0].where.OR,
+      ).toBeUndefined();
+    });
   });
 
   describe('getJobOffersForAdmin()', () => {
@@ -254,6 +287,25 @@ describe('JobOfferService (extended)', () => {
       expect(result.data).toHaveLength(1);
       expect(result.total).toBe(1);
       expect(result.data[0].employerName).toBe('Paul Kanda');
+      // The fixture's employer has no flag: an app employer.
+      expect(result.data[0].employerIsBusiness).toBe(false);
+    });
+
+    it('says when the offer was posted by a business account', async () => {
+      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([
+        {
+          ...adminOffer,
+          employer: { ...adminOffer.employer, is_business: true },
+        },
+      ]);
+      (prisma.jobOffer.count as jest.Mock).mockResolvedValue(1);
+      const result = await service.getJobOffersForAdmin({ page: 1, limit: 10 });
+      expect(result.data[0].employerIsBusiness).toBe(true);
+      // The export and the analytics read the flag from the list query.
+      expect(
+        (prisma.jobOffer.findMany as jest.Mock).mock.calls[0][0].include
+          .employer.select.is_business,
+      ).toBe(true);
     });
 
     /**

@@ -571,6 +571,7 @@ export class MobileFeedController {
     await this.assertProfileType(profileId, ProfileType.WORKER);
     await this.applicationService.create(jobOfferId, profileId, {
       answers: dto?.answers,
+      cv: dto?.cv,
     });
     const dailyQuota =
       await this.applicationService.getDailyApplicationQuota(profileId);
@@ -659,7 +660,7 @@ export class MobileFeedController {
   @ApiOperation({
     summary: '[Mobile/EMPLOYER] My job offers',
     description:
-      'Returns the job offers created by the authenticated employer. `status` takes a comma-separated list (e.g. PARTIALLY_FILLED,FILLED,IN_PROGRESS) and is applied before pagination, so pages stay full and `total` reflects the filter.',
+      'Returns the job offers created by the authenticated employer. `status` takes a comma-separated list (e.g. PARTIALLY_FILLED,FILLED,IN_PROGRESS) and `q` a title or reference to find; both apply before pagination, so pages stay full and `total` reflects the filter.',
   })
   @ApiResponse({ status: 200, description: 'The employer’s job offers' })
   @ApiResponse({ status: 403, description: 'Not an EMPLOYER profile' })
@@ -668,6 +669,7 @@ export class MobileFeedController {
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
     @Query('status') status?: string,
+    @Query('q') q?: string,
   ) {
     const profileId = req.user.profileId;
     await this.assertProfileType(profileId, ProfileType.EMPLOYER);
@@ -676,6 +678,7 @@ export class MobileFeedController {
       page: this.parseInt(page, 0, 10_000),
       pageSize: this.parseLimit(pageSize, 20, 100),
       statuses: this.parseStatuses(status),
+      q: q?.slice(0, 100),
     });
   }
 

@@ -3,6 +3,17 @@ import {
   publicEmployerName,
 } from '../business/public-employer';
 import {
+  APPLICATION_SUBMITTED,
+  CANDIDATE_VIEWED,
+  type ApplicationSubmitted,
+  type CandidateViewed,
+} from './application.events';
+import {
+  cvForApplication,
+  cvOpen,
+  unlockedWorkers,
+} from '../profile-cv/profile-cv.rules';
+import {
   AdminCacheService,
   ADMIN_LIST_TTL_SECONDS,
 } from '../../common/services/cache/admin-cache.service';
@@ -15,7 +26,7 @@ import {
   Inject,
   forwardRef,
 } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { jobLocationLabel } from '../../common/utils/job-location.util';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -45,6 +56,7 @@ import {
   ApplicationStatus,
   AssignmentStatus,
   BillingStatus,
+  CvChoice,
   EmploymentType,
   InteractionActor,
   InteractionKind,
@@ -52,6 +64,7 @@ import {
   InteractionSource,
   ExternalApplicationStatus,
   JobOfferStatus,
+  OfferQuestionKind,
   Prisma,
   RatingDirection,
   RejectionSource,
@@ -315,6 +328,11 @@ export type WorkerMissionCard = {
     ratingAvg: number | null;
     ratingCount: number;
   };
+  /**
+   * The worker's own answers to the offer's questions. Detail only, and never
+   * `passed`: a candidate must not learn which answers count against them.
+   */
+  answers?: { label: string; kind: OfferQuestionKind; value: string }[];
 };
 
 /**
@@ -371,7 +389,7 @@ export class ApplicationService {
   async create(
     jobOfferId: string,
     workerId: string,
-    options: { agentId?: string; answers?: AnswerInput[] } = {},
+    options: { agentId?: string; answers?: AnswerInput[]; cv?: CvChoice } = {},
   ): Promise<ApplicationListItem> {
     const [jobOffer, worker] = await Promise.all([
       this.prisma.jobOffer.findUnique({
@@ -516,12 +534,15 @@ export class ApplicationService {
       ) {
         throw new BadRequestException("Cette offre n'est plus disponible");
       }
+      // « Mon CV » when chosen (or the worker's default); else the Rabotka CV.
+      const profileCvId = await cvForApplication(tx, workerId, options.cv);
       return tx.application.create({
         data: {
           job_offer_id: jobOfferId,
           worker_id: workerId,
           status: ApplicationStatus.PENDING,
           knocked_out: answered.knockedOut,
+          profile_cv_id: profileCvId,
           ...(options.agentId ? { agent_id: options.agentId } : {}),
           ...(answered.rows.length > 0
             ? { answers: { create: answered.rows } }
@@ -530,6 +551,12 @@ export class ApplicationService {
         include: { job_offer: true },
       });
     });
+
+    this.eventEmitter.emit(APPLICATION_SUBMITTED, {
+      applicationId: application.id,
+      jobOfferId: application.job_offer_id,
+      employerId: application.job_offer.employer_id,
+    } satisfies ApplicationSubmitted);
 
     this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_CREATED, {
       event: AdminNotificationEvent.APPLICATION_CREATED,
@@ -801,6 +828,21 @@ export class ApplicationService {
           select: { label: true, kind: true, value: true, passed: true },
           orderBy: { created_at: 'asc' },
         },
+        profile_cv: {
+          select: { file_name: true, mime_type: true, purged_at: true },
+        },
+        cv_resume: {
+          select: {
+            id: true,
+            status: true,
+            score: true,
+            summary: true,
+            strengths: true,
+            gaps: true,
+            criteria: true,
+            screening_id: true,
+          },
+        },
       },
     });
 
@@ -824,8 +866,41 @@ export class ApplicationService {
           ).map((r) => r.assignment_id),
     );
 
+    // « Mon CV »: the file has the contacts on it, so it opens only once they
+    // are unlocked or the application retained.
+    const unlocked = employerId
+      ? await unlockedWorkers(
+          this.prisma,
+          employerId,
+          applications.filter((a) => a.profile_cv).map((a) => a.worker_id),
+        )
+      : new Set<string>();
+
     return applications.map((a) => ({
       ...this.toApplicationWithOffer(a),
+      cv:
+        a.profile_cv && !a.profile_cv.purged_at
+          ? {
+              kind: CvChoice.UPLOADED,
+              fileName: a.profile_cv.file_name,
+              mimeType: a.profile_cv.mime_type,
+              available: cvOpen(a.status, a.worker_id, unlocked),
+            }
+          : { kind: CvChoice.RABOTKA },
+      // Its CV analysis, in the offer's screening: asked about and compared
+      // with the careers-page CVs.
+      analysis: a.cv_resume
+        ? {
+            resumeId: a.cv_resume.id,
+            screeningId: a.cv_resume.screening_id,
+            status: a.cv_resume.status,
+            score: a.cv_resume.score,
+            summary: a.cv_resume.summary,
+            strengths: a.cv_resume.strengths,
+            gaps: a.cv_resume.gaps,
+            criteria: a.cv_resume.criteria,
+          }
+        : null,
       ratedByEmployer: a.assignment
         ? ratedAssignmentIds.has(a.assignment.id)
         : false,
@@ -2520,10 +2595,22 @@ export class ApplicationService {
       }
     }
 
-    const [card] = await this.toWorkerMissionCards(workerId, [
-      { ...application, contract },
+    const [[card], answers] = await Promise.all([
+      this.toWorkerMissionCards(workerId, [{ ...application, contract }]),
+      this.prisma.applicationAnswer.findMany({
+        where: { application_id: applicationId },
+        select: { label: true, kind: true, value: true },
+        orderBy: { created_at: 'asc' },
+      }),
     ]);
-    return card;
+    return {
+      ...card,
+      answers: answers.map((a) => ({
+        label: a.label,
+        kind: a.kind,
+        value: answerText(a),
+      })),
+    };
   }
 
   private async toWorkerMissionCards(
@@ -2750,6 +2837,26 @@ export class ApplicationService {
       );
 
     return updated;
+  }
+
+  /** The business looked at a candidate's CV: their waiting applications are « Vues ». */
+  @OnEvent(CANDIDATE_VIEWED, { async: true })
+  async onCandidateViewed({
+    employerId,
+    workerId,
+    applicationId,
+  }: CandidateViewed): Promise<void> {
+    const waiting = await this.prisma.application.findMany({
+      where: {
+        worker_id: workerId,
+        status: ApplicationStatus.PENDING,
+        deleted_at: null,
+        job_offer: { employer_id: employerId },
+        ...(applicationId ? { id: applicationId } : {}),
+      },
+      select: { id: true },
+    });
+    for (const { id } of waiting) await this.markAsViewed(id);
   }
 
   async markAsViewed(applicationId: string): Promise<void> {

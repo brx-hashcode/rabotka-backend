@@ -19,6 +19,7 @@ const profileRow = (over: Record<string, unknown> = {}) => ({
   kyc_documents: [],
   kyc_verification_images: [],
   files: [],
+  cvs: [],
   portfolio_items: [],
   claims: [],
   ...over,
@@ -71,6 +72,22 @@ describe('ProfileFilesService', () => {
         { key: 'kyc-verification/selfie.jpg', bucket: 'kyc-bucket' },
         { key: 'files/cv.pdf' },
         { key: 'portfolio/a.jpg' },
+      ]);
+    });
+
+    it('deletes « Mon CV », each version from its own bucket', async () => {
+      const { tx, service } = setup([
+        profileRow({
+          cvs: [
+            { storage_key: 'profile-cvs/p1/a.pdf', storage_bucket: 'kyc' },
+            { storage_key: 'profile-cvs/p1/b.docx', storage_bucket: null },
+          ],
+        }),
+      ]);
+
+      expect(await service.collect(tx, ['p1'])).toEqual([
+        { key: 'profile-cvs/p1/a.pdf', bucket: 'kyc' },
+        { key: 'profile-cvs/p1/b.docx' },
       ]);
     });
 

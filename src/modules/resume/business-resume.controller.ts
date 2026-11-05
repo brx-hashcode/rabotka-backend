@@ -8,6 +8,11 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  CANDIDATE_VIEWED,
+  type CandidateViewed,
+} from '../application/application.events';
 import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -34,6 +39,7 @@ export class BusinessResumeController {
     private readonly resumeService: ResumeService,
     private readonly prisma: PrismaService,
     private readonly subscriptions: BusinessSubscriptionService,
+    private readonly events: EventEmitter2,
   ) {}
 
   @Get(':workerId/resume')
@@ -45,6 +51,11 @@ export class BusinessResumeController {
     @Res() res: Response,
   ): Promise<void> {
     await this.assertMayRead(req.user.profileId, workerId);
+    // Looking at it moves their waiting applications here to « Vue ».
+    this.events.emit(CANDIDATE_VIEWED, {
+      employerId: req.user.profileId,
+      workerId,
+    } satisfies CandidateViewed);
     const { buffer, filename } = await this.resumeService.download(workerId, {
       withContacts: false,
     });

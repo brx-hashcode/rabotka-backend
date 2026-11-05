@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -18,6 +19,8 @@ import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { kycBucket } from '../../../common/services/storage/kyc-bucket';
 import { StorageService } from '../../../common/services/storage/storage.service';
+import { QueueService } from '../../../common/services/queue/queue.service';
+import { enqueueCvAnalysis } from '../applicant-score/cv-analysis-jobs';
 import {
   answerText,
   type AnswerInput,
@@ -47,7 +50,10 @@ import { feedSite, jobsFeedXml } from './job-feed';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { BUSINESS_CATEGORY_LABELS } from '../business-catalog';
 import { CvScreeningService } from '../cv-screening/cv-screening.service';
-import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
+import {
+  BusinessSubscriptionService,
+  cvBatchRoom,
+} from '../subscription/business-subscription.service';
 import {
   CV_EXTENSION,
   cvFileType,
@@ -114,6 +120,7 @@ export class CareersService {
     private readonly events: EventEmitter2,
     private readonly screenings: CvScreeningService,
     private readonly subscriptions: BusinessSubscriptionService,
+    private readonly queue: QueueService,
   ) {}
 
   /** Verified businesses that are hiring now, those with the most offers first. */
@@ -410,8 +417,13 @@ export class CareersService {
     );
     // Scored at once, on the plan's « CV inclus ». The candidate is not kept
     // waiting, and a plan with none left simply shows the CV unscored.
-    void this.analyse(business.profile_id, offer.id, id).catch((err) =>
-      this.logger.warn(`Automatic analysis of ${id} failed: ${String(err)}`),
+    void enqueueCvAnalysis(this.queue, {
+      kind: 'careers',
+      applicationId: id,
+      offerId: offer.id,
+      employerId: business.profile_id,
+    }).catch((err) =>
+      this.logger.warn(`CV analysis of ${id} not queued: ${String(err)}`),
     );
     return { sent: true };
   }
@@ -429,6 +441,9 @@ export class CareersService {
             status: true,
             score: true,
             summary: true,
+            strengths: true,
+            gaps: true,
+            criteria: true,
             screening_id: true,
           },
         },
@@ -460,6 +475,9 @@ export class CareersService {
         status: a.cv_resume.status,
         score: a.cv_resume.score,
         summary: a.cv_resume.summary,
+        strengths: a.cv_resume.strengths,
+        gaps: a.cv_resume.gaps,
+        criteria: a.cv_resume.criteria,
       },
     }));
   }
@@ -473,6 +491,12 @@ export class CareersService {
     const businessId = await this.subscriptions.businessOf(profileId);
     if (!businessId) throw new NotFoundException('Organisation introuvable.');
     const e = await this.subscriptions.entitlements(businessId);
+    const room = cvBatchRoom(e);
+    if (room === 0) {
+      throw new ForbiddenException(
+        'Vous avez utilisé tous les CV inclus dans votre formule pour cette période. Changez de formule pour en analyser davantage.',
+      );
+    }
     const where = {
       job_offer_id: offerId,
       job_offer: {
@@ -491,7 +515,7 @@ export class CareersService {
       this.prisma.externalApplication.findMany({
         where,
         orderBy: { created_at: 'asc' },
-        take: e.cvBatchMax,
+        take: room,
       }),
       this.prisma.externalApplication.count({ where }),
     ]);
@@ -506,45 +530,25 @@ export class CareersService {
         mimetype: a.cv_mime_type,
         size: a.cv_size_bytes,
         buffer: await this.readCv(a),
+        tag: a.id,
       })),
     );
 
-    const open = await this.prisma.cvScreening.findFirst({
-      where: {
-        business_id: businessId,
-        offer_id: offerId,
-        external: true,
-        purged_at: null,
-        expires_at: { gt: new Date() },
-      },
-      select: { id: true },
-    });
-    const screening = await this.screenings.create(
+    const screening = await this.screenings.addToOffer(
       profileId,
+      offerId,
       files,
-      { offerId },
-      open?.id,
     );
-    if (!open) {
-      await this.prisma.cvScreening.update({
-        where: { id: screening.id },
-        data: { external: true },
-      });
-    }
     for (const a of due) {
-      const resume = screening.resumes.find((r) => r.fileName.includes(a.id));
-      if (!resume) continue;
+      const resumeId = screening.resumeIds.get(a.id);
+      if (!resumeId) continue;
       await this.prisma.externalApplication.update({
         where: { id: a.id },
-        data: { cv_resume_id: resume.id },
-      });
-      await this.prisma.cvScreeningResume.update({
-        where: { id: resume.id },
-        data: { file_name: resume.fileName.replace(` ${a.id}`, '') },
+        data: { cv_resume_id: resumeId },
       });
     }
     return {
-      screeningId: screening.id,
+      screeningId: screening.screeningId,
       analysed: due.length,
       left: total - due.length,
     };
@@ -844,15 +848,25 @@ export class CareersService {
     }
   }
 
+  /**
+   * The business behind a slug: its current one, or one it had before a
+   * rename. The view then carries the current slug, and the site redirects
+   * the old address to it.
+   */
   private async business(slug: string) {
-    const business = await this.prisma.business.findFirst({
-      where: {
-        public_slug: slug,
-        deleted_at: null,
-        verification_status: VerificationStatus.VERIFIED,
-      },
-      select: COMPANY_SELECT,
-    });
+    const live = {
+      deleted_at: null,
+      verification_status: VerificationStatus.VERIFIED,
+    };
+    const business =
+      (await this.prisma.business.findFirst({
+        where: { public_slug: slug, ...live },
+        select: COMPANY_SELECT,
+      })) ??
+      (await this.prisma.business.findFirst({
+        where: { previous_slugs: { has: slug }, ...live },
+        select: COMPANY_SELECT,
+      }));
     if (!business) throw new NotFoundException('Page introuvable.');
     return business;
   }

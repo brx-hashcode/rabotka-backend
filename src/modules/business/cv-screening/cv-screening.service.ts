@@ -60,6 +60,11 @@ export type CvUpload = {
   mimetype: string;
   size: number;
   buffer: Buffer;
+  /**
+   * Set by server code only, for a CV it wrote (an applicant's, as text):
+   * multer never sets it, so an upload is always sniffed.
+   */
+  internalType?: CvFileType;
 };
 
 const EMPLOYMENT_LABEL: Record<string, string> = {
@@ -141,7 +146,7 @@ export class CvScreeningService {
           `« ${name} » dépasse ${e.cvFileMaxMb} Mo.`,
         );
       }
-      const type = cvFileType(file.buffer, file.mimetype);
+      const type = file.internalType ?? cvFileType(file.buffer, file.mimetype);
       if (!type) {
         throw new BadRequestException(
           `« ${name} » n'est pas reconnu : envoyez un PDF, un fichier Word (.docx) ou une photo (JPG, PNG, WEBP).`,
@@ -230,6 +235,55 @@ export class CvScreeningService {
     return screeningDetail(screening);
   }
 
+  /**
+   * Adds CVs to the offer's one shared screening (opened on first use): the
+   * careers-page CVs and the Rabotka applicants' land together, so any of them
+   * can be compared. `tag` is a token in each file name that tells which
+   * resume came from which file; it is taken out once they are matched.
+   */
+  async addToOffer(
+    profileId: string,
+    offerId: string,
+    files: (CvUpload & { tag: string })[],
+  ): Promise<{ screeningId: string; resumeIds: Map<string, string> }> {
+    const businessId = await this.requireBusiness(profileId);
+    const open = await this.prisma.cvScreening.findFirst({
+      where: {
+        business_id: businessId,
+        offer_id: offerId,
+        external: true,
+        purged_at: null,
+        expires_at: { gt: new Date() },
+      },
+      select: { id: true },
+    });
+    const screening = await this.create(
+      profileId,
+      files,
+      { offerId },
+      open?.id,
+    );
+    if (!open) {
+      await this.prisma.cvScreening.update({
+        where: { id: screening.id },
+        data: { external: true },
+      });
+    }
+    const resumeIds = new Map<string, string>();
+    for (const file of files) {
+      const resume = screening.resumes.find((r) =>
+        r.fileName.includes(` ${file.tag}`),
+      );
+      if (!resume) continue;
+      resumeIds.set(file.tag, resume.id);
+      await this.prisma.cvScreeningResume.update({
+        where: { id: resume.id },
+        data: { file_name: resume.fileName.replace(` ${file.tag}`, '') },
+      });
+    }
+    return { screeningId: screening.id, resumeIds };
+  }
+
   /** The job the CVs are measured against: an offer of the business, or one described by hand. */
   private async jobBrief(
     profileId: string,
@@ -300,7 +354,22 @@ export class CvScreeningService {
   }
 
   async get(profileId: string, id: string) {
-    return screeningDetail(await this.owned(profileId, id));
+    const screening = await this.owned(profileId, id);
+    // Which CVs are a Rabotka applicant's: their interview goes on the
+    // application (profile e-mail, in-app notice), not on the CV's contacts.
+    const links = await this.prisma.application.findMany({
+      where: { cv_resume_id: { in: screening.resumes.map((r) => r.id) } },
+      select: { id: true, cv_resume_id: true },
+    });
+    const applicationOf = new Map(links.map((l) => [l.cv_resume_id, l.id]));
+    const detail = screeningDetail(screening);
+    return {
+      ...detail,
+      resumes: detail.resumes.map((r) => ({
+        ...r,
+        applicationId: applicationOf.get(r.id) ?? null,
+      })),
+    };
   }
 
   /** One CV's file, for its business only, until the purge. */
@@ -451,6 +520,7 @@ export class CvScreeningService {
         id: true,
         job_title: true,
         status: true,
+        external: true,
         business: { select: { profile_id: true } },
         resumes: { select: { status: true, score: true } },
       },
@@ -474,6 +544,9 @@ export class CvScreeningService {
       data: { status: CvScreeningStatus.DONE },
     });
     if (count === 0) return;
+    // An offer's own screening fills as candidates apply: their score shows on
+    // the offer, and « Analyse terminée » on each arrival would only be noise.
+    if (screening.external) return;
     const scored = screening.resumes.filter(
       (r) => r.status === CvScreeningResumeStatus.SCORED,
     );

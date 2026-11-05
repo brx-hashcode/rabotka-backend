@@ -36,6 +36,11 @@ export const BUSINESS_SUBSCRIPTION_QUEUE = 'business-subscription-queue';
 /** Business CV screening: one job per CV, plus the repeatable stuck/retention sweep. */
 export const CV_SCREENING_QUEUE = 'cv-screening-queue';
 export const CV_SCREENING_SWEEP_QUEUE = 'cv-screening-sweep-queue';
+/**
+ * The CV analysis of one application to a business offer (Rabotka or careers
+ * page), as it arrives or once its plan has « CV inclus » again.
+ */
+export const CV_ANALYSIS_QUEUE = 'cv-analysis-queue';
 /** Applicants to business offers, scored against the offer: one repeatable sweep. */
 export const APPLICANT_SCORE_QUEUE = 'applicant-score-queue';
 /** Interview reminders, the day before. */

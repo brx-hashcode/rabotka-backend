@@ -263,6 +263,104 @@ describe('CvScreeningService', () => {
     });
   });
 
+  describe('get', () => {
+    it('says which CVs are a Rabotka applicant’s', async () => {
+      const { service, prisma } = make();
+      const resume = (id: string) => ({
+        id,
+        status: 'SCORED',
+        score: 80,
+        created_at: new Date(),
+        file_name: `${id}.txt`,
+        mime_type: 'text/plain',
+        size_bytes: 3,
+        storage_key: 'k',
+        criteria: {},
+        summary: '',
+        strengths: [],
+        gaps: [],
+        candidate: null,
+        error: null,
+      });
+      prisma.cvScreening.findFirst = jest.fn().mockResolvedValue({
+        id: 's1',
+        job_title: 'Dev',
+        job_text: '…',
+        status: 'DONE',
+        created_at: new Date(),
+        expires_at: new Date(),
+        purged_at: null,
+        offer_id: 'o1',
+        external: true,
+        resumes: [resume('r1'), resume('r2')],
+      });
+      prisma.application = {
+        findMany: jest
+          .fn()
+          .mockResolvedValue([{ id: 'a1', cv_resume_id: 'r1' }]),
+      };
+
+      const detail = await service.get('p1', 's1');
+
+      expect(
+        Object.fromEntries(detail.resumes.map((r) => [r.id, r.applicationId])),
+      ).toEqual({ r1: 'a1', r2: null });
+    });
+  });
+
+  describe('addToOffer', () => {
+    const files = [
+      {
+        originalname: 'Awa Ngoma a1.txt',
+        mimetype: 'text/plain',
+        size: 3,
+        buffer: Buffer.from('cv!'),
+        tag: 'a1',
+      },
+    ];
+    const created = (id: string) => ({
+      id,
+      resumes: [{ id: 'r-a1', fileName: 'Awa Ngoma a1.txt' }],
+    });
+
+    it('opens the offer’s screening, marks it shared and links each file to its resume', async () => {
+      const { service, prisma } = make();
+      prisma.cvScreening.findFirst = jest.fn().mockResolvedValue(null);
+      const create = jest
+        .spyOn(service, 'create')
+        .mockResolvedValue(created('s1') as never);
+
+      const out = await service.addToOffer('p1', 'o1', files);
+
+      expect(create.mock.calls[0][3]).toBeUndefined();
+      expect(prisma.cvScreening.update).toHaveBeenCalledWith({
+        where: { id: 's1' },
+        data: { external: true },
+      });
+      expect(prisma.cvScreeningResume.update).toHaveBeenCalledWith({
+        where: { id: 'r-a1' },
+        data: { file_name: 'Awa Ngoma.txt' },
+      });
+      expect(out).toEqual({
+        screeningId: 's1',
+        resumeIds: new Map([['a1', 'r-a1']]),
+      });
+    });
+
+    it('joins the one already open, so every candidate can be compared', async () => {
+      const { service, prisma } = make();
+      prisma.cvScreening.findFirst = jest.fn().mockResolvedValue({ id: 's0' });
+      const create = jest
+        .spyOn(service, 'create')
+        .mockResolvedValue(created('s0') as never);
+
+      await service.addToOffer('p1', 'o1', files);
+
+      expect(create.mock.calls[0][3]).toBe('s0');
+      expect(prisma.cvScreening.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('process', () => {
     it('reads a photo with vision, saves the weighted score and reports progress', async () => {
       const { service, prisma, storage, llm, events, subscriptions } = make();
@@ -365,6 +463,25 @@ describe('CvScreeningService', () => {
       await service.process('r1');
       expect(llm.invoke).not.toHaveBeenCalled();
       expect(prisma.cvScreeningResume.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('says nothing when an offer’s own screening closes: candidates arrive one by one', async () => {
+      const { service, prisma, storage, events } = make();
+      prisma.cvScreeningResume.findUnique.mockResolvedValue(queued());
+      storage.download.mockResolvedValue({ body: Readable.from([PNG]) });
+      prisma.cvScreening.findUnique.mockResolvedValue({
+        ...closing(['SCORED']),
+        external: true,
+      });
+
+      await service.process('r1');
+
+      expect(prisma.cvScreening.updateMany).toHaveBeenCalled();
+      expect(
+        events.emit.mock.calls.some(
+          ([name]: [string]) => name === 'profile.notification.create',
+        ),
+      ).toBe(false);
     });
 
     it('closes the screening after its last CV and tells the business, once', async () => {

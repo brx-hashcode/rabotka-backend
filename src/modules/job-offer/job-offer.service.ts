@@ -230,6 +230,8 @@ export type AdminJobOfferListItem = {
   employerPhone: string;
   employerAvatarUrl: string | null;
   employerId: string;
+  /** Posted by a business account (business.rabotka.work), not the app. */
+  employerIsBusiness: boolean;
   applicationsCount: number;
   createdAt: string;
   updatedAt: string;
@@ -1097,6 +1099,8 @@ export class JobOfferService {
       /** Narrow to these statuses. Must be applied here, not client-side: a
        *  post-pagination filter yields short pages and a wrong `total`. */
       statuses?: JobOfferStatus[];
+      /** A title or reference to find, applied before pagination too. */
+      q?: string;
     },
   ): Promise<{ items: JobOfferListItem[]; total: number }>;
   async findByEmployerId(
@@ -1105,6 +1109,7 @@ export class JobOfferService {
       page: number;
       pageSize: number;
       statuses?: JobOfferStatus[];
+      q?: string;
     },
   ): Promise<
     JobOfferListItem[] | { items: JobOfferListItem[]; total: number }
@@ -1133,6 +1138,19 @@ export class JobOfferService {
       deleted_at: null,
       ...(pagination?.statuses?.length
         ? { status: { in: pagination.statuses } }
+        : {}),
+      ...(pagination?.q?.trim()
+        ? {
+            OR: [
+              { title: { contains: pagination.q.trim(), mode: 'insensitive' } },
+              {
+                reference: {
+                  contains: pagination.q.trim(),
+                  mode: 'insensitive',
+                },
+              },
+            ],
+          }
         : {}),
     };
 
@@ -1578,6 +1596,7 @@ export class JobOfferService {
               email: true,
               phone: true,
               avatar_url: true,
+              is_business: true,
             },
           },
           _count: {
@@ -1624,6 +1643,7 @@ export class JobOfferService {
       employerPhone: o.employer.phone,
       employerAvatarUrl: o.employer.avatar_url ?? null,
       employerId: o.employer_id,
+      employerIsBusiness: o.employer.is_business ?? false,
       applicationsCount: o._count.applications,
       createdAt: o.created_at.toISOString(),
       updatedAt: o.updated_at.toISOString(),
@@ -1826,6 +1846,7 @@ export class JobOfferService {
             email: true,
             phone: true,
             avatar_url: true,
+            is_business: true,
           },
         },
         applications: {
@@ -1886,6 +1907,7 @@ export class JobOfferService {
       employerPhone: offer.employer.phone,
       employerAvatarUrl: offer.employer.avatar_url ?? null,
       employerId: offer.employer_id,
+      employerIsBusiness: offer.employer.is_business ?? false,
       applicationsCount: offer._count.applications,
       createdAt: offer.created_at.toISOString(),
       updatedAt: offer.updated_at.toISOString(),
