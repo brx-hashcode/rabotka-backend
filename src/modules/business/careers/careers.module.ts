@@ -35,6 +35,7 @@ import { AdminExternalApplicationsController } from './admin-external-applicatio
   ],
   providers: [CareersService, CareersPageService],
   // For rabotka-admin's view of a business (AdminBusinessService).
-  exports: [CareersPageService],
+  // CareersService for the CV analysis queue (applicant-score).
+  exports: [CareersPageService, CareersService],
 })
 export class CareersModule {}

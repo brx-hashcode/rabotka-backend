@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ForbiddenException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -11,9 +12,13 @@ import {
   ApplicationStatus,
   AssignmentStatus,
   CvScreeningResumeStatus,
+  ExternalApplicationStatus,
   JobOfferStatus,
   Prisma,
 } from '@prisma/client';
+import { QueueService } from '../../../common/services/queue/queue.service';
+import { CareersService } from '../careers/careers.service';
+import { enqueueCvAnalysis, type CvAnalysisJob } from './cv-analysis-jobs';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { LlmService } from '../../rag/llm/llm.service';
 import {
@@ -50,10 +55,8 @@ const PER_SWEEP = 20;
 const RECENT_DAYS = 120;
 const MAX_MISSIONS = 15;
 const MAX_PORTFOLIO = 8;
-/** Offers whose waiting applicants get their CV analysed, per sweep. */
-const CATCH_UP_OFFERS = 5;
-/** Left to the analysis on arrival before the sweep takes over. */
-const ARRIVAL_GRACE_MS = 5 * 60 * 1000;
+/** How many waiting applications of each source a sweep looks at. */
+const CATCH_UP_SCAN = 200;
 /** A failed analysis is tried again after this: not at every sweep. */
 const FAILED_RETRY_MS = 6 * 60 * 60 * 1000;
 /** Older applications are not worth a « CV inclus » any more. */
@@ -73,6 +76,8 @@ export class ApplicantScoreService {
     private readonly llm: LlmService,
     private readonly subscriptions: BusinessSubscriptionService,
     private readonly screenings: CvScreeningService,
+    private readonly queue: QueueService,
+    private readonly careers: CareersService,
   ) {}
 
   /** Scores the applications that have none yet; returns how many were scored. */
@@ -227,75 +232,107 @@ export class ApplicantScoreService {
   }
 
   /**
-   * The waiting Rabotka applications to business offers that have no CV
-   * analysis yet: those that came before analysis on arrival, or that found the
-   * plan with no « CV inclus » left. A few offers per sweep, each analysed as
-   * « Analyser tout » would. Never one that just arrived: analysis on arrival
-   * may still be running for it, and the same CV must not be paid twice.
+   * The waiting applications to business offers that have no CV analysis: those
+   * that came while the plan had no « CV inclus », before analysis on arrival,
+   * or whose analysis failed a while ago. Only for businesses that can pay for
+   * them now, and never more than they can: one business out of « CV inclus »
+   * never holds up the others. Queued (deduplicated by application), not run
+   * here; returns how many were queued.
    */
-  async catchUpAnalyses(now = new Date()): Promise<number> {
-    const waiting = await this.prisma.application.findMany({
-      where: {
-        // Not analysed yet, or whose analysis failed long enough ago.
-        OR: [
-          { cv_resume_id: null },
-          {
-            cv_resume: {
-              status: CvScreeningResumeStatus.FAILED,
-              updated_at: { lte: new Date(now.getTime() - FAILED_RETRY_MS) },
+  async queueWaitingAnalyses(now = new Date()): Promise<number> {
+    const since = new Date(now.getTime() - CATCH_UP_DAYS * 86_400_000);
+    const failedBefore = new Date(now.getTime() - FAILED_RETRY_MS);
+    const recruiting = {
+      deleted_at: null,
+      status: { in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED] },
+      employer: { is_business: true },
+    };
+    const [rabotka, careers] = await Promise.all([
+      this.prisma.application.findMany({
+        where: {
+          OR: [
+            { cv_resume_id: null },
+            {
+              cv_resume: {
+                status: CvScreeningResumeStatus.FAILED,
+                updated_at: { lte: failedBefore },
+              },
             },
-          },
-        ],
-        deleted_at: null,
-        status: { in: [ApplicationStatus.PENDING, ApplicationStatus.VIEWED] },
-        created_at: {
-          gte: new Date(now.getTime() - CATCH_UP_DAYS * 86_400_000),
-          lte: new Date(now.getTime() - ARRIVAL_GRACE_MS),
-        },
-        job_offer: {
+          ],
           deleted_at: null,
-          status: {
-            in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
-          },
-          employer: { is_business: true },
+          status: { in: [ApplicationStatus.PENDING, ApplicationStatus.VIEWED] },
+          created_at: { gte: since },
+          job_offer: recruiting,
         },
-      },
-      // The newest first: a plan's last « CV inclus » go to who just applied,
-      // not to applications long left waiting.
-      orderBy: { created_at: 'desc' },
-      distinct: ['job_offer_id'],
-      take: CATCH_UP_OFFERS,
-      select: {
-        job_offer_id: true,
-        job_offer: { select: { employer_id: true } },
-      },
-    });
-    let analysed = 0;
-    for (const w of waiting) {
-      try {
-        analysed += (
-          await this.analyse(
-            w.job_offer.employer_id,
-            w.job_offer_id,
-            undefined,
-            new Date(now.getTime() - ARRIVAL_GRACE_MS),
-            new Date(now.getTime() - FAILED_RETRY_MS),
-          )
-        ).analysed;
-      } catch (err) {
-        // A plan without « CV inclus » left: tried again on a later sweep.
-        this.logger.debug(
-          `CV analysis catch-up skipped for offer ${w.job_offer_id}: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        orderBy: { created_at: 'desc' },
+        take: CATCH_UP_SCAN,
+        select: {
+          id: true,
+          job_offer_id: true,
+          job_offer: { select: { employer_id: true } },
+        },
+      }),
+      this.prisma.externalApplication.findMany({
+        where: {
+          cv_resume_id: null,
+          cv_storage_key: { not: null },
+          status: ExternalApplicationStatus.PENDING,
+          created_at: { gte: since },
+          job_offer: recruiting,
+        },
+        orderBy: { created_at: 'desc' },
+        take: CATCH_UP_SCAN,
+        select: {
+          id: true,
+          job_offer_id: true,
+          job_offer: { select: { employer_id: true } },
+        },
+      }),
+    ]);
+
+    // By business, newest first, so the « CV inclus » left go to who just applied.
+    const byEmployer = new Map<string, CvAnalysisJob[]>();
+    const push = (job: CvAnalysisJob) => {
+      const list = byEmployer.get(job.employerId) ?? [];
+      list.push(job);
+      byEmployer.set(job.employerId, list);
+    };
+    for (const a of rabotka) {
+      push({
+        kind: 'rabotka',
+        applicationId: a.id,
+        offerId: a.job_offer_id,
+        employerId: a.job_offer.employer_id,
+      });
+    }
+    for (const a of careers) {
+      push({
+        kind: 'careers',
+        applicationId: a.id,
+        offerId: a.job_offer_id,
+        employerId: a.job_offer.employer_id,
+      });
+    }
+
+    let queued = 0;
+    for (const [employerId, jobs] of byEmployer) {
+      const businessId = await this.subscriptions.businessOf(employerId);
+      if (!businessId) continue;
+      const e = await this.subscriptions.entitlements(businessId);
+      // One « CV inclus » each: as many as are left (all, on an unlimited plan).
+      const room = e.cvQuota === 0 ? 0 : (e.cvRemaining ?? jobs.length);
+      for (const job of jobs.slice(0, room)) {
+        await enqueueCvAnalysis(this.queue, job);
+        queued++;
       }
     }
-    return analysed;
+    return queued;
   }
 
   /**
-   * A Rabotka application to a business offer is analysed as it arrives, like a
-   * careers-page CV: on the plan's « CV inclus », so every candidate can be
-   * compared at once. A plan with none left simply leaves it to analyse later.
+   * A Rabotka application to a business offer is queued for analysis as it
+   * arrives, like a careers-page CV: on the plan's « CV inclus », so every
+   * candidate can be compared at once.
    */
   @OnEvent(APPLICATION_SUBMITTED, { async: true })
   async analyseOnArrival({
@@ -308,12 +345,49 @@ export class ApplicantScoreService {
       select: { is_business: true },
     });
     if (!employer?.is_business) return;
-    try {
-      await this.analyse(employerId, jobOfferId, applicationId);
-    } catch (err) {
+    await enqueueCvAnalysis(this.queue, {
+      kind: 'rabotka',
+      applicationId,
+      offerId: jobOfferId,
+      employerId,
+    }).catch((err) =>
       this.logger.warn(
-        `Automatic CV analysis of application ${applicationId} skipped: ${err instanceof Error ? err.message : String(err)}`,
-      );
+        `CV analysis of application ${applicationId} not queued: ${err instanceof Error ? err.message : String(err)}`,
+      ),
+    );
+  }
+
+  /**
+   * One queued analysis. What the business cannot have — no « CV inclus »
+   * left, the offer closed, the application already read — ends the job: it is
+   * queued again once that changes. Anything else (the network, the storage)
+   * throws, and the queue tries again.
+   */
+  async runAnalysisJob(job: CvAnalysisJob, now = new Date()): Promise<void> {
+    try {
+      if (job.kind === 'rabotka') {
+        await this.analyse(
+          job.employerId,
+          job.offerId,
+          job.applicationId,
+          undefined,
+          new Date(now.getTime() - FAILED_RETRY_MS),
+        );
+      } else {
+        await this.careers.analyse(
+          job.employerId,
+          job.offerId,
+          job.applicationId,
+        );
+      }
+    } catch (err) {
+      if (err instanceof HttpException && err.getStatus() < 500) {
+        this.logger.debug(
+          `CV analysis of ${job.kind} ${job.applicationId} not run: ${err.message}`,
+        );
+        return;
+      }
+      throw err;
     }
   }
 
