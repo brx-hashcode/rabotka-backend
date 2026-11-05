@@ -29,6 +29,22 @@ const answer = (over: Record<string, unknown> = {}) =>
   });
 
 describe('parseAssessment', () => {
+  it('refuses a CV answer with no marks at all, rather than scoring it 0', () => {
+    expect(
+      parseAssessment(
+        JSON.stringify({
+          isCv: true,
+          candidate: { name: 'Awa', experiences: [] },
+          criteria: {},
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it('still takes « not a CV » with nothing else', () => {
+    expect(parseAssessment(JSON.stringify({ isCv: false }))?.isCv).toBe(false);
+  });
+
   it('reads the JSON, fenced or with prose around it', () => {
     const parsed = parseAssessment(
       'Voici :\n```json\n' + answer() + '\n```\nBonne journée',
