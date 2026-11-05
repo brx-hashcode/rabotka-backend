@@ -173,6 +173,13 @@ describe('CvScreeningService', () => {
         offer_id: null,
         job_title: 'Caissier',
       });
+      // Each CV records the period it was charged to.
+      expect(
+        prisma.cvScreening.create.mock.calls[0][0].data.resumes.create,
+      ).toEqual([
+        expect.objectContaining({ subscription_id: 'sub-1' }),
+        expect.objectContaining({ subscription_id: 'sub-1' }),
+      ]);
       expect(queue.addJob).toHaveBeenCalledTimes(2);
       expect(result.total).toBe(2);
     });
@@ -464,6 +471,23 @@ describe('CvScreeningService', () => {
         prisma.cvScreeningResume.updateMany.mock.calls[0][0].data.status,
       ).toBe('FAILED');
       expect(subscriptions.releaseCv).toHaveBeenCalledWith('sub-1', 1);
+    });
+
+    it('gives a failed CV back to the period it was charged to, not the screening’s', async () => {
+      const { service, prisma, storage, llm, subscriptions } = make();
+      // An offer's screening opened under an older period; this CV was
+      // charged to the period running when it arrived.
+      prisma.cvScreeningResume.findUnique.mockResolvedValue(
+        queued({ subscription_id: 'sub-now' }),
+      );
+      storage.download.mockResolvedValue({ body: Readable.from([PNG]) });
+      prisma.cvScreening.findUnique.mockResolvedValue(closing(['FAILED']));
+      llm.invoke.mockRejectedValue(new Error('chain exhausted'));
+
+      await service.process('r1');
+
+      expect(subscriptions.releaseCv).toHaveBeenCalledWith('sub-now', 1);
+      expect(subscriptions.releaseCv).not.toHaveBeenCalledWith('sub-1', 1);
     });
 
     it('leaves a CV already decided alone', async () => {

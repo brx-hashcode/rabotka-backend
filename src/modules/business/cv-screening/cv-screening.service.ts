@@ -204,6 +204,8 @@ export class CvScreeningService {
       size_bytes: file.size,
       storage_key: uploaded[i].key,
       storage_bucket: uploaded[i].bucket,
+      // Charged now, to this period: given back here if it can't be read.
+      subscription_id: subscriptionId,
     }));
     const screening = into
       ? await this.prisma.cvScreening.update({
@@ -512,8 +514,11 @@ export class CvScreeningService {
       data,
     });
     if (count === 0) return;
-    if (outcome.status !== 'SCORED' && resume.screening.subscription_id) {
-      await this.subscriptions.releaseCv(resume.screening.subscription_id, 1);
+    // Given back to the period it was taken from, not the screening's: an
+    // offer's screening outlives a period, and the period may have changed.
+    const charged = resume.subscription_id ?? resume.screening.subscription_id;
+    if (outcome.status !== 'SCORED' && charged) {
+      await this.subscriptions.releaseCv(charged, 1);
     }
     await this.afterProgress(resume.screening.id);
   }
