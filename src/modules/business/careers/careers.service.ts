@@ -848,15 +848,25 @@ export class CareersService {
     }
   }
 
+  /**
+   * The business behind a slug: its current one, or one it had before a
+   * rename. The view then carries the current slug, and the site redirects
+   * the old address to it.
+   */
   private async business(slug: string) {
-    const business = await this.prisma.business.findFirst({
-      where: {
-        public_slug: slug,
-        deleted_at: null,
-        verification_status: VerificationStatus.VERIFIED,
-      },
-      select: COMPANY_SELECT,
-    });
+    const live = {
+      deleted_at: null,
+      verification_status: VerificationStatus.VERIFIED,
+    };
+    const business =
+      (await this.prisma.business.findFirst({
+        where: { public_slug: slug, ...live },
+        select: COMPANY_SELECT,
+      })) ??
+      (await this.prisma.business.findFirst({
+        where: { previous_slugs: { has: slug }, ...live },
+        select: COMPANY_SELECT,
+      }));
     if (!business) throw new NotFoundException('Page introuvable.');
     return business;
   }

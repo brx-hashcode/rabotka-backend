@@ -1,6 +1,11 @@
 import { NotFoundException } from '@nestjs/common';
 import { OfferQuestionKind } from '@prisma/client';
-import { slugBase, uniqueBusinessSlug } from '../careers-slug';
+import {
+  slugAfterRename,
+  slugBase,
+  slugFitsName,
+  uniqueBusinessSlug,
+} from '../careers-slug';
 import { CareersService } from '../careers.service';
 
 const business = {
@@ -111,6 +116,86 @@ describe('careers slug', () => {
       'kamoa-3',
     );
   });
+
+  it("never hands out another business's old slug, but gives one back to its owner", async () => {
+    const tx = {
+      business: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue([
+            { id: 'b1', public_slug: 'sna', previous_slugs: ['kamoa'] },
+          ]),
+      },
+    };
+    await expect(uniqueBusinessSlug(tx as never, 'Kamoa')).resolves.toBe(
+      'kamoa-2',
+    );
+    await expect(uniqueBusinessSlug(tx as never, 'Kamoa', 'b1')).resolves.toBe(
+      'kamoa',
+    );
+  });
+
+  it('tells a slug made from the name', () => {
+    expect(slugFitsName('kamoa', 'Kamoa')).toBe(true);
+    expect(slugFitsName('kamoa-3', 'Kamoa')).toBe(true);
+    expect(slugFitsName('rabotka-review', 'The Yellow Team')).toBe(false);
+    expect(slugFitsName('kamoa-sarl', 'Kamoa')).toBe(false);
+    expect(slugFitsName(null, 'Kamoa')).toBe(false);
+  });
+
+  it('follows a rename and keeps the old slug', async () => {
+    const tx = { business: { findMany: jest.fn().mockResolvedValue([]) } };
+    await expect(
+      slugAfterRename(
+        tx as never,
+        { id: 'b1', public_slug: 'rabotka-review', previous_slugs: [] },
+        'THE YELLOW TEAM',
+      ),
+    ).resolves.toEqual({
+      public_slug: 'the-yellow-team',
+      previous_slugs: ['rabotka-review'],
+    });
+  });
+
+  it('changes nothing when the slug already fits the name', async () => {
+    const tx = { business: { findMany: jest.fn() } };
+    await expect(
+      slugAfterRename(
+        tx as never,
+        { id: 'b1', public_slug: 'kamoa-2', previous_slugs: [] },
+        'Kamoa',
+      ),
+    ).resolves.toBeNull();
+    expect(tx.business.findMany).not.toHaveBeenCalled();
+  });
+
+  it('takes back its own old slug on a return to a former name', async () => {
+    const tx = {
+      business: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'b1',
+            public_slug: 'the-yellow-team',
+            previous_slugs: ['rabotka-review'],
+          },
+        ]),
+      },
+    };
+    await expect(
+      slugAfterRename(
+        tx as never,
+        {
+          id: 'b1',
+          public_slug: 'the-yellow-team',
+          previous_slugs: ['rabotka-review'],
+        },
+        'Rabotka Review',
+      ),
+    ).resolves.toEqual({
+      public_slug: 'rabotka-review',
+      previous_slugs: ['the-yellow-team'],
+    });
+  });
 });
 
 describe('CareersService', () => {
@@ -150,6 +235,22 @@ describe('CareersService', () => {
     );
     expect(prisma.business.findFirst.mock.calls[0][0].where).toMatchObject({
       public_slug: 'kamoa',
+      deleted_at: null,
+      verification_status: 'VERIFIED',
+    });
+  });
+
+  it('finds a business by a slug it had before a rename', async () => {
+    const { prisma, service } = serviceWith(null);
+    prisma.business.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(business);
+
+    const page = await service.company('rabotka-review');
+
+    expect(page.company.slug).toBe('kamoa');
+    expect(prisma.business.findFirst.mock.calls[1][0].where).toMatchObject({
+      previous_slugs: { has: 'rabotka-review' },
       deleted_at: null,
       verification_status: 'VERIFIED',
     });

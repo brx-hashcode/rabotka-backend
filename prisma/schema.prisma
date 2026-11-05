@@ -3407,9 +3407,14 @@ model Business {
   /// business must be able to see it again to add it to another agenda; it
   /// only reads the interviews, and replacing it cuts the old one off.
   calendar_token      String?            @unique
-  /// Its public careers page: /carrieres/<public_slug>. Null only for a row
-  /// created before the migration ran; every sign-up sets it.
+  /// Its public careers page: /carrieres/<public_slug>, made from `name` and
+  /// remade when the business is renamed (careers-slug.ts). Null only for a
+  /// row created before the migration ran; every sign-up sets it.
   public_slug         String?            @unique
+  /// Its slugs before a rename. They still lead to the careers page (a
+  /// redirect to `public_slug`), so links already shared keep working, and
+  /// no other business is given one.
+  previous_slugs      String[]           @default([])
   /// Its open offers go to Google and the job sites. Its careers page stays
   /// reachable by link either way.
   distribute_offers   Boolean            @default(true)
@@ -3460,6 +3465,7 @@ model Business {
   @@index([verification_status], name: "idx_business_verification_status")
   @@index([category], name: "idx_business_category")
   @@index([deleted_at], name: "idx_business_deleted_at")
+  @@index([previous_slugs], name: "idx_business_previous_slugs", type: Gin)
   @@map("businesses")
 }
 

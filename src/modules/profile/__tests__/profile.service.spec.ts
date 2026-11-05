@@ -1898,6 +1898,8 @@ describe('ProfileService', () => {
     const businessRow = {
       id: 'b-1',
       name: 'École Les Lauriers',
+      public_slug: 'ecole-les-lauriers',
+      previous_slugs: [],
       category: 'SCHOOL',
       legal_form: 'ASSOCIATION',
       size: null,
@@ -1940,6 +1942,7 @@ describe('ProfileService', () => {
     beforeEach(() => {
       (prisma as any).business = {
         findUnique: jest.fn().mockResolvedValue(businessRow),
+        findMany: jest.fn().mockResolvedValue([]),
         update: jest.fn().mockResolvedValue({}),
       };
       (prisma as any).businessDocument = {
@@ -2011,6 +2014,29 @@ describe('ProfileService', () => {
       it('lets an admin change the identity', async () => {
         await service.updateBusiness('p-1', { name: 'Autre nom' } as any, 'admin');
         expect((prisma as any).business.update).toHaveBeenCalled();
+      });
+
+      it('moves the careers page to the new name, keeping the old address', async () => {
+        await service.updateBusiness('p-1', { name: 'Autre nom' } as any, 'admin');
+        expect((prisma as any).business.update).toHaveBeenCalledWith({
+          where: { id: 'b-1' },
+          data: expect.objectContaining({
+            name: 'Autre nom',
+            public_slug: 'autre-nom',
+            previous_slugs: ['ecole-les-lauriers'],
+          }),
+        });
+      });
+
+      it('leaves the address alone when the name is not changed', async () => {
+        await service.updateBusiness(
+          'p-1',
+          { name: 'École Les Lauriers', website: 'https://ecole.cg' } as any,
+          'admin',
+        );
+        const { data } = (prisma as any).business.update.mock.calls[0][0];
+        expect(data).not.toHaveProperty('public_slug');
+        expect(data).not.toHaveProperty('previous_slugs');
       });
 
       it('moves only to a country Rabotka Business is open in, and clears the address', async () => {
