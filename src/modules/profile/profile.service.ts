@@ -1,4 +1,7 @@
-import { uniqueBusinessSlug } from '../business/careers/careers-slug';
+import {
+  slugAfterRename,
+  uniqueBusinessSlug,
+} from '../business/careers/careers-slug';
 import { countCountedCancellations } from '../application/cancellation-counter';
 import {
   AdminCacheService,
@@ -2568,11 +2571,17 @@ export class ProfileService {
             city: dto.city ?? undefined,
           })
         : {};
+    // Renamed: the careers page's address follows the new name.
+    const slug =
+      dto.name !== undefined
+        ? await slugAfterRename(this.prisma, business, dto.name)
+        : null;
 
     await this.prisma.$transaction([
       this.prisma.business.update({
         where: { id: business.id },
         data: {
+          ...slug,
           name: dto.name,
           category: dto.category,
           legal_form: legalForm,
