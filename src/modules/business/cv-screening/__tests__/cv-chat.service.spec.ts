@@ -43,7 +43,10 @@ function make(
     businessOf: jest.fn().mockResolvedValue('b1'),
     entitlements: jest
       .fn()
-      .mockResolvedValue({ cvChatQuestions: opts.limit ?? 20 }),
+      .mockResolvedValue({
+        cvChatQuestions: opts.limit ?? 20,
+        trialLocked: [],
+      }),
   };
   const screenings: any = {
     transcribe: jest.fn((source: { kind: string; text?: string }) =>

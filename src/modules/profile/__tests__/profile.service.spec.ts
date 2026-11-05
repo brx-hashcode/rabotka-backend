@@ -2077,6 +2077,23 @@ describe('ProfileService', () => {
       );
     });
 
+    it('starts the trial on approval unless the admin chose not to', async () => {
+      const emit = (service as any).eventEmitter.emit as jest.Mock;
+      await service.verifyBusiness('p-1', 'admin-1', 'VERIFIED');
+      expect(emit).toHaveBeenCalledWith('business.verified', {
+        businessId: 'b-1',
+        startTrial: true,
+      });
+      emit.mockClear();
+      await service.verifyBusiness('p-1', 'admin-1', 'VERIFIED', undefined, {
+        startTrial: false,
+      });
+      expect(emit).toHaveBeenCalledWith('business.verified', {
+        businessId: 'b-1',
+        startTrial: false,
+      });
+    });
+
     it('refusing needs a reason, and does not activate', async () => {
       await expect(service.verifyBusiness('p-1', 'admin-1', 'REJECTED')).rejects.toThrow(
         BadRequestException,

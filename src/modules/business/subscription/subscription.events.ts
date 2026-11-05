@@ -6,4 +6,8 @@ export type BusinessSubscriptionPaidPayload = { paymentRequestId: string };
 /** An admin approved a business: its trial starts (if configured). */
 export const BUSINESS_VERIFIED_EVENT = 'business.verified';
 
-export type BusinessVerifiedPayload = { businessId: string };
+/** `startTrial` false: the admin approved without the trial (absent: started). */
+export type BusinessVerifiedPayload = {
+  businessId: string;
+  startTrial?: boolean;
+};

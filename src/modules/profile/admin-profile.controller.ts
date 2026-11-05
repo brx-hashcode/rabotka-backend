@@ -484,6 +484,7 @@ export class AdminProfileController {
       adminUserId,
       dto.decision,
       dto.reason,
+      { startTrial: dto.startTrial ?? true },
     );
     await this.logService.create({
       action:
@@ -494,7 +495,13 @@ export class AdminProfileController {
       entityId: result.id,
       userId: adminUserId,
       profileId: id,
-      metadata: { decision: dto.decision, reason: dto.reason },
+      metadata: {
+        decision: dto.decision,
+        reason: dto.reason,
+        ...(dto.decision === VerifyDecision.VERIFIED && {
+          startTrial: dto.startTrial ?? true,
+        }),
+      },
     });
 
     const person = await this.prisma.profile.findUnique({

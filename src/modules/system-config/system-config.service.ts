@@ -1017,13 +1017,31 @@ export class SystemConfigService implements OnModuleInit {
     trialDays: number;
     trialPlanCode: string | null;
     reminderDays: number[];
+    /** The AI features the trial includes; each is off unless set to 'true'. */
+    trialAi: { cvAnalysis: boolean; cvChat: boolean; offerWriter: boolean };
   }> {
-    const [trialDays, trialPlanCode, reminderDays] = await this.mgetBatch([
+    const [
+      trialDays,
+      trialPlanCode,
+      reminderDays,
+      trialCvAnalysis,
+      trialCvChat,
+      trialOfferWriter,
+    ] = await this.mgetBatch([
       { key: 'business.trial_days', fallback: '14' },
       { key: 'business.trial_plan_code', fallback: '' },
       { key: 'business.renewal_reminder_days', fallback: '7,1' },
+      { key: 'business.trial_cv_analysis', fallback: 'false' },
+      { key: 'business.trial_cv_chat', fallback: 'false' },
+      { key: 'business.trial_offer_writer', fallback: 'false' },
     ]);
+    const on = (v: string | null | undefined) => v?.trim() === 'true';
     return {
+      trialAi: {
+        cvAnalysis: on(trialCvAnalysis),
+        cvChat: on(trialCvChat),
+        offerWriter: on(trialOfferWriter),
+      },
       trialDays: Math.max(0, Math.floor(Number(trialDays) || 0)),
       trialPlanCode: trialPlanCode?.trim() || null,
       reminderDays: (reminderDays ?? '')

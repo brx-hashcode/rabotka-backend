@@ -160,6 +160,15 @@ export class CreateBusinessPlanDto {
   @IsOptional()
   @IsInt()
   sortOrder?: number;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'A custom plan: the business (id) it is made for, the only one to see it. Null: the public catalog',
+  })
+  @IsOptional()
+  @IsUUID()
+  businessId?: string | null;
 }
 
 export class UpdateBusinessPlanDto extends PartialType(CreateBusinessPlanDto) {}

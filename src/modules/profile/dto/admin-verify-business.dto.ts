@@ -1,4 +1,10 @@
-import { IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { VerifyDecision } from './admin-verify-profile.dto';
@@ -18,4 +24,12 @@ export class AdminVerifyBusinessDto {
   @IsString()
   @MaxLength(1000)
   reason?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'On approval: start the free trial (default). False: approved without it; the admin may start it later.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  startTrial?: boolean;
 }

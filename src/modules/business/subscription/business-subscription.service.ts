@@ -118,7 +118,27 @@ export type BusinessEntitlements = {
   recruiters: number;
   /** Évaluateurs invited or active now. */
   reviewers: number;
+  /** AI features the plan has but the trial leaves out (their quotas read 0). */
+  trialLocked: TrialAiFeature[];
 };
+
+/** The AI features a trial may leave out (SystemConfig `business.trial_*`). */
+export type TrialAiFeature = 'cvAnalysis' | 'cvChat' | 'offerWriter';
+
+/** Why an AI feature is refused during the trial: it comes with a paid plan. */
+export const TRIAL_AI_REFUSAL =
+  'Disponible avec une formule payante, après votre essai gratuit. Choisissez une formule depuis votre espace, rubrique « Abonnement ».';
+
+/**
+ * Whether a business may have this plan: every catalog plan, and a custom
+ * plan only for the business it was made for.
+ */
+export function planAvailableTo(
+  plan: { business_id: string | null },
+  businessId: string,
+): boolean {
+  return !plan.business_id || plan.business_id === businessId;
+}
 
 /**
  * How many CVs one analysis may read now: the plan's batch, but never more
@@ -232,8 +252,14 @@ export class BusinessSubscriptionService {
         reviewersLimit: 0,
         recruiters,
         reviewers,
+        trialLocked: [],
       };
     }
+    // A trial leaves out the AI features not switched on for it: their quotas
+    // read 0, so every gate (and the dashboard) treats them as not included.
+    const locked = await this.trialLocks(sub);
+    const cvLocked = locked.has('cvAnalysis');
+    const draftsLocked = locked.has('offerWriter');
     return {
       plan: { id: sub.plan.id, code: sub.plan.code, name: sub.plan.name },
       status: sub.status,
@@ -252,28 +278,57 @@ export class BusinessSubscriptionService {
         sub.plan.active_offers_limit,
         sub.offers_published,
       ),
-      cvRemaining: remaining(
-        sub.plan.cv_screenings_per_period,
-        sub.cv_screened,
-      ),
-      cvQuota: sub.plan.cv_screenings_per_period,
+      cvRemaining: cvLocked
+        ? 0
+        : remaining(sub.plan.cv_screenings_per_period, sub.cv_screened),
+      cvQuota: cvLocked ? 0 : sub.plan.cv_screenings_per_period,
       cvUsed: sub.cv_screened,
       cvBatchMax: sub.plan.cv_batch_max,
       cvFileMaxMb: sub.plan.cv_file_max_mb,
       cvRetentionDays: sub.plan.cv_retention_days,
-      cvChatQuestions: sub.plan.cv_chat_questions,
-      offerDraftsRemaining: remaining(
-        sub.plan.offer_drafts_per_period,
-        sub.offer_drafts_used,
-      ),
-      offerDraftsQuota: sub.plan.offer_drafts_per_period,
+      cvChatQuestions: locked.has('cvChat') ? 0 : sub.plan.cv_chat_questions,
+      offerDraftsRemaining: draftsLocked
+        ? 0
+        : remaining(sub.plan.offer_drafts_per_period, sub.offer_drafts_used),
+      offerDraftsQuota: draftsLocked ? 0 : sub.plan.offer_drafts_per_period,
       includesPreselection: sub.plan.includes_preselection,
       priorityVisibility: sub.plan.priority_visibility,
       recruitersLimit: sub.plan.recruiters_limit,
       reviewersLimit: sub.plan.reviewers_limit,
       recruiters,
       reviewers,
+      trialLocked: [...locked],
     };
+  }
+
+  /**
+   * The AI features this period's plan includes but its trial leaves out
+   * (none for a paid period). Read by entitlements() and by the consume
+   * methods, which charge the plan directly.
+   */
+  private async trialLocks(sub: {
+    billing_period: BusinessBillingPeriod;
+    plan: {
+      cv_screenings_per_period: number | null;
+      cv_chat_questions: number;
+      offer_drafts_per_period: number | null;
+    };
+  }): Promise<Set<TrialAiFeature>> {
+    const locked = new Set<TrialAiFeature>();
+    if (sub.billing_period !== BusinessBillingPeriod.TRIAL) return locked;
+    const { trialAi } =
+      await this.systemConfig.getBusinessSubscriptionSettings();
+    const plan = sub.plan;
+    if (!trialAi.cvAnalysis && plan.cv_screenings_per_period !== 0) {
+      locked.add('cvAnalysis');
+    }
+    if (!trialAi.cvChat && plan.cv_chat_questions !== 0) {
+      locked.add('cvChat');
+    }
+    if (!trialAi.offerWriter && plan.offer_drafts_per_period !== 0) {
+      locked.add('offerWriter');
+    }
+    return locked;
   }
 
   /** The business dashboard's « Abonnement » page, in one read. */
@@ -286,7 +341,7 @@ export class BusinessSubscriptionService {
         orderBy: { starts_at: 'desc' },
         take: 24,
       }),
-      this.listPlans(true),
+      this.plansFor(businessId),
     ]);
     const now = new Date();
     return {
@@ -300,18 +355,38 @@ export class BusinessSubscriptionService {
     };
   }
 
+  /** Every plan, custom ones included, with the business each is made for (admin). */
   listPlans(activeOnly: boolean) {
     return this.prisma.businessPlan.findMany({
       where: { deleted_at: null, ...(activeOnly && { is_active: true }) },
+      include: {
+        business: { select: { id: true, name: true, profile_id: true } },
+      },
+      orderBy: [{ sort_order: 'asc' }, { monthly_price_fcfa: 'asc' }],
+    });
+  }
+
+  /** What a business may choose: the catalog, and its own custom plans. */
+  plansFor(businessId: string) {
+    return this.prisma.businessPlan.findMany({
+      where: {
+        deleted_at: null,
+        is_active: true,
+        OR: [{ business_id: null }, { business_id: businessId }],
+      },
       orderBy: [{ sort_order: 'asc' }, { monthly_price_fcfa: 'asc' }],
     });
   }
 
   // ── Lifecycle ────────────────────────────────────────────────────────
 
-  /** Approval starts the trial (once per business, ever; none if configured off). */
+  /**
+   * Approval starts the trial, unless the admin chose not to (once per
+   * business, ever; none if configured off).
+   */
   @OnEvent(BUSINESS_VERIFIED_EVENT, { async: true })
   async onBusinessVerified(payload: BusinessVerifiedPayload): Promise<void> {
+    if (payload.startTrial === false) return;
     try {
       await this.startTrial(payload.businessId);
     } catch (err) {
@@ -328,9 +403,10 @@ export class BusinessSubscriptionService {
     const plan = await this.prisma.businessPlan.findUnique({
       where: { code: settings.trialPlanCode },
     });
-    if (!plan || !plan.is_active) {
+    // A custom plan is one business's: never the trial of every other.
+    if (!plan || !plan.is_active || plan.deleted_at || plan.business_id) {
       this.logger.warn(
-        `Trial plan « ${settings.trialPlanCode} » missing or inactive`,
+        `Trial plan « ${settings.trialPlanCode} » missing, inactive or custom`,
       );
       return null;
     }
@@ -747,6 +823,9 @@ export class BusinessSubscriptionService {
     // A deleted plan is never granted again; a payment taken for it before
     // the deletion is still honoured.
     if (!plan || (plan.deleted_at && !by.paymentRequestId)) return null;
+    if (!planAvailableTo(plan, businessId)) {
+      throw new BadRequestException('Cette formule n’est pas disponible.');
+    }
     const created = await this.prisma.$transaction(async (tx) => {
       const trial = await tx.businessSubscription.findFirst({
         where: {
@@ -952,6 +1031,9 @@ export class BusinessSubscriptionService {
     db: Db = this.prisma,
   ): Promise<{ subscriptionId: string }> {
     const sub = await this.current(businessId, db);
+    if (sub && (await this.trialLocks(sub)).has('cvAnalysis')) {
+      throw new ForbiddenException(TRIAL_AI_REFUSAL);
+    }
     const quota = sub ? sub.plan.cv_screenings_per_period : 0;
     if (!sub || quota === 0) {
       throw new ForbiddenException(
@@ -984,6 +1066,9 @@ export class BusinessSubscriptionService {
     businessId: string,
   ): Promise<{ subscriptionId: string }> {
     const sub = await this.current(businessId);
+    if (sub && (await this.trialLocks(sub)).has('offerWriter')) {
+      throw new ForbiddenException(TRIAL_AI_REFUSAL);
+    }
     const quota = sub ? sub.plan.offer_drafts_per_period : 0;
     if (!sub || quota === 0) {
       throw new ForbiddenException(

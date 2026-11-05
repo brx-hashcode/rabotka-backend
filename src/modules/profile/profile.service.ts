@@ -2439,6 +2439,8 @@ export class ProfileService {
     adminUserId: string,
     decision: 'VERIFIED' | 'REJECTED',
     reason?: string,
+    /** On approval: start the free trial (the default), or leave it to later. */
+    { startTrial = true }: { startTrial?: boolean } = {},
   ): Promise<AdminBusinessDetail> {
     const note = reason?.trim() || null;
     if (decision === 'REJECTED' && !note) {
@@ -2509,6 +2511,7 @@ export class ProfileService {
       // subscription starts instead, in BusinessSubscriptionService.
       this.eventEmitter.emit(BUSINESS_VERIFIED_EVENT, {
         businessId: business.id,
+        startTrial,
       } satisfies BusinessVerifiedPayload);
     }
 

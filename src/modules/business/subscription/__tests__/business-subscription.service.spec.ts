@@ -58,6 +58,7 @@ function make(
         trialDays: 14,
         trialPlanCode: 'pro',
         reminderDays: [7, 1],
+        trialAi: { cvAnalysis: false, cvChat: false, offerWriter: false },
       },
     ),
   };
@@ -584,6 +585,22 @@ describe('BusinessSubscriptionService', () => {
       expect(prisma.businessSubscription.create).not.toHaveBeenCalled();
     });
 
+    it('never starts a custom plan as the trial', async () => {
+      const { service, prisma } = make();
+      prisma.businessPlan.findUnique.mockResolvedValue(
+        plan({ business_id: 'b9' }),
+      );
+      await expect(service.startTrial('b1')).resolves.toBeNull();
+      expect(prisma.businessSubscription.create).not.toHaveBeenCalled();
+    });
+
+    it('is skipped when the admin approved without it', async () => {
+      const { service, prisma } = make();
+      await service.onBusinessVerified({ businessId: 'b1', startTrial: false });
+      expect(prisma.businessSubscription.create).not.toHaveBeenCalled();
+      expect(prisma.businessPlan.findUnique).not.toHaveBeenCalled();
+    });
+
     it('starts the configured plan for the configured days, and tells the business', async () => {
       const { service, prisma, mail } = make();
       const now = new Date('2026-10-01T00:00:00Z');
@@ -893,6 +910,119 @@ describe('BusinessSubscriptionService', () => {
       await expect(noPlan.service.consumeOffer('p1')).rejects.toThrow(
         /Choisissez une formule/,
       );
+    });
+  });
+
+  describe('custom plans', () => {
+    it('shows a business the catalog and its own custom plans only', async () => {
+      const { service, prisma } = make();
+      prisma.businessPlan.findMany = jest.fn().mockResolvedValue([]);
+      await service.plansFor('b1');
+      expect(prisma.businessPlan.findMany.mock.calls[0][0].where).toEqual({
+        deleted_at: null,
+        is_active: true,
+        OR: [{ business_id: null }, { business_id: 'b1' }],
+      });
+    });
+
+    it("refuses to grant another business's custom plan", async () => {
+      const { service, prisma } = make();
+      prisma.businessPlan.findUnique.mockResolvedValue(
+        plan({ business_id: 'b9' }),
+      );
+      await expect(
+        service.grantByAdmin('b1', 'plan-1', 'MONTHLY' as any, 'admin'),
+      ).rejects.toThrow(/pas disponible/);
+      expect(prisma.businessSubscription.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('entitlements during the trial', () => {
+    const aiPlan = plan({
+      cv_screenings_per_period: 50,
+      cv_chat_questions: 20,
+      offer_drafts_per_period: 10,
+    });
+    const period = (billing_period: string) =>
+      running({
+        status: billing_period === 'TRIAL' ? 'TRIAL' : 'ACTIVE',
+        billing_period,
+        cv_screened: 0,
+        offer_drafts_used: 0,
+        plan: aiPlan,
+      });
+
+    it('leaves the AI features out of a trial', async () => {
+      const { service } = make({ sub: period('TRIAL') });
+      const e = await service.entitlements('b1');
+      expect(e).toMatchObject({
+        cvQuota: 0,
+        cvRemaining: 0,
+        cvChatQuestions: 0,
+        offerDraftsQuota: 0,
+        offerDraftsRemaining: 0,
+      });
+      expect(e.trialLocked.sort()).toEqual([
+        'cvAnalysis',
+        'cvChat',
+        'offerWriter',
+      ]);
+    });
+
+    it('gives a paid period on the same plan its AI quotas', async () => {
+      const { service } = make({ sub: period('MONTHLY') });
+      const e = await service.entitlements('b1');
+      expect(e).toMatchObject({
+        cvQuota: 50,
+        cvRemaining: 50,
+        cvChatQuestions: 20,
+        offerDraftsQuota: 10,
+        trialLocked: [],
+      });
+    });
+
+    it('keeps in the trial what the settings switch on', async () => {
+      const { service } = make({
+        sub: period('TRIAL'),
+        settings: {
+          trialDays: 14,
+          trialPlanCode: 'pro',
+          reminderDays: [],
+          trialAi: { cvAnalysis: true, cvChat: false, offerWriter: false },
+        },
+      });
+      const e = await service.entitlements('b1');
+      expect(e.cvQuota).toBe(50);
+      expect(e.cvChatQuestions).toBe(0);
+      expect(e.trialLocked).not.toContain('cvAnalysis');
+    });
+
+    it('refuses to charge a CV or an AI draft on a trial, saying why', async () => {
+      const { service, prisma } = make({ sub: period('TRIAL') });
+      await expect(service.consumeCv('b1', 1)).rejects.toThrow(
+        /après votre essai/,
+      );
+      await expect(service.consumeOfferDraft('b1')).rejects.toThrow(
+        /après votre essai/,
+      );
+      expect(prisma.businessSubscription.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('locks nothing the plan does not include anyway', async () => {
+      const { service } = make({
+        sub: running({
+          status: 'TRIAL',
+          billing_period: 'TRIAL',
+          cv_screened: 0,
+          offer_drafts_used: 0,
+          plan: plan({
+            cv_screenings_per_period: 0,
+            cv_chat_questions: 0,
+            offer_drafts_per_period: 0,
+          }),
+        }),
+      });
+      expect((await service.entitlements('b1')).trialLocked).toEqual([]);
     });
   });
 

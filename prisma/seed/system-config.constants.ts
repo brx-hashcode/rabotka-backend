@@ -216,6 +216,29 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: "Entreprises – Formule offerte pendant l'essai (code)",
     isSecret: false,
   },
+  // The AI features the trial includes ('true' / 'false'); off by default: they
+  // cost a model call each, and come with a paid plan.
+  {
+    key: 'business.trial_cv_analysis',
+    value: 'false',
+    category: ConfigCategory.FEES,
+    label: "Entreprises – Analyse de CV pendant l'essai (true/false)",
+    isSecret: false,
+  },
+  {
+    key: 'business.trial_cv_chat',
+    value: 'false',
+    category: ConfigCategory.FEES,
+    label: "Entreprises – Questions au CV et comparaison pendant l'essai (true/false)",
+    isSecret: false,
+  },
+  {
+    key: 'business.trial_offer_writer',
+    value: 'false',
+    category: ConfigCategory.FEES,
+    label: "Entreprises – Rédaction d'offre par l'IA pendant l'essai (true/false)",
+    isSecret: false,
+  },
   {
     // 0 = no reminder.
     key: 'business.offer_expiry_reminder_days',

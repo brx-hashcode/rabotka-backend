@@ -1,11 +1,28 @@
 import type { BusinessPlan } from '@prisma/client';
 
 /** A plan for the API: camelCase, as every other business payload. */
-export function planView(p: BusinessPlan) {
+export function planView(
+  p: BusinessPlan & {
+    business?: { id: string; name: string; profile_id: string } | null;
+  },
+) {
   return {
     id: p.id,
     code: p.code,
     name: p.name,
+    /** Made for one business alone (« sur mesure »). */
+    custom: p.business_id !== null,
+    businessId: p.business_id,
+    /** Who it is made for: admin reads only (the list includes it). */
+    ...(p.business
+      ? {
+          business: {
+            id: p.business.id,
+            name: p.business.name,
+            profileId: p.business.profile_id,
+          },
+        }
+      : {}),
     description: p.description,
     monthlyPriceFcfa: p.monthly_price_fcfa,
     annualPriceFcfa: p.annual_price_fcfa,
@@ -47,6 +64,7 @@ export function planData(dto: {
   priorityVisibility?: boolean;
   isActive?: boolean;
   sortOrder?: number;
+  businessId?: string | null;
 }) {
   return {
     code: dto.code,
@@ -68,5 +86,6 @@ export function planData(dto: {
     priority_visibility: dto.priorityVisibility,
     is_active: dto.isActive,
     sort_order: dto.sortOrder,
+    business_id: dto.businessId,
   };
 }
