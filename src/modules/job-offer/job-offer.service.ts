@@ -1099,6 +1099,8 @@ export class JobOfferService {
       /** Narrow to these statuses. Must be applied here, not client-side: a
        *  post-pagination filter yields short pages and a wrong `total`. */
       statuses?: JobOfferStatus[];
+      /** A title or reference to find, applied before pagination too. */
+      q?: string;
     },
   ): Promise<{ items: JobOfferListItem[]; total: number }>;
   async findByEmployerId(
@@ -1107,6 +1109,7 @@ export class JobOfferService {
       page: number;
       pageSize: number;
       statuses?: JobOfferStatus[];
+      q?: string;
     },
   ): Promise<
     JobOfferListItem[] | { items: JobOfferListItem[]; total: number }
@@ -1135,6 +1138,19 @@ export class JobOfferService {
       deleted_at: null,
       ...(pagination?.statuses?.length
         ? { status: { in: pagination.statuses } }
+        : {}),
+      ...(pagination?.q?.trim()
+        ? {
+            OR: [
+              { title: { contains: pagination.q.trim(), mode: 'insensitive' } },
+              {
+                reference: {
+                  contains: pagination.q.trim(),
+                  mode: 'insensitive',
+                },
+              },
+            ],
+          }
         : {}),
     };
 

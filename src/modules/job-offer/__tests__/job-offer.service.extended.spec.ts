@@ -231,6 +231,39 @@ describe('JobOfferService (extended)', () => {
       (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([]);
       expect(await service.findByEmployerId(EMPLOYER_ID)).toHaveLength(0);
     });
+
+    it('finds by title or reference, before paginating', async () => {
+      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.jobOffer.count as jest.Mock).mockResolvedValue(0);
+      await service.findByEmployerId(EMPLOYER_ID, {
+        page: 0,
+        pageSize: 20,
+        q: '  ingénieur ',
+      });
+      const { where } = (prisma.jobOffer.findMany as jest.Mock).mock.calls.at(
+        -1,
+      )[0];
+      expect(where.OR).toEqual([
+        { title: { contains: 'ingénieur', mode: 'insensitive' } },
+        { reference: { contains: 'ingénieur', mode: 'insensitive' } },
+      ]);
+      expect(
+        (prisma.jobOffer.count as jest.Mock).mock.calls.at(-1)[0].where,
+      ).toEqual(where);
+    });
+
+    it('ignores a blank search', async () => {
+      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.jobOffer.count as jest.Mock).mockResolvedValue(0);
+      await service.findByEmployerId(EMPLOYER_ID, {
+        page: 0,
+        pageSize: 20,
+        q: '  ',
+      });
+      expect(
+        (prisma.jobOffer.findMany as jest.Mock).mock.calls.at(-1)[0].where.OR,
+      ).toBeUndefined();
+    });
   });
 
   describe('getJobOffersForAdmin()', () => {
