@@ -18,6 +18,9 @@ export const APPLICANT_WEIGHTS = {
 
 export type ApplicantCriterion = keyof typeof APPLICANT_WEIGHTS;
 
+/** Enough of a CV to judge it, without crowding out the rest of the profile. */
+const MAX_CV_CHARS = 6_000;
+
 export type ApplicantFacts = {
   trades: string[];
   description: string | null;
@@ -31,6 +34,8 @@ export type ApplicantFacts = {
   portfolio: string[];
   /** Its answers to the offer's questions (« Questions aux candidats »). */
   answers?: { question: string; answer: string }[];
+  /** « Mon CV »: the text of the CV it sent, contacts removed. */
+  cvText?: string;
 };
 
 export type OfferFacts = {
@@ -100,6 +105,9 @@ export function applicantMessages(offer: OfferFacts, a: ApplicantFacts) {
       : 'Missions menées à terme sur Rabotka : aucune',
     a.portfolio.length
       ? `Réalisations publiées :\n${a.portfolio.map((p) => `- ${p}`).join('\n')}`
+      : null,
+    a.cvText?.trim()
+      ? `CV joint par le candidat (son expérience hors Rabotka) :\n${a.cvText.trim().slice(0, MAX_CV_CHARS)}`
       : null,
     a.answers?.length
       ? `Réponses aux questions de l'employeur :\n${a.answers

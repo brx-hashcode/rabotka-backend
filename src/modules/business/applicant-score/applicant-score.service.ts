@@ -77,6 +77,7 @@ export class ApplicantScoreService {
           select: { label: true, kind: true, value: true },
           orderBy: { created_at: 'asc' },
         },
+        profile_cv: { select: { cv_text: true } },
         worker: {
           include: {
             category: { select: { name: true } },
@@ -145,6 +146,7 @@ export class ApplicantScoreService {
           question: x.label,
           answer: answerText(x),
         })),
+        cvText: app.profile_cv?.cv_text || undefined,
       },
     );
 

@@ -571,6 +571,7 @@ export class MobileFeedController {
     await this.assertProfileType(profileId, ProfileType.WORKER);
     await this.applicationService.create(jobOfferId, profileId, {
       answers: dto?.answers,
+      cv: dto?.cv,
     });
     const dailyQuota =
       await this.applicationService.getDailyApplicationQuota(profileId);

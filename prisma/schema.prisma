@@ -606,6 +606,10 @@ model Profile {
   conversations_as_employer       ProfileConversation[]         @relation("ConversationEmployer")
   messages_sent                   ProfileMessage[]
   redaction_reports_filed         RedactionReport[]
+  /// « Mon CV »: what a worker uploaded, every version an application was sent with.
+  cvs                             ProfileCv[]
+  /// Which CV an application carries when none is chosen (WhatsApp, agents).
+  preferred_cv                    CvChoice                      @default(RABOTKA)
   deleted_at                      DateTime?                     @db.Timestamptz
 
   @@index([email], name: "idx_profile_email")
@@ -1416,6 +1420,9 @@ model Application {
   /// A wrong answer to one of the offer's « éliminatoire » questions: the
   /// application is kept, flagged, and listed after the others.
   knocked_out         Boolean                 @default(false)
+  /// The worker's own CV sent with this application; null when it went with
+  /// the Rabotka CV. Kept even after the worker replaces it.
+  profile_cv_id       String?                 @db.Uuid
   cancelled_at        DateTime?
   cancellation_reason String?
   /// Who cancelled, and therefore whether the worker may apply again: only a
@@ -1488,6 +1495,7 @@ model Application {
   @@map("applications")
   assessment ApplicationAssessment?
   answers    ApplicationAnswer[]
+  profile_cv ProfileCv?             @relation(fields: [profile_cv_id], references: [id], onDelete: SetNull)
 }
 
 model Assignment {
@@ -4111,4 +4119,35 @@ model ApplicationAnswer {
 
   @@unique([application_id, question_id])
   @@map("application_answers")
+}
+
+/// Which CV goes with an application: the one Rabotka builds, or the worker's own.
+enum CvChoice {
+  RABOTKA
+  UPLOADED
+}
+
+/// A CV a worker uploaded to their profile (« Mon CV »). One live row per
+/// profile; replacing it soft-deletes the old row, which stays as long as an
+/// application points at it, so a recruiter reads what was actually sent.
+model ProfileCv {
+  id             String    @id @default(uuid()) @db.Uuid
+  created_at     DateTime  @default(now())
+  profile_id     String    @db.Uuid
+  file_name      String
+  mime_type      String
+  size_bytes     Int
+  storage_key    String
+  storage_bucket String?
+  /// The text, contacts removed: what the scoring reads before any unlock.
+  cv_text        String    @default("") @db.Text
+  deleted_at     DateTime? @db.Timestamptz
+  /// Set once the stored file is gone (deleted and no longer sent anywhere).
+  purged_at      DateTime? @db.Timestamptz
+
+  profile      Profile       @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  applications Application[]
+
+  @@index([profile_id, deleted_at], name: "idx_profile_cv_live")
+  @@map("profile_cvs")
 }
