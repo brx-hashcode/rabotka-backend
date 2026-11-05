@@ -4,7 +4,9 @@ import {
 } from '../business/public-employer';
 import {
   APPLICATION_SUBMITTED,
+  CANDIDATE_VIEWED,
   type ApplicationSubmitted,
+  type CandidateViewed,
 } from './application.events';
 import {
   cvForApplication,
@@ -24,7 +26,7 @@ import {
   Inject,
   forwardRef,
 } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { jobLocationLabel } from '../../common/utils/job-location.util';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -2835,6 +2837,26 @@ export class ApplicationService {
       );
 
     return updated;
+  }
+
+  /** The business looked at a candidate's CV: their waiting applications are « Vues ». */
+  @OnEvent(CANDIDATE_VIEWED, { async: true })
+  async onCandidateViewed({
+    employerId,
+    workerId,
+    applicationId,
+  }: CandidateViewed): Promise<void> {
+    const waiting = await this.prisma.application.findMany({
+      where: {
+        worker_id: workerId,
+        status: ApplicationStatus.PENDING,
+        deleted_at: null,
+        job_offer: { employer_id: employerId },
+        ...(applicationId ? { id: applicationId } : {}),
+      },
+      select: { id: true },
+    });
+    for (const { id } of waiting) await this.markAsViewed(id);
   }
 
   async markAsViewed(applicationId: string): Promise<void> {

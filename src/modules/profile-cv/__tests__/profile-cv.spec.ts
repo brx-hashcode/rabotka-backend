@@ -84,13 +84,15 @@ function setup(
     delete: jest.fn().mockResolvedValue(undefined),
     download: jest.fn().mockResolvedValue({ body: 'stream' }),
   };
+  const events = { emit: jest.fn() };
   const service = new ProfileCvService(
     prisma as never,
     storage as never,
     {} as never,
     {} as never,
+    events as never,
   );
-  return { service, prisma, storage, tx };
+  return { service, prisma, storage, tx, events };
 }
 
 describe('stripContacts', () => {
@@ -223,8 +225,8 @@ describe('ProfileCvService', () => {
       );
     });
 
-    it('opens once the contact is unlocked', async () => {
-      const { service, prisma, storage } = setup();
+    it('opens once the contact is unlocked, and marks the application « Vue »', async () => {
+      const { service, prisma, storage, events } = setup();
       prisma.application.findFirst.mockResolvedValue({
         status: ApplicationStatus.PENDING,
         worker_id: 'w',
@@ -233,6 +235,11 @@ describe('ProfileCvService', () => {
       prisma.contactRecord.findMany.mockResolvedValue([{ worker_id: 'w' }]);
       const out = await service.fileForEmployer('e', 'a');
       expect(storage.download).toHaveBeenCalledWith('k', { bucket: 'b' });
+      expect(events.emit).toHaveBeenCalledWith('application.candidate-viewed', {
+        employerId: 'e',
+        workerId: 'w',
+        applicationId: 'a',
+      });
       expect(out.filename).toBe('cv-cv-1.pdf');
     });
 

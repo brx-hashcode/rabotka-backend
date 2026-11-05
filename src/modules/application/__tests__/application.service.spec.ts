@@ -1375,6 +1375,42 @@ describe('ApplicationService', () => {
     });
   });
 
+  describe('onCandidateViewed()', () => {
+    it('marks « Vue » the waiting applications of that worker to this employer only', async () => {
+      (prisma.application.findMany as jest.Mock).mockResolvedValue([
+        { id: 'a1' },
+        { id: 'a2' },
+      ]);
+      const marked = jest
+        .spyOn(service, 'markAsViewed')
+        .mockResolvedValue(undefined);
+      await service.onCandidateViewed({
+        employerId: EMPLOYER_ID,
+        workerId: WORKER_ID,
+      });
+      expect(
+        (prisma.application.findMany as jest.Mock).mock.calls.at(-1)[0].where,
+      ).toMatchObject({
+        worker_id: WORKER_ID,
+        status: 'PENDING',
+        job_offer: { employer_id: EMPLOYER_ID },
+      });
+      expect(marked.mock.calls).toEqual([['a1'], ['a2']]);
+    });
+
+    it('only that one when the CV came with one application', async () => {
+      (prisma.application.findMany as jest.Mock).mockResolvedValue([]);
+      await service.onCandidateViewed({
+        employerId: EMPLOYER_ID,
+        workerId: WORKER_ID,
+        applicationId: APPLICATION_ID,
+      });
+      expect(
+        (prisma.application.findMany as jest.Mock).mock.calls.at(-1)[0].where,
+      ).toMatchObject({ id: APPLICATION_ID });
+    });
+  });
+
   describe('getUnpaidPenalties()', () => {
     it('returns count, total, and ids', async () => {
       (prisma.penalty as any).findMany = jest.fn().mockResolvedValue([

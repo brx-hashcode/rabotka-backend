@@ -10,3 +10,17 @@ export type ApplicationSubmitted = {
   jobOfferId: string;
   employerId: string;
 };
+
+/**
+ * A business opened a candidate's CV: their own (one application) or the
+ * Rabotka one (every waiting application of theirs to its offers). Moves them
+ * from « Nouvelle » to « Vue », as opening a careers-page CV does.
+ */
+export const CANDIDATE_VIEWED = 'application.candidate-viewed';
+
+export type CandidateViewed = {
+  employerId: string;
+  workerId: string;
+  /** Set when one application's CV was opened. */
+  applicationId?: string;
+};
