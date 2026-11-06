@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import sharp from 'sharp';
 import { MailboxCrypto } from '../../mailbox/mailbox-crypto';
 import { linkedinCallbackPage } from '../linkedin-callback-page';
 import {
@@ -276,6 +277,54 @@ describe('LinkedinService', () => {
     ).resolves.toMatchObject({ status: 'QUEUED' });
   });
 
+  it('sends the recruiter’s own picture to LinkedIn, as a JPEG, before queueing', async () => {
+    const { service, prisma } = make();
+    const png = await sharp({
+      create: { width: 2400, height: 1260, channels: 3, background: '#25d366' },
+    })
+      .png()
+      .toBuffer();
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            value: {
+              uploadUrl: 'https://upload.linkedin/x',
+              image: 'urn:li:image:42',
+            },
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 201 }));
+    global.fetch = fetchMock as never;
+
+    await service.queuePost('p-1', undefined, 'o-1', 'x', false, png);
+
+    const put = fetchMock.mock.calls[1];
+    expect(put[0]).toBe('https://upload.linkedin/x');
+    const sent = await sharp(Buffer.from(put[1].body)).metadata();
+    expect(sent.format).toBe('jpeg');
+    expect(sent.width).toBe(1200);
+    expect(
+      prisma.jobOfferLinkedinPost.create.mock.calls[0][0].data.thumbnail_urn,
+    ).toBe('urn:li:image:42');
+  });
+
+  it('refuses a file that is not a picture', async () => {
+    const { service } = make();
+    await expect(
+      service.queuePost(
+        'p-1',
+        undefined,
+        'o-1',
+        'x',
+        false,
+        Buffer.from('not an image'),
+      ),
+    ).rejects.toThrow('Cette image n’a pas pu être lue.');
+  });
+
   it('refuses an offer that is not on the careers page', async () => {
     const { service, prisma } = make();
     prisma.business.findUnique.mockResolvedValue({
@@ -352,6 +401,30 @@ describe('LinkedinService', () => {
         postUrl: 'https://www.linkedin.com/feed/update/urn%3Ali%3Ashare%3A7/',
       },
     });
+  });
+
+  it('posts with the recruiter’s picture, without fetching the offer’s', async () => {
+    const { service, prisma } = make();
+    prisma.jobOfferLinkedinPost.findUnique.mockResolvedValue({
+      ...queued,
+      thumbnail_urn: 'urn:li:image:42',
+    });
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 201,
+          headers: { 'x-restli-id': 'urn:li:share:8' },
+        }),
+      );
+    global.fetch = fetchMock as never;
+
+    await service.process({ data: { postId: 'post-1' }, attemptsMade: 0 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(
+      JSON.parse(fetchMock.mock.calls[0][1].body).content.article.thumbnail,
+    ).toBe('urn:li:image:42');
   });
 
   it('marks the connection expired when LinkedIn refuses the token', async () => {

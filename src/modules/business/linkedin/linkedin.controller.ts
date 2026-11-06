@@ -10,8 +10,11 @@ import {
   Query,
   Req,
   Res,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
@@ -19,6 +22,7 @@ import { ProfileAuthGuard } from '../../auth/guards/profile-auth.guard';
 import { BusinessProfileGuard } from '../../auth/guards/business-profile.guard';
 import type { ProfileAuthenticatedRequest } from '../../auth/guards/jwt-auth.guard';
 import { Public } from '../../auth/decorators/public.decorator';
+import { imageMulterOptions } from '../../../common/utils/image-upload.util';
 import { LinkedinPostDto } from './dto/linkedin.dto';
 import {
   linkedinCallbackPage,
@@ -58,14 +62,25 @@ export class LinkedinController {
 
   @Post('posts')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  @ApiOperation({ summary: 'Post an offer on its LinkedIn (queued)' })
-  post(@Req() req: ProfileAuthenticatedRequest, @Body() dto: LinkedinPostDto) {
+  @UseInterceptors(
+    FileInterceptor('image', imageMulterOptions(8 * 1024 * 1024)),
+  )
+  @ApiOperation({
+    summary:
+      'Post an offer on its LinkedIn (queued); `image` replaces the offer’s share picture',
+  })
+  post(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Body() dto: LinkedinPostDto,
+    @UploadedFile() image: Express.Multer.File | undefined,
+  ) {
     return this.linkedin.queuePost(
       req.user.profileId,
       req.user.memberId,
       dto.offerId,
       dto.text,
       dto.again ?? false,
+      image?.buffer,
     );
   }
 
