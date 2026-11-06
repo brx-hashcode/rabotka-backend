@@ -1021,6 +1021,32 @@ export class SystemConfigService implements OnModuleInit {
   }
 
   /**
+   * The packs a business may buy on top of its plan: how many units each
+   * brings and its price. A price of 0 (or a quantity of 0) is not sold.
+   */
+  async getBusinessPackSettings(): Promise<
+    Record<
+      'cv' | 'offers' | 'contacts' | 'offerDrafts',
+      { quantity: number; priceFcfa: number }
+    >
+  > {
+    const keys = ['cv', 'offers', 'contacts', 'offer_drafts'] as const;
+    const values = await this.mgetBatch(
+      keys.flatMap((k) => [
+        { key: `business.pack_${k}_quantity`, fallback: '0' },
+        { key: `business.pack_${k}_price_fcfa`, fallback: '0' },
+      ]),
+    );
+    const int = (v: string | null | undefined) =>
+      Math.max(0, Math.floor(Number(v) || 0));
+    const at = (i: number) => ({
+      quantity: int(values[i * 2]),
+      priceFcfa: int(values[i * 2 + 1]),
+    });
+    return { cv: at(0), offers: at(1), contacts: at(2), offerDrafts: at(3) };
+  }
+
+  /**
    * The business trial and renewal reminders. The plans (prices, quotas) are
    * the business_plans table. `trialDays` 0 or no `trialPlanCode`: no trial.
    */

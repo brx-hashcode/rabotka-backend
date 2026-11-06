@@ -1,4 +1,5 @@
 import {
+  BUSINESS_CREDIT_PACK_PAID_EVENT,
   BUSINESS_SUBSCRIPTION_PAID_EVENT,
   type BusinessSubscriptionPaidPayload,
 } from '../business/subscription/subscription.events';
@@ -15,6 +16,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '@nestjs/config';
 import {
+  BusinessCreditKind,
   AccountStatus,
   BillingStatus,
   BusinessBillingPeriod,
@@ -178,6 +180,8 @@ export class PaymentRequestService {
       urlFor?: (token: string) => string;
       /** BUSINESS_SUBSCRIPTION: what this payment buys. */
       businessPlan?: { planId: string; period: BusinessBillingPeriod };
+      /** BUSINESS_CREDIT_PACK: the credits this payment buys. */
+      creditPack?: { kind: BusinessCreditKind; quantity: number };
     } = {},
   ): Promise<string> {
     const token = randomUUID();
@@ -198,6 +202,10 @@ export class PaymentRequestService {
         ...(options.businessPlan && {
           business_plan_id: options.businessPlan.planId,
           business_billing_period: options.businessPlan.period,
+        }),
+        ...(options.creditPack && {
+          business_credit_kind: options.creditPack.kind,
+          business_credit_quantity: options.creditPack.quantity,
         }),
       },
     });
@@ -669,6 +677,12 @@ export class PaymentRequestService {
         paymentRequestId: request.id,
       } satisfies BusinessSubscriptionPaidPayload);
     }
+    // A pack: its credits are added by BusinessSubscriptionService.
+    if (request.request_type === PaymentRequestType.BUSINESS_CREDIT_PACK) {
+      this.eventEmitter.emit(BUSINESS_CREDIT_PACK_PAID_EVENT, {
+        paymentRequestId: request.id,
+      } satisfies BusinessSubscriptionPaidPayload);
+    }
 
     // Compute unlock result first (needed for the confirmation message text).
     const unlockResult = await this.handleContactUnlockPostPayment(request);
@@ -1021,7 +1035,9 @@ export class PaymentRequestService {
             ? InvoiceReason.WALLET_TOP_UP
             : request.request_type === PaymentRequestType.BUSINESS_SUBSCRIPTION
               ? InvoiceReason.BUSINESS_SUBSCRIPTION
-              : InvoiceReason.PENALTY,
+              : request.request_type === PaymentRequestType.BUSINESS_CREDIT_PACK
+                ? InvoiceReason.BUSINESS_CREDIT_PACK
+                : InvoiceReason.PENALTY,
       relatedEntityType: relatedEntity?.type,
       relatedEntityId: relatedEntity?.id,
     });

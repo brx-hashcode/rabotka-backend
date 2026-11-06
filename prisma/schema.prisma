@@ -309,6 +309,8 @@ enum PaymentRequestType {
   WALLET_TOP_UP
   /// A period of a business plan (BusinessSubscription).
   BUSINESS_SUBSCRIPTION
+  /// A pack of credits bought on top of the plan (BusinessCredit).
+  BUSINESS_CREDIT_PACK
 }
 
 enum ClaimStatus {
@@ -2017,6 +2019,9 @@ model PaymentRequest {
   /// when the request was created (a later price change does not touch it).
   business_plan_id          String?              @db.Uuid
   business_billing_period   BusinessBillingPeriod?
+  /// BUSINESS_CREDIT_PACK: what this payment buys, priced when created.
+  business_credit_kind      BusinessCreditKind?
+  business_credit_quantity  Int?
 
   profile    Profile   @relation(fields: [profile_id], references: [id], onDelete: Cascade)
   invoice    Invoice?
@@ -2273,6 +2278,8 @@ enum ProfileNotificationType {
   INTERVIEW_ANSWERED
   /// An offer posted on LinkedIn from Rabotka, or the post that failed.
   LINKEDIN_POST
+  /// A pack bought: its credits are there to use.
+  BUSINESS_CREDITS_ADDED
 }
 
 /// The in-app feed behind the bell in rabotka-client.
@@ -2372,6 +2379,7 @@ enum InvoiceReason {
   PENALTY
   WALLET_TOP_UP
   BUSINESS_SUBSCRIPTION
+  BUSINESS_CREDIT_PACK
   OTHER
 }
 
@@ -3470,6 +3478,7 @@ model Business {
   linkedin_accounts BusinessLinkedinAccount[]
   members       BusinessMember[]
   activities    BusinessActivity[]
+  credits            BusinessCredit[]
   candidate_notes    CandidateNote[]
   candidate_opinions CandidateOpinion[]
   admin_notes        AdminBusinessNote[]
@@ -3595,6 +3604,11 @@ model BusinessSubscription {
   offer_drafts_used   Int                        @default(0)
   /// Offers published (or republished) during this period.
   offers_published    Int                        @default(0)
+  /// Of the units above, those paid from the business's credits (packs),
+  /// not from the plan: given back to the credits first.
+  cv_from_credits           Int                  @default(0)
+  offers_from_credits       Int                  @default(0)
+  offer_drafts_from_credits Int                  @default(0)
   /// The month the counters above belong to (null: the period's first). A
   /// period longer than a month starts them again every month
   /// (counterWindow in subscription-rules.ts).
@@ -3864,6 +3878,8 @@ model BusinessQuotaUsage {
   contact_unlock_attempt_id String?   @unique @db.Uuid
   contact_record_id         String?   @unique @db.Uuid
   released_at               DateTime? @db.Timestamptz
+  /// Paid from a contacts pack rather than the plan: given back to it.
+  credit_id                 String?   @db.Uuid
 
   subscription BusinessSubscription @relation(fields: [subscription_id], references: [id], onDelete: Cascade)
 
@@ -3901,6 +3917,34 @@ enum MailProvider {
 /// A mailbox a business connected (OAuth) to pick CVs from its e-mails for
 /// « Analyse de CV ». Only the tokens are kept, encrypted (MAILBOX_TOKEN_KEY):
 /// mails are read on demand, never stored.
+enum BusinessCreditKind {
+  CV
+  OFFER
+  CONTACT
+  OFFER_DRAFT
+}
+
+/// Units bought on top of the plan (a pack): spent once the period's own
+/// quota is used up, oldest-expiring first, kept 12 months.
+model BusinessCredit {
+  id                  String             @id @default(uuid()) @db.Uuid
+  created_at          DateTime           @default(now())
+  updated_at          DateTime           @updatedAt
+  business_id         String             @db.Uuid
+  kind                BusinessCreditKind
+  quantity            Int
+  used                Int                @default(0)
+  expires_at          DateTime           @db.Timestamptz
+  /// The pack's payment; null for credits an admin granted.
+  payment_request_id  String?            @unique @db.Uuid
+  granted_by_admin_id String?            @db.Uuid
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@index([business_id, kind, expires_at])
+  @@map("business_credits")
+}
+
 /// A team member's own LinkedIn account, connected to post the business's
 /// offers on it (« Share on LinkedIn »). One per person: the account holder
 /// (`person` = "holder") or a member (`person` = its member id).

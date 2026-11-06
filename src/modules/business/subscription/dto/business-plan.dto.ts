@@ -15,7 +15,7 @@ import {
   Min,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { BusinessBillingPeriod } from '@prisma/client';
+import { BusinessBillingPeriod, BusinessCreditKind } from '@prisma/client';
 
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
@@ -201,6 +201,19 @@ export class SubscribeDto {
   @IsEnum(BusinessBillingPeriod)
   @IsIn(['MONTHLY', 'ANNUAL'])
   billingPeriod: BusinessBillingPeriod;
+}
+
+/** Buying packs: `count` times the pack of this kind, at its current price. */
+export class BuyPackDto {
+  @ApiProperty({ enum: BusinessCreditKind })
+  @IsEnum(BusinessCreditKind)
+  kind: BusinessCreditKind;
+
+  @ApiProperty({ minimum: 1, maximum: 10 })
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  count: number;
 }
 
 /** An admin assigning a plan: queued by default, or replacing the running one. */

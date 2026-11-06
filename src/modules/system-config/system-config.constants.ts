@@ -259,6 +259,64 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
       "Entreprises – Rédaction d'offre par l'IA pendant l'essai (true/false)",
     isSecret: false,
   },
+  // Packs: units a business buys on top of its plan. Price 0: not sold.
+  {
+    key: 'business.pack_cv_quantity',
+    value: '50',
+    category: ConfigCategory.FEES,
+    label: 'Entreprises – Pack CV à analyser : quantité',
+    isSecret: false,
+  },
+  {
+    key: 'business.pack_cv_price_fcfa',
+    value: '0',
+    category: ConfigCategory.FEES,
+    label: 'Entreprises – Pack CV à analyser : prix (FCFA, 0 = non vendu)',
+    isSecret: false,
+  },
+  {
+    key: 'business.pack_offers_quantity',
+    value: '5',
+    category: ConfigCategory.FEES,
+    label: 'Entreprises – Pack offres à publier : quantité',
+    isSecret: false,
+  },
+  {
+    key: 'business.pack_offers_price_fcfa',
+    value: '0',
+    category: ConfigCategory.FEES,
+    label: 'Entreprises – Pack offres à publier : prix (FCFA, 0 = non vendu)',
+    isSecret: false,
+  },
+  {
+    key: 'business.pack_contacts_quantity',
+    value: '10',
+    category: ConfigCategory.FEES,
+    label: 'Entreprises – Pack contacts à obtenir : quantité',
+    isSecret: false,
+  },
+  {
+    key: 'business.pack_contacts_price_fcfa',
+    value: '0',
+    category: ConfigCategory.FEES,
+    label: 'Entreprises – Pack contacts à obtenir : prix (FCFA, 0 = non vendu)',
+    isSecret: false,
+  },
+  {
+    key: 'business.pack_offer_drafts_quantity',
+    value: '10',
+    category: ConfigCategory.FEES,
+    label: "Entreprises – Pack offres rédigées par l'IA : quantité",
+    isSecret: false,
+  },
+  {
+    key: 'business.pack_offer_drafts_price_fcfa',
+    value: '0',
+    category: ConfigCategory.FEES,
+    label:
+      "Entreprises – Pack offres rédigées par l'IA : prix (FCFA, 0 = non vendu)",
+    isSecret: false,
+  },
   {
     // 0 = no reminder.
     key: 'business.offer_expiry_reminder_days',

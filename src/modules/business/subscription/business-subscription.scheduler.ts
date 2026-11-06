@@ -28,6 +28,11 @@ export class BusinessSubscriptionScheduler implements OnModuleInit {
             `Paid subscriptions without a period: ${paid.activated} activated, ${paid.failed} still failing`,
           );
         }
+        // And a paid pack whose credits were never added.
+        const packs = await this.subscriptions.reconcilePaidPacks();
+        if (packs > 0) {
+          this.logger.warn(`Paid packs without credits: ${packs} added`);
+        }
         const result = await this.subscriptions.sweep();
         if (result.reminded > 0 || result.expired > 0) {
           this.logger.log(

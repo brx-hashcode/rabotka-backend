@@ -3,11 +3,20 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { BusinessBillingPeriod, PaymentRequestType } from '@prisma/client';
+import {
+  BusinessBillingPeriod,
+  BusinessCreditKind,
+  PaymentRequestType,
+} from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { PaymentRequestService } from '../../payment-request/payment-request.service';
 import { appUrlFor } from '../../mail/audience';
-import { PERIOD_LABEL } from './business-subscription.service';
+import {
+  BusinessSubscriptionService,
+  PERIOD_LABEL,
+} from './business-subscription.service';
+import { SystemConfigService } from '../../system-config/system-config.service';
+import { creditLabel, PACK_SETTING } from './business-credits';
 import { priceFor } from './subscription-rules';
 
 /**
@@ -20,6 +29,8 @@ export class BusinessCheckoutService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly paymentRequests: PaymentRequestService,
+    private readonly subscriptions: BusinessSubscriptionService,
+    private readonly systemConfig: SystemConfigService,
   ) {}
 
   /**
@@ -64,6 +75,47 @@ export class BusinessCheckoutService {
       PaymentRequestType.BUSINESS_SUBSCRIPTION,
       {
         businessPlan: { planId: plan.id, period },
+        urlFor: (t) => {
+          token = t;
+          return `${appUrlFor('business')}/payer/${t}`;
+        },
+      },
+    );
+    return { token, amount };
+  }
+
+  /**
+   * A BUSINESS_CREDIT_PACK payment request for `count` packs of a kind,
+   * priced now from the settings. The credits are added when the payment
+   * succeeds (BusinessSubscriptionService.addCreditsFromPayment). Needs a
+   * plan running: credits are only spent on top of one.
+   */
+  async buyPack(
+    profileId: string,
+    kind: BusinessCreditKind,
+    count: number,
+  ): Promise<{ token: string; amount: number }> {
+    const businessId = await this.subscriptions.businessOf(profileId);
+    if (!businessId || !(await this.subscriptions.current(businessId))) {
+      throw new BadRequestException(
+        'Choisissez d’abord une formule : les packs s’ajoutent à celle-ci.',
+      );
+    }
+    const packs = await this.systemConfig.getBusinessPackSettings();
+    const pack = packs[PACK_SETTING[kind]];
+    if (pack.priceFcfa <= 0 || pack.quantity <= 0) {
+      throw new NotFoundException('Ce pack n’est pas disponible.');
+    }
+    const quantity = pack.quantity * count;
+    const amount = pack.priceFcfa * count;
+    let token = '';
+    await this.paymentRequests.createPaymentUrl(
+      profileId,
+      amount,
+      `Pack Rabotka Business — ${creditLabel(kind, quantity)}`,
+      PaymentRequestType.BUSINESS_CREDIT_PACK,
+      {
+        creditPack: { kind, quantity },
         urlFor: (t) => {
           token = t;
           return `${appUrlFor('business')}/payer/${t}`;

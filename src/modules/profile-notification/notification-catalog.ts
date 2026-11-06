@@ -30,6 +30,7 @@ export function paymentKindOf(
     case PaymentRequestType.RECOMMENDATION_CONTACT:
       return 'RECOMMENDATION_CONTACT';
     case PaymentRequestType.BUSINESS_SUBSCRIPTION:
+    case PaymentRequestType.BUSINESS_CREDIT_PACK:
       return 'BUSINESS_SUBSCRIPTION';
     default:
       // Null predates the column and was always a penalty — same fallback as
@@ -224,6 +225,12 @@ export type NotificationInput =
     }
   | { type: 'BUSINESS_TRIAL_STARTED'; planName: string; endsAt: string }
   | { type: 'BUSINESS_SUBSCRIPTION_ACTIVE'; planName: string; endsAt: string }
+  | {
+      type: 'BUSINESS_CREDITS_ADDED';
+      /** « 50 CV à analyser », « 5 offres »… */
+      what: string;
+      expiresAt: string;
+    }
   | {
       type: 'BUSINESS_SUBSCRIPTION_EXPIRING';
       planName: string;
@@ -653,6 +660,13 @@ export function renderNotification(
       return {
         title: 'Abonnement confirmé',
         body: `Votre abonnement ${input.planName} est actif jusqu’au ${shortDate(input.endsAt)}.`,
+        link: '/espace/abonnement',
+      };
+
+    case 'BUSINESS_CREDITS_ADDED':
+      return {
+        title: 'Pack ajouté',
+        body: `+${input.what}, à utiliser jusqu’au ${shortDate(input.expiresAt)}.`,
         link: '/espace/abonnement',
       };
 
