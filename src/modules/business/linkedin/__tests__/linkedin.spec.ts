@@ -374,6 +374,31 @@ describe('LinkedinService', () => {
     expect(post.imageUrl).toBe('https://media.licdn.com/x');
   });
 
+  it('posting again keeps the previous own picture, unless the offer’s is asked for', async () => {
+    const { service, prisma } = make();
+    prisma.jobOfferLinkedinPost.findFirst.mockResolvedValue({
+      thumbnail_urn: 'urn:li:image:42',
+    });
+
+    await service.queuePost('p-1', undefined, 'o-1', 'x', true);
+    expect(
+      prisma.jobOfferLinkedinPost.create.mock.calls[0][0].data.thumbnail_urn,
+    ).toBe('urn:li:image:42');
+
+    await service.queuePost(
+      'p-1',
+      undefined,
+      'o-1',
+      'x',
+      true,
+      undefined,
+      true,
+    );
+    expect(
+      prisma.jobOfferLinkedinPost.create.mock.calls[1][0].data.thumbnail_urn,
+    ).toBeNull();
+  });
+
   it('refuses an offer that is not on the careers page', async () => {
     const { service, prisma } = make();
     prisma.business.findUnique.mockResolvedValue({

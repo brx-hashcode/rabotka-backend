@@ -268,6 +268,7 @@ export class LinkedinService implements OnModuleInit {
     text: string,
     again = false,
     image?: Buffer,
+    offerImage = false,
   ) {
     if (!this.available) {
       throw new ServiceUnavailableException(
@@ -304,6 +305,8 @@ export class LinkedinService implements OnModuleInit {
     }
     // The recruiter's own picture goes to LinkedIn now, while they wait: a
     // file is never queued, and a refused token is said at once.
+    // Posting again keeps the previous post's own picture, unless a new one
+    // comes or the recruiter went back to the offer's share image.
     const thumbnail = image
       ? await this.uploadOwnPicture(
           account.id,
@@ -311,7 +314,9 @@ export class LinkedinService implements OnModuleInit {
           account.linkedin_sub,
           image,
         )
-      : null;
+      : again && !offerImage
+        ? await this.previousOwnPicture(businessId, person, offerId)
+        : null;
     const post = await this.prisma.jobOfferLinkedinPost.create({
       data: {
         offer_id: offerId,
@@ -428,6 +433,20 @@ export class LinkedinService implements OnModuleInit {
         'LinkedIn n’a pas accepté cette image. Réessayez, ou gardez l’image de l’offre.',
       );
     }
+  }
+
+  /** The newest post of this offer by this person, if it carried its own picture. */
+  private async previousOwnPicture(
+    businessId: string,
+    person: string,
+    offerId: string,
+  ): Promise<string | null> {
+    const previous = await this.prisma.jobOfferLinkedinPost.findFirst({
+      where: { offer_id: offerId, business_id: businessId, person },
+      orderBy: { created_at: 'desc' },
+      select: { thumbnail_urn: true },
+    });
+    return previous?.thumbnail_urn ?? null;
   }
 
   /** The offer's share picture, uploaded; none if anything goes wrong. */
