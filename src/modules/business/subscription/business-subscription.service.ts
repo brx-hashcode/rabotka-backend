@@ -147,6 +147,8 @@ export type BusinessEntitlements = {
   priorityVisibility: boolean;
   /** « Publier sur LinkedIn » from Rabotka (the share link is open to all). */
   linkedinPosting: boolean;
+  /** « Exports RH »: candidates, staff register, ACPE declaration. */
+  hrExports: boolean;
   /** Recruteurs the business may have (the holder is its one administrator). Null: unlimited; 0: none. */
   recruitersLimit: number | null;
   /** Évaluateurs the business may have. Null: unlimited; 0: none. */
@@ -311,6 +313,7 @@ export class BusinessSubscriptionService {
         includesPreselection: false,
         priorityVisibility: false,
         linkedinPosting: false,
+        hrExports: false,
         recruitersLimit: 0,
         reviewersLimit: 0,
         recruiters,
@@ -363,6 +366,7 @@ export class BusinessSubscriptionService {
       includesPreselection: sub.plan.includes_preselection,
       priorityVisibility: sub.plan.priority_visibility,
       linkedinPosting: sub.plan.linkedin_posting,
+      hrExports: sub.plan.hr_exports,
       recruitersLimit: sub.plan.recruiters_limit,
       reviewersLimit: sub.plan.reviewers_limit,
       recruiters,

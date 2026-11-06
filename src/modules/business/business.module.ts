@@ -21,6 +21,7 @@ import { BusinessReportController } from './report/business-report.controller';
 import { BusinessReportService } from './report/business-report.service';
 import { CareersModule } from './careers/careers.module';
 import { TeamModule } from './team/team.module';
+import { HrExportsModule } from './hr-exports/hr-exports.module';
 import { LinkedinModule } from './linkedin/linkedin.module';
 import { MailboxModule } from './mailbox/mailbox.module';
 import { AdminBusinessController } from './admin/admin-business.controller';
@@ -47,6 +48,7 @@ import { CandidateNotesModule } from './candidate-notes/candidate-notes.module';
     CandidateNotesModule,
     MailboxModule,
     LinkedinModule,
+    HrExportsModule,
   ],
   controllers: [
     BusinessCatalogController,

@@ -3542,6 +3542,8 @@ model BusinessPlan {
   /// « Publier sur LinkedIn »: the business's team posts its offers on their
   /// own LinkedIn from Rabotka. The share link stays open to every plan.
   linkedin_posting      Boolean  @default(false)
+  /// « Exports RH »: an offer's candidates, the staff register, the ACPE file.
+  hr_exports            Boolean  @default(false)
   /// CVs the AI screening reads per period. Null: unlimited; 0: not included.
   cv_screenings_per_period Int?  @default(0)
   /// CVs in one screening, 100 at most: sent in several requests when many.
