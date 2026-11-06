@@ -774,13 +774,8 @@ export class SystemConfigService implements OnModuleInit {
    * http(s) URL are left out, so a typo never becomes a broken icon.
    */
   async getEmailFooterInfo(): Promise<FooterInfo> {
-    const [description, email, address, phone, legalName, rccm, ...links] =
+    const [email, address, phone, legalName, rccm, ...links] =
       await this.mgetBatch([
-        {
-          key: 'general.description',
-          fallback:
-            'Plateforme de mise en relation entre employeurs et travailleurs informels en Afrique.',
-        },
         { key: 'contact.email', fallback: 'contact@rabotka.com' },
         { key: 'contact.address', fallback: '' },
         { key: 'contact.phone', fallback: '' },
@@ -792,7 +787,7 @@ export class SystemConfigService implements OnModuleInit {
       const url = links[i]?.trim() ?? '';
       return /^https?:\/\/\S+$/i.test(url) ? [{ network, url }] : [];
     });
-    return { description, email, address, phone, legalName, rccm, socials };
+    return { email, address, phone, legalName, rccm, socials };
   }
 
   async getFees() {

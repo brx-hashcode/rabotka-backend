@@ -1,4 +1,4 @@
-import { wrapEmailHtml } from '../templates/layout';
+import { displayPhone, wrapEmailHtml } from '../templates/layout';
 import {
   RABOTKA_LOGO_CID,
   rabotkaLogoBuffer,
@@ -66,7 +66,6 @@ describe('wrapEmailHtml', () => {
 
   describe('footer', () => {
     const footer = {
-      description: 'Plateforme de mise en relation.',
       email: 'contact@rabotka.work',
       address: 'Brazzaville, Congo',
       legalName: 'Rabotka SARL',
@@ -81,6 +80,7 @@ describe('wrapEmailHtml', () => {
     };
 
     it('shows the company, its RCCM, address, contact and legal links', () => {
+      // No logo or tagline down there: the card's header already carries the brand.
       const html = wrapEmailHtml('<p>hi</p>', { footer });
       expect(html).toContain(
         'Rabotka SARL&nbsp;&middot;&nbsp;RCCM CG-BZV-01-2025-B12-00042',
@@ -90,7 +90,7 @@ describe('wrapEmailHtml', () => {
       expect(html).toContain('href="https://www.rabotka.work/terms"');
       expect(html).toContain('href="https://www.rabotka.work/privacy"');
       expect(html).toContain(
-        `Copyright &copy; ${new Date().getFullYear()} Rabotka SARL.`,
+        `&copy; ${new Date().getFullYear()} Rabotka SARL.`,
       );
     });
 
@@ -126,6 +126,21 @@ describe('wrapEmailHtml', () => {
       });
       expect(html).not.toContain('<script>');
       expect(html).toContain('RCCM &lt;b&gt;x&lt;/b&gt;');
+    });
+  });
+
+  describe('displayPhone', () => {
+    it('spaces a Congo number as people write it, leaves others alone', () => {
+      expect(displayPhone('+242055183391')).toBe('+242 05 518 33 91');
+      expect(displayPhone('+242 05 518 33 91')).toBe('+242 05 518 33 91');
+      expect(displayPhone('+33 6 12 34 56 78')).toBe('+33 6 12 34 56 78');
+    });
+
+    it('shows it under « Besoin d’aide ? », dialable', () => {
+      const html = wrapEmailHtml('<p>hi</p>', { footer: { phone: '+242055183391' } });
+      expect(html).toContain('Besoin d’aide ?');
+      expect(html).toContain('href="tel:+242055183391"');
+      expect(html).toContain('+242 05 518 33 91');
     });
   });
 
