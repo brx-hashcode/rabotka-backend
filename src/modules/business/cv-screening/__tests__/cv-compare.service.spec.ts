@@ -41,19 +41,25 @@ function make(
       }),
     },
     cvComparisonMessage: {
-      create: jest.fn().mockResolvedValue({}),
+      create: jest.fn().mockResolvedValue({ id: 'q1' }),
+      // Questions asked about each CV, across its comparisons.
+      count: jest
+        .fn()
+        .mockResolvedValue(
+          (opts.past ?? []).filter((m: any) => m.role === 'USER').length,
+        ),
       findFirst: jest.fn(),
-      delete: jest.fn().mockResolvedValue({}),
+      deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
+    $executeRaw: jest.fn().mockResolvedValue(1),
   };
+  prisma.$transaction = (fn: (tx: unknown) => unknown) => fn(prisma);
   const subscriptions: any = {
     businessOf: jest.fn().mockResolvedValue('b1'),
-    entitlements: jest
-      .fn()
-      .mockResolvedValue({
-        cvChatQuestions: opts.limit ?? 20,
-        trialLocked: [],
-      }),
+    entitlements: jest.fn().mockResolvedValue({
+      cvChatQuestions: opts.limit ?? 20,
+      trialLocked: [],
+    }),
   };
   const chat: any = {
     cvTextOf: jest.fn((r: { cv_text: string }) => Promise.resolve(r.cv_text)),
@@ -136,6 +142,21 @@ describe('CvCompareService', () => {
       expect(turn.remaining).toBe(18);
     });
 
+    it('counts the questions per CV, across its comparisons: a new group gives none back', async () => {
+      const { service, prisma } = make({ limit: 2 });
+      // CV « a » already had 2 questions in another comparison.
+      prisma.cvComparisonMessage.count.mockImplementation(
+        ({
+          where,
+        }: {
+          where: { comparison: { resume_ids: { has: string } } };
+        }) => Promise.resolve(where.comparison.resume_ids.has === 'a' ? 2 : 0),
+      );
+      await expect(service.prepare('p1', 's1', 'c1', 'Q ?')).rejects.toThrow(
+        'l’un de ces CV',
+      );
+    });
+
     it('holds to the questions allowed, and refuses purged CVs', async () => {
       await expect(
         make({ limit: 1, past: [msg('USER', 'a')] }).service.prepare(
@@ -145,7 +166,7 @@ describe('CvCompareService', () => {
           'Encore ?',
         ),
       ).rejects.toThrow(
-        'Vous avez posé les 1 questions prévues pour cette comparaison.',
+        'Vous avez posé les 1 questions prévues pour l’un de ces CV dans vos comparaisons.',
       );
       await expect(
         make({
