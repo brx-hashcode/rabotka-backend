@@ -758,6 +758,46 @@ describe('JobOfferService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('reopens an offer closed by hand with posts still free, as partly filled', async () => {
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
+        ...expiredOffer,
+        status: JobOfferStatus.FILLED,
+        closed_at: new Date(),
+        quantity: 3,
+      });
+      // One post taken (a Rabotka hire), none from the careers page.
+      (prisma as any).application = {
+        ...(prisma as any).application,
+        count: jest.fn().mockResolvedValue(1),
+      };
+      (prisma as any).externalApplication = {
+        count: jest.fn().mockResolvedValue(0),
+      };
+      await service.republish(OFFER_ID, OWNER_ID, hoursFromNow(48));
+      expect(
+        (prisma.jobOffer.update as jest.Mock).mock.calls[0][0].data.status,
+      ).toBe(JobOfferStatus.PARTIALLY_FILLED);
+    });
+
+    it('does not reopen an offer whose posts are all filled', async () => {
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
+        ...expiredOffer,
+        status: JobOfferStatus.FILLED,
+        closed_at: new Date(),
+        quantity: 1,
+      });
+      (prisma as any).application = {
+        ...(prisma as any).application,
+        count: jest.fn().mockResolvedValue(1),
+      };
+      (prisma as any).externalApplication = {
+        count: jest.fn().mockResolvedValue(0),
+      };
+      await expect(
+        service.republish(OFFER_ID, OWNER_ID, hoursFromNow(48)),
+      ).rejects.toThrow('pourvus');
+    });
+
     it('rejects a date under the minimum lead time', async () => {
       await expect(
         service.republish(OFFER_ID, OWNER_ID, hoursFromNow(1)),
