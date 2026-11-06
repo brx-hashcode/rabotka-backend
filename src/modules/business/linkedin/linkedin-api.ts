@@ -149,50 +149,67 @@ export async function uploadImage(
 /**
  * LinkedIn's « little text »: these characters mean markup in a post's
  * commentary and must be escaped to show as typed. Hashtags written with `#`
- * become real LinkedIn hashtags.
+ * become real LinkedIn hashtags; links stay as written, so LinkedIn makes
+ * them clickable.
  */
 export function toLittleText(text: string): string {
   const escape = (t: string) =>
     t.replace(/[\\|{}@[\]()<>#*_~]/g, (c) => `\\${c}`);
-  // Hashtags first, so their own characters (an underscore) stay as typed.
-  const tag = /#([\p{L}\p{N}_]+)/gu;
+  const token = /(https?:\/\/\S+)|#([\p{L}\p{N}_]+)/gu;
   let out = '';
   let last = 0;
-  for (const m of text.matchAll(tag)) {
-    out += escape(text.slice(last, m.index)) + `{hashtag|\\#|${m[1]}}`;
+  for (const m of text.matchAll(token)) {
+    out +=
+      escape(text.slice(last, m.index)) + (m[1] ?? `{hashtag|\\#|${m[2]}}`);
     last = m.index + m[0].length;
   }
   return out + escape(text.slice(last));
 }
 
-export type ArticlePost = {
+/**
+ * The text always says where to apply: the careers link is added at the end
+ * when the recruiter's text no longer has it (an image post has no link card).
+ */
+export function withApplyLink(text: string, url: string): string {
+  const path = new URL(url).pathname;
+  if (text.includes(path)) return text.trim();
+  return `${text.trim()}\n\n👉 Postulez en ligne : ${url}`;
+}
+
+export type SharePost = {
   authorUrn: string;
   text: string;
+  /** The offer's careers page, where candidates apply. */
   url: string;
   title: string;
   description: string;
-  thumbnail: string | null;
+  /** urn:li:image:… shown large; without one, a link card. */
+  image: string | null;
 };
 
-/** The post: the member's text above a card that opens the careers page. */
-export function postBody(p: ArticlePost) {
+/**
+ * The post: the text (with the link to apply) above the offer's picture,
+ * shown large. Without a picture, a card that opens the careers page.
+ */
+export function postBody(p: SharePost) {
   return {
     author: p.authorUrn,
-    commentary: toLittleText(p.text),
+    commentary: toLittleText(withApplyLink(p.text, p.url)),
     visibility: 'PUBLIC',
     distribution: {
       feedDistribution: 'MAIN_FEED',
       targetEntities: [],
       thirdPartyDistributionChannels: [],
     },
-    content: {
-      article: {
-        source: p.url,
-        title: p.title.slice(0, 200),
-        description: p.description.slice(0, 250),
-        ...(p.thumbnail ? { thumbnail: p.thumbnail } : {}),
-      },
-    },
+    content: p.image
+      ? { media: { id: p.image, altText: p.title.slice(0, 300) } }
+      : {
+          article: {
+            source: p.url,
+            title: p.title.slice(0, 200),
+            description: p.description.slice(0, 250),
+          },
+        },
     lifecycleState: 'PUBLISHED',
     isReshareDisabledByAuthor: false,
   };
@@ -201,7 +218,7 @@ export function postBody(p: ArticlePost) {
 /** Publishes; the post's URN comes back in the `x-restli-id` header. */
 export async function createPost(
   accessToken: string,
-  post: ArticlePost,
+  post: SharePost,
 ): Promise<string> {
   const res = await fetch(`${API}/rest/posts`, {
     method: 'POST',
