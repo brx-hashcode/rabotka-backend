@@ -300,6 +300,10 @@ jobs:
           GOOGLE_MAIL_CLIENT_ID=$(echo "$VAULT_SECRET" | jq -r '.GOOGLE_MAIL_CLIENT_ID // ""')
           GOOGLE_MAIL_CLIENT_SECRET=$(echo "$VAULT_SECRET" | jq -r '.GOOGLE_MAIL_CLIENT_SECRET // ""')
           MAILBOX_TOKEN_KEY=$(echo "$VAULT_SECRET" | jq -r '.MAILBOX_TOKEN_KEY // ""')
+          # « Publier sur LinkedIn » (a team member's own account; tokens sealed
+          # with MAILBOX_TOKEN_KEY). Optional: blank means the feature is not offered.
+          LINKEDIN_CLIENT_ID=$(echo "$VAULT_SECRET" | jq -r '.LINKEDIN_CLIENT_ID // ""')
+          LINKEDIN_CLIENT_SECRET=$(echo "$VAULT_SECRET" | jq -r '.LINKEDIN_CLIENT_SECRET // ""')
           # --- static values ---
           BACKEND_IMAGE=${{ needs.build-and-push.outputs.image }}
           NODE_ENV=production
