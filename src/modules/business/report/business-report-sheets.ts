@@ -1,5 +1,10 @@
-import ExcelJS from 'exceljs';
 import type { ReportInput } from './business-report';
+import {
+  tablesCsv,
+  tablesXlsx,
+  type Cell,
+  type DataTable,
+} from './table-files';
 import { OFFER_STATUS_LABEL } from './business-report';
 
 /**
@@ -8,13 +13,8 @@ import { OFFER_STATUS_LABEL } from './business-report';
  * they can be summed and charted; empty means « not enough data ».
  */
 
-export type Cell = string | number | null;
-export type ReportTable = {
-  /** The sheet's name (31 characters at most, Excel's limit). */
-  name: string;
-  header: string[];
-  rows: Cell[][];
-};
+export type { Cell } from './table-files';
+export type ReportTable = DataTable;
 
 const SOURCE_LABEL: Record<string, string> = {
   rabotka: 'Rabotka',
@@ -37,7 +37,7 @@ const SOURCE_LABEL: Record<string, string> = {
   jora: 'Jora',
 };
 
-const sourceLabel = (s: string) =>
+export const sourceLabel = (s: string) =>
   SOURCE_LABEL[s] ?? s.charAt(0).toUpperCase() + s.slice(1);
 
 const share = (n: number, of: number) =>
@@ -157,76 +157,17 @@ export function reportTables(input: ReportInput): ReportTable[] {
 const periodLine = (input: ReportInput) =>
   `Du ${input.stats.period.from.slice(0, 10)} au ${input.stats.period.to.slice(0, 10)} (${input.stats.period.days} jours)`;
 
-/** One sheet per table, a styled header, numbers kept as numbers. */
-export async function reportXlsx(input: ReportInput): Promise<Buffer> {
-  const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'Rabotka';
-  workbook.created = input.generatedAt;
-
-  for (const table of reportTables(input)) {
-    const sheet = workbook.addWorksheet(table.name.slice(0, 31));
-    const title = sheet.addRow([
-      `Rapport de recrutement — ${input.businessName}`,
-    ]);
-    title.font = { bold: true, size: 14 };
-    sheet.addRow([periodLine(input)]).font = {
-      color: { argb: 'FF5A655F' },
-    };
-    sheet.addRow([]);
-
-    const head = sheet.addRow(table.header);
-    head.height = 22;
-    head.eachCell((cell) => {
-      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FF0FA84C' },
-      };
-      cell.alignment = { vertical: 'middle' };
-    });
-    for (const row of table.rows) sheet.addRow(row);
-    if (!table.rows.length) {
-      sheet.addRow(['Aucune donnée sur la période.']).font = {
-        italic: true,
-        color: { argb: 'FF7A857F' },
-      };
-    }
-
-    sheet.views = [{ state: 'frozen', ySplit: head.number }];
-    table.header.forEach((label, i) => {
-      const longest = Math.max(
-        label.length,
-        ...table.rows.map((r) => String(r[i] ?? '').length),
-      );
-      sheet.getColumn(i + 1).width = Math.min(Math.max(longest + 2, 12), 60);
-    });
-  }
-
-  return Buffer.from(await workbook.xlsx.writeBuffer());
+export function reportXlsx(input: ReportInput): Promise<Buffer> {
+  return tablesXlsx(reportFile(input));
 }
 
-/**
- * The tables one after the other, each under its name, in the format a
- * French spreadsheet opens as is: `;` between cells, a decimal comma, and a
- * BOM so the accents survive.
- */
 export function reportCsv(input: ReportInput): string {
-  const cell = (v: Cell) => {
-    if (v === null) return '';
-    const text = typeof v === 'number' ? String(v).replace('.', ',') : v;
-    return /[;"\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-  };
-  const line = (cells: Cell[]) => cells.map(cell).join(';');
-
-  const blocks = reportTables(input).map((t) =>
-    [line([t.name]), line(t.header), ...t.rows.map(line)].join('\r\n'),
-  );
-  const BOM = '\uFEFF';
-  return `${BOM}${[
-    line([`Rapport de recrutement — ${input.businessName}`]),
-    line([periodLine(input)]),
-    '',
-    blocks.join('\r\n\r\n'),
-  ].join('\r\n')}\r\n`;
+  return tablesCsv(reportFile(input));
 }
+
+const reportFile = (input: ReportInput) => ({
+  title: `Rapport de recrutement — ${input.businessName}`,
+  subtitle: periodLine(input),
+  tables: reportTables(input),
+  generatedAt: input.generatedAt,
+});

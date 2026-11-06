@@ -39,6 +39,7 @@ export function planView(
     includesPreselection: p.includes_preselection,
     priorityVisibility: p.priority_visibility,
     linkedinPosting: p.linkedin_posting,
+    hrExports: p.hr_exports,
     isActive: p.is_active,
     sortOrder: p.sort_order,
   };
@@ -64,6 +65,7 @@ export function planData(dto: {
   includesPreselection?: boolean;
   priorityVisibility?: boolean;
   linkedinPosting?: boolean;
+  hrExports?: boolean;
   isActive?: boolean;
   sortOrder?: number;
   businessId?: string | null;
@@ -87,6 +89,7 @@ export function planData(dto: {
     includes_preselection: dto.includesPreselection,
     priority_visibility: dto.priorityVisibility,
     linkedin_posting: dto.linkedinPosting,
+    hr_exports: dto.hrExports,
     is_active: dto.isActive,
     sort_order: dto.sortOrder,
     business_id: dto.businessId,
