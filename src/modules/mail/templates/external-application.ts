@@ -65,6 +65,23 @@ export function applicationRetainedEmail(
   `;
 }
 
+/** A retention taken back: the candidate is back among those considered. */
+export function applicationRetainCancelledEmail(
+  firstName: string,
+  businessName: string,
+  jobTitle: string,
+): string {
+  return `
+    <p>Bonjour ${escapeHtml(firstName)},</p>
+    <p>
+      ${escapeHtml(businessName)} revient sur sa décision pour
+      <strong>${escapeHtml(jobTitle)}</strong> : votre candidature n'est plus
+      retenue pour le moment, mais elle reste à l'étude.
+    </p>
+    <p>Le recruteur vous recontacte s'il donne suite.</p>
+  `;
+}
+
 export function newExternalApplicationEmail(
   candidateName: string,
   jobTitle: string,

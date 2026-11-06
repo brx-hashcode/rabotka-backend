@@ -447,12 +447,87 @@ describe('CareersService', () => {
       await expect(service.retain('p1', 'a1')).rejects.toThrow('refusée');
     });
 
-    it('does not refuse someone already retained', async () => {
+    it('does not refuse someone already retained, and says so', async () => {
       const { prisma, service } = owned('RETAINED');
 
-      await service.refuse('p1', 'a1');
+      await expect(service.refuse('p1', 'a1')).rejects.toThrow(
+        'annulez d’abord',
+      );
 
       expect(prisma.externalApplication.update).not.toHaveBeenCalled();
+    });
+
+    describe('taking a retention back', () => {
+      const retained = (
+        offer: Record<string, unknown>,
+        seatsAfter: { rabotka: number; outside: number },
+      ) => {
+        const made = owned('RETAINED');
+        const tx = {
+          $executeRaw: jest.fn().mockResolvedValue(1),
+          jobOffer: {
+            findUnique: jest.fn().mockResolvedValue({
+              status: 'FILLED',
+              quantity: 2,
+              deleted_at: null,
+              ...offer,
+            }),
+            update: jest.fn().mockResolvedValue({}),
+          },
+          application: {
+            count: jest.fn().mockResolvedValue(seatsAfter.rabotka),
+          },
+          externalApplication: {
+            count: jest.fn().mockResolvedValue(seatsAfter.outside),
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          },
+        };
+        (made.prisma as unknown as { $transaction: jest.Mock }).$transaction =
+          jest.fn((run: (t: typeof tx) => Promise<unknown>) => run(tx));
+        return { ...made, tx };
+      };
+
+      it('frees the post, reopens the offer and tells the candidate', async () => {
+        const { service, tx } = retained({}, { rabotka: 1, outside: 0 });
+
+        await expect(service.unretain('p1', 'a1')).resolves.toEqual({
+          retained: false,
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(tx.externalApplication.updateMany.mock.calls[0][0]).toEqual({
+          where: { id: 'a1', status: 'RETAINED' },
+          data: { status: 'PENDING', retained_at: null },
+        });
+        expect(tx.jobOffer.update.mock.calls[0][0].data.status).toBe(
+          'PARTIALLY_FILLED',
+        );
+        expect(sendMail.mock.calls[0][0].to).toBe('awa@example.com');
+      });
+
+      it('puts the offer back online when no post is taken any more', async () => {
+        const { service, tx } = retained({}, { rabotka: 0, outside: 0 });
+
+        await service.unretain('p1', 'a1');
+
+        expect(tx.jobOffer.update.mock.calls[0][0].data.status).toBe('ACTIVE');
+      });
+
+      it('refuses on an offer past recruiting, or a candidate not retained', async () => {
+        const ended = retained(
+          { status: 'IN_PROGRESS' },
+          { rabotka: 0, outside: 0 },
+        );
+        await expect(ended.service.unretain('p1', 'a1')).rejects.toThrow(
+          'ne recrute',
+        );
+        expect(ended.tx.externalApplication.updateMany).not.toHaveBeenCalled();
+
+        const { service } = owned('PENDING');
+        await expect(service.unretain('p1', 'a1')).rejects.toThrow(
+          "n'est pas retenue",
+        );
+      });
     });
 
     describe('retaining fills a post', () => {

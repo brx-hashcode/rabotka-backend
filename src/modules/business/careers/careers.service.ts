@@ -33,6 +33,7 @@ import { MailService } from '../../mail/mail.service';
 import {
   applicationReceivedEmail,
   applicationRefusedEmail,
+  applicationRetainCancelledEmail,
   applicationRetainedEmail,
   newExternalApplicationEmail,
 } from '../../mail/templates/external-application';
@@ -773,6 +774,64 @@ export class CareersService {
     return { retained: true };
   }
 
+  /**
+   * Takes a retention back (a mistaken click, a candidate who fell through):
+   * the candidate is waiting again, the post is free, the offer recruits
+   * again, and the candidate is told. Only while the offer still recruits:
+   * a started or ended one is past it.
+   */
+  async unretain(profileId: string, id: string) {
+    const application = await this.owned(profileId, id);
+    if (application.status !== ExternalApplicationStatus.RETAINED) {
+      throw new ConflictException("Cette candidature n'est pas retenue.");
+    }
+    const offerId = application.job_offer_id;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM "job_offers" WHERE id = ${offerId}::uuid FOR UPDATE`;
+      const offer = await tx.jobOffer.findUnique({
+        where: { id: offerId },
+        select: { status: true, quantity: true, deleted_at: true },
+      });
+      if (
+        !offer ||
+        offer.deleted_at ||
+        (!OPEN.includes(offer.status) && offer.status !== JobOfferStatus.FILLED)
+      ) {
+        throw new BadRequestException('Cette offre ne recrute plus.');
+      }
+      const { count } = await tx.externalApplication.updateMany({
+        where: { id, status: ExternalApplicationStatus.RETAINED },
+        data: { status: ExternalApplicationStatus.PENDING, retained_at: null },
+      });
+      if (count === 0) {
+        throw new ConflictException("Cette candidature n'est pas retenue.");
+      }
+      const taken = await takenSeats(tx, offerId);
+      await tx.jobOffer.update({
+        where: { id: offerId },
+        data: {
+          status:
+            taken === 0
+              ? JobOfferStatus.ACTIVE
+              : taken >= offer.quantity
+                ? JobOfferStatus.FILLED
+                : JobOfferStatus.PARTIALLY_FILLED,
+        },
+      });
+    });
+    const name = await this.businessName(profileId);
+    void this.send(
+      application.email,
+      `Votre candidature chez ${name}`,
+      applicationRetainCancelledEmail(
+        application.first_name,
+        name,
+        application.job_offer.title,
+      ),
+    );
+    return { retained: false };
+  }
+
   /** A closed offer: those still waiting hear it, as Rabotka's candidates do. */
   @OnEvent(JOB_OFFER_CLOSED)
   async refuseWaiting({ jobOfferId }: JobOfferClosedEvent) {
@@ -785,6 +844,12 @@ export class CareersService {
 
   async refuse(profileId: string, id: string, message?: string) {
     const application = await this.owned(profileId, id);
+    if (application.status === ExternalApplicationStatus.RETAINED) {
+      // Said, rather than a quiet { refused: false } the screen took for done.
+      throw new ConflictException(
+        'Ce candidat est retenu : annulez d’abord la décision.',
+      );
+    }
     if (application.status !== ExternalApplicationStatus.PENDING) {
       return {
         refused: application.status === ExternalApplicationStatus.REFUSED,
