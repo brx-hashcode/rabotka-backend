@@ -1,4 +1,4 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional, PickType } from '@nestjs/swagger';
 import { plainToInstance, Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -84,6 +84,11 @@ export class CreateCvScreeningDto {
   @Type(() => MailAttachmentRefDto)
   mailAttachments?: MailAttachmentRefDto[];
 }
+
+/** More CVs for a screening already opened: files and/or mailbox CVs. */
+export class AddCvScreeningFilesDto extends PickType(CreateCvScreeningDto, [
+  'mailAttachments',
+] as const) {}
 
 /** One question about an analysed CV. */
 export class CvChatQuestionDto {
