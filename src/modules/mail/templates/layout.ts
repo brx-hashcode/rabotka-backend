@@ -136,16 +136,11 @@ export function displayPhone(raw: string): string {
 }
 
 /**
- * The foot of the email, under the card on the page's own background, in
- * three sections as retail emails do (Patagonia's, Apple's):
- *
- * 1. « Suivez-nous » and the networks as icons (when any link is set);
- * 2. « Besoin d'aide ? »: customer service phone, email and site, address;
- * 3. the small print: why this email, legal name and RCCM, copyright, the
- *    legal links.
- *
- * Short rules separate them. Each line shows only when its setting is filled
- * in (Settings → Contact). A business's email points to
+ * The foot of the email, under the card on the page's own background, kept
+ * short: the networks as icons, one line to reach us (phone, email, site) and
+ * the address, then the small print — why this email, and copyright, legal
+ * name, RCCM and the legal links on one line. Each part shows only when its
+ * setting is filled in (Settings → Contact). A business's email points to
  * business.rabotka.work, every other to www.rabotka.work.
  */
 export function emailFooter(
@@ -159,100 +154,71 @@ export function emailFooter(
     `<a href="${escapeHtml(href)}" target="_blank" style="color:${color};text-decoration:underline;">${label}</a>`;
   const p = (html: string, style: string, margin = '0 0 6px') =>
     `<p style="margin:${margin};${font}${style}">${html}</p>`;
-  const sep = `&nbsp;&nbsp;<span style="color:#c4c2ba;">|</span>&nbsp;&nbsp;`;
-  // A short centred rule between sections.
-  const rule = `<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:26px auto;">
-                <tr><td width="56" height="1" bgcolor="#d9d7cf" style="width:56px;height:1px;line-height:1px;font-size:0;background:#d9d7cf;">&nbsp;</td></tr>
-              </table>`;
+  const dot = `&nbsp;<span style="color:#c4c2ba;">&middot;</span>&nbsp;`;
 
-  // 1. The networks, under the same kind of heading as « Besoin d’aide ? ».
   const socials = footer?.socials ?? [];
-  const follow = socials.length
-    ? [
-        p(
-          'Suivez-nous',
-          `font-size:15px;line-height:22px;font-weight:600;color:${ink};`,
-          '0 0 12px',
-        ),
-        `<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;">
+  const icons = socials.length
+    ? `<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto 18px;">
                 <tr>${socials
                   .map(
                     ({ network, url }) => `
-                  <td style="padding:0 6px;">
+                  <td style="padding:0 5px;">
                     <a href="${escapeHtml(url)}" target="_blank" style="text-decoration:none;">
-                      <img src="cid:${socialIconCid(network)}" width="36" height="36" alt="${SOCIAL_LABELS[network]}"
-                        style="display:block;width:36px;height:36px;border:0;outline:none;">
+                      <img src="cid:${socialIconCid(network)}" width="30" height="30" alt="${SOCIAL_LABELS[network]}"
+                        style="display:block;width:30px;height:30px;border:0;outline:none;">
                     </a>
                   </td>`,
                   )
                   .join('')}
                 </tr>
-              </table>`,
-        rule,
-      ].join('')
+              </table>`
     : '';
 
-  // 2. Help.
   const email = footer?.email?.trim() || 'noreply@rabotka.work';
   const phone = footer?.phone?.trim();
   const site =
     product === 'business' ? 'business.rabotka.work' : 'www.rabotka.work';
-  const help = [
-    p(
-      'Besoin d’aide ?',
-      `font-size:15px;line-height:22px;font-weight:600;color:${ink};`,
-      '0 0 8px',
-    ),
-    phone
-      ? p(
-          `Service client : ${link(`tel:${phone.replace(/[^\d+]/g, '')}`, `<strong>${escapeHtml(displayPhone(phone))}</strong>`)}`,
-          `font-size:14px;line-height:22px;color:${ink};`,
-        )
-      : '',
-    p(
-      [
-        link(`mailto:${email}`, escapeHtml(email)),
-        link(`https://${site}`, site),
-      ].join(sep),
-      `font-size:13px;line-height:20px;color:${ink};`,
-    ),
-    footer?.address?.trim()
-      ? p(
-          escapeHtml(footer.address.trim()),
-          `font-size:13px;line-height:20px;color:${grey};`,
-          '0',
-        )
-      : '',
-  ].join('');
+  const reach = p(
+    [
+      phone
+        ? link(
+            `tel:${phone.replace(/[^\d+]/g, '')}`,
+            escapeHtml(displayPhone(phone)),
+          )
+        : '',
+      link(`mailto:${email}`, escapeHtml(email)),
+      link(`https://${site}`, site),
+    ]
+      .filter(Boolean)
+      .join(dot),
+    `font-size:13px;line-height:20px;color:${ink};`,
+    footer?.address?.trim() ? '0 0 4px' : '0',
+  );
+  const address = footer?.address?.trim()
+    ? p(
+        escapeHtml(footer.address.trim()),
+        `font-size:13px;line-height:20px;color:${grey};`,
+        '0',
+      )
+    : '';
 
-  // 3. The small print.
   const legalName = footer?.legalName?.trim() || 'Rabotka';
   const small = `font-size:12px;line-height:18px;color:${grey};`;
   const fine = [
     p(
       `Vous recevez cet e-mail parce que vous utilisez ${product === 'business' ? 'Rabotka Business' : 'Rabotka'}.`,
       small,
-      '0 0 10px',
+      '0 0 4px',
     ),
     p(
       [
-        escapeHtml(legalName),
+        `&copy; ${new Date().getFullYear()} ${escapeHtml(legalName)}`,
         footer?.rccm?.trim() ? `RCCM ${escapeHtml(footer.rccm.trim())}` : '',
-      ]
-        .filter(Boolean)
-        .join('&nbsp;&middot;&nbsp;'),
-      small,
-    ),
-    p(
-      `&copy; ${new Date().getFullYear()} ${escapeHtml(legalName)}. Tous droits réservés.`,
-      small,
-      '0 0 10px',
-    ),
-    p(
-      [
         link(`${LEGAL_SITE}/terms`, 'Conditions d’utilisation', '#515154'),
         link(`${LEGAL_SITE}/privacy`, 'Confidentialité', '#515154'),
-      ].join(sep),
+      ]
+        .filter(Boolean)
+        .join(dot),
       small,
       '0',
     ),
@@ -261,10 +227,13 @@ export function emailFooter(
   return `<!-- Footer -->
           <table class="rk-foot" width="600" cellpadding="0" cellspacing="0" border="0" role="presentation">
             <tr>
-              <td align="center" style="padding:36px 32px 0;text-align:center;">
-              ${follow}
-              ${help}
-              ${rule}
+              <td align="center" style="padding:28px 32px 0;text-align:center;">
+              ${icons}
+              ${reach}
+              ${address}
+              <table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:18px auto;">
+                <tr><td width="40" height="1" bgcolor="#d9d7cf" style="width:40px;height:1px;line-height:1px;font-size:0;background:#d9d7cf;">&nbsp;</td></tr>
+              </table>
               ${fine}
               </td>
             </tr>
