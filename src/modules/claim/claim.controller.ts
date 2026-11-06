@@ -15,6 +15,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
+import { Throttle } from '@nestjs/throttler';
 import { ApiConsumes } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { ClaimService } from './claim.service';
@@ -217,6 +218,8 @@ export class ProfileClaimController {
 
   /** The complainant's side of `ClaimController.uploadAttachments`. */
   @Post('attachments')
+  // Stored before any claim exists: paced, so storage can't be filled.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @UseInterceptors(
     FilesInterceptor('files', MAX_CLAIM_ATTACHMENTS, imageMulterOptions()),
   )
