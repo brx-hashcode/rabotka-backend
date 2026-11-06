@@ -6,9 +6,14 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import {
+  MAX_ANALYSIS_ATTEMPTS,
+  claimable,
+} from '../applicant-score/analysis-attempts';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import {
+  CvScreeningResumeStatus,
   ExternalApplicationStatus,
   JobOfferStatus,
   OfferQuestionKind,
@@ -503,7 +508,13 @@ export class CareersService {
    * read, up to what the plan takes at once. Each uses one of its « CV
    * inclus ». They all join the offer's one screening, so they can be compared.
    */
-  async analyse(profileId: string, offerId: string, applicationId?: string) {
+  async analyse(
+    profileId: string,
+    offerId: string,
+    applicationId?: string,
+    /** Also those whose analysis failed before then, tried again (capped). */
+    retryFailedBefore?: Date,
+  ) {
     const businessId = await this.subscriptions.businessOf(profileId);
     if (!businessId) throw new NotFoundException('Organisation introuvable.');
     const e = await this.subscriptions.entitlements(businessId);
@@ -521,24 +532,75 @@ export class CareersService {
         status: { in: OPEN },
       },
       status: ExternalApplicationStatus.PENDING,
-      cv_resume_id: null,
+      OR: [
+        { cv_resume_id: null },
+        ...(retryFailedBefore
+          ? [
+              {
+                cv_resume: {
+                  status: CvScreeningResumeStatus.FAILED,
+                  updated_at: { lte: retryFailedBefore },
+                },
+                analysis_attempts: { lt: MAX_ANALYSIS_ATTEMPTS },
+              },
+            ]
+          : []),
+      ],
       cv_storage_key: { not: null },
-      ...(applicationId
-        ? { id: applicationId }
-        : { cv_size_bytes: { lte: e.cvFileMaxMb * 1024 * 1024 } }),
+      // Above the plan's file size it would be refused: never sent.
+      cv_size_bytes: { lte: e.cvFileMaxMb * 1024 * 1024 },
+      ...(applicationId ? { id: applicationId } : {}),
     };
-    const [due, total] = await Promise.all([
+    const now = new Date();
+    const [found, total] = await Promise.all([
       this.prisma.externalApplication.findMany({
-        where,
+        where: { ...where, AND: [claimable(now)] },
         orderBy: { created_at: 'asc' },
         take: room,
       }),
       this.prisma.externalApplication.count({ where }),
     ]);
+    // Claimed before anything is charged: two runs never charge one CV twice.
+    const ids = found.map((a) => a.id);
+    if (ids.length > 0) {
+      await this.prisma.externalApplication.updateMany({
+        where: { id: { in: ids }, AND: [claimable(now)] },
+        data: { analysis_claimed_at: now },
+      });
+    }
+    const mine = new Set(
+      ids.length === 0
+        ? []
+        : (
+            await this.prisma.externalApplication.findMany({
+              where: { id: { in: ids }, analysis_claimed_at: now },
+              select: { id: true },
+            })
+          ).map((a) => a.id),
+    );
+    const due = found.filter((a) => mine.has(a.id));
     if (due.length === 0) {
       throw new BadRequestException('Aucun CV à analyser.');
     }
+    try {
+      return await this.analyseClaimed(profileId, offerId, due, total);
+    } finally {
+      await this.prisma.externalApplication
+        .updateMany({
+          where: { id: { in: [...mine] }, analysis_claimed_at: now },
+          data: { analysis_claimed_at: null },
+        })
+        .catch(() => undefined);
+    }
+  }
 
+  /** The CVs this run holds the claim on: read, sent, then linked. */
+  private async analyseClaimed(
+    profileId: string,
+    offerId: string,
+    due: Prisma.ExternalApplicationGetPayload<object>[],
+    total: number,
+  ) {
     // The application's id in the file name: it finds its resume again below.
     const files = await Promise.all(
       due.map(async (a) => ({
@@ -560,8 +622,14 @@ export class CareersService {
       if (!resumeId) continue;
       await this.prisma.externalApplication.update({
         where: { id: a.id },
-        data: { cv_resume_id: resumeId },
+        data: { cv_resume_id: resumeId, analysis_attempts: { increment: 1 } },
       });
+      // The failed try it replaces: gone, rather than a dead row in the screening.
+      if (a.cv_resume_id) {
+        await this.prisma.cvScreeningResume
+          .delete({ where: { id: a.cv_resume_id } })
+          .catch(() => undefined);
+      }
     }
     return {
       screeningId: screening.screeningId,
