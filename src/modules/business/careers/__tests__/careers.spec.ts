@@ -344,6 +344,10 @@ describe('CareersService', () => {
         .fn()
         .mockResolvedValue(ids.map(due));
       prisma.externalApplication.count = jest.fn().mockResolvedValue(3);
+      // The claim: taken by this run (the read-back returns the same rows).
+      prisma.externalApplication.updateMany = jest
+        .fn()
+        .mockResolvedValue({ count: ids.length });
       prisma.cvScreening = {
         findFirst: jest.fn().mockResolvedValue(open),
         update: jest.fn().mockResolvedValue({}),
@@ -394,8 +398,36 @@ describe('CareersService', () => {
         job_offer_id: 'o1',
         job_offer: { employer_id: 'p1' },
         status: 'PENDING',
-        cv_resume_id: null,
+        OR: [{ cv_resume_id: null }],
+        // Never one above the plan's file size: it would be refused.
+        cv_size_bytes: { lte: 5 * 1024 * 1024 },
       });
+    });
+
+    it('claims the CVs before charging them, and lets them go after', async () => {
+      const { service, prisma } = withDue(null);
+
+      await service.analyse('p1', 'o1');
+
+      const [claim, release] = prisma.externalApplication.updateMany.mock.calls;
+      expect(claim[0].where.id).toEqual({ in: ['a1', 'a2'] });
+      expect(claim[0].data.analysis_claimed_at).toBeInstanceOf(Date);
+      expect(release[0].data).toEqual({ analysis_claimed_at: null });
+      // Each linked try counts.
+      expect(prisma.externalApplication.update.mock.calls[0][0].data).toEqual({
+        cv_resume_id: 'r-a1',
+        analysis_attempts: { increment: 1 },
+      });
+    });
+
+    it('takes none another run already holds', async () => {
+      const { service, prisma } = withDue(null);
+      prisma.externalApplication.findMany
+        .mockResolvedValueOnce([due('a1')])
+        .mockResolvedValueOnce([]); // the claim went to the other run
+
+      await expect(service.analyse('p1', 'o1')).rejects.toThrow('Aucun CV');
+      expect(screenings.addToOffer).not.toHaveBeenCalled();
     });
 
     it('never takes more CVs than the « CV inclus » left', async () => {

@@ -1,3 +1,4 @@
+import { retryDue } from '../analysis-attempts';
 import { ForbiddenException } from '@nestjs/common';
 import { ApplicantScoreService } from '../applicant-score.service';
 
@@ -158,6 +159,8 @@ describe('ApplicantScoreService.analyse', () => {
         findMany: jest.fn().mockResolvedValue(due.map((id) => ({ id }))),
         count: jest.fn().mockResolvedValue(due.length + 1),
         update: jest.fn(),
+        // The claim, taken and given back.
+        updateMany: jest.fn().mockResolvedValue({ count: due.length }),
       },
     };
     const subscriptions: any = {
@@ -199,8 +202,12 @@ describe('ApplicantScoreService.analyse', () => {
     expect(text).not.toContain('123 45 67');
     expect(prisma.application.update).toHaveBeenCalledWith({
       where: { id: 'a1' },
-      data: { cv_resume_id: 'r-a1' },
+      data: { cv_resume_id: 'r-a1', analysis_attempts: { increment: 1 } },
     });
+    // Claimed first, let go after.
+    const [claim, release] = prisma.application.updateMany.mock.calls;
+    expect(claim[0].data.analysis_claimed_at).toBeInstanceOf(Date);
+    expect(release[0].data).toEqual({ analysis_claimed_at: null });
     expect(out).toEqual({ screeningId: 's1', analysed: 1, left: 1 });
   });
 
@@ -252,7 +259,7 @@ describe('ApplicantScoreService.analyse', () => {
     await service.analyse('p1', 'o1', undefined, undefined, new Date());
     expect(prisma.application.update).toHaveBeenCalledWith({
       where: { id: 'a1' },
-      data: { cv_resume_id: 'r-a1' },
+      data: { cv_resume_id: 'r-a1', analysis_attempts: { increment: 1 } },
     });
     expect(prisma.cvScreeningResume.delete).toHaveBeenCalledWith({
       where: { id: 'r-old' },
@@ -352,7 +359,13 @@ describe('ApplicantScoreService.runAnalysisJob', () => {
   it('hands a careers-page one to its own analysis', async () => {
     const { service, careers } = make();
     await service.runAnalysisJob(job('careers'), now);
-    expect(careers.analyse).toHaveBeenCalledWith('e1', 'o1', 'a1');
+    // A failed try included, as for a Rabotka one.
+    expect(careers.analyse).toHaveBeenCalledWith(
+      'e1',
+      'o1',
+      'a1',
+      new Date('2026-11-05T04:00:00Z'),
+    );
   });
 
   it('ends quietly on what the business cannot have: no « CV inclus », closed, done', async () => {
@@ -374,10 +387,19 @@ describe('ApplicantScoreService.runAnalysisJob', () => {
 
 describe('ApplicantScoreService.queueWaitingAnalyses', () => {
   const now = new Date('2026-11-05T10:00:00Z');
-  const row = (id: string, employer: string, offer = 'o1') => ({
+  const row = (
+    id: string,
+    employer: string,
+    offer = 'o1',
+    over: Record<string, unknown> = {},
+  ) => ({
     id,
     job_offer_id: offer,
     job_offer: { employer_id: employer },
+    analysis_attempts: 0,
+    cv_resume: null as { updated_at: Date } | null,
+    cv_size_bytes: 1000,
+    ...over,
   });
   const make = (
     rabotka: ReturnType<typeof row>[],
@@ -397,6 +419,7 @@ describe('ApplicantScoreService.queueWaitingAnalyses', () => {
         return Promise.resolve({
           cvRemaining,
           cvQuota: cvRemaining === 0 ? 10 : 10,
+          cvFileMaxMb: 5,
         });
       }),
     };
@@ -458,13 +481,61 @@ describe('ApplicantScoreService.queueWaitingAnalyses', () => {
         status: 'FAILED',
         updated_at: { lte: new Date('2026-11-05T04:00:00Z') },
       },
+      analysis_attempts: { lt: 3 },
     });
+    // Careers CVs that failed are tried again too.
     expect(
       prisma.externalApplication.findMany.mock.calls[0][0].where,
     ).toMatchObject({
-      cv_resume_id: null,
+      OR: [
+        { cv_resume_id: null },
+        expect.objectContaining({ analysis_attempts: { lt: 3 } }),
+      ],
       status: 'PENDING',
       cv_storage_key: { not: null },
     });
+  });
+
+  it('waits longer after each failed try', async () => {
+    const failedAt = (hoursAgo: number) => ({
+      updated_at: new Date(now.getTime() - hoursAgo * 3_600_000),
+    });
+    const { service, add } = make(
+      [
+        // Second try failed 7 h ago: waits 12 h.
+        row('a1', 'ok', 'o1', { analysis_attempts: 2, cv_resume: failedAt(7) }),
+        // First try failed 7 h ago: waits 6 h, due.
+        row('a2', 'ok', 'o1', { analysis_attempts: 1, cv_resume: failedAt(7) }),
+      ],
+      [],
+      { ok: 5 },
+    );
+    await service.queueWaitingAnalyses(now);
+    expect(ids(add)).toEqual(['rabotka-a2']);
+  });
+
+  it('never sends a careers CV above the plan’s file size', async () => {
+    const { service, add } = make(
+      [],
+      [
+        row('x1', 'ok', 'o1', { cv_size_bytes: 8 * 1024 * 1024 }),
+        row('x2', 'ok'),
+      ],
+      { ok: 5 },
+    );
+    await service.queueWaitingAnalyses(now);
+    expect(ids(add)).toEqual(['careers-x2']);
+  });
+});
+
+describe('retryDue', () => {
+  const now = new Date('2026-11-06T12:00:00Z');
+  const ago = (h: number) => new Date(now.getTime() - h * 3_600_000);
+  it('waits 6 h, then 12 h, and stops at the third try', () => {
+    expect(retryDue(1, ago(5), now)).toBe(false);
+    expect(retryDue(1, ago(6), now)).toBe(true);
+    expect(retryDue(2, ago(11), now)).toBe(false);
+    expect(retryDue(2, ago(12), now)).toBe(true);
+    expect(retryDue(3, ago(100), now)).toBe(false);
   });
 });
