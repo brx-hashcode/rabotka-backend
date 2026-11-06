@@ -151,6 +151,18 @@ export class ExternalApplicationsController {
     return this.careers.retain(req.user.profileId, id);
   }
 
+  @Post(':id/unretain')
+  @ApiOperation({
+    summary:
+      'Take a retention back: the candidate waits again and is told by e-mail',
+  })
+  unretain(
+    @Req() req: { user: { profileId: string } },
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.careers.unretain(req.user.profileId, id);
+  }
+
   @Post(':id/refuse')
   @ApiOperation({ summary: 'Refuse it; the candidate is told by e-mail' })
   refuse(
