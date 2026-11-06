@@ -11,6 +11,7 @@ import { linkedinCallbackPage } from '../linkedin-callback-page';
 import {
   linkedinAuthUrl,
   postBody,
+  withApplyLink,
   postUrl,
   toLittleText,
 } from '../linkedin-api';
@@ -47,14 +48,17 @@ describe('LinkedIn API helpers', () => {
     expect(toLittleText('100 # pas un tag')).toBe('100 \\# pas un tag');
   });
 
-  it('posts an article card to the careers page, thumbnail when there is one', () => {
+  const URL_ =
+    'https://business.rabotka.work/carrieres/akieni/OF-1?source=linkedin';
+
+  it('posts the picture large, with the link to apply in the text', () => {
     const body = postBody({
       authorUrn: 'urn:li:person:abc',
       text: 'Nous recrutons',
-      url: 'https://business.rabotka.work/carrieres/akieni/OF-1?source=linkedin',
+      url: URL_,
       title: 'Comptable — Akieni',
       description: 'Tenue de la comptabilité',
-      thumbnail: null,
+      image: 'urn:li:image:1',
     });
     expect(body).toMatchObject({
       author: 'urn:li:person:abc',
@@ -62,25 +66,38 @@ describe('LinkedIn API helpers', () => {
       lifecycleState: 'PUBLISHED',
       distribution: { feedDistribution: 'MAIN_FEED' },
       content: {
-        article: {
-          source:
-            'https://business.rabotka.work/carrieres/akieni/OF-1?source=linkedin',
-          title: 'Comptable — Akieni',
-        },
+        media: { id: 'urn:li:image:1', altText: 'Comptable — Akieni' },
       },
     });
-    expect(body.content.article).not.toHaveProperty('thumbnail');
-    const withPicture = postBody({
+    expect(body.commentary).toBe(
+      `Nous recrutons\n\n👉 Postulez en ligne : ${URL_}`,
+    );
+  });
+
+  it('falls back to a link card without a picture', () => {
+    const body = postBody({
       authorUrn: 'a',
-      text: '',
-      url: 'u',
-      title: 't',
-      description: 'd',
-      thumbnail: 'urn:li:image:1',
+      text: 'Nous recrutons',
+      url: URL_,
+      title: 'Comptable — Akieni',
+      description: 'Tenue',
+      image: null,
     });
-    expect(withPicture.content.article).toHaveProperty(
-      'thumbnail',
-      'urn:li:image:1',
+    expect(body.content).toEqual({
+      article: {
+        source: URL_,
+        title: 'Comptable — Akieni',
+        description: 'Tenue',
+      },
+    });
+  });
+
+  it('keeps the link where the recruiter put it, unescaped', () => {
+    expect(withApplyLink(`Postulez ici : ${URL_} merci`, URL_)).toBe(
+      `Postulez ici : ${URL_} merci`,
+    );
+    expect(toLittleText(`Voir ${URL_} (vite) #emploi`)).toBe(
+      `Voir ${URL_} \\(vite\\) {hashtag|\\#|emploi}`,
     );
   });
 
@@ -384,7 +401,10 @@ describe('LinkedinService', () => {
     expect(init.headers.Authorization).toBe('Bearer li-token');
     const body = JSON.parse(init.body);
     expect(body.author).toBe('urn:li:person:abc');
-    expect(body.commentary).toBe('Nous recrutons {hashtag|\\#|emploi}');
+    // No picture reachable: a link card, and the link in the text too.
+    expect(body.commentary).toMatch(
+      /^Nous recrutons \{hashtag\|\\#\|emploi\}\n\n👉 Postulez en ligne : .*\/carrieres\/akieni\/OF-1\?source=linkedin$/,
+    );
     expect(body.content.article.source).toMatch(
       /\/carrieres\/akieni\/OF-1\?source=linkedin$/,
     );
@@ -409,22 +429,20 @@ describe('LinkedinService', () => {
       ...queued,
       thumbnail_urn: 'urn:li:image:42',
     });
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(null, {
-          status: 201,
-          headers: { 'x-restli-id': 'urn:li:share:8' },
-        }),
-      );
+    const fetchMock = jest.fn().mockResolvedValueOnce(
+      new Response(null, {
+        status: 201,
+        headers: { 'x-restli-id': 'urn:li:share:8' },
+      }),
+    );
     global.fetch = fetchMock as never;
 
     await service.process({ data: { postId: 'post-1' }, attemptsMade: 0 });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(
-      JSON.parse(fetchMock.mock.calls[0][1].body).content.article.thumbnail,
-    ).toBe('urn:li:image:42');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).content.media.id).toBe(
+      'urn:li:image:42',
+    );
   });
 
   it('marks the connection expired when LinkedIn refuses the token', async () => {

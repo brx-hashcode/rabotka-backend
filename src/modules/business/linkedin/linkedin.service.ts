@@ -335,7 +335,7 @@ export class LinkedinService implements OnModuleInit {
         url: careersOfferUrl(offer.slug, offer.reference),
         title: `${offer.title} — ${offer.businessName}`,
         description: excerpt(offer.description),
-        thumbnail,
+        image: thumbnail,
       });
       await this.finish(post.id, { urn });
     } catch (err) {
