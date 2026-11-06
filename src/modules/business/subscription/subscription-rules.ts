@@ -105,7 +105,18 @@ type PricedPlan = { monthly_price_fcfa: number; annual_price_fcfa: number };
 
 /** A move to a dearer plan (by monthly price): it starts at once, not after the running one. */
 export function isUpgrade(current: PricedPlan, next: PricedPlan): boolean {
-  return next.monthly_price_fcfa > current.monthly_price_fcfa;
+  return monthlyEquivalent(next) > monthlyEquivalent(current);
+}
+
+/**
+ * What a plan costs a month: its monthly price, or a twelfth of the year for
+ * a plan sold by the year only (a custom plan with no monthly price), which
+ * compared at 0 was never an upgrade and waited behind a cheaper plan.
+ */
+function monthlyEquivalent(p: PricedPlan): number {
+  return p.monthly_price_fcfa > 0
+    ? p.monthly_price_fcfa
+    : Math.round(p.annual_price_fcfa / 12);
 }
 
 /**

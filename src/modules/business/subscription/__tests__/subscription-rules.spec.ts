@@ -163,3 +163,12 @@ describe('counterWindow', () => {
     ).toEqual({ from: m, resetsAt: null });
   });
 });
+
+describe('isUpgrade with a plan sold by the year only', () => {
+  it('compares a twelfth of the year when there is no monthly price', () => {
+    const cheap = { monthly_price_fcfa: 10_000, annual_price_fcfa: 100_000 };
+    const yearOnly = { monthly_price_fcfa: 0, annual_price_fcfa: 600_000 };
+    expect(isUpgrade(cheap, yearOnly)).toBe(true);
+    expect(isUpgrade(yearOnly, cheap)).toBe(false);
+  });
+});

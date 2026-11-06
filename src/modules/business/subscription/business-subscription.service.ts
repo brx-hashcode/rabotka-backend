@@ -893,6 +893,10 @@ export class BusinessSubscriptionService {
       throw new BadRequestException('Cette formule n’est pas disponible.');
     }
     const created = await this.prisma.$transaction(async (tx) => {
+      // One business's periods are placed one at a time: two payments
+      // approved together both read the same latest end and overlapped, and
+      // one paid period was never used.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${businessId}))`;
       const trial = await tx.businessSubscription.findFirst({
         where: {
           business_id: businessId,
