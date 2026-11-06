@@ -6,6 +6,7 @@ import {
   socialIconCid,
   socialIconFilename,
 } from './templates/social-icons-asset';
+import { escapeHtml, RECIPIENT_TOKEN } from './templates/layout';
 
 export type MailAttachment = {
   filename: string;
@@ -83,15 +84,20 @@ export class MailService {
       return { jobId: '' };
     }
 
+    // The footer's « Cet e-mail était destiné à … » (layout.ts).
+    const html = options.html?.replaceAll(
+      RECIPIENT_TOKEN,
+      escapeHtml(options.to.trim()),
+    );
     const attachments = [
       ...(options.attachments ?? []),
-      ...socialIconAttachments(options.html),
+      ...socialIconAttachments(html),
     ];
     const jobId = await this.queueService.addEmailJob({
       to: options.to,
       subject: options.subject,
       ...(options.text !== undefined && { text: options.text }),
-      ...(options.html !== undefined && { html: options.html }),
+      ...(html !== undefined && { html }),
       ...(options.from !== undefined && { from: options.from }),
       ...(options.fromName !== undefined && { fromName: options.fromName }),
       ...(attachments.length && { attachments }),
