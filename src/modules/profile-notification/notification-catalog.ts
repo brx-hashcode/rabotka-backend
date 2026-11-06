@@ -278,6 +278,18 @@ export type NotificationInput =
       jobTitle: string;
       scored: number;
       best: number | null;
+    }
+  | {
+      /** An offer posted on LinkedIn from Rabotka, or the post that failed. */
+      type: 'LINKEDIN_POST';
+      jobOfferId: string;
+      jobTitle: string;
+      /** Who it was posted as. */
+      authorName: string;
+      /** The post on LinkedIn; null when it failed. */
+      postUrl: string | null;
+      /** Why it failed, in the space's words. */
+      error?: string | null;
     };
 
 export type NotificationType = NotificationInput['type'];
@@ -740,6 +752,19 @@ export function renderNotification(
             : `${input.scored} CV classé${input.scored > 1 ? 's' : ''} pour${quoted(input.jobTitle)}${input.best !== null ? ` : le meilleur obtient ${input.best}/100` : ''}.`,
         link: `/espace/analyse-cv/${input.screeningId}`,
       };
+
+    case 'LINKEDIN_POST':
+      return input.postUrl
+        ? {
+            title: 'Offre publiée sur LinkedIn',
+            body: `${quoted(input.jobTitle).trim()} est en ligne sur le LinkedIn de ${input.authorName} : les candidats postulent sur votre page carrières.`,
+            link: `/espace/offres/${input.jobOfferId}`,
+          }
+        : {
+            title: 'Publication LinkedIn non aboutie',
+            body: `${quoted(input.jobTitle).trim()} n’a pas pu être publiée sur LinkedIn${input.error ? ` : ${input.error}` : '.'}`,
+            link: `/espace/offres/${input.jobOfferId}`,
+          };
 
     case 'BUSINESS_DOCUMENT_REJECTED':
       return {

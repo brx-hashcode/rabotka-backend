@@ -1396,6 +1396,7 @@ model JobOffer {
   agent_leads             AgentLead[]
   cv_screenings           CvScreening[]
   interviews              Interview[]
+  linkedin_posts          JobOfferLinkedinPost[]
   deleted_at              DateTime?              @db.Timestamptz
   /// The employer closed it. Nothing reopens it until they republish, not even
   /// a hire dropping out; an EXPIRED status alone cannot tell this from expiry.
@@ -2270,6 +2271,8 @@ enum ProfileNotificationType {
   INTERVIEW_INVITED
   INTERVIEW_CANCELLED
   INTERVIEW_ANSWERED
+  /// An offer posted on LinkedIn from Rabotka, or the post that failed.
+  LINKEDIN_POST
 }
 
 /// The in-app feed behind the bell in rabotka-client.
@@ -3464,6 +3467,7 @@ model Business {
   cv_screenings CvScreening[]
   interviews    Interview[]
   mailboxes     BusinessMailbox[]
+  linkedin_accounts BusinessLinkedinAccount[]
   members       BusinessMember[]
   activities    BusinessActivity[]
   candidate_notes    CandidateNote[]
@@ -3892,6 +3896,60 @@ enum MailProvider {
 /// A mailbox a business connected (OAuth) to pick CVs from its e-mails for
 /// « Analyse de CV ». Only the tokens are kept, encrypted (MAILBOX_TOKEN_KEY):
 /// mails are read on demand, never stored.
+/// A team member's own LinkedIn account, connected to post the business's
+/// offers on it (« Share on LinkedIn »). One per person: the account holder
+/// (`person` = "holder") or a member (`person` = its member id).
+model BusinessLinkedinAccount {
+  id               String    @id @default(uuid()) @db.Uuid
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+  business_id      String    @db.Uuid
+  person           String
+  /// The member's OpenID subject: the author of its posts (urn:li:person:<sub>).
+  linkedin_sub     String
+  name             String
+  picture_url      String?
+  /// Sealed like the mailbox tokens (MAILBOX_TOKEN_KEY). About 60 days, no refresh token.
+  access_token_enc String    @db.Text
+  expires_at       DateTime
+  /// LinkedIn refused the token before its date: connect again.
+  expired_at       DateTime?
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@unique([business_id, person])
+  @@map("business_linkedin_accounts")
+}
+
+enum LinkedinPostStatus {
+  QUEUED
+  PUBLISHED
+  FAILED
+}
+
+/// An offer posted on LinkedIn from Rabotka: what the offer page shows
+/// (« Publiée sur LinkedIn le … ») and what stops a double post.
+model JobOfferLinkedinPost {
+  id           String             @id @default(uuid()) @db.Uuid
+  created_at   DateTime           @default(now())
+  updated_at   DateTime           @updatedAt
+  offer_id     String             @db.Uuid
+  business_id  String             @db.Uuid
+  person       String
+  author_name  String
+  text         String             @db.Text
+  status       LinkedinPostStatus @default(QUEUED)
+  /// urn:li:share:… or urn:li:ugcPost:…, from the x-restli-id header.
+  post_urn     String?
+  error        String?
+  published_at DateTime?
+
+  offer JobOffer @relation(fields: [offer_id], references: [id], onDelete: Cascade)
+
+  @@index([offer_id, created_at])
+  @@map("job_offer_linkedin_posts")
+}
+
 model BusinessMailbox {
   id                      String       @id @default(uuid()) @db.Uuid
   created_at              DateTime     @default(now())
