@@ -3938,6 +3938,9 @@ model JobOfferLinkedinPost {
   person       String
   author_name  String
   text         String             @db.Text
+  /// The recruiter's own card picture, already on LinkedIn (urn:li:image:…);
+  /// null: the offer's share picture is uploaded when it is posted.
+  thumbnail_urn String?
   status       LinkedinPostStatus @default(QUEUED)
   /// urn:li:share:… or urn:li:ugcPost:…, from the x-restli-id header.
   post_urn     String?

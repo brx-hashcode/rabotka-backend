@@ -17,6 +17,7 @@ import {
   VerificationStatus,
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import sharp from 'sharp';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { LINKEDIN_POST_QUEUE } from '../../../common/services/queue/queue.module';
 import {
@@ -237,6 +238,7 @@ export class LinkedinService implements OnModuleInit {
     offerId: string,
     text: string,
     again = false,
+    image?: Buffer,
   ) {
     if (!this.available) {
       throw new ServiceUnavailableException(
@@ -271,6 +273,16 @@ export class LinkedinService implements OnModuleInit {
         );
       }
     }
+    // The recruiter's own picture goes to LinkedIn now, while they wait: a
+    // file is never queued, and a refused token is said at once.
+    const thumbnail = image
+      ? await this.uploadOwnPicture(
+          account.id,
+          account.access_token_enc,
+          account.linkedin_sub,
+          image,
+        )
+      : null;
     const post = await this.prisma.jobOfferLinkedinPost.create({
       data: {
         offer_id: offerId,
@@ -278,6 +290,7 @@ export class LinkedinService implements OnModuleInit {
         person,
         author_name: account.name,
         text: text.trim(),
+        thumbnail_urn: thumbnail,
       },
     });
     await this.queue.addJob<PostJob>(LINKEDIN_POST_QUEUE, { postId: post.id });
@@ -314,7 +327,8 @@ export class LinkedinService implements OnModuleInit {
     const token = this.crypto.open(account.access_token_enc);
     const author = `urn:li:person:${account.linkedin_sub}`;
     try {
-      const thumbnail = await this.cardPicture(token, author, offer);
+      const thumbnail =
+        post.thumbnail_urn ?? (await this.cardPicture(token, author, offer));
       const urn = await createPost(token, {
         authorUrn: author,
         text: post.text,
@@ -341,6 +355,48 @@ export class LinkedinService implements OnModuleInit {
       this.logger.warn(`LinkedIn post ${post.id} failed: ${String(err)}`);
       return fail(
         'LinkedIn n’a pas accepté la publication. Réessayez plus tard.',
+      );
+    }
+  }
+
+  /**
+   * A picture of the recruiter's own for the card: re-encoded as a JPEG at
+   * most 1200 px wide (LinkedIn takes no WEBP; a photo's metadata goes), then
+   * uploaded to LinkedIn. Returns the image's URN.
+   */
+  private async uploadOwnPicture(
+    accountId: string,
+    sealedToken: string,
+    sub: string,
+    image: Buffer,
+  ): Promise<string> {
+    let jpeg: Buffer;
+    try {
+      jpeg = await sharp(image)
+        .rotate()
+        .resize({ width: 1200, withoutEnlargement: true })
+        .jpeg({ quality: 85 })
+        .toBuffer();
+    } catch {
+      throw new BadRequestException('Cette image n’a pas pu être lue.');
+    }
+    try {
+      return await uploadImage(
+        this.crypto!.open(sealedToken),
+        `urn:li:person:${sub}`,
+        jpeg,
+      );
+    } catch (err) {
+      if (err instanceof LinkedinAuthError) {
+        await this.prisma.businessLinkedinAccount.update({
+          where: { id: accountId },
+          data: { expired_at: new Date() },
+        });
+        throw new BadRequestException(EXPIRED_MESSAGE);
+      }
+      this.logger.warn(`LinkedIn picture upload failed: ${String(err)}`);
+      throw new BadRequestException(
+        'LinkedIn n’a pas accepté cette image. Réessayez, ou gardez l’image de l’offre.',
       );
     }
   }

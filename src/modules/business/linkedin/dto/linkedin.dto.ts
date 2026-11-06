@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
   IsBoolean,
   IsNotEmpty,
@@ -25,7 +26,9 @@ export class LinkedinPostDto {
   @ApiPropertyOptional({
     description: 'Post it again although it was already posted (after an edit)',
   })
+  // A multipart field when a picture comes with it: « true » as text.
   @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   again?: boolean;
 }
