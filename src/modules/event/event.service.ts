@@ -169,8 +169,8 @@ export class EventService {
 
     this.eventEmitter.emit(AdminNotificationEvent.EVENT_CREATED, {
       event: AdminNotificationEvent.EVENT_CREATED,
-      title: 'Nouvel événement',
-      message: `Nouvel événement créé : ${dto.title}`,
+      title: 'New event',
+      message: `New event created: ${dto.title}`,
       entityType: 'event',
       entityId: String(event.id),
       timestamp: new Date().toISOString(),
@@ -313,8 +313,8 @@ export class EventService {
   private emitUpdated(mapped: ReturnType<typeof mapEvent>) {
     this.eventEmitter.emit(AdminNotificationEvent.EVENT_UPDATED, {
       event: AdminNotificationEvent.EVENT_UPDATED,
-      title: 'Événement modifié',
-      message: `L'événement a été modifié : ${mapped.title}`,
+      title: 'Event updated',
+      message: `Event updated: ${mapped.title}`,
       entityType: 'event',
       entityId: String(mapped.id),
       timestamp: new Date().toISOString(),

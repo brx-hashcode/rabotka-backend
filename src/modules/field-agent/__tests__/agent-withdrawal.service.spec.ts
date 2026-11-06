@@ -186,7 +186,7 @@ describe('AgentWithdrawalService', () => {
           entityId: 'wd-1',
           // fr-FR groups thousands with a narrow no-break space.
           message: expect.stringMatching(
-            /^Jean K demande 2\s000 FCFA \(MTN\)$/,
+            /^Jean K requests 2\s000 FCFA \(MTN\)$/,
           ),
         }),
       );

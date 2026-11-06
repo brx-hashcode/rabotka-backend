@@ -28,8 +28,8 @@ export async function notifyAgentPlacement(
       : 'un travailleur';
     deps.events.emit(AdminNotificationEvent.AGENT_PLACEMENT, {
       event: AdminNotificationEvent.AGENT_PLACEMENT,
-      title: 'Nouveau placement agent',
-      message: `${p.agentFirstName ?? 'Un agent'} a placé ${workerName} sur « ${p.jobTitle} »`,
+      title: 'New agent placement',
+      message: `${p.agentFirstName ?? 'An agent'} placed ${workerName} on « ${p.jobTitle} »`,
       // The application, not the agent: that is what an admin opens next,
       // and its detail names the agent.
       entityType: 'agent-placement',

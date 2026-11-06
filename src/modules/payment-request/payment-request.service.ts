@@ -951,8 +951,8 @@ export class PaymentRequestService {
     const profileName = this.fullName(request.profile);
     this.eventEmitter.emit(AdminNotificationEvent.PAYMENT_PENALTY, {
       event: AdminNotificationEvent.PAYMENT_PENALTY,
-      title: 'Paiement reçu',
-      message: `${profileName} a effectué un paiement de ${context.amount.toLocaleString('fr-FR')} FCFA — ${context.paymentDescription}`,
+      title: 'Payment received',
+      message: `${profileName} paid ${context.amount.toLocaleString('fr-FR')} FCFA — ${context.paymentDescription}`,
       entityType: 'profile',
       entityId: request.profile_id,
       timestamp: new Date().toISOString(),

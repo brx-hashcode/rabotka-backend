@@ -323,8 +323,8 @@ export class PaymentService {
 
     this.eventEmitter.emit(AdminNotificationEvent.PAYMENT_PENALTY, {
       event: AdminNotificationEvent.PAYMENT_PENALTY,
-      title: 'Paiement pénalité',
-      message: `Paiement de pénalité réussi pour ${penaltyProfileName}`,
+      title: 'Penalty payment',
+      message: `Penalty paid by ${penaltyProfileName}`,
       entityType: 'payment',
       entityId: String(profileId),
       timestamp: new Date().toISOString(),
@@ -332,8 +332,8 @@ export class PaymentService {
 
     this.eventEmitter.emit(AdminNotificationEvent.PENALTY_SOLVED, {
       event: AdminNotificationEvent.PENALTY_SOLVED,
-      title: 'Pénalité réglée',
-      message: `Les pénalités de ${penaltyProfileName} ont été réglées`,
+      title: 'Penalties settled',
+      message: `${penaltyProfileName}'s penalties are settled`,
       entityType: 'penalty',
       entityId: String(profileId),
       timestamp: new Date().toISOString(),

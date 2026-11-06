@@ -1440,8 +1440,8 @@ export class BusinessSubscriptionService {
       ) {
         this.events.emit(AdminNotificationEvent.PAYMENT_ACTIVATION, {
           event: AdminNotificationEvent.PAYMENT_ACTIVATION,
-          title: 'Abonnement payé sans période',
-          message: `Le paiement ${request.id} est validé mais la période de l'abonnement n'a pas pu être créée (${error}). À attribuer à la main.`,
+          title: 'Subscription paid without a period',
+          message: `Payment ${request.id} is confirmed but the subscription period could not be created (${error}). Grant it by hand.`,
           entityType: 'payment',
           entityId: request.id,
           timestamp: now.toISOString(),
