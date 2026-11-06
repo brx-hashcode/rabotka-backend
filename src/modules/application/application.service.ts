@@ -980,8 +980,6 @@ export class ApplicationService {
       throw new BadRequestException("Cette candidature n'est plus en attente");
     }
 
-    let autoRejectedIds: string[] = [];
-
     await this.prisma.$transaction(async (tx) => {
       // Lock the application row first to prevent concurrent duplicate-accept
       await tx.$executeRaw`SELECT id FROM "applications" WHERE id = ${applicationId}::uuid FOR UPDATE`;
@@ -1056,47 +1054,15 @@ export class ApplicationService {
         },
       });
       await this.contactUnlock.initiateUnlock(applicationId, employerId, tx);
-
-      if (offerStatus === JobOfferStatus.FILLED) {
-        const toAutoReject = await tx.application.findMany({
-          where: {
-            job_offer_id: application.job_offer_id,
-            id: { not: applicationId },
-            status: {
-              in: [ApplicationStatus.PENDING, ApplicationStatus.VIEWED],
-            },
-          },
-          select: { id: true },
-        });
-        autoRejectedIds = toAutoReject.map((a) => a.id);
-
-        if (autoRejectedIds.length > 0) {
-          await tx.application.updateMany({
-            where: { id: { in: autoRejectedIds } },
-            data: {
-              status: ApplicationStatus.REJECTED,
-              rejected_at: new Date(),
-              // The offer filled up — nobody judged these workers. Marking them
-              // AUTO_FILL keeps them out of negative preference signals; without
-              // it, losing two races looks identical to being turned down twice.
-              rejection_source: RejectionSource.AUTO_FILL,
-            },
-          });
-        }
-      }
+      // The others still waiting are refused only once this hire is
+      // confirmed (contact obtained → ACCEPTED, rejectLeftoversIfOfferFilled):
+      // refused now, a hire that falls through reopened the offer with
+      // nobody left to retain.
     });
 
-    for (const appId of autoRejectedIds) {
-      this.botNotification
-        .sendApplicationRejectedToWorker(appId)
-        .catch((err: unknown) =>
-          console.warn(`[accept] auto-reject notify failed for ${appId}:`, err),
-        );
-    }
-
     // The accepted worker was only ever notified from the WhatsApp accept flow,
-    // so accepting on the web left them uninformed while their rivals got their
-    // rejection. Fires here so both channels behave the same.
+    // so accepting on the web left them uninformed. Fires here so both
+    // channels behave the same.
     void this.botNotification
       .sendApplicationAcceptedToWorker(applicationId)
       .catch((err: unknown) =>
@@ -1171,8 +1137,14 @@ export class ApplicationService {
     }
     const message = refusalMessage(reason);
 
-    const updated = await this.prisma.application.update({
-      where: { id: applicationId },
+    // Refused only if still waiting at the moment of writing: a retention in
+    // another tab (or the bulk loop) between the check above and here must
+    // not be overwritten, leaving an open hire behind a refused application.
+    const { count } = await this.prisma.application.updateMany({
+      where: {
+        id: applicationId,
+        status: { in: [ApplicationStatus.PENDING, ApplicationStatus.VIEWED] },
+      },
       data: {
         status: ApplicationStatus.REJECTED,
         rejected_at: new Date(),
@@ -1182,6 +1154,12 @@ export class ApplicationService {
         // variant may ever be read as a negative preference signal.
         rejection_source: RejectionSource.EMPLOYER,
       },
+    });
+    if (count === 0) {
+      throw new BadRequestException("Cette candidature n'est plus en attente");
+    }
+    const updated = await this.prisma.application.findUniqueOrThrow({
+      where: { id: applicationId },
       include: {
         job_offer: {
           include: {
