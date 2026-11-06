@@ -65,7 +65,18 @@ const emit = jest.fn();
 
 const serviceWith = (found: unknown, offers: unknown[] = [], one?: unknown) => {
   const prisma = {
-    business: { findFirst: jest.fn().mockResolvedValue(found) },
+    business: {
+      findFirst: jest.fn().mockResolvedValue(found),
+      // Who of the business is e-mailed: its holder, no team yet.
+      findUnique: jest.fn().mockResolvedValue({
+        id: 'b1',
+        profile: { email: 'boss@kamoa.cg', first_name: 'Awa' },
+      }),
+    },
+    businessMember: {
+      findMany: jest.fn().mockResolvedValue([]),
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
     jobOffer: {
       findMany: jest.fn().mockResolvedValue(offers),
       findFirst: jest.fn().mockResolvedValue(one ?? null),
@@ -624,12 +635,16 @@ describe('CareersService', () => {
       const { service } = serviceWith(business, [], open);
 
       await service.apply('kamoa', 'RBT-AC5LF', pdf, { ...dto, answers });
-      await new Promise((resolve) => setImmediate(resolve));
+      for (let i = 0; i < 5; i++) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
 
       expect(emit).toHaveBeenCalled();
+      // The candidate, then the team (the holder's address, not the
+      // organisation's contact one).
       expect(sendMail.mock.calls.map(([mail]) => mail.to)).toEqual([
         'awa@example.com',
-        'rh@kamoa.cg',
+        'boss@kamoa.cg',
       ]);
     });
 

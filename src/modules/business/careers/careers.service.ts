@@ -61,6 +61,7 @@ import {
   DOCX_MIME,
 } from '../cv-screening/cv-files';
 import type { ApplyDto } from './dto/apply.dto';
+import { businessEmailRecipientsOfProfile } from '../team/business-recipients';
 
 const OPEN: JobOfferStatus[] = [
   JobOfferStatus.ACTIVE,
@@ -405,16 +406,30 @@ export class CareersService {
       `Candidature envoyée à ${business.name}`,
       applicationReceivedEmail(firstName, business.name, offer.title),
     );
-    void this.send(
-      business.email,
-      `Nouvelle candidature : ${offer.title}`,
-      newExternalApplicationEmail(
-        name,
-        offer.title,
-        // The offer, where its candidates are, rather than every candidature.
-        `${businessDashboardUrl()}/offres/${offer.id}`,
-      ),
-    );
+    // To the team, as its other recruiting e-mails: the holder and every
+    // member who left them on (not the organisation's contact address).
+    void businessEmailRecipientsOfProfile(
+      this.prisma,
+      business.profile_id,
+      'recruiting',
+    )
+      .then(async (recipients) => {
+        for (const r of recipients) {
+          await this.send(
+            r.email,
+            `Nouvelle candidature : ${offer.title}`,
+            newExternalApplicationEmail(
+              name,
+              offer.title,
+              // The offer, where its candidates are, rather than every candidature.
+              `${businessDashboardUrl()}/offres/${offer.id}`,
+            ),
+          );
+        }
+      })
+      .catch((err) =>
+        this.logger.warn(`Careers mail recipients failed: ${String(err)}`),
+      );
     // Scored at once, on the plan's « CV inclus ». The candidate is not kept
     // waiting, and a plan with none left simply shows the CV unscored.
     void enqueueCvAnalysis(this.queue, {
