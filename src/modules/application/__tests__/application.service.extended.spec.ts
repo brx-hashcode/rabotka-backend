@@ -202,10 +202,34 @@ describe('ApplicationService (extended)', () => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue(
         mockApplication,
       );
-      (prisma.application.update as jest.Mock).mockResolvedValue({
-        ...mockApplication,
-        status: ApplicationStatus.REJECTED,
+      (prisma.application as any).updateMany = jest
+        .fn()
+        .mockResolvedValue({ count: 1 });
+      (prisma.application as any).findUniqueOrThrow = jest
+        .fn()
+        .mockResolvedValue({
+          ...mockApplication,
+          status: ApplicationStatus.REJECTED,
+        });
+    });
+
+    it('refuses only while still waiting, in the write itself', async () => {
+      await service.reject(APPLICATION_ID, EMPLOYER_ID);
+      expect(
+        (prisma.application as any).updateMany.mock.calls[0][0].where,
+      ).toEqual({
+        id: APPLICATION_ID,
+        status: {
+          in: [ApplicationStatus.PENDING, ApplicationStatus.VIEWED],
+        },
       });
+    });
+
+    it('does not overwrite a retention that happened meanwhile', async () => {
+      (prisma.application as any).updateMany.mockResolvedValue({ count: 0 });
+      await expect(service.reject(APPLICATION_ID, EMPLOYER_ID)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('rejects application successfully', async () => {
@@ -240,10 +264,6 @@ describe('ApplicationService (extended)', () => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue({
         ...mockApplication,
         status: ApplicationStatus.VIEWED,
-      });
-      (prisma.application.update as jest.Mock).mockResolvedValue({
-        ...mockApplication,
-        status: ApplicationStatus.REJECTED,
       });
       const result = await service.reject(APPLICATION_ID, EMPLOYER_ID);
       expect(result.status).toBe(ApplicationStatus.REJECTED);
