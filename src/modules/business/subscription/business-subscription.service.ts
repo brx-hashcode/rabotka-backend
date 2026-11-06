@@ -1467,16 +1467,22 @@ export class BusinessSubscriptionService {
       },
       include: { plan: true },
     });
+    // The periods queued after the running ones, read once rather than one
+    // query per running period.
+    const queuedPeriods = await this.prisma.businessSubscription.findMany({
+      where: {
+        business_id: { in: [...new Set(running.map((r) => r.business_id))] },
+        status: BusinessSubscriptionStatus.ACTIVE,
+        starts_at: { gt: now },
+      },
+      select: { business_id: true, starts_at: true },
+    });
     for (const sub of running) {
       // Not when the next period is already queued: nothing to renew.
-      const queued = await this.prisma.businessSubscription.count({
-        where: {
-          business_id: sub.business_id,
-          status: BusinessSubscriptionStatus.ACTIVE,
-          starts_at: { gte: sub.ends_at },
-        },
-      });
-      if (queued > 0) continue;
+      const queued = queuedPeriods.some(
+        (q) => q.business_id === sub.business_id && q.starts_at >= sub.ends_at,
+      );
+      if (queued) continue;
       const due = dueReminder(
         now,
         sub.ends_at,

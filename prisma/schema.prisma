@@ -4055,6 +4055,9 @@ model CandidateOpinion {
 
   @@unique([member_id, application_id])
   @@unique([member_id, external_application_id])
+  // The opinions of one candidate, read per offer and per application.
+  @@index([application_id], name: "idx_candidate_opinion_application")
+  @@index([external_application_id], name: "idx_candidate_opinion_external")
   @@map("candidate_opinions")
 }
 
@@ -4112,6 +4115,8 @@ model ExternalApplication {
 
   @@unique([job_offer_id, email])
   @@index([created_at], name: "idx_external_application_created")
+  // Per offer and status: the offer page, the sweeps every few minutes.
+  @@index([job_offer_id, status], name: "idx_external_application_offer_status")
   @@map("external_applications")
 }
 

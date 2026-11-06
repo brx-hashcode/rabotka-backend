@@ -363,6 +363,9 @@ export const APPLICANT_PUBLIC_SELECT = {
   reliability_score: true,
 } as const satisfies Prisma.ProfileSelect;
 
+/** Applicants listed for one offer (the newest). */
+const MAX_OFFER_APPLICANTS = 300;
+
 @Injectable()
 export class ApplicationService {
   constructor(
@@ -806,8 +809,10 @@ export class ApplicationService {
 
   async findByJobOffer(jobOfferId: string): Promise<ApplicationWithOffer[]> {
     const applications = await this.prisma.application.findMany({
-      where: { job_offer_id: jobOfferId },
+      // Not one an admin deleted; the newest, polled every 30 s by the offer page.
+      where: { job_offer_id: jobOfferId, deleted_at: null },
       orderBy: { created_at: 'desc' },
+      take: MAX_OFFER_APPLICANTS,
       include: {
         job_offer: {
           include: {
