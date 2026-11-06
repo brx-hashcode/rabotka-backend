@@ -154,6 +154,14 @@ export class CreateBusinessPlanDto {
   @IsBoolean()
   priorityVisibility?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      '« Publier sur LinkedIn » from Rabotka (the share link is open to all)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  linkedinPosting?: boolean;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()

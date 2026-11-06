@@ -38,6 +38,7 @@ export function planView(
     reviewersLimit: p.reviewers_limit,
     includesPreselection: p.includes_preselection,
     priorityVisibility: p.priority_visibility,
+    linkedinPosting: p.linkedin_posting,
     isActive: p.is_active,
     sortOrder: p.sort_order,
   };
@@ -62,6 +63,7 @@ export function planData(dto: {
   reviewersLimit?: number | null;
   includesPreselection?: boolean;
   priorityVisibility?: boolean;
+  linkedinPosting?: boolean;
   isActive?: boolean;
   sortOrder?: number;
   businessId?: string | null;
@@ -84,6 +86,7 @@ export function planData(dto: {
     reviewers_limit: dto.reviewersLimit,
     includes_preselection: dto.includesPreselection,
     priority_visibility: dto.priorityVisibility,
+    linkedin_posting: dto.linkedinPosting,
     is_active: dto.isActive,
     sort_order: dto.sortOrder,
     business_id: dto.businessId,

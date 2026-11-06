@@ -198,6 +198,7 @@ describe('LinkedinService', () => {
     };
     const subscriptions: any = {
       businessOf: jest.fn().mockResolvedValue('biz-1'),
+      entitlements: jest.fn().mockResolvedValue({ linkedinPosting: true }),
     };
     const queue: any = { addJob: jest.fn(), createWorker: jest.fn() };
     const events: any = { emit: jest.fn() };
@@ -209,7 +210,7 @@ describe('LinkedinService', () => {
       events,
       config as any,
     );
-    return { service, prisma, queue, events };
+    return { service, prisma, queue, events, subscriptions };
   }
 
   it('is not offered without the app credentials or the token key', async () => {
@@ -221,7 +222,7 @@ describe('LinkedinService', () => {
     );
     await expect(
       make({ LINKEDIN_CLIENT_ID: '' }).service.account('p-1', undefined),
-    ).resolves.toEqual({ available: false, account: null });
+    ).resolves.toEqual({ available: false, included: false, account: null });
   });
 
   it('connects the signed-in person: a member by its id, sealed token', async () => {
@@ -397,6 +398,22 @@ describe('LinkedinService', () => {
     expect(
       prisma.jobOfferLinkedinPost.create.mock.calls[1][0].data.thumbnail_urn,
     ).toBeNull();
+  });
+
+  it('refuses to connect or post when the plan leaves LinkedIn out', async () => {
+    const { service, subscriptions, queue } = make();
+    subscriptions.entitlements.mockResolvedValue({ linkedinPosting: false });
+    await expect(service.connectUrl('p-1', undefined)).rejects.toThrow(
+      'n’est pas incluse dans votre formule',
+    );
+    await expect(
+      service.queuePost('p-1', undefined, 'o-1', 'x'),
+    ).rejects.toThrow('n’est pas incluse dans votre formule');
+    expect(queue.addJob).not.toHaveBeenCalled();
+    await expect(service.account('p-1', undefined)).resolves.toMatchObject({
+      available: true,
+      included: false,
+    });
   });
 
   it('refuses an offer that is not on the careers page', async () => {
