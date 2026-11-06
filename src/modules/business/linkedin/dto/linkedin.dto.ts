@@ -31,4 +31,13 @@ export class LinkedinPostDto {
   @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   again?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Posting again without a picture: use the offer’s share image rather than the previous post’s own picture',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  offerImage?: boolean;
 }

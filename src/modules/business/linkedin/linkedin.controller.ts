@@ -81,6 +81,7 @@ export class LinkedinController {
       dto.text,
       dto.again ?? false,
       image?.buffer,
+      dto.offerImage ?? false,
     );
   }
 
