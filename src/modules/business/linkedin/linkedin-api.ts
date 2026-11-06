@@ -232,6 +232,23 @@ export async function createPost(
   return urn;
 }
 
+/**
+ * Where an uploaded picture can be seen (a signed, expiring address): to show
+ * the recruiter the picture its post carries.
+ */
+export async function imageDownloadUrl(
+  accessToken: string,
+  imageUrn: string,
+): Promise<string | null> {
+  const res = await fetch(
+    `${API}/rest/images/${encodeURIComponent(imageUrn)}`,
+    { headers: restHeaders(accessToken), signal: AbortSignal.timeout(10_000) },
+  );
+  if (!res.ok) return null;
+  const body = (await res.json()) as { downloadUrl?: string };
+  return body.downloadUrl ?? null;
+}
+
 /** Where a post is read: its URN in a feed link. */
 export function postUrl(urn: string): string {
   return `https://www.linkedin.com/feed/update/${encodeURIComponent(urn)}/`;
