@@ -2547,6 +2547,7 @@ export class ProfileService {
         registrationNumber: business.registration_number,
         taxId: business.tax_id,
         statisticalId: business.statistical_id,
+        countryCode: business.country_code,
       },
       { ...dto, legalForm },
     );

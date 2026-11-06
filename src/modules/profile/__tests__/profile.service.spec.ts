@@ -2039,16 +2039,23 @@ describe('ProfileService', () => {
         expect(data).not.toHaveProperty('previous_slugs');
       });
 
+      it('refuses the owner a new country: its papers are that country’s', async () => {
+        await expect(
+          service.updateBusiness('p-1', { countryCode: 'GA' } as any, 'owner'),
+        ).rejects.toThrow(ForbiddenException);
+        expect((prisma as any).business.update).not.toHaveBeenCalled();
+      });
+
       it('moves only to a country Rabotka Business is open in, and clears the address', async () => {
         await expect(
-          service.updateBusiness('p-1', { countryCode: 'FR' } as any, 'owner'),
+          service.updateBusiness('p-1', { countryCode: 'FR' } as any, 'admin'),
         ).rejects.toThrow(/disponible au Congo-Brazzaville/);
         expect((prisma as any).business.update).not.toHaveBeenCalled();
 
         await service.updateBusiness(
           'p-1',
           { countryCode: 'GA', address: null } as any,
-          'owner',
+          'admin',
         );
         expect((prisma as any).business.update).toHaveBeenCalledWith({
           where: { id: 'b-1' },
