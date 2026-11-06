@@ -1,5 +1,6 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { z } from 'zod';
+import { booleanish, numberish } from './lenient-answer';
 import {
   experienceMonths,
   experiencesSchema,
@@ -80,31 +81,36 @@ const lines = (max: number) =>
       ),
   );
 
-const mark = z
-  .number()
-  .nullish()
-  .transform((n) =>
-    n === null || n === undefined || !Number.isFinite(n)
-      ? null
-      : Math.round(Math.min(100, Math.max(0, n))),
-  );
+// `"80"` reads as 80 (lenient-answer.ts).
+const mark = numberish(
+  z
+    .number()
+    .nullish()
+    .transform((n) =>
+      n === null || n === undefined || !Number.isFinite(n)
+        ? null
+        : Math.round(Math.min(100, Math.max(0, n))),
+    ),
+);
 
 const answerSchema = z.object({
-  isCv: z.boolean(),
+  isCv: booleanish(z.boolean()),
   candidate: absentIfNull(
     z
       .object({
         name: nullableText(120),
         currentTitle: nullableText(120),
         city: nullableText(80),
-        yearsExperience: z
-          .number()
-          .nullish()
-          .transform((n) =>
-            n === null || n === undefined || !Number.isFinite(n) || n < 0
-              ? null
-              : Math.min(60, Math.round(n)),
-          ),
+        yearsExperience: numberish(
+          z
+            .number()
+            .nullish()
+            .transform((n) =>
+              n === null || n === undefined || !Number.isFinite(n) || n < 0
+                ? null
+                : Math.min(60, Math.round(n)),
+            ),
+        ),
         email: nullableText(160),
         phone: nullableText(40),
         experiences: experiencesSchema,

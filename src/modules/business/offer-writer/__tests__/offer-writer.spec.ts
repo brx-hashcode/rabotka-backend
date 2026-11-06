@@ -30,6 +30,15 @@ describe('offer-writer', () => {
     ).toMatchObject({ categoryName: null, employmentType: null });
   });
 
+  it('drops null items rather than refusing the whole draft', () => {
+    expect(
+      parseDraft(
+        answer({ removed: [null, 'Le salaire'], toConfirm: null }),
+        TRADES,
+      ),
+    ).toMatchObject({ removed: ['Le salaire'] });
+  });
+
   it('keeps within the form’s limits, cutting at a line, and drops markdown', () => {
     const long = Array.from(
       { length: 60 },

@@ -1,5 +1,6 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { z } from 'zod';
+import { lenientLines } from '../cv-screening/lenient-answer';
 
 /**
  * « Rédiger avec l'IA »: an offer written from a few words, in the shape the
@@ -96,8 +97,9 @@ const answerSchema = z.object({
   description: z.string().trim().min(20),
   categoryName: z.string().trim().nullish(),
   employmentType: z.string().nullish(),
-  removed: z.array(z.string().trim()).nullish(),
-  toConfirm: z.array(z.string().trim()).nullish(),
+  // null items dropped rather than the whole draft refused.
+  removed: lenientLines,
+  toConfirm: lenientLines,
 });
 
 /** Cuts at the last full line (or word) that fits, never mid-word. */
