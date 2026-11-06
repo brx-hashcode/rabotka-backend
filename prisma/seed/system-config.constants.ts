@@ -816,6 +816,72 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Adresse physique',
     isSecret: false,
   },
+  // The company, as the foot of every email names it.
+  {
+    key: 'company.legal_name',
+    value: 'Rabotka',
+    category: ConfigCategory.CONTACT,
+    label: 'Raison sociale (pied des e-mails)',
+    isSecret: false,
+  },
+  {
+    key: 'company.rccm',
+    value: '',
+    category: ConfigCategory.CONTACT,
+    label: 'Numéro RCCM (pied des e-mails ; vide = masqué)',
+    isSecret: false,
+  },
+  // The networks' links, as icons at the foot of every email. Empty: no icon.
+  // The first three are the website footer's.
+  {
+    key: 'social.facebook',
+    value: 'https://www.facebook.com/share/18pxQBc8nD',
+    category: ConfigCategory.CONTACT,
+    label: 'Page Facebook',
+    isSecret: false,
+  },
+  {
+    key: 'social.instagram',
+    value: 'https://www.instagram.com/rabotka__',
+    category: ConfigCategory.CONTACT,
+    label: 'Compte Instagram',
+    isSecret: false,
+  },
+  {
+    key: 'social.linkedin',
+    value: 'https://www.linkedin.com/company/rabotka',
+    category: ConfigCategory.CONTACT,
+    label: 'Page LinkedIn',
+    isSecret: false,
+  },
+  {
+    key: 'social.tiktok',
+    value: '',
+    category: ConfigCategory.CONTACT,
+    label: 'Compte TikTok',
+    isSecret: false,
+  },
+  {
+    key: 'social.x',
+    value: '',
+    category: ConfigCategory.CONTACT,
+    label: 'Compte X',
+    isSecret: false,
+  },
+  {
+    key: 'social.youtube',
+    value: '',
+    category: ConfigCategory.CONTACT,
+    label: 'Chaîne YouTube',
+    isSecret: false,
+  },
+  {
+    key: 'social.whatsapp',
+    value: '',
+    category: ConfigCategory.CONTACT,
+    label: 'Lien WhatsApp (wa.me ou chaîne)',
+    isSecret: false,
+  },
   {
     key: 'contact.orange_money_number',
     value: '06 000 0000',

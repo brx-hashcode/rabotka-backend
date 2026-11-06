@@ -7,6 +7,12 @@ import {
   RABOTKA_LOGO_FILENAME,
   rabotkaLogoBuffer,
 } from './templates/logo-asset';
+import {
+  SOCIAL_NETWORKS,
+  socialIconBuffer,
+  socialIconCid,
+  socialIconFilename,
+} from './templates/social-icons-asset';
 
 function formatFromField(from?: string, fromName?: string): string | undefined {
   if (from === undefined && fromName === undefined) return undefined;
@@ -34,6 +40,20 @@ function logoAttachment() {
     cid: RABOTKA_LOGO_CID,
     contentDisposition: 'inline' as const,
   };
+}
+
+/** The footer's social icons this email points at, inline like the logo. */
+function socialAttachments(html?: string) {
+  if (!html) return [];
+  return SOCIAL_NETWORKS.filter((n) =>
+    html.includes(`cid:${socialIconCid(n)}`),
+  ).map((n) => ({
+    filename: socialIconFilename(n),
+    content: socialIconBuffer(n),
+    contentType: 'image/png',
+    cid: socialIconCid(n),
+    contentDisposition: 'inline' as const,
+  }));
 }
 
 @Injectable()
@@ -134,6 +154,8 @@ export class MailProcessor implements OnModuleInit {
       // Attached here rather than queued with the job: the bytes would
       // otherwise be JSON-serialised into Redis once per email for no reason.
       ...(referencesLogo(html) ? [logoAttachment()] : []),
+      // The footer's network icons, those this email shows.
+      ...socialAttachments(html),
     ];
 
     const sendMailOptions: Parameters<MailerService['sendMail']>[0] = {
