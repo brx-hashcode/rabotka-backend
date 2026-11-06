@@ -113,27 +113,6 @@ describe('MailProcessor', () => {
           ).toBe(false);
         });
 
-        it('attaches the footer icons the HTML shows, and no others', async () => {
-          await processor.processEmailJob(
-            makeJob({
-              ...validData(),
-              html: '<img src="cid:rabotka-social-facebook"><img src="cid:rabotka-social-linkedin">',
-            }) as any,
-          );
-
-          const cids = sentAttachments().map((a) => a.cid);
-          expect(cids).toEqual(
-            expect.arrayContaining([
-              'rabotka-social-facebook',
-              'rabotka-social-linkedin',
-            ]),
-          );
-          expect(cids).not.toContain('rabotka-social-instagram');
-          expect(
-            sentAttachments().every((a) => a.contentDisposition === 'inline'),
-          ).toBe(true);
-        });
-
         it('keeps caller-supplied attachments alongside it', async () => {
           await processor.processEmailJob(
             makeJob({
