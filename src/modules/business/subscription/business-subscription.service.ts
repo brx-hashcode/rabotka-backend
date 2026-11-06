@@ -9,6 +9,8 @@ import {
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import {
   BusinessBillingPeriod,
+  type BusinessCredit,
+  BusinessCreditKind,
   BusinessSubscriptionStatus,
   JobOfferStatus,
   PaymentRequestStatus,
@@ -25,6 +27,7 @@ import { MailService } from '../../mail/mail.service';
 import { LayoutService } from '../../mail/layout.service';
 import { appUrlFor } from '../../mail/audience';
 import {
+  businessCreditsAddedEmail,
   businessSubscriptionActiveEmail,
   businessSubscriptionCancelledEmail,
   businessSubscriptionExpiredEmail,
@@ -44,14 +47,50 @@ import {
   upgradedEnd,
 } from './subscription-rules';
 import {
+  BUSINESS_CREDIT_PACK_PAID_EVENT,
   BUSINESS_SUBSCRIPTION_PAID_EVENT,
   BUSINESS_VERIFIED_EVENT,
   type BusinessSubscriptionPaidPayload,
   type BusinessVerifiedPayload,
 } from './subscription.events';
 import { businessEmailRecipients } from '../team/business-recipients';
+import {
+  creditBalance,
+  creditExpiry,
+  creditLabel,
+  giveBackCredits,
+  PACK_SETTING,
+  takeCredits,
+} from './business-credits';
 
 type Db = Prisma.TransactionClient | PrismaService;
+
+/** A period counter a pack can top up, with its credit-funded share. */
+type Counter = 'cv_screened' | 'offers_published' | 'offer_drafts_used';
+
+const FROM_CREDITS: Record<Counter, string> = {
+  cv_screened: 'cv_from_credits',
+  offers_published: 'offers_from_credits',
+  offer_drafts_used: 'offer_drafts_from_credits',
+};
+
+const CREDIT_KIND: Record<Counter, BusinessCreditKind> = {
+  cv_screened: BusinessCreditKind.CV,
+  offers_published: BusinessCreditKind.OFFER,
+  offer_drafts_used: BusinessCreditKind.OFFER_DRAFT,
+};
+
+/** Thrown inside a charge's transaction to undo it: no room after all. */
+class NoRoom extends Error {}
+
+/** A limited quota's room this period, plus the packs' credits. */
+function withCredits(
+  quota: number | null,
+  used: number,
+  credits: number,
+): number | null {
+  return quota === null ? null : Math.max(0, quota - used) + credits;
+}
 
 /** How far back a paid subscription without its period is looked for. */
 const RECONCILE_DAYS = 30;
@@ -92,12 +131,15 @@ const NO_PLAN_TO_MESSAGE =
 const NO_PLAN_TO_INVITE =
   'Choisissez une formule depuis votre espace, rubrique « Abonnement », pour inviter des profils à postuler.';
 
-function noOfferLeft(e: {
-  plan: { name: string } | null;
-  activeOffersLimit: number | null;
-}): string {
+function noOfferLeft(
+  e: {
+    plan: { name: string } | null;
+    activeOffersLimit: number | null;
+  },
+  packSold = false,
+): string {
   const n = e.activeOffersLimit ?? 0;
-  return `Votre formule ${e.plan?.name ?? ''} permet de publier ${n} offre${n > 1 ? 's' : ''} par période, déjà publiée${n > 1 ? 's' : ''}. Passez à une formule supérieure pour en publier davantage, ou attendez la prochaine période.`;
+  return `Votre formule ${e.plan?.name ?? ''} permet de publier ${n} offre${n > 1 ? 's' : ''} par période, déjà publiée${n > 1 ? 's' : ''}. Passez à une formule supérieure${packSold ? ' ou achetez un pack d’offres' : ''} pour en publier davantage, ou attendez la prochaine période.`;
 }
 
 export const PERIOD_LABEL: Record<BusinessBillingPeriod, string> = {
@@ -159,6 +201,17 @@ export type BusinessEntitlements = {
   reviewers: number;
   /** AI features the plan has but the trial leaves out (their quotas read 0). */
   trialLocked: TrialAiFeature[];
+  /**
+   * Units bought in packs and not used nor expired. Spent after the plan's
+   * own quota, and only with a plan running; the `*Remaining` above count
+   * them already.
+   */
+  credits: {
+    cv: number;
+    offers: number;
+    contacts: number;
+    offerDrafts: number;
+  };
 };
 
 /** The AI features a trial may leave out (SystemConfig `business.trial_*`). */
@@ -239,6 +292,9 @@ export class BusinessSubscriptionService {
         cv_screened: 0,
         offer_drafts_used: 0,
         offers_published: 0,
+        cv_from_credits: 0,
+        offers_from_credits: 0,
+        offer_drafts_from_credits: 0,
       },
     });
     // Reset by this call or a concurrent one: read what is there now.
@@ -287,6 +343,13 @@ export class BusinessSubscriptionService {
     // The people in the team now, invited or active: a plan's places are a
     // team size, freed when someone leaves.
     const { recruiters, reviewers } = await this.seatsInUse(businessId);
+    const balance = await creditBalance(this.prisma, businessId);
+    const credits = {
+      cv: balance.CV,
+      offers: balance.OFFER,
+      contacts: balance.CONTACT,
+      offerDrafts: balance.OFFER_DRAFT,
+    };
     if (!sub) {
       return {
         plan: null,
@@ -319,6 +382,7 @@ export class BusinessSubscriptionService {
         recruiters,
         reviewers,
         trialLocked: [],
+        credits,
       };
     }
     // A trial leaves out the AI features not switched on for it: their quotas
@@ -336,9 +400,10 @@ export class BusinessSubscriptionService {
           sub.ends_at,
           new Date(),
         ).resetsAt?.toISOString() ?? null,
-      unlocksRemaining: remaining(
+      unlocksRemaining: withCredits(
         sub.plan.unlocks_per_period,
         sub.unlocks_used,
+        credits.contacts,
       ),
       unlocksQuota: sub.plan.unlocks_per_period,
       unlocksUsed: sub.unlocks_used,
@@ -346,13 +411,18 @@ export class BusinessSubscriptionService {
       activeOffers,
       hasPublishedOffer,
       offersPublished: sub.offers_published,
-      offersRemaining: remaining(
+      offersRemaining: withCredits(
         sub.plan.active_offers_limit,
         sub.offers_published,
+        credits.offers,
       ),
       cvRemaining: cvLocked
         ? 0
-        : remaining(sub.plan.cv_screenings_per_period, sub.cv_screened),
+        : withCredits(
+            sub.plan.cv_screenings_per_period,
+            sub.cv_screened,
+            credits.cv,
+          ),
       cvQuota: cvLocked ? 0 : sub.plan.cv_screenings_per_period,
       cvUsed: sub.cv_screened,
       cvBatchMax: sub.plan.cv_batch_max,
@@ -361,7 +431,11 @@ export class BusinessSubscriptionService {
       cvChatQuestions: locked.has('cvChat') ? 0 : sub.plan.cv_chat_questions,
       offerDraftsRemaining: draftsLocked
         ? 0
-        : remaining(sub.plan.offer_drafts_per_period, sub.offer_drafts_used),
+        : withCredits(
+            sub.plan.offer_drafts_per_period,
+            sub.offer_drafts_used,
+            credits.offerDrafts,
+          ),
       offerDraftsQuota: draftsLocked ? 0 : sub.plan.offer_drafts_per_period,
       includesPreselection: sub.plan.includes_preselection,
       priorityVisibility: sub.plan.priority_visibility,
@@ -372,6 +446,7 @@ export class BusinessSubscriptionService {
       recruiters,
       reviewers,
       trialLocked: [...locked],
+      credits,
     };
   }
 
@@ -611,6 +686,132 @@ export class BusinessSubscriptionService {
         }),
     );
     return created;
+  }
+
+  /** A paid BUSINESS_CREDIT_PACK request: add its credits (idempotent). */
+  @OnEvent(BUSINESS_CREDIT_PACK_PAID_EVENT, { async: true })
+  async onCreditPackPaid(
+    payload: BusinessSubscriptionPaidPayload,
+  ): Promise<void> {
+    try {
+      await this.addCreditsFromPayment(payload.paymentRequestId);
+    } catch (err) {
+      this.logger.error(
+        `Credit pack failed for payment request ${payload.paymentRequestId}`,
+        err,
+      );
+    }
+  }
+
+  /**
+   * Adds a paid pack's credits, kept 12 months. Once per payment request:
+   * the event, the sweep and a retry may all ask.
+   */
+  async addCreditsFromPayment(paymentRequestId: string, now = new Date()) {
+    const request = await this.prisma.paymentRequest.findUnique({
+      where: { id: paymentRequestId },
+      select: {
+        id: true,
+        profile_id: true,
+        status: true,
+        request_type: true,
+        business_credit_kind: true,
+        business_credit_quantity: true,
+      },
+    });
+    if (
+      !request ||
+      request.request_type !== PaymentRequestType.BUSINESS_CREDIT_PACK ||
+      request.status !== PaymentRequestStatus.APPROVED ||
+      !request.business_credit_kind ||
+      !request.business_credit_quantity
+    ) {
+      this.logger.warn(
+        `Payment request ${paymentRequestId} is not a paid pack`,
+      );
+      return null;
+    }
+    const businessId = await this.businessOf(request.profile_id);
+    if (!businessId) {
+      this.logger.warn(
+        `Payment request ${paymentRequestId}: payer is not a business`,
+      );
+      return null;
+    }
+    const existing = await this.prisma.businessCredit.findUnique({
+      where: { payment_request_id: request.id },
+    });
+    if (existing) return existing;
+    let credit: BusinessCredit;
+    try {
+      credit = await this.prisma.businessCredit.create({
+        data: {
+          business_id: businessId,
+          kind: request.business_credit_kind,
+          quantity: request.business_credit_quantity,
+          expires_at: creditExpiry(now),
+          payment_request_id: request.id,
+        },
+      });
+    } catch (err) {
+      // Added meanwhile by a concurrent call: that one tells the business.
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        return this.prisma.businessCredit.findUnique({
+          where: { payment_request_id: request.id },
+        });
+      }
+      throw err;
+    }
+    const what = creditLabel(credit.kind, credit.quantity);
+    await this.tell(
+      businessId,
+      {
+        type: 'BUSINESS_CREDITS_ADDED',
+        what,
+        expiresAt: credit.expires_at.toISOString(),
+      },
+      `Pack ajouté : ${what}`,
+      (name) =>
+        businessCreditsAddedEmail(name, {
+          what,
+          expiresAt: credit.expires_at,
+          url: this.subscriptionUrl(),
+        }),
+    );
+    return credit;
+  }
+
+  /**
+   * The « Packs » of the subscription page: the packs on sale (a price of 0
+   * is not sold) and the credits bought, not expired, each with what is left.
+   */
+  async packs(businessId: string, now = new Date()) {
+    const [settings, credits] = await Promise.all([
+      this.systemConfig.getBusinessPackSettings(),
+      this.prisma.businessCredit.findMany({
+        where: { business_id: businessId, expires_at: { gt: now } },
+        orderBy: { expires_at: 'asc' },
+      }),
+    ]);
+    const kinds = Object.keys(PACK_SETTING) as BusinessCreditKind[];
+    return {
+      onSale: kinds
+        .map((kind) => ({ kind, ...settings[PACK_SETTING[kind]] }))
+        .filter((p) => p.priceFcfa > 0 && p.quantity > 0),
+      credits: credits
+        .filter((c) => c.used < c.quantity)
+        .map((c) => ({
+          id: c.id,
+          kind: c.kind,
+          quantity: c.quantity,
+          left: c.quantity - c.used,
+          boughtAt: c.created_at.toISOString(),
+          expiresAt: c.expires_at.toISOString(),
+        })),
+    };
   }
 
   /**
@@ -1070,9 +1271,23 @@ export class BusinessSubscriptionService {
       },
       data: { unlocks_used: { increment: 1 } },
     });
-    if (count === 0) return false;
+    if (count > 0) {
+      await db.businessQuotaUsage.create({
+        data: { subscription_id: sub.id, ...target },
+      });
+      return true;
+    }
+    // The plan's contacts are used up: one from a pack, if there is any. The
+    // usage row keeps which, to give it back to that pack.
+    const taken = await takeCredits(
+      db,
+      businessId,
+      BusinessCreditKind.CONTACT,
+      1,
+    );
+    if (!taken?.length) return false;
     await db.businessQuotaUsage.create({
-      data: { subscription_id: sub.id, ...target },
+      data: { subscription_id: sub.id, credit_id: taken[0].id, ...target },
     });
     return true;
   }
@@ -1091,11 +1306,153 @@ export class BusinessSubscriptionService {
       data: { released_at: new Date() },
     });
     if (count === 0) return false;
+    if (usage.credit_id) {
+      const sub = await db.businessSubscription.findUnique({
+        where: { id: usage.subscription_id },
+        select: { business_id: true },
+      });
+      if (sub) {
+        await giveBackCredits(
+          db,
+          sub.business_id,
+          BusinessCreditKind.CONTACT,
+          1,
+          new Date(),
+          usage.credit_id,
+        );
+      }
+      return true;
+    }
     await db.businessSubscription.updateMany({
       where: { id: usage.subscription_id, unlocks_used: { gt: 0 } },
       data: { unlocks_used: { decrement: 1 } },
     });
     return true;
+  }
+
+  /**
+   * Charges `count` units on a period counter: the plan's room first, then
+   * the packs' credits for what the plan lacks, all or nothing. An unlimited
+   * quota never touches the credits. False when both together fall short.
+   * `db` may be a caller's transaction; a batch from credits wants the
+   * client (its own transaction), as a refusal only undoes that one.
+   */
+  private async charge(
+    sub: { id: string; business_id: string },
+    counter: Counter,
+    quota: number | null,
+    count: number,
+    db: Db,
+  ): Promise<boolean> {
+    // A quota of 0 (not in the plan): straight to the packs.
+    if (quota !== 0) {
+      const { count: updated } = await db.businessSubscription.updateMany({
+        where: {
+          id: sub.id,
+          ...(quota === null ? {} : { [counter]: { lte: quota - count } }),
+        },
+        data: { [counter]: { increment: count } },
+      });
+      if (updated > 0) return true;
+      if (quota === null) return false;
+    }
+    // Two tries: a concurrent charge may take the plan's last units between
+    // the read and the update.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const fresh = await db.businessSubscription.findUnique({
+        where: { id: sub.id },
+        select: {
+          cv_screened: true,
+          offers_published: true,
+          offer_drafts_used: true,
+        },
+      });
+      if (!fresh) return false;
+      const room = Math.min(count, Math.max(0, quota - fresh[counter]));
+      const fromCredits = count - room;
+      try {
+        await this.inTransaction(db, async (tx) => {
+          if (room > 0) {
+            const { count: ok } = await tx.businessSubscription.updateMany({
+              where: {
+                id: sub.id,
+                [counter]: { lte: quota - room },
+              },
+              data: { [counter]: { increment: room } },
+            });
+            if (ok === 0) throw new NoRoom();
+          }
+          const taken = await takeCredits(
+            tx,
+            sub.business_id,
+            CREDIT_KIND[counter],
+            fromCredits,
+          );
+          if (!taken) throw new NoRoom();
+          await tx.businessSubscription.update({
+            where: { id: sub.id },
+            data: { [FROM_CREDITS[counter]]: { increment: fromCredits } },
+          });
+        });
+        return true;
+      } catch (err) {
+        if (!(err instanceof NoRoom)) throw err;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Gives `count` units of a counter back (work that did not happen): to
+   * the packs first, as they cost money, then to the plan; never below 0.
+   * One statement on the period, so a concurrent charge can't slip between.
+   */
+  private async giveBack(
+    subscriptionId: string,
+    counter: Counter,
+    count: number,
+    db: Db = this.prisma,
+  ): Promise<void> {
+    if (count <= 0) return;
+    const used = Prisma.raw(`"${counter}"`);
+    const fromCredits = Prisma.raw(`"${FROM_CREDITS[counter]}"`);
+    const rows = await db.$queryRaw<
+      { business_id: string; credited: number }[]
+    >`
+      WITH old AS (
+        SELECT "id", ${fromCredits} AS credited
+        FROM "business_subscriptions"
+        WHERE "id" = ${subscriptionId}::uuid
+        FOR UPDATE
+      )
+      UPDATE "business_subscriptions" s
+      SET ${fromCredits} = s.${fromCredits} - LEAST(old.credited, ${count}::int),
+          ${used} = GREATEST(s.${used} - (${count}::int - LEAST(old.credited, ${count}::int)), 0)
+      FROM old
+      WHERE s."id" = old."id"
+      RETURNING s."business_id"::text AS business_id,
+                LEAST(old.credited, ${count}::int)::int AS credited`;
+    const row = rows[0];
+    if (row && row.credited > 0) {
+      await giveBackCredits(
+        db,
+        row.business_id,
+        CREDIT_KIND[counter],
+        row.credited,
+      );
+    }
+  }
+
+  /** Runs `fn` in a transaction, or in the caller's when `db` is one. */
+  private inTransaction<T>(db: Db, fn: (tx: Db) => Promise<T>): Promise<T> {
+    return '$transaction' in db ? db.$transaction((tx) => fn(tx)) : fn(db);
+  }
+
+  /** « ou achetez un pack », when that pack is on sale. */
+  private async packSold(kind: BusinessCreditKind): Promise<boolean> {
+    const packs = await this.systemConfig.getBusinessPackSettings();
+    const pack = packs[PACK_SETTING[kind]];
+    return pack.priceFcfa > 0 && pack.quantity > 0;
   }
 
   /**
@@ -1112,28 +1469,31 @@ export class BusinessSubscriptionService {
     if (sub && (await this.trialLocks(sub)).has('cvAnalysis')) {
       throw new ForbiddenException(TRIAL_AI_REFUSAL);
     }
-    const quota = sub ? sub.plan.cv_screenings_per_period : 0;
-    if (!sub || quota === 0) {
+    if (!sub) {
       throw new ForbiddenException(
         'L’analyse de CV est incluse dans les formules supérieures. Changez de formule depuis votre espace, rubrique « Abonnement ».',
       );
     }
-    const { count: updated } = await db.businessSubscription.updateMany({
-      where: {
-        id: sub.id,
-        ...(quota === null ? {} : { cv_screened: { lte: quota - count } }),
-      },
-      data: { cv_screened: { increment: count } },
-    });
-    if (updated === 0) {
-      const left = remaining(quota, sub.cv_screened) ?? 0;
+    const quota = sub.plan.cv_screenings_per_period;
+    if (await this.charge(sub, 'cv_screened', quota, count, db)) {
+      return { subscriptionId: sub.id };
+    }
+    const [balance, packSold] = await Promise.all([
+      creditBalance(db, businessId),
+      this.packSold(BusinessCreditKind.CV),
+    ]);
+    const orPack = packSold ? ' ou achetez un pack de CV' : '';
+    if (quota === 0 && balance.CV === 0) {
       throw new ForbiddenException(
-        left > 0
-          ? `Il vous reste ${left} CV inclus jusqu'au ${frenchDay(countersEnd(sub))} : retirez-en ${count - left} ou changez de formule.`
-          : `Vous avez utilisé tous les CV inclus dans votre formule jusqu'au ${frenchDay(countersEnd(sub))}. Changez de formule pour en analyser davantage.`,
+        `L’analyse de CV est incluse dans les formules supérieures. Changez de formule${orPack} depuis votre espace, rubrique « Abonnement ».`,
       );
     }
-    return { subscriptionId: sub.id };
+    const left = (remaining(quota, sub.cv_screened) ?? 0) + balance.CV;
+    throw new ForbiddenException(
+      left > 0
+        ? `Il vous reste ${left} CV à analyser : retirez-en ${count - left}${packSold ? ', changez de formule ou achetez un pack de CV' : ' ou changez de formule'}.`
+        : `Vous avez utilisé tous les CV inclus dans votre formule jusqu'au ${frenchDay(countersEnd(sub))}. Changez de formule${orPack} pour en analyser davantage.`,
+    );
   }
 
   /**
@@ -1147,47 +1507,35 @@ export class BusinessSubscriptionService {
     if (sub && (await this.trialLocks(sub)).has('offerWriter')) {
       throw new ForbiddenException(TRIAL_AI_REFUSAL);
     }
-    const quota = sub ? sub.plan.offer_drafts_per_period : 0;
-    if (!sub || quota === 0) {
-      throw new ForbiddenException(
-        'La rédaction d’offres par l’IA est incluse dans les formules supérieures. Changez de formule depuis votre espace, rubrique « Abonnement ».',
-      );
+    const notIncluded =
+      'La rédaction d’offres par l’IA est incluse dans les formules supérieures. Changez de formule depuis votre espace, rubrique « Abonnement ».';
+    if (!sub) throw new ForbiddenException(notIncluded);
+    const quota = sub.plan.offer_drafts_per_period;
+    if (await this.charge(sub, 'offer_drafts_used', quota, 1, this.prisma)) {
+      return { subscriptionId: sub.id };
     }
-    const { count } = await this.prisma.businessSubscription.updateMany({
-      where: {
-        id: sub.id,
-        ...(quota === null ? {} : { offer_drafts_used: { lt: quota } }),
-      },
-      data: { offer_drafts_used: { increment: 1 } },
-    });
-    if (count === 0) {
-      throw new ForbiddenException(
-        `Vous avez utilisé toutes les rédactions par l’IA incluses dans votre formule jusqu’au ${frenchDay(countersEnd(sub))}.`,
-      );
-    }
-    return { subscriptionId: sub.id };
+    const orPack = (await this.packSold(BusinessCreditKind.OFFER_DRAFT))
+      ? ' Achetez un pack de rédactions pour en écrire davantage.'
+      : '';
+    throw new ForbiddenException(
+      quota === 0
+        ? `${notIncluded}${orPack}`
+        : `Vous avez utilisé toutes les rédactions par l’IA incluses dans votre formule jusqu’au ${frenchDay(countersEnd(sub))}.${orPack}`,
+    );
   }
 
-  /** Gives back an offer the AI could not write; never below zero. */
+  /** Gives back an offer the AI could not write: to its pack first. */
   async releaseOfferDraft(subscriptionId: string): Promise<void> {
-    await this.prisma.$executeRaw`
-      UPDATE "business_subscriptions"
-      SET "offer_drafts_used" = GREATEST("offer_drafts_used" - 1, 0)
-      WHERE "id" = ${subscriptionId}::uuid`;
+    await this.giveBack(subscriptionId, 'offer_drafts_used', 1);
   }
 
-  /** Gives back CVs that could not be read; never below zero. */
+  /** Gives back CVs that could not be read: to their pack first. */
   async releaseCv(
     subscriptionId: string,
     count: number,
     db: Db = this.prisma,
   ): Promise<void> {
-    if (count <= 0) return;
-    // One statement: a read-then-write would race an upload taking units.
-    await db.$executeRaw`
-      UPDATE "business_subscriptions"
-      SET "cv_screened" = GREATEST("cv_screened" - ${count}, 0)
-      WHERE "id" = ${subscriptionId}::uuid`;
+    await this.giveBack(subscriptionId, 'cv_screened', count, db);
   }
 
   /** Throws the upgrade message when a business may not publish one more offer. */
@@ -1201,7 +1549,11 @@ export class BusinessSubscriptionService {
     if (!businessId) return;
     const e = await this.entitlements(businessId);
     if (!e.plan) throw new ForbiddenException(NO_PLAN_TO_PUBLISH);
-    if (e.offersRemaining === 0) throw new ForbiddenException(noOfferLeft(e));
+    if (e.offersRemaining === 0) {
+      throw new ForbiddenException(
+        noOfferLeft(e, await this.packSold(BusinessCreditKind.OFFER)),
+      );
+    }
   }
 
   /**
@@ -1218,19 +1570,15 @@ export class BusinessSubscriptionService {
     const sub = await this.current(businessId);
     if (!sub) throw new ForbiddenException(NO_PLAN_TO_PUBLISH);
     const quota = sub.plan.active_offers_limit;
-    const { count } = await this.prisma.businessSubscription.updateMany({
-      where: {
-        id: sub.id,
-        ...(quota === null ? {} : { offers_published: { lt: quota } }),
-      },
-      data: { offers_published: { increment: 1 } },
-    });
-    if (count === 0) {
-      throw new ForbiddenException(
-        noOfferLeft({ plan: sub.plan, activeOffersLimit: quota }),
-      );
+    if (await this.charge(sub, 'offers_published', quota, 1, this.prisma)) {
+      return { subscriptionId: sub.id };
     }
-    return { subscriptionId: sub.id };
+    throw new ForbiddenException(
+      noOfferLeft(
+        { plan: sub.plan, activeOffersLimit: quota },
+        await this.packSold(BusinessCreditKind.OFFER),
+      ),
+    );
   }
 
   /**
@@ -1291,12 +1639,9 @@ export class BusinessSubscriptionService {
     return { subscriptionId: sub.id };
   }
 
-  /** Gives back an offer that could not be saved; never below zero. */
+  /** Gives back an offer that could not be saved: to its pack first. */
   async releaseOffer(subscriptionId: string): Promise<void> {
-    await this.prisma.$executeRaw`
-      UPDATE "business_subscriptions"
-      SET "offers_published" = GREATEST("offers_published" - 1, 0)
-      WHERE "id" = ${subscriptionId}::uuid`;
+    await this.giveBack(subscriptionId, 'offers_published', 1);
   }
 
   /**
@@ -1457,6 +1802,44 @@ export class BusinessSubscriptionService {
       }
     }
     return { activated, failed };
+  }
+
+  /**
+   * A pack paid whose credits were never added (its event is one-off, like
+   * a subscription's): added here, from the last 30 days, after the grace.
+   * Returns how many were added; one that keeps failing is logged.
+   */
+  async reconcilePaidPacks(now = new Date()): Promise<number> {
+    const paid = await this.prisma.paymentRequest.findMany({
+      where: {
+        request_type: PaymentRequestType.BUSINESS_CREDIT_PACK,
+        status: PaymentRequestStatus.APPROVED,
+        updated_at: {
+          gte: new Date(now.getTime() - RECONCILE_DAYS * 86_400_000),
+          lte: new Date(now.getTime() - RECONCILE_GRACE_MS),
+        },
+      },
+      select: { id: true },
+      take: 200,
+    });
+    if (paid.length === 0) return 0;
+    const added = new Set(
+      (
+        await this.prisma.businessCredit.findMany({
+          where: { payment_request_id: { in: paid.map((p) => p.id) } },
+          select: { payment_request_id: true },
+        })
+      ).map((c) => c.payment_request_id),
+    );
+    let count = 0;
+    for (const request of paid.filter((p) => !added.has(p.id))) {
+      try {
+        if (await this.addCreditsFromPayment(request.id, now)) count++;
+      } catch (err) {
+        this.logger.error(`Paid pack ${request.id} still has no credits`, err);
+      }
+    }
+    return count;
   }
 
   /** Reminders before the end, then expiry. Idempotent; safe to rerun. */

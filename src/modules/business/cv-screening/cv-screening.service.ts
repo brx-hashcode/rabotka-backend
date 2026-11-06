@@ -128,7 +128,11 @@ export class CvScreeningService {
   ) {
     const businessId = await this.requireBusiness(profileId);
     const e = await this.subscriptions.entitlements(businessId);
-    if (e.cvQuota === 0) {
+    // Not in the plan, and no pack bought: refused before reading the files.
+    if (
+      e.cvQuota === 0 &&
+      (e.cvRemaining === 0 || e.trialLocked.includes('cvAnalysis'))
+    ) {
       throw new ForbiddenException(
         e.trialLocked.includes('cvAnalysis')
           ? TRIAL_AI_REFUSAL

@@ -37,7 +37,10 @@ export function resolvePaymentType(
     case PaymentRequestType.WALLET_TOP_UP:
       return PaymentType.WALLET_TOP_UP;
 
+    // A pack is Rabotka Business revenue too: the finance figures add it to
+    // the subscriptions (its invoice and request still say « pack »).
     case PaymentRequestType.BUSINESS_SUBSCRIPTION:
+    case PaymentRequestType.BUSINESS_CREDIT_PACK:
       return PaymentType.BUSINESS_SUBSCRIPTION;
 
     case PaymentRequestType.CONTACT_UNLOCK:

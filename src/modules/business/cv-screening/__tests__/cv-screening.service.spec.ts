@@ -295,12 +295,21 @@ describe('CvScreeningService', () => {
     it('refuses when the plan does not include it', async () => {
       const { service, subscriptions, storage } = make();
       subscriptions.entitlements.mockResolvedValue(
-        entitlements({ cvQuota: 0 }),
+        entitlements({ cvQuota: 0, cvRemaining: 0 }),
       );
       await expect(service.create('p1', [file('a.pdf')], JOB)).rejects.toThrow(
         ForbiddenException,
       );
       expect(storage.upload).not.toHaveBeenCalled();
+    });
+
+    it('lets a pack of CVs in when the plan has none', async () => {
+      const { service, subscriptions } = make();
+      subscriptions.entitlements.mockResolvedValue(
+        entitlements({ cvQuota: 0, cvRemaining: 50 }),
+      );
+      await service.create('p1', [file('a.pdf')], JOB);
+      expect(subscriptions.consumeCv).toHaveBeenCalledWith('b1', 1);
     });
 
     it('holds to the plan’s batch size, file size and the accepted types', async () => {

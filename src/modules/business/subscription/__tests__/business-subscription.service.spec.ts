@@ -37,6 +37,7 @@ function make(
       findMany: jest.fn().mockResolvedValue([]),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       create: jest.fn(),
+      update: jest.fn().mockResolvedValue({}),
     },
     businessQuotaUsage: {
       create: jest.fn().mockResolvedValue({}),
@@ -44,6 +45,14 @@ function make(
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     businessPlan: { findUnique: jest.fn().mockResolvedValue(plan()) },
+    // No pack bought: the plan alone.
+    businessCredit: {
+      findMany: jest.fn().mockResolvedValue([]),
+      findUnique: jest.fn().mockResolvedValue(null),
+      create: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    $queryRaw: jest.fn().mockResolvedValue([]),
     jobOffer: { count: jest.fn().mockResolvedValue(0), updateMany: jest.fn() },
     paymentRequest: { findUnique: jest.fn() },
     // No team yet: e-mails go to the account holder.
@@ -54,6 +63,12 @@ function make(
     },
   };
   const systemConfig: any = {
+    getBusinessPackSettings: jest.fn().mockResolvedValue({
+      cv: { quantity: 50, priceFcfa: 0 },
+      offers: { quantity: 5, priceFcfa: 0 },
+      contacts: { quantity: 10, priceFcfa: 0 },
+      offerDrafts: { quantity: 10, priceFcfa: 0 },
+    }),
     getBusinessSubscriptionSettings: jest.fn().mockResolvedValue(
       over.settings ?? {
         trialDays: 14,
@@ -63,6 +78,8 @@ function make(
       },
     ),
   };
+  // A transaction runs on the same mock.
+  prisma.$transaction = jest.fn((fn: (tx: unknown) => unknown) => fn(prisma));
   const layout: any = { wrap: jest.fn().mockResolvedValue('<html/>') };
   const mail: any = {
     sendMail: jest.fn().mockResolvedValue(undefined),
@@ -190,7 +207,7 @@ describe('BusinessSubscriptionService', () => {
       const { service, prisma } = make({ sub: withCv() });
       prisma.businessSubscription.updateMany.mockResolvedValue({ count: 0 });
       await expect(service.consumeCv('b1', 9)).rejects.toThrow(
-        /Il vous reste 7 CV inclus jusqu'au \d+ \S+ \d{4} : retirez-en 2/,
+        /Il vous reste 7 CV à analyser : retirez-en 2 ou changez de formule\./,
       );
     });
 
@@ -222,12 +239,12 @@ describe('BusinessSubscriptionService', () => {
 
     it('gives back in one statement, and nothing for zero', async () => {
       const { service, prisma } = make();
-      prisma.$executeRaw = jest.fn().mockResolvedValue(1);
       await service.releaseCv('sub-1', 0);
-      expect(prisma.$executeRaw).not.toHaveBeenCalled();
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
       await service.releaseCv('sub-1', 2);
-      expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
-      expect(prisma.$executeRaw.mock.calls[0].slice(1)).toEqual([2, 'sub-1']);
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      // None of them came from a pack: no credit given back.
+      expect(prisma.businessCredit.updateMany).not.toHaveBeenCalled();
     });
   });
 
@@ -424,7 +441,7 @@ describe('BusinessSubscriptionService', () => {
         subscriptionId: 'sub-1',
       });
       expect(prisma.businessSubscription.updateMany).toHaveBeenCalledWith({
-        where: { id: 'sub-1', offer_drafts_used: { lt: 4 } },
+        where: { id: 'sub-1', offer_drafts_used: { lte: 3 } },
         data: { offer_drafts_used: { increment: 1 } },
       });
 
@@ -916,7 +933,7 @@ describe('BusinessSubscriptionService', () => {
         subscriptionId: 'sub-1',
       });
       expect(prisma.businessSubscription.updateMany).toHaveBeenCalledWith({
-        where: { id: 'sub-1', offers_published: { lt: 1 } },
+        where: { id: 'sub-1', offers_published: { lte: 0 } },
         data: { offers_published: { increment: 1 } },
       });
 
@@ -1057,6 +1074,9 @@ describe('BusinessSubscriptionService', () => {
           cv_screened: 0,
           offer_drafts_used: 0,
           offers_published: 0,
+          cv_from_credits: 0,
+          offers_from_credits: 0,
+          offer_drafts_from_credits: 0,
         },
       });
       expect(sub?.cv_screened).toBe(0);

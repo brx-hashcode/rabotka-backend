@@ -29,6 +29,7 @@ export {
 } from './agent-withdrawal';
 export { adminUpdatedEmail } from './admin-updated';
 export {
+  businessCreditsAddedEmail,
   businessSubscriptionActiveEmail,
   businessSubscriptionCancelledEmail,
   businessSubscriptionExpiredEmail,
