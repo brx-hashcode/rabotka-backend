@@ -483,16 +483,27 @@ export class TeamService {
     );
   }
 
-  /** Takes the member out of the team: its place is free again at once. */
+  /**
+   * Takes the member out of the team: its place is free again at once. The
+   * interview calendar link is renewed too: one link for the whole team, and
+   * someone who left kept the candidates' names and times in their agenda.
+   */
   private async markRemoved(member: BusinessMember) {
-    await this.prisma.businessMember.update({
-      where: { id: member.id },
-      data: {
-        status: 'REMOVED',
-        removed_at: new Date(),
-        seat_subscription_id: null,
-      },
-    });
+    await this.prisma.$transaction([
+      this.prisma.businessMember.update({
+        where: { id: member.id },
+        data: {
+          status: 'REMOVED',
+          removed_at: new Date(),
+          seat_subscription_id: null,
+        },
+      }),
+      // A new one is made the next time someone asks for it.
+      this.prisma.business.update({
+        where: { id: member.business_id },
+        data: { calendar_token: null },
+      }),
+    ]);
   }
 
   private assertAdmin(actor: TeamActor) {

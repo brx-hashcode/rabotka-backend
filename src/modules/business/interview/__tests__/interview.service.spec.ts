@@ -45,6 +45,8 @@ function make() {
       }),
     },
     application: { findFirst: jest.fn() },
+    // A careers-page candidate refused? (none here)
+    externalApplication: { findFirst: jest.fn().mockResolvedValue(null) },
     // Who of the business is e-mailed: the holder, no team yet.
     business: {
       findUnique: jest.fn().mockResolvedValue({
@@ -284,6 +286,72 @@ describe('InterviewService', () => {
       );
       await expect(service.respond('tok', 'CONFIRMED')).rejects.toThrow(
         'passé',
+      );
+    });
+  });
+
+  describe('the rules added after the audit', () => {
+    it('sends no « demain » reminder for an interview within the day', async () => {
+      const { service, prisma } = make();
+      await service.create('p1', {
+        ...slot,
+        startsAt: inHours(5),
+        cvResumeId: 'r1',
+        candidateEmail: 'grace@example.com',
+      });
+      expect(
+        prisma.interview.create.mock.calls[0][0].data.reminded_at,
+      ).toBeInstanceOf(Date);
+
+      const later = make();
+      await later.service.create('p1', { ...slot, cvResumeId: 'r1' });
+      expect(
+        later.prisma.interview.create.mock.calls[0][0].data.reminded_at,
+      ).toBeNull();
+    });
+
+    it('invites no candidate whose careers application was refused', async () => {
+      const { service, prisma } = make();
+      prisma.externalApplication.findFirst.mockResolvedValue({ id: 'x1' });
+      await expect(
+        service.create('p1', { ...slot, cvResumeId: 'r1' }),
+      ).rejects.toThrow('refusée');
+    });
+
+    it('invites a careers candidate without a CV analysis, at the address they gave', async () => {
+      const { service, prisma } = make();
+      prisma.externalApplication.findFirst.mockResolvedValue({
+        id: 'x1',
+        first_name: 'Grâce',
+        last_name: 'Mavoungou',
+        email: ' Grace@Example.com ',
+        status: 'PENDING',
+        job_offer: { id: 'o1', title: 'Caissier', status: 'ACTIVE' },
+      });
+      await service.create('p1', { ...slot, externalApplicationId: 'x1' });
+      expect(prisma.interview.create.mock.calls[0][0].data).toMatchObject({
+        external_application_id: 'x1',
+        cv_resume_id: null,
+        application_id: null,
+        candidate_name: 'Grâce Mavoungou',
+        candidate_email: 'grace@example.com',
+      });
+    });
+
+    it('ignores the same answer again, and paces changes of mind', async () => {
+      const { service, prisma, mail } = make();
+      prisma.interview.findUnique.mockResolvedValue(
+        loaded({ status: 'CONFIRMED', response_note: null }),
+      );
+      await service.respond('tok', 'CONFIRMED', null);
+      expect(prisma.interview.update).not.toHaveBeenCalled();
+      expect(mail.sendMail).not.toHaveBeenCalled();
+
+      prisma.interview.findUnique.mockResolvedValue(
+        loaded({ status: 'CONFIRMED', responded_at: new Date() }),
+      );
+      await expect(service.respond('tok', 'DECLINED', null)).rejects.toThrow(
+        'patientez',
       );
     });
   });
