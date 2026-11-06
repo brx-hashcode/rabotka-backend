@@ -90,7 +90,7 @@ describe('wrapEmailHtml', () => {
       expect(html).toContain('href="https://www.rabotka.work/terms"');
       expect(html).toContain('href="https://www.rabotka.work/privacy"');
       expect(html).toContain(
-        `&copy; ${new Date().getFullYear()} Rabotka SARL.`,
+        `&copy; ${new Date().getFullYear()} Rabotka SARL`,
       );
     });
 
@@ -142,6 +142,27 @@ describe('wrapEmailHtml', () => {
       expect(html).toContain('href="tel:+242055183391"');
       expect(html).toContain('+242 05 518 33 91');
     });
+  });
+
+  it('closes the card with a 4px brand-green line', () => {
+    expect(wrapEmailHtml('<p>hi</p>')).toContain(
+      '<td height="4" bgcolor="#25d366" style="height:4px;',
+    );
+  });
+
+  it('leaves a place for the recipient, filled in when the email is queued', () => {
+    expect(wrapEmailHtml('<p>hi</p>', { footer: {} })).toContain(
+      'Cet e-mail était destiné à {{rk:recipient}}.',
+    );
+  });
+
+  it('signs in one line: copyright, legal name, RCCM, address', () => {
+    const html = wrapEmailHtml('<p>hi</p>', {
+      footer: { legalName: 'Rabotka SARL', rccm: 'CG-1', address: 'Brazzaville' },
+    });
+    expect(html).toContain(
+      `&copy; ${new Date().getFullYear()} Rabotka SARL&nbsp;&middot;&nbsp;RCCM CG-1&nbsp;&middot;&nbsp;Brazzaville. Tous droits réservés.`,
+    );
   });
 
   it('leaves the raw layout alone', () => {

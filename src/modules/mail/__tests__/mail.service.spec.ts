@@ -113,6 +113,19 @@ describe('MailService', () => {
     });
   });
 
+  describe('recipient line', () => {
+    it('puts the address the email goes to in the footer, escaped', async () => {
+      await service.sendMail({
+        to: 'a&b@example.com',
+        subject: 'S',
+        html: '<p>Cet e-mail était destiné à {{rk:recipient}}.</p>',
+      });
+      expect(queueService.addEmailJob.mock.calls[0][0].html).toBe(
+        '<p>Cet e-mail était destiné à a&amp;b@example.com.</p>',
+      );
+    });
+  });
+
   describe('sendMail() with no recipient', () => {
     it.each([
       ['null', null],

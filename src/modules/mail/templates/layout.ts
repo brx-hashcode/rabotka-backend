@@ -17,6 +17,15 @@ export type FooterInfo = {
   socials?: { network: SocialNetwork; url: string }[];
 };
 
+/**
+ * Stands in the footer for the address the email goes to; MailService.sendMail
+ * puts it in when the email is queued (« Cet e-mail était destiné à … »).
+ * One place for every email, rather than each template passing its recipient.
+ * A phishing copy cannot know the address, so this line is what tells the
+ * real email from a fake.
+ */
+export const RECIPIENT_TOKEN = '{{rk:recipient}}';
+
 /** Where the terms and the privacy policy live, whatever the product. */
 const LEGAL_SITE = 'https://www.rabotka.work';
 
@@ -115,6 +124,13 @@ export function wrapEmailHtml(
               </td>
             </tr>
 
+            <!-- The brand's green closes the card. A row rather than a
+                 border-bottom: with border-collapse and rounded corners,
+                 clients (and Chrome) drop the table's own border. -->
+            <tr>
+              <td height="4" bgcolor="#25d366" style="height:4px;line-height:4px;font-size:0;background:#25d366;">&nbsp;</td>
+            </tr>
+
           </table>
 
           ${emailFooter(footer, options?.product)}
@@ -140,9 +156,9 @@ export function displayPhone(raw: string): string {
  * three sections as retail emails do (Patagonia's, Apple's):
  *
  * 1. « Suivez-nous » and the networks as icons (when any link is set);
- * 2. « Besoin d'aide ? »: customer service phone, email and site, address;
- * 3. the small print: why this email, legal name and RCCM, copyright, the
- *    legal links.
+ * 2. « Besoin d'aide ? »: customer service phone, email and site;
+ * 3. the small print: who this email was for and why, then copyright, legal
+ *    name, RCCM and address in one line, then the legal links.
  *
  * Short rules separate them. Each line shows only when its setting is filled
  * in (Settings → Contact). A business's email points to
@@ -216,13 +232,6 @@ export function emailFooter(
       ].join(sep),
       `font-size:13px;line-height:20px;color:${ink};`,
     ),
-    footer?.address?.trim()
-      ? p(
-          escapeHtml(footer.address.trim()),
-          `font-size:13px;line-height:20px;color:${grey};`,
-          '0',
-        )
-      : '',
   ].join('');
 
   // 3. The small print.
@@ -230,21 +239,19 @@ export function emailFooter(
   const small = `font-size:12px;line-height:18px;color:${grey};`;
   const fine = [
     p(
-      `Vous recevez cet e-mail parce que vous utilisez ${product === 'business' ? 'Rabotka Business' : 'Rabotka'}.`,
+      `Cet e-mail était destiné à ${RECIPIENT_TOKEN}. Vous le recevez parce que vous utilisez ${product === 'business' ? 'Rabotka Business' : 'Rabotka'}.`,
       small,
       '0 0 10px',
     ),
+    // One sentence, as a company signs: copyright, legal name, RCCM, address.
     p(
       [
-        escapeHtml(legalName),
+        `&copy; ${new Date().getFullYear()} ${escapeHtml(legalName)}`,
         footer?.rccm?.trim() ? `RCCM ${escapeHtml(footer.rccm.trim())}` : '',
+        footer?.address?.trim() ? escapeHtml(footer.address.trim()) : '',
       ]
         .filter(Boolean)
-        .join('&nbsp;&middot;&nbsp;'),
-      small,
-    ),
-    p(
-      `&copy; ${new Date().getFullYear()} ${escapeHtml(legalName)}. Tous droits réservés.`,
+        .join('&nbsp;&middot;&nbsp;') + '. Tous droits réservés.',
       small,
       '0 0 10px',
     ),
