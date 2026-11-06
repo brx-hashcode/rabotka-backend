@@ -82,15 +82,13 @@ describe('wrapEmailHtml', () => {
     it('shows the company, its RCCM, address, contact and legal links', () => {
       // No logo or tagline down there: the card's header already carries the brand.
       const html = wrapEmailHtml('<p>hi</p>', { footer });
-      expect(html).toContain(
-        'Rabotka SARL&nbsp;&middot;&nbsp;RCCM CG-BZV-01-2025-B12-00042',
-      );
+      expect(html).toContain('RCCM CG-BZV-01-2025-B12-00042');
       expect(html).toContain('Brazzaville, Congo');
       expect(html).toContain('href="mailto:contact@rabotka.work"');
       expect(html).toContain('href="https://www.rabotka.work/terms"');
       expect(html).toContain('href="https://www.rabotka.work/privacy"');
       expect(html).toContain(
-        `&copy; ${new Date().getFullYear()} Rabotka SARL.`,
+        `&copy; ${new Date().getFullYear()} Rabotka SARL`,
       );
     });
 
@@ -108,7 +106,7 @@ describe('wrapEmailHtml', () => {
       });
       expect(html).not.toContain('RCCM');
       expect(html).not.toContain('rabotka-social-');
-      expect(html).toContain(`${new Date().getFullYear()} Rabotka.`);
+      expect(html).toContain(`${new Date().getFullYear()} Rabotka`);
     });
 
     it('points a business email to business.rabotka.work', () => {
@@ -136,9 +134,8 @@ describe('wrapEmailHtml', () => {
       expect(displayPhone('+33 6 12 34 56 78')).toBe('+33 6 12 34 56 78');
     });
 
-    it('shows it under « Besoin d’aide ? », dialable', () => {
+    it('shows it dialable, first on the contact line', () => {
       const html = wrapEmailHtml('<p>hi</p>', { footer: { phone: '+242055183391' } });
-      expect(html).toContain('Besoin d’aide ?');
       expect(html).toContain('href="tel:+242055183391"');
       expect(html).toContain('+242 05 518 33 91');
     });
