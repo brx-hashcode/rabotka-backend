@@ -709,8 +709,18 @@ describe('BusinessSubscriptionService', () => {
         ({ data }: any) => ({ ...data, plan: next }),
       );
       prisma.$transaction = (fn: (tx: unknown) => unknown) => fn(prisma);
+      prisma.$executeRaw = jest.fn().mockResolvedValue(1);
       return ctx;
     }
+
+    it('places one business’s periods one at a time (an advisory lock)', async () => {
+      const { service, prisma } = setup(null, cheap);
+      await service.grantByAdmin('b1', 'ess', 'MONTHLY' as any, 'admin');
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(prisma.$executeRaw.mock.calls[0][0].join('?')).toContain(
+        'pg_advisory_xact_lock',
+      );
+    });
 
     it('starts a dearer plan at once, closing the old period and moving what was queued', async () => {
       const current = runningPeriod(cheap);
