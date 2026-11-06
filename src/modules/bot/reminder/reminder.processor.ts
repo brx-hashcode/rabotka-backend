@@ -423,7 +423,8 @@ export class ReminderProcessor {
   }
 
   private offerUrl(id: string): string {
-    return `${businessDashboardUrl()}/espace/offres/${id}`;
+    // businessDashboardUrl() already ends in /espace.
+    return `${businessDashboardUrl()}/offres/${id}`;
   }
 
   /**

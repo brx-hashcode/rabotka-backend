@@ -31,9 +31,10 @@ export class ApplyDto {
   consent!: string;
 
   /** JSON: [{ questionId, value }]. */
+  // Up to 5 questions of 3,000 characters each, plus the JSON around them.
   @IsOptional()
   @IsString()
-  @MaxLength(5000)
+  @MaxLength(20000, { message: 'Vos réponses sont trop longues.' })
   answers?: string;
 
   /** Where they came from, from `?source=` or the page that sent them. */
