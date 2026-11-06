@@ -64,6 +64,71 @@ describe('wrapEmailHtml', () => {
     expect(html).toContain('contact@rabotka.co');
   });
 
+  describe('footer', () => {
+    const footer = {
+      description: 'Plateforme de mise en relation.',
+      email: 'contact@rabotka.work',
+      address: 'Brazzaville, Congo',
+      legalName: 'Rabotka SARL',
+      rccm: 'CG-BZV-01-2025-B12-00042',
+      socials: [
+        { network: 'facebook' as const, url: 'https://facebook.com/rabotka' },
+        {
+          network: 'linkedin' as const,
+          url: 'https://linkedin.com/company/rabotka',
+        },
+      ],
+    };
+
+    it('shows the company, its RCCM, address, contact and legal links', () => {
+      const html = wrapEmailHtml('<p>hi</p>', { footer });
+      expect(html).toContain(
+        'Rabotka SARL&nbsp;&middot;&nbsp;RCCM CG-BZV-01-2025-B12-00042',
+      );
+      expect(html).toContain('Brazzaville, Congo');
+      expect(html).toContain('href="mailto:contact@rabotka.work"');
+      expect(html).toContain('href="https://www.rabotka.work/terms"');
+      expect(html).toContain('href="https://www.rabotka.work/privacy"');
+      expect(html).toContain(
+        `Copyright &copy; ${new Date().getFullYear()} Rabotka SARL.`,
+      );
+    });
+
+    it('draws an icon per network set, embedded, linking to it', () => {
+      const html = wrapEmailHtml('<p>hi</p>', { footer });
+      expect(html).toContain('src="cid:rabotka-social-facebook"');
+      expect(html).toContain('href="https://facebook.com/rabotka"');
+      expect(html).toContain('alt="LinkedIn"');
+      expect(html).not.toContain('rabotka-social-instagram');
+    });
+
+    it('leaves out what is not set: no RCCM, no address, no icons', () => {
+      const html = wrapEmailHtml('<p>hi</p>', {
+        footer: { email: 'contact@rabotka.work' },
+      });
+      expect(html).not.toContain('RCCM');
+      expect(html).not.toContain('rabotka-social-');
+      expect(html).toContain(`${new Date().getFullYear()} Rabotka.`);
+    });
+
+    it('points a business email to business.rabotka.work', () => {
+      expect(
+        wrapEmailHtml('<p>hi</p>', { footer, product: 'business' }),
+      ).toContain('href="https://business.rabotka.work"');
+      expect(wrapEmailHtml('<p>hi</p>', { footer })).toContain(
+        'href="https://www.rabotka.work"',
+      );
+    });
+
+    it('escapes what the settings hold', () => {
+      const html = wrapEmailHtml('<p>hi</p>', {
+        footer: { rccm: '<b>x</b>', address: '"><script>' },
+      });
+      expect(html).not.toContain('<script>');
+      expect(html).toContain('RCCM &lt;b&gt;x&lt;/b&gt;');
+    });
+  });
+
   it('leaves the raw layout alone', () => {
     // rawLayout templates supply their own full markup; injecting a logo there
     // would duplicate whatever header they already draw.

@@ -21,6 +21,8 @@ import {
   DEFAULT_SYSTEM_CONFIGS,
   STORAGE_ENV_OVERRIDES,
 } from './system-config.constants';
+import { SOCIAL_NETWORKS } from '../mail/templates/social-icons-asset';
+import type { FooterInfo } from '../mail/templates/layout';
 
 const CACHE_PREFIX = `${REDIS_KEY_PREFIX}syscfg:`;
 const CACHE_TTL_SECONDS = 300; // 5 minutes
@@ -766,17 +768,31 @@ export class SystemConfigService implements OnModuleInit {
     return { email, phone, address };
   }
 
-  async getEmailFooterInfo() {
-    const [description, email, address] = await this.mgetBatch([
-      {
-        key: 'general.description',
-        fallback:
-          'Plateforme de mise en relation entre employeurs et travailleurs informels en Afrique.',
-      },
-      { key: 'contact.email', fallback: 'contact@rabotka.com' },
-      { key: 'contact.address', fallback: '' },
-    ]);
-    return { description, email, address };
+  /**
+   * What the foot of every email says: who Rabotka is (legal name, RCCM,
+   * address, contact) and where to follow it. Social links that are not an
+   * http(s) URL are left out, so a typo never becomes a broken icon.
+   */
+  async getEmailFooterInfo(): Promise<FooterInfo> {
+    const [description, email, address, phone, legalName, rccm, ...links] =
+      await this.mgetBatch([
+        {
+          key: 'general.description',
+          fallback:
+            'Plateforme de mise en relation entre employeurs et travailleurs informels en Afrique.',
+        },
+        { key: 'contact.email', fallback: 'contact@rabotka.com' },
+        { key: 'contact.address', fallback: '' },
+        { key: 'contact.phone', fallback: '' },
+        { key: 'company.legal_name', fallback: 'Rabotka' },
+        { key: 'company.rccm', fallback: '' },
+        ...SOCIAL_NETWORKS.map((n) => ({ key: `social.${n}`, fallback: '' })),
+      ]);
+    const socials = SOCIAL_NETWORKS.flatMap((network, i) => {
+      const url = links[i]?.trim() ?? '';
+      return /^https?:\/\/\S+$/i.test(url) ? [{ network, url }] : [];
+    });
+    return { description, email, address, phone, legalName, rccm, socials };
   }
 
   async getFees() {

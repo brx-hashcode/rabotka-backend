@@ -1,10 +1,25 @@
 import { RABOTKA_LOGO_CID } from './logo-asset';
+import {
+  SOCIAL_LABELS,
+  socialIconCid,
+  type SocialNetwork,
+} from './social-icons-asset';
 
+/** The foot of every email, from Settings → Contact (getEmailFooterInfo). */
 export type FooterInfo = {
   description?: string | null;
   email?: string | null;
   address?: string | null;
+  phone?: string | null;
+  /** « Rabotka SARL »: the company the RCCM belongs to. */
+  legalName?: string | null;
+  rccm?: string | null;
+  /** Only those with a link set, in the order to show them. */
+  socials?: { network: SocialNetwork; url: string }[];
 };
+
+/** Where the terms and the privacy policy live, whatever the product. */
+const LEGAL_SITE = 'https://www.rabotka.work';
 
 export type EmailLayoutOptions = {
   previewText?: string;
@@ -54,6 +69,7 @@ export function wrapEmailHtml(
       body { margin: 0; padding: 0; background-color: #f5f4ef; }
       @media only screen and (max-width: 640px) {
         .rk-card { width: 100% !important; border-radius: 0 !important; border-left: none !important; border-right: none !important; }
+        .rk-foot { width: 100% !important; }
       }
     </style>
   </head>
@@ -100,22 +116,87 @@ export function wrapEmailHtml(
               </td>
             </tr>
 
-            <!-- Footer -->
-            <tr>
-              <td align="center" style="padding:20px 32px 28px;border-top:1px solid #e6e4dd;font-family:'Ubuntu',sans-serif;">
-                ${footer?.description ? `<p style="margin:0 0 10px;font-size:13px;color:#2a322e;font-weight:500;">${escapeHtml(footer.description)}</p>` : ''}
-                <p style="margin:0;font-size:12px;color:#9aa39d;">
-                  &copy; ${new Date().getFullYear()} Rabotka${footer?.email ? ` &nbsp;&middot;&nbsp; ${escapeHtml(footer.email)}` : ' &nbsp;&middot;&nbsp; noreply@rabotka.work'}${footer?.address ? ` &nbsp;&middot;&nbsp; ${escapeHtml(footer.address)}` : ''}
-                </p>
-              </td>
-            </tr>
-
           </table>
+
+          ${emailFooter(footer, options?.product)}
         </td>
       </tr>
     </table>
   </body>
 </html>`;
+}
+
+/**
+ * The foot of the email, under the card on the page's own background, the way
+ * Apple's are: the networks as icons, then the small print — who Rabotka is,
+ * its RCCM and address, how to reach it, the copyright and the legal links.
+ * Each line shows only when its setting is filled in. A business's email
+ * points to business.rabotka.work, every other to www.rabotka.work.
+ */
+export function emailFooter(
+  footer: FooterInfo | undefined,
+  product?: 'business',
+): string {
+  const text =
+    "font-family:'Ubuntu',Arial,sans-serif;font-size:12px;line-height:18px;color:#86868b;";
+  const link = 'color:#515154;text-decoration:underline;';
+  const dot = '&nbsp;&middot;&nbsp;';
+  const line = (html: string, spacing = '0 0 6px') =>
+    `<p style="margin:${spacing};${text}">${html}</p>`;
+
+  const socials = footer?.socials ?? [];
+  const icons = socials.length
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;">
+                <tr>${socials
+                  .map(
+                    ({ network, url }, i) => `
+                  <td style="padding:0 ${i === socials.length - 1 ? 0 : 10}px 0 0;">
+                    <a href="${escapeHtml(url)}" target="_blank" style="text-decoration:none;">
+                      <img src="cid:${socialIconCid(network)}" width="32" height="32" alt="${SOCIAL_LABELS[network]}"
+                        style="display:block;width:32px;height:32px;border:0;outline:none;">
+                    </a>
+                  </td>`,
+                  )
+                  .join('')}
+                </tr>
+              </table>`
+    : '';
+
+  const legalName = footer?.legalName?.trim() || 'Rabotka';
+  const identity = [
+    escapeHtml(legalName),
+    footer?.rccm?.trim() ? `RCCM ${escapeHtml(footer.rccm.trim())}` : '',
+  ]
+    .filter(Boolean)
+    .join(dot);
+  const site =
+    product === 'business' ? 'business.rabotka.work' : 'www.rabotka.work';
+  const email = footer?.email?.trim() || 'noreply@rabotka.work';
+  const reach = [
+    `<a href="mailto:${escapeHtml(email)}" style="${link}">${escapeHtml(email)}</a>`,
+    footer?.phone?.trim() ? escapeHtml(footer.phone.trim()) : '',
+    `<a href="https://${site}" target="_blank" style="${link}">${site}</a>`,
+  ]
+    .filter(Boolean)
+    .join(dot);
+
+  return `<!-- Footer -->
+          <table class="rk-foot" width="600" cellpadding="0" cellspacing="0" border="0" role="presentation">
+            <tr>
+              <td align="left" style="padding:28px 32px 0;text-align:left;">
+              ${icons}
+              ${footer?.description ? line(escapeHtml(footer.description), '0 0 14px') : ''}
+              ${line(identity)}
+              ${footer?.address?.trim() ? line(escapeHtml(footer.address.trim())) : ''}
+              ${line(reach, '0 0 14px')}
+              ${line(`Copyright &copy; ${new Date().getFullYear()} ${escapeHtml(legalName)}. Tous droits réservés.`)}
+              ${line(
+                `<a href="${LEGAL_SITE}/terms" target="_blank" style="${link}">Conditions d’utilisation</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="${LEGAL_SITE}/privacy" target="_blank" style="${link}">Confidentialité</a>`,
+                '0',
+              )}
+              </td>
+            </tr>
+          </table>`;
 }
 
 /**

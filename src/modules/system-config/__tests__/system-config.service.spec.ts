@@ -590,6 +590,31 @@ describe('SystemConfigService', () => {
     });
   });
 
+  describe('getEmailFooterInfo', () => {
+    it('reads the company and its networks, keeping only real links', async () => {
+      mockRedis.mget.mockResolvedValue(Array<null>(13).fill(null));
+      mockPrisma.systemConfig.findMany.mockResolvedValue([
+        { key: 'company.legal_name', value: 'Rabotka SARL' },
+        { key: 'company.rccm', value: 'CG-BZV-01-2025-B12-00042' },
+        { key: 'contact.address', value: 'Brazzaville, Congo' },
+        { key: 'social.facebook', value: ' https://facebook.com/rabotka ' },
+        { key: 'social.x', value: 'not a link' },
+        { key: 'social.linkedin', value: '' },
+      ]);
+
+      const footer = await service.getEmailFooterInfo();
+
+      expect(footer).toMatchObject({
+        legalName: 'Rabotka SARL',
+        rccm: 'CG-BZV-01-2025-B12-00042',
+        address: 'Brazzaville, Congo',
+      });
+      expect(footer.socials).toEqual([
+        { network: 'facebook', url: 'https://facebook.com/rabotka' },
+      ]);
+    });
+  });
+
   describe('getFees', () => {
     it('returns fees with defaults', async () => {
       // getFees requests 14 keys — return all null so every value falls back.
