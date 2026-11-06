@@ -3784,9 +3784,12 @@ model Interview {
   created_at       DateTime        @default(now())
   updated_at       DateTime        @updatedAt
   business_id      String          @db.Uuid
-  /// Exactly one of the two: where the candidate comes from.
+  /// Exactly one of the three: where the candidate comes from.
   cv_resume_id     String?         @db.Uuid
   application_id   String?         @db.Uuid
+  /// A careers-page candidate invited without a CV analysis (none left on
+  /// the plan, or not run): reached at the address they applied with.
+  external_application_id String?  @db.Uuid
   offer_id         String?         @db.Uuid
   job_title        String
   candidate_name   String
@@ -3810,12 +3813,14 @@ model Interview {
   business  Business           @relation(fields: [business_id], references: [id], onDelete: Cascade)
   cv_resume CvScreeningResume? @relation(fields: [cv_resume_id], references: [id], onDelete: SetNull)
   application Application?     @relation(fields: [application_id], references: [id], onDelete: SetNull)
+  external_application ExternalApplication? @relation(fields: [external_application_id], references: [id], onDelete: SetNull)
   offer     JobOffer?          @relation(fields: [offer_id], references: [id], onDelete: SetNull)
 
   @@index([business_id, starts_at], name: "idx_interview_business_starts")
   @@index([status, starts_at], name: "idx_interview_status_starts")
   @@index([cv_resume_id], name: "idx_interview_cv_resume")
   @@index([application_id], name: "idx_interview_application")
+  @@index([external_application_id], name: "idx_interview_external_application")
   @@map("interviews")
 }
 
@@ -4101,6 +4106,7 @@ model ExternalApplication {
 
   job_offer JobOffer @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
   cv_resume CvScreeningResume? @relation(fields: [cv_resume_id], references: [id], onDelete: SetNull)
+  interviews Interview[]
   team_notes    CandidateNote[]
   team_opinions CandidateOpinion[]
 

@@ -81,7 +81,10 @@ describe('TeamService', () => {
       },
       profile: { findFirst: jest.fn().mockResolvedValue(null) },
       businessActivity: { create: jest.fn().mockResolvedValue({}) },
+      // The writes of a removal run together.
+      $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
     };
+    (prisma.business as any).update = jest.fn().mockResolvedValue({});
     limits = { RECRUITER: 2, REVIEWER: 0 };
     taken = { RECRUITER: 0, REVIEWER: 0 };
     subscriptions = {
@@ -306,6 +309,11 @@ describe('TeamService', () => {
           removed_at: expect.any(Date),
           seat_subscription_id: null,
         },
+      });
+      // The shared interview calendar link is renewed: they had it.
+      expect((prisma.business as any).update).toHaveBeenCalledWith({
+        where: { id: expect.any(String) },
+        data: { calendar_token: null },
       });
     });
   });
