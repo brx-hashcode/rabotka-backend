@@ -35,6 +35,7 @@ import {
 import { notifyProfile } from '../../profile-notification/profile-notification.events';
 import type { NotificationInput } from '../../profile-notification/notification-catalog';
 import {
+  counterWindow,
   dueReminder,
   isUpgrade,
   nextPeriodStart,
@@ -58,6 +59,24 @@ const RECONCILE_DAYS = 30;
 const RECONCILE_GRACE_MS = 5 * 60 * 1000;
 /** The hourly run that tells the admins: the first after the grace. */
 const RECONCILE_ALERT_WINDOW_MS = 60 * 60 * 1000;
+
+/** When a period's counters start again: next month of it, or its end. */
+function countersEnd(sub: { starts_at: Date; ends_at: Date }): Date {
+  return (
+    counterWindow(sub.starts_at, sub.ends_at, new Date()).resetsAt ??
+    sub.ends_at
+  );
+}
+
+/** « 5 décembre 2026 », for the limit messages. */
+function frenchDay(d: Date): string {
+  return d.toLocaleDateString('fr-FR', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'Africa/Brazzaville',
+  });
+}
 
 const RUNNING: BusinessSubscriptionStatus[] = [
   BusinessSubscriptionStatus.TRIAL,
@@ -92,6 +111,11 @@ export type BusinessEntitlements = {
   plan: { id: string; code: string; name: string } | null;
   status: BusinessSubscriptionStatus | null;
   endsAt: string | null;
+  /**
+   * When the counters start again (a new month of a longer period); null
+   * when they only do with the next period, at `endsAt`.
+   */
+  countersResetAt: string | null;
   /** Contact unlocks still covered this period; null: unlimited; 0: pay per unlock. */
   unlocksRemaining: number | null;
   unlocksQuota: number | null;
@@ -182,17 +206,41 @@ export class BusinessSubscriptionService {
 
   // ── Reading ──────────────────────────────────────────────────────────
 
-  /** The period covering now (trial or paid), with its plan. */
-  current(businessId: string, db: Db = this.prisma, now = new Date()) {
-    return db.businessSubscription.findFirst({
-      where: {
-        business_id: businessId,
-        status: { in: RUNNING },
-        starts_at: { lte: now },
-        ends_at: { gt: now },
-      },
+  /**
+   * The period covering now (trial or paid), with its plan — its counters
+   * started again first when a new month of it has begun (an annual plan
+   * gives its quotas « par mois »). Lazy: whoever reads or charges the period
+   * first in a month resets it, once (conditional on the month it was in).
+   */
+  async current(businessId: string, db: Db = this.prisma, now = new Date()) {
+    const where = {
+      business_id: businessId,
+      status: { in: RUNNING },
+      starts_at: { lte: now },
+      ends_at: { gt: now },
+    };
+    const sub = await db.businessSubscription.findFirst({
+      where,
       include: { plan: true },
       orderBy: { starts_at: 'desc' },
+    });
+    if (!sub) return sub;
+    const { from } = counterWindow(sub.starts_at, sub.ends_at, now);
+    if (from <= (sub.counters_from ?? sub.starts_at)) return sub;
+    await db.businessSubscription.updateMany({
+      where: { id: sub.id, counters_from: sub.counters_from },
+      data: {
+        counters_from: from,
+        unlocks_used: 0,
+        cv_screened: 0,
+        offer_drafts_used: 0,
+        offers_published: 0,
+      },
+    });
+    // Reset by this call or a concurrent one: read what is there now.
+    return db.businessSubscription.findFirst({
+      where: { id: sub.id },
+      include: { plan: true },
     });
   }
 
@@ -240,6 +288,7 @@ export class BusinessSubscriptionService {
         plan: null,
         status: null,
         endsAt: null,
+        countersResetAt: null,
         unlocksRemaining: 0,
         unlocksQuota: 0,
         unlocksUsed: 0,
@@ -275,6 +324,12 @@ export class BusinessSubscriptionService {
       plan: { id: sub.plan.id, code: sub.plan.code, name: sub.plan.name },
       status: sub.status,
       endsAt: sub.ends_at.toISOString(),
+      countersResetAt:
+        counterWindow(
+          sub.starts_at,
+          sub.ends_at,
+          new Date(),
+        ).resetsAt?.toISOString() ?? null,
       unlocksRemaining: remaining(
         sub.plan.unlocks_per_period,
         sub.unlocks_used,
@@ -1062,8 +1117,8 @@ export class BusinessSubscriptionService {
       const left = remaining(quota, sub.cv_screened) ?? 0;
       throw new ForbiddenException(
         left > 0
-          ? `Il vous reste ${left} CV inclus ce mois-ci : retirez-en ${count - left} ou changez de formule.`
-          : 'Vous avez utilisé tous les CV inclus dans votre formule pour cette période. Changez de formule pour en analyser davantage.',
+          ? `Il vous reste ${left} CV inclus jusqu'au ${frenchDay(countersEnd(sub))} : retirez-en ${count - left} ou changez de formule.`
+          : `Vous avez utilisé tous les CV inclus dans votre formule jusqu'au ${frenchDay(countersEnd(sub))}. Changez de formule pour en analyser davantage.`,
       );
     }
     return { subscriptionId: sub.id };
@@ -1095,7 +1150,7 @@ export class BusinessSubscriptionService {
     });
     if (count === 0) {
       throw new ForbiddenException(
-        'Vous avez utilisé toutes les rédactions par l’IA incluses dans votre formule pour cette période.',
+        `Vous avez utilisé toutes les rédactions par l’IA incluses dans votre formule jusqu’au ${frenchDay(countersEnd(sub))}.`,
       );
     }
     return { subscriptionId: sub.id };

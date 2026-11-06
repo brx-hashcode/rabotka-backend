@@ -3580,6 +3580,10 @@ model BusinessSubscription {
   offer_drafts_used   Int                        @default(0)
   /// Offers published (or republished) during this period.
   offers_published    Int                        @default(0)
+  /// The month the counters above belong to (null: the period's first). A
+  /// period longer than a month starts them again every month
+  /// (counterWindow in subscription-rules.ts).
+  counters_from       DateTime?                  @db.Timestamptz
   /// Recruiters / evaluators added to the team during this period (an
   /// invitation, or a member moved to the role). Counted from 0 each period:
   /// the people already in the team stay.
