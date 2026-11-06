@@ -2575,37 +2575,52 @@ export class ProfileService {
             city: dto.city ?? undefined,
           })
         : {};
-    // Renamed: the careers page's address follows the new name.
-    const slug =
-      dto.name !== undefined
-        ? await slugAfterRename(this.prisma, business, dto.name)
-        : null;
+    // Renamed: the careers page's address follows the new name. Two
+    // businesses renamed at the same moment can pick the same free slug:
+    // the second save fails on its unique index, and is tried once more
+    // with the next free one.
+    for (let attempt = 0; ; attempt++) {
+      const slug =
+        dto.name !== undefined
+          ? await slugAfterRename(this.prisma, business, dto.name)
+          : null;
 
-    await this.prisma.$transaction([
-      this.prisma.business.update({
-        where: { id: business.id },
-        data: {
-          ...slug,
-          name: dto.name,
-          category: dto.category,
-          legal_form: legalForm,
-          size: dto.size,
-          registration_number: dto.registrationNumber,
-          tax_id: dto.taxId,
-          statistical_id: dto.statisticalId,
-          address: dto.address,
-          country_code: location.country_code,
-          city: dto.city === null ? null : location.city,
-          email: dto.email,
-          phone: dto.phone,
-          website: dto.website,
-          description: dto.description,
-          distribute_offers: dto.distributeOffers,
-          ...(reopened ? reopenedReview() : {}),
-        },
-      }),
-      ...(reopened ? [this.reopenProfileReview(profileId)] : []),
-    ]);
+      try {
+        await this.prisma.$transaction([
+          this.prisma.business.update({
+            where: { id: business.id },
+            data: {
+              ...slug,
+              name: dto.name,
+              category: dto.category,
+              legal_form: legalForm,
+              size: dto.size,
+              registration_number: dto.registrationNumber,
+              tax_id: dto.taxId,
+              statistical_id: dto.statisticalId,
+              address: dto.address,
+              country_code: location.country_code,
+              city: dto.city === null ? null : location.city,
+              email: dto.email,
+              phone: dto.phone,
+              website: dto.website,
+              description: dto.description,
+              distribute_offers: dto.distributeOffers,
+              ...(reopened ? reopenedReview() : {}),
+            },
+          }),
+          ...(reopened ? [this.reopenProfileReview(profileId)] : []),
+        ]);
+        break;
+      } catch (err) {
+        const slugTaken =
+          slug &&
+          attempt === 0 &&
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002';
+        if (!slugTaken) throw err;
+      }
+    }
 
     if (reopened) {
       this.emitBusinessResubmitted(

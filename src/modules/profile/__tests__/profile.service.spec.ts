@@ -2028,6 +2028,23 @@ describe('ProfileService', () => {
         });
       });
 
+      it('tries the next free address once when another rename took it meanwhile', async () => {
+        const { Prisma } = jest.requireActual('@prisma/client');
+        const clash = new Prisma.PrismaClientKnownRequestError('Unique constraint', {
+          code: 'P2002',
+          clientVersion: 'test',
+        });
+        (prisma.$transaction as jest.Mock)
+          .mockRejectedValueOnce(clash)
+          .mockImplementation((calls: any) =>
+            Array.isArray(calls) ? Promise.resolve(calls) : calls(prisma),
+          );
+        await service.updateBusiness('p-1', { name: 'Autre nom' } as any, 'admin');
+        // The free slug looked up twice: once per try.
+        expect((prisma as any).business.findMany).toHaveBeenCalledTimes(2);
+        expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+      });
+
       it('leaves the address alone when the name is not changed', async () => {
         await service.updateBusiness(
           'p-1',
