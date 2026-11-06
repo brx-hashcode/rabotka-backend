@@ -233,11 +233,10 @@ export class PaymentRequestService {
       throw new NotFoundException('Demande de paiement introuvable');
     }
 
-    const isSettled =
-      request.status === PaymentRequestStatus.APPROVED ||
-      request.status === PaymentRequestStatus.REJECTED;
-
-    if (isSettled) {
+    // Only a paid request is spent. A REJECTED one is an attempt the
+    // operator declined (nothing was charged): still served, so the page
+    // can say so and the payer can try again with the same link.
+    if (request.status === PaymentRequestStatus.APPROVED) {
       throw new BadRequestException('Cette demande a déjà été traitée');
     }
 
@@ -375,14 +374,31 @@ export class PaymentRequestService {
 
     // Atomically claim PENDING → PROCESSING before calling the gateway.
     // Concurrent double-taps both attempt this; only one succeeds (count === 1).
+    // REJECTED too: only the gateway sets it, when the payer declined or could
+    // not pay (nothing charged), and a new attempt gets a new gateway
+    // reference, so the old attempt's late webhook or poll cannot touch it.
     const locked = await this.prisma.paymentRequest.updateMany({
-      where: { id: request.id, status: PaymentRequestStatus.PENDING },
-      data: { status: PaymentRequestStatus.PROCESSING, phone, operator },
+      where: {
+        id: request.id,
+        status: {
+          in: [PaymentRequestStatus.PENDING, PaymentRequestStatus.REJECTED],
+        },
+      },
+      data: {
+        status: PaymentRequestStatus.PROCESSING,
+        phone,
+        operator,
+        gateway_payment_ref: null,
+        gateway_tx_id: null,
+      },
     });
 
     if (locked.count === 0) {
+      // PROCESSING (a request still open on the phone) or APPROVED.
       throw new BadRequestException(
-        "Cette demande n'est pas en attente de paiement",
+        request.status === PaymentRequestStatus.APPROVED
+          ? 'Cette demande a déjà été payée'
+          : 'Une demande est déjà en cours sur votre téléphone : validez-la, ou réessayez dans 2 minutes.',
       );
     }
 
