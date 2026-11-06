@@ -8,7 +8,8 @@ import { createArcjetLoggerAdapter } from './common/utils/arcjet-logger.adapter.
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { validateWhatsappEnv } from './modules/whatsapp/whatsapp.config';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { ClientIpThrottlerGuard } from './common/guards/client-ip-throttler.guard';
 import { MailerModule } from '@nestjs-modules/mailer';
 import { I18nModule, AcceptLanguageResolver, QueryResolver } from 'nestjs-i18n';
 import * as fs from 'node:fs';
@@ -234,7 +235,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
   providers: [
     AppService,
     { provide: APP_GUARD, useClass: HttpOnlyArcjetGuard },
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: ClientIpThrottlerGuard },
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
   ],
 })

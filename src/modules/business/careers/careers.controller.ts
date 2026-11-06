@@ -112,8 +112,11 @@ export class ExternalApplicationsController {
 
   @Get()
   @ApiOperation({ summary: 'Applications from the public careers page' })
-  list(@Req() req: { user: { profileId: string } }) {
-    return this.careers.listForBusiness(req.user.profileId);
+  list(
+    @Req() req: { user: { profileId: string } },
+    @Query('offerId', new ParseUUIDPipe({ optional: true })) offerId?: string,
+  ) {
+    return this.careers.listForBusiness(req.user.profileId, offerId);
   }
 
   @Get(':id/cv')

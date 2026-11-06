@@ -75,6 +75,8 @@ const OPEN: JobOfferStatus[] = [
 ];
 
 const MAX_COMPANIES = 200;
+/** Careers applications listed at once for a business (the newest). */
+const MAX_LISTED = 500;
 /** Well above what Rabotka's businesses have open; a feed stays one file. */
 const MAX_FEED_JOBS = 5000;
 
@@ -450,10 +452,20 @@ export class CareersService {
   }
 
   /** The business's own: newest first, a failed « éliminatoire » after the others. */
-  async listForBusiness(profileId: string) {
+  /**
+   * The careers-page applications of the business, or of one offer: the
+   * offer page asks for its own, rather than every application ever and a
+   * filter in the browser, polled every few seconds while a CV is read.
+   * The newest MAX_LISTED.
+   */
+  async listForBusiness(profileId: string, offerId?: string) {
     const rows = await this.prisma.externalApplication.findMany({
-      where: { job_offer: { employer_id: profileId, deleted_at: null } },
+      where: {
+        job_offer: { employer_id: profileId, deleted_at: null },
+        ...(offerId ? { job_offer_id: offerId } : {}),
+      },
       orderBy: [{ knocked_out: 'asc' }, { created_at: 'desc' }],
+      take: MAX_LISTED,
       include: {
         job_offer: { select: { id: true, title: true, status: true } },
         cv_resume: {
