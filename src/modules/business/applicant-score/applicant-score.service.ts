@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { answerSnippet } from '../cv-screening/lenient-answer';
 import { OnEvent } from '@nestjs/event-emitter';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import {
@@ -66,6 +67,10 @@ const CATCH_UP_SCAN = 200;
 const FAILED_RETRY_MS = 6 * 60 * 60 * 1000;
 /** Older applications are not worth a « CV inclus » any more. */
 const CATCH_UP_DAYS = 30;
+/** A failed score is tried again after this… */
+const SCORE_RETRY_MS = 6 * 60 * 60 * 1000;
+/** …for this long after its first failure. */
+const SCORE_RETRY_FOR_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Ranks the applicants of a business's offers like CV analysis ranks CVs:
@@ -89,10 +94,42 @@ export class ApplicantScoreService {
   async sweep(now = new Date()): Promise<number> {
     const pending = await this.prisma.application.findMany({
       where: {
-        assessment: null,
-        status: { not: ApplicationStatus.CANCELLED },
+        // Never scored, or a failed try old enough to try again: every 6 h,
+        // for a day after the first one (it used to retry the same batch
+        // every 2 minutes, and the older ones waited behind it).
+        OR: [
+          { assessment: null },
+          {
+            assessment: {
+              failed: true,
+              updated_at: { lte: new Date(now.getTime() - SCORE_RETRY_MS) },
+              created_at: {
+                gte: new Date(now.getTime() - SCORE_RETRY_FOR_MS),
+              },
+            },
+          },
+        ],
+        // A refused or cancelled application needs no score.
+        status: {
+          notIn: [ApplicationStatus.CANCELLED, ApplicationStatus.REJECTED],
+        },
         created_at: { gte: new Date(now.getTime() - RECENT_DAYS * 86_400_000) },
-        job_offer: { deleted_at: null, employer: { is_business: true } },
+        job_offer: {
+          deleted_at: null,
+          // Only for a business with a plan running: a model call each.
+          employer: {
+            is_business: true,
+            business: {
+              subscriptions: {
+                some: {
+                  status: { in: ['TRIAL', 'ACTIVE'] },
+                  starts_at: { lte: now },
+                  ends_at: { gt: now },
+                },
+              },
+            },
+          },
+        },
       },
       orderBy: { created_at: 'desc' },
       take: PER_SWEEP,
@@ -207,6 +244,14 @@ export class ApplicantScoreService {
       this.logger.warn(
         `Applicant score failed for ${applicationId}: ${err instanceof Error ? err.message : String(err)}`,
       );
+      // Recorded, so the next sweep takes the others first; tried again later.
+      await this.prisma.applicationAssessment
+        .upsert({
+          where: { application_id: applicationId },
+          create: { application_id: applicationId, failed: true },
+          update: { failed: true },
+        })
+        .catch(() => undefined);
       return false;
     }
 
@@ -641,7 +686,13 @@ export class ApplicantScoreService {
         )
       ).output.content,
     );
-    return parseApplicantAssessment(second);
+    const read = parseApplicantAssessment(second);
+    if (!read) {
+      this.logger.warn(
+        `Applicant score unreadable for ${applicationId}: ${answerSnippet(second)}`,
+      );
+    }
+    return read;
   }
 }
 

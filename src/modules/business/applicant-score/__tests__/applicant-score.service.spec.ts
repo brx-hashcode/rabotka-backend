@@ -77,7 +77,7 @@ describe('ApplicantScoreService', () => {
     expect(saved.failed).toBe(false);
   });
 
-  it('marks an unusable answer as failed (not retried), and leaves a provider error for the next sweep', async () => {
+  it('marks an unusable answer and a provider error as failed, to try again later', async () => {
     const { service, prisma, llm } = make();
     llm.invoke.mockResolvedValue({ output: { content: 'Je ne sais pas.' } });
     await service.assess('a1');
@@ -88,18 +88,42 @@ describe('ApplicantScoreService', () => {
     prisma.applicationAssessment.upsert.mockClear();
     llm.invoke.mockRejectedValue(new Error('chain exhausted'));
     await expect(service.assess('a1')).resolves.toBe(false);
-    expect(prisma.applicationAssessment.upsert).not.toHaveBeenCalled();
+    // Recorded, so the next sweep takes the others first.
+    expect(
+      prisma.applicationAssessment.upsert.mock.calls[0][0].create,
+    ).toMatchObject({ failed: true });
   });
 
   it('sweeps only business offers’ recent applications without a score', async () => {
     const { service, prisma } = make();
     prisma.application.findMany.mockResolvedValue([]);
     await service.sweep(new Date('2026-10-28T00:00:00Z'));
+    const now = new Date('2026-10-28T00:00:00Z');
     const where = prisma.application.findMany.mock.calls[0][0].where;
-    expect(where.assessment).toBeNull();
-    expect(where.job_offer).toEqual({
-      deleted_at: null,
-      employer: { is_business: true },
+    expect(where.OR).toEqual([
+      { assessment: null },
+      {
+        assessment: {
+          failed: true,
+          updated_at: { lte: new Date('2026-10-27T18:00:00Z') },
+          created_at: { gte: new Date('2026-10-27T00:00:00Z') },
+        },
+      },
+    ]);
+    // Refused ones need no score.
+    expect(where.status).toEqual({ notIn: ['CANCELLED', 'REJECTED'] });
+    // Only for a business with a plan running.
+    expect(where.job_offer.employer).toEqual({
+      is_business: true,
+      business: {
+        subscriptions: {
+          some: {
+            status: { in: ['TRIAL', 'ACTIVE'] },
+            starts_at: { lte: now },
+            ends_at: { gt: now },
+          },
+        },
+      },
     });
   });
 

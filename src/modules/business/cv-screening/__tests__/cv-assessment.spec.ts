@@ -216,3 +216,18 @@ describe('assessmentMessages', () => {
     });
   });
 });
+
+describe('parseAssessment, as the models write', () => {
+  it('reads numbers and booleans written as text', () => {
+    const parsed = parseAssessment(
+      JSON.stringify({
+        isCv: 'true',
+        candidate: { yearsExperience: '5' },
+        criteria: { skills: '80', experience: 60 },
+      }),
+    );
+    expect(parsed).not.toBeNull();
+    expect(parsed!.isCv).toBe(true);
+    expect(parsed!.criteria).toEqual({ skills: 80, experience: 60 });
+  });
+});

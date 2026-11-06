@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { answerSnippet } from './lenient-answer';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'node:crypto';
@@ -666,7 +667,14 @@ export class CvScreeningService {
       new AIMessage(first),
       new HumanMessage(JSON_REMINDER),
     ]);
-    return parseAssessment(second);
+    const read = parseAssessment(second);
+    if (!read) {
+      // Logged now: until today a failed CV said only « n'a pas abouti ».
+      this.logger.warn(
+        `CV ${correlationId} answer unreadable: ${answerSnippet(second)}`,
+      );
+    }
+    return read;
   }
 
   /**

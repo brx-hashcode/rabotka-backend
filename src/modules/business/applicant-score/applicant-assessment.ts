@@ -1,5 +1,6 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { z } from 'zod';
+import { numberish } from '../cv-screening/lenient-answer';
 
 /**
  * How well an applicant fits the offer they applied to, as CV analysis scores
@@ -126,14 +127,17 @@ export function applicantMessages(offer: OfferFacts, a: ApplicantFacts) {
 export const JSON_REMINDER =
   'Ta réponse n’était pas un objet JSON valide. Réponds uniquement par l’objet JSON demandé, sans texte autour.';
 
-const mark = z
-  .number()
-  .nullish()
-  .transform((n) =>
-    n === null || n === undefined || !Number.isFinite(n)
-      ? null
-      : Math.round(Math.min(100, Math.max(0, n))),
-  );
+// `"80"` reads as 80 (lenient-answer.ts).
+const mark = numberish(
+  z
+    .number()
+    .nullish()
+    .transform((n) =>
+      n === null || n === undefined || !Number.isFinite(n)
+        ? null
+        : Math.round(Math.min(100, Math.max(0, n))),
+    ),
+);
 /** `null` where there is nothing to say reads as absent, so the default applies. */
 const absentIfNull = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((v) => (v === null ? undefined : v), schema);
