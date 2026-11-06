@@ -232,9 +232,9 @@ export class BusinessSubscriptionService {
           take: 1,
         })) > 0
       : false;
-    // Places taken this period, like the offers: a new period frees them.
-    const recruiters = sub?.recruiters_added ?? 0;
-    const reviewers = sub?.reviewers_added ?? 0;
+    // The people in the team now, invited or active: a plan's places are a
+    // team size, freed when someone leaves.
+    const { recruiters, reviewers } = await this.seatsInUse(businessId);
     if (!sub) {
       return {
         plan: null,
@@ -1167,15 +1167,43 @@ export class BusinessSubscriptionService {
   }
 
   /**
-   * One team place for this role on the current period, counted from 0 each
-   * period like the offers: the people already in the team keep theirs.
-   * Conditional, so two invitations can't share the last one. Returns the
-   * period charged, `message` builds the refusal from the plan's limit.
+   * The team's invited and active members per role, the account holder
+   * aside: what a plan's « recruteurs » and « évaluateurs » limit.
+   */
+  async seatsInUse(
+    businessId: string,
+    db: Db = this.prisma,
+    excludeMemberId?: string,
+  ): Promise<{ recruiters: number; reviewers: number }> {
+    const rows = await db.businessMember.groupBy({
+      by: ['role'],
+      where: {
+        business_id: businessId,
+        is_owner: false,
+        status: { in: ['INVITED', 'ACTIVE'] },
+        role: { in: ['RECRUITER', 'REVIEWER'] },
+        ...(excludeMemberId ? { id: { not: excludeMemberId } } : {}),
+      },
+      _count: { _all: true },
+    });
+    const of = (role: string) =>
+      rows.find((r) => r.role === role)?._count._all ?? 0;
+    return { recruiters: of('RECRUITER'), reviewers: of('REVIEWER') };
+  }
+
+  /**
+   * Room for one more of this role in the team: the plan's limit against
+   * the people already in it (invited or active), not a per-period count —
+   * which let a team grow by its limit every month, and kept a seat taken
+   * after its member left. `excludeMemberId`: the member changing role, who
+   * leaves the other one. Returns the period (kept on the member, for its
+   * history); `message` builds the refusal from the plan's limit.
    */
   async consumeSeat(
     businessId: string,
     role: 'RECRUITER' | 'REVIEWER',
     message: (limit: number) => string,
+    excludeMemberId?: string,
   ): Promise<{ subscriptionId: string }> {
     const sub = await this.current(businessId);
     const limit = !sub
@@ -1184,34 +1212,16 @@ export class BusinessSubscriptionService {
         ? sub.plan.recruiters_limit
         : sub.plan.reviewers_limit;
     if (!sub || limit === 0) throw new ForbiddenException(message(0));
-    const field = role === 'RECRUITER' ? 'recruiters_added' : 'reviewers_added';
-    const { count } = await this.prisma.businessSubscription.updateMany({
-      where: {
-        id: sub.id,
-        ...(limit === null ? {} : { [field]: { lt: limit } }),
-      },
-      data: { [field]: { increment: 1 } },
-    });
-    if (count === 0) throw new ForbiddenException(message(limit ?? 0));
-    return { subscriptionId: sub.id };
-  }
-
-  /** Gives back a team place (invitation cancelled or never sent); never below zero. */
-  async releaseSeat(
-    subscriptionId: string,
-    role: 'RECRUITER' | 'REVIEWER',
-  ): Promise<void> {
-    if (role === 'RECRUITER') {
-      await this.prisma.$executeRaw`
-        UPDATE "business_subscriptions"
-        SET "recruiters_added" = GREATEST("recruiters_added" - 1, 0)
-        WHERE "id" = ${subscriptionId}::uuid`;
-    } else {
-      await this.prisma.$executeRaw`
-        UPDATE "business_subscriptions"
-        SET "reviewers_added" = GREATEST("reviewers_added" - 1, 0)
-        WHERE "id" = ${subscriptionId}::uuid`;
+    if (limit !== null) {
+      const used = await this.seatsInUse(
+        businessId,
+        this.prisma,
+        excludeMemberId,
+      );
+      const taken = role === 'RECRUITER' ? used.recruiters : used.reviewers;
+      if (taken >= limit) throw new ForbiddenException(message(limit));
     }
+    return { subscriptionId: sub.id };
   }
 
   /** Gives back an offer that could not be saved; never below zero. */

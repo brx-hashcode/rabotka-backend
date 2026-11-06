@@ -50,6 +50,7 @@ function make(
     businessMember: {
       findMany: jest.fn().mockResolvedValue([]),
       findFirst: jest.fn().mockResolvedValue(null),
+      groupBy: jest.fn().mockResolvedValue([]),
     },
   };
   const systemConfig: any = {
@@ -446,36 +447,54 @@ describe('BusinessSubscriptionService', () => {
 
   describe('consumeSeat', () => {
     const message = (limit: number) => `limit ${limit}`;
+    const team = (recruiters: number, reviewers: number) =>
+      jest.fn().mockResolvedValue([
+        { role: 'RECRUITER', _count: { _all: recruiters } },
+        { role: 'REVIEWER', _count: { _all: reviewers } },
+      ]);
 
-    it('takes a place of the role on the current period, never past the plan', async () => {
+    it('counts the people in the team, not a per-period tally', async () => {
       const { service, prisma } = make({
         sub: running({
           plan: plan({ recruiters_limit: 2, reviewers_limit: 1 }),
         }),
       });
-      await expect(
-        service.consumeSeat('b1', 'REVIEWER', message),
-      ).resolves.toEqual({ subscriptionId: 'sub-1' });
-      expect(prisma.businessSubscription.updateMany).toHaveBeenCalledWith({
-        where: { id: 'sub-1', reviewers_added: { lt: 1 } },
-        data: { reviewers_added: { increment: 1 } },
-      });
-
-      prisma.businessSubscription.updateMany.mockResolvedValue({ count: 0 });
+      prisma.businessMember.groupBy = team(1, 1);
       await expect(
         service.consumeSeat('b1', 'RECRUITER', message),
-      ).rejects.toThrow('limit 2');
+      ).resolves.toEqual({ subscriptionId: 'sub-1' });
+      await expect(
+        service.consumeSeat('b1', 'REVIEWER', message),
+      ).rejects.toThrow('limit 1');
+      expect(prisma.businessMember.groupBy.mock.calls[0][0].where).toEqual({
+        business_id: 'b1',
+        is_owner: false,
+        status: { in: ['INVITED', 'ACTIVE'] },
+        role: { in: ['RECRUITER', 'REVIEWER'] },
+      });
+      // Nothing is counted up any more: a new period frees no place.
+      expect(prisma.businessSubscription.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('leaves the member changing role out of the count', async () => {
+      const { service, prisma } = make({
+        sub: running({ plan: plan({ reviewers_limit: 1 }) }),
+      });
+      prisma.businessMember.groupBy = team(0, 0);
+      await service.consumeSeat('b1', 'REVIEWER', message, 'm-2');
+      expect(prisma.businessMember.groupBy.mock.calls[0][0].where.id).toEqual({
+        not: 'm-2',
+      });
     });
 
     it('has no ceiling for an unlimited role', async () => {
       const { service, prisma } = make({
         sub: running({ plan: plan({ recruiters_limit: null }) }),
       });
-      await service.consumeSeat('b1', 'RECRUITER', message);
-      expect(prisma.businessSubscription.updateMany).toHaveBeenCalledWith({
-        where: { id: 'sub-1' },
-        data: { recruiters_added: { increment: 1 } },
-      });
+      prisma.businessMember.groupBy = team(50, 0);
+      await expect(
+        service.consumeSeat('b1', 'RECRUITER', message),
+      ).resolves.toEqual({ subscriptionId: 'sub-1' });
     });
 
     it('is refused without a plan or with a plan that has none', async () => {
