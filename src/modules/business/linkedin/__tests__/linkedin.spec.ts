@@ -342,6 +342,38 @@ describe('LinkedinService', () => {
     ).rejects.toThrow('Cette image n’a pas pu être lue.');
   });
 
+  it('shows the newest post’s own picture, as LinkedIn serves it', async () => {
+    const { service, prisma } = make();
+    prisma.jobOfferLinkedinPost.findMany.mockResolvedValue([
+      {
+        id: 'post-2',
+        status: 'PUBLISHED',
+        person: 'holder',
+        author_name: 'Awa Mbemba',
+        post_urn: 'urn:li:share:9',
+        thumbnail_urn: 'urn:li:image:42',
+        error: null,
+        created_at: new Date(),
+        published_at: new Date(),
+      },
+    ]);
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ downloadUrl: 'https://media.licdn.com/x' }),
+        ),
+      );
+    global.fetch = fetchMock as never;
+
+    const [post] = await service.posts('p-1', 'o-1');
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'https://api.linkedin.com/rest/images/urn%3Ali%3Aimage%3A42',
+    );
+    expect(post.imageUrl).toBe('https://media.licdn.com/x');
+  });
+
   it('refuses an offer that is not on the careers page', async () => {
     const { service, prisma } = make();
     prisma.business.findUnique.mockResolvedValue({

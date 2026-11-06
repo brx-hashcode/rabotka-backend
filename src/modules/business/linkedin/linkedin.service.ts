@@ -32,6 +32,7 @@ import {
   createPost,
   exchangeCode,
   fetchMember,
+  imageDownloadUrl,
   LinkedinAuthError,
   linkedinAuthUrl,
   LinkedinRetryableError,
@@ -217,7 +218,13 @@ export class LinkedinService implements OnModuleInit {
       orderBy: { created_at: 'desc' },
       take: 10,
     });
-    return rows.map((r) => ({
+    // The newest post's own picture, if it had one: what the recruiter sees
+    // as « posted », rather than the offer's share image.
+    const latest = rows[0];
+    const ownImageUrl = latest?.thumbnail_urn
+      ? await this.ownImageUrl(businessId, latest.person, latest.thumbnail_urn)
+      : null;
+    return rows.map((r, i) => ({
       id: r.id,
       status: r.status,
       authorName: r.author_name,
@@ -225,7 +232,29 @@ export class LinkedinService implements OnModuleInit {
       error: r.error,
       createdAt: r.created_at,
       publishedAt: r.published_at,
+      /** Its own picture's address on LinkedIn (newest post only); null: the offer's share image. */
+      imageUrl: i === 0 ? ownImageUrl : null,
     }));
+  }
+
+  private async ownImageUrl(
+    businessId: string,
+    person: string,
+    urn: string,
+  ): Promise<string | null> {
+    if (!this.crypto) return null;
+    const account = await this.prisma.businessLinkedinAccount.findUnique({
+      where: { business_id_person: { business_id: businessId, person } },
+    });
+    if (!account || account.expired_at) return null;
+    try {
+      return await imageDownloadUrl(
+        this.crypto.open(account.access_token_enc),
+        urn,
+      );
+    } catch {
+      return null;
+    }
   }
 
   /**
