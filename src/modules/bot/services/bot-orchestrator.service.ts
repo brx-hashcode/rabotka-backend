@@ -947,8 +947,8 @@ export class BotOrchestratorService {
       const name = `${profile.first_name} ${profile.last_name}`.trim();
       this.events.emit(AdminNotificationEvent.SUPPORT_REQUESTED, {
         event: AdminNotificationEvent.SUPPORT_REQUESTED,
-        title: 'Demande de support',
-        message: `${name || 'Un profil'} (${profile.phone}) a demandé le support sur WhatsApp`,
+        title: 'Support request',
+        message: `${name || 'A profile'} (${profile.phone}) asked for support on WhatsApp`,
         entityType: 'profile',
         entityId: profile.id,
         metadata: { channel: 'whatsapp', accountStatus: profile.status },

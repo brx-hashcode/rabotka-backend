@@ -632,8 +632,8 @@ export class JobOfferService {
 
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_CREATED, {
       event: AdminNotificationEvent.JOB_OFFER_CREATED,
-      title: 'Nouvelle offre',
-      message: `Nouvelle offre d'emploi créée : ${offer.title}`,
+      title: 'New job offer',
+      message: `New job offer created: ${offer.title}`,
       entityType: 'job-offer',
       entityId: String(offer.id),
       timestamp: new Date().toISOString(),
@@ -1379,8 +1379,8 @@ export class JobOfferService {
 
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED, {
       event: AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED,
-      title: 'Offre republiée',
-      message: `L'offre "${updated.title}" a été republiée`,
+      title: 'Job offer republished',
+      message: `The job offer "${updated.title}" was republished`,
       entityType: 'job-offer',
       entityId: String(updated.id),
       timestamp: new Date().toISOString(),
@@ -1424,8 +1424,8 @@ export class JobOfferService {
 
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED, {
       event: AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED,
-      title: 'Statut offre modifié',
-      message: `Le statut de l'offre "${updated.title}" a été changé en ${status}`,
+      title: 'Job offer status changed',
+      message: `The job offer "${updated.title}" changed status to ${status}`,
       entityType: 'job-offer',
       entityId: String(updated.id),
       timestamp: new Date().toISOString(),
@@ -1981,8 +1981,8 @@ export class JobOfferService {
 
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_DELETED, {
       event: AdminNotificationEvent.JOB_OFFER_DELETED,
-      title: 'Offre supprimée',
-      message: `L'offre d'emploi "${offer.title}" a été supprimée`,
+      title: 'Job offer deleted',
+      message: `The job offer "${offer.title}" was deleted`,
       entityType: 'job-offer',
       entityId: String(id),
       timestamp: new Date().toISOString(),
@@ -2569,8 +2569,8 @@ export class JobOfferService {
       );
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_UPDATED, {
       event: AdminNotificationEvent.JOB_OFFER_UPDATED,
-      title: 'Offre mise à jour',
-      message: `L'offre d'emploi "${title}" a été mise à jour par ${editor}`,
+      title: 'Job offer updated',
+      message: `The job offer "${title}" was updated by ${editor}`,
       entityType: 'job-offer',
       entityId: String(id),
       timestamp: new Date().toISOString(),

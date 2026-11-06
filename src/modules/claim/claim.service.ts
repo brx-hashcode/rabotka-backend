@@ -191,8 +191,8 @@ export class ClaimService {
 
     this.eventEmitter.emit(AdminNotificationEvent.CLAIM_CREATED, {
       event: AdminNotificationEvent.CLAIM_CREATED,
-      title: 'Nouvelle réclamation',
-      message: `Nouvelle réclamation "${dto.title}" créée par ${claim.profile ? `${claim.profile.first_name} ${claim.profile.last_name}` : 'un profil'}`,
+      title: 'New claim',
+      message: `New claim "${dto.title}" from ${claim.profile ? `${claim.profile.first_name} ${claim.profile.last_name}` : 'a profile'}`,
       entityType: 'claim',
       entityId: String(claim.id),
       timestamp: new Date().toISOString(),
@@ -335,8 +335,8 @@ export class ClaimService {
 
     this.eventEmitter.emit(AdminNotificationEvent.CLAIM_UPDATED, {
       event: AdminNotificationEvent.CLAIM_UPDATED,
-      title: 'Réclamation mise à jour',
-      message: `La réclamation "${claim.title}" a été mise à jour${claim.profile ? ` (profil : ${claim.profile.first_name} ${claim.profile.last_name})` : ''}`,
+      title: 'Claim updated',
+      message: `The claim "${claim.title}" was updated${claim.profile ? ` (profile: ${claim.profile.first_name} ${claim.profile.last_name})` : ''}`,
       entityType: 'claim',
       entityId: String(claim.id),
       timestamp: new Date().toISOString(),
@@ -580,8 +580,8 @@ export class ClaimService {
       `${comment.user?.first_name ?? ''} ${comment.user?.last_name ?? ''}`.trim();
     this.eventEmitter.emit(AdminNotificationEvent.CLAIM_COMMENTED, {
       event: AdminNotificationEvent.CLAIM_COMMENTED,
-      title: 'Nouveau commentaire (admin)',
-      message: `${authorName} a commenté la réclamation « ${exists.title} »`,
+      title: 'New comment (admin)',
+      message: `${authorName} commented on the claim « ${exists.title} »`,
       entityType: 'claim',
       entityId: claimId,
       timestamp: new Date().toISOString(),
@@ -778,8 +778,8 @@ export class ClaimService {
 
     this.eventEmitter.emit(AdminNotificationEvent.CLAIM_CREATED, {
       event: AdminNotificationEvent.CLAIM_CREATED,
-      title: 'Nouvelle réclamation',
-      message: `Nouvelle réclamation "${dto.title}" créée par ${claim.profile ? `${claim.profile.first_name} ${claim.profile.last_name}` : 'un profil'}`,
+      title: 'New claim',
+      message: `New claim "${dto.title}" from ${claim.profile ? `${claim.profile.first_name} ${claim.profile.last_name}` : 'a profile'}`,
       entityType: 'claim',
       entityId: String(claim.id),
       timestamp: new Date().toISOString(),
@@ -903,8 +903,8 @@ export class ClaimService {
       `${comment.profile?.first_name ?? ''} ${comment.profile?.last_name ?? ''}`.trim();
     this.eventEmitter.emit(AdminNotificationEvent.CLAIM_COMMENTED, {
       event: AdminNotificationEvent.CLAIM_COMMENTED,
-      title: 'Nouveau commentaire (client)',
-      message: `${authorName} a commenté la réclamation « ${claim.title} »`,
+      title: 'New comment (client)',
+      message: `${authorName} commented on the claim « ${claim.title} »`,
       entityType: 'claim',
       entityId: claimId,
       timestamp: new Date().toISOString(),

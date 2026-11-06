@@ -808,8 +808,8 @@ export class ProfileService {
 
     this.eventEmitter.emit(AdminNotificationEvent.PROFILE_UPDATED, {
       event: AdminNotificationEvent.PROFILE_UPDATED,
-      title: 'Profil mis à jour',
-      message: `${existingProfile.first_name} ${existingProfile.last_name} a mis à jour son profil`,
+      title: 'Profile updated',
+      message: `${existingProfile.first_name} ${existingProfile.last_name} updated their profile`,
       entityType: 'profile',
       entityId: String(id),
       timestamp: new Date().toISOString(),
@@ -1356,8 +1356,8 @@ export class ProfileService {
 
     this.eventEmitter.emit(AdminNotificationEvent.PROFILE_KYC_VERIFIED, {
       event: AdminNotificationEvent.PROFILE_KYC_VERIFIED,
-      title: 'KYC vérifié',
-      message: `KYC de ${kycProfile?.first_name ?? ''} ${kycProfile?.last_name ?? ''} : ${decision}`,
+      title: 'KYC reviewed',
+      message: `KYC of ${kycProfile?.first_name ?? ''} ${kycProfile?.last_name ?? ''}: ${decision}`,
       entityType: 'profile',
       entityId: String(profileId),
       timestamp: new Date().toISOString(),
@@ -1481,8 +1481,8 @@ export class ProfileService {
 
     this.eventEmitter.emit(AdminNotificationEvent.PROFILE_STATUS_CHANGED, {
       event: AdminNotificationEvent.PROFILE_STATUS_CHANGED,
-      title: 'Statut profil modifié',
-      message: `${profile.first_name} — statut changé en ${status}`,
+      title: 'Profile status changed',
+      message: `${profile.first_name} — status changed to ${status}`,
       entityType: 'profile',
       entityId: String(profileId),
       timestamp: new Date().toISOString(),
@@ -1715,8 +1715,8 @@ export class ProfileService {
 
     this.eventEmitter.emit(AdminNotificationEvent.PROFILE_UPDATED, {
       event: AdminNotificationEvent.PROFILE_UPDATED,
-      title: 'Profil mis à jour par admin',
-      message: `${profile.first_name} ${profile.last_name} — mis à jour par un administrateur`,
+      title: 'Profile updated by an admin',
+      message: `${profile.first_name} ${profile.last_name} — updated by an administrator`,
       entityType: 'profile',
       entityId: String(profileId),
       timestamp: new Date().toISOString(),
@@ -2183,8 +2183,8 @@ export class ProfileService {
 
       this.eventEmitter.emit(AdminNotificationEvent.PROFILE_CREATED, {
         event: AdminNotificationEvent.PROFILE_CREATED,
-        title: 'Nouveau profil',
-        message: `Nouveau profil créé : ${createProfileDto.firstName} ${createProfileDto.lastName}`,
+        title: 'New profile',
+        message: `New profile created: ${createProfileDto.firstName} ${createProfileDto.lastName}`,
         entityType: 'profile',
         entityId: String(profile.id),
         timestamp: new Date().toISOString(),
@@ -2499,8 +2499,8 @@ export class ProfileService {
 
     this.eventEmitter.emit(AdminNotificationEvent.PROFILE_KYC_VERIFIED, {
       event: AdminNotificationEvent.PROFILE_KYC_VERIFIED,
-      title: 'Organisation vérifiée',
-      message: `Organisation du profil ${profileId} : ${decision}`,
+      title: 'Organisation reviewed',
+      message: `Organisation of profile ${profileId}: ${decision}`,
       entityType: 'profile',
       entityId: String(profileId),
       timestamp: now.toISOString(),
@@ -2625,7 +2625,7 @@ export class ProfileService {
     if (reopened) {
       this.emitBusinessResubmitted(
         profileId,
-        `${business.name} a modifié ses informations (${changed.join(', ')}) : à revoir.`,
+        `${business.name} changed its details (${changed.join(', ')}): to review.`,
       );
     }
     return { business: await this.getBusinessForAdmin(profileId), reopened };
@@ -2729,7 +2729,7 @@ export class ProfileService {
 
     this.emitBusinessResubmitted(
       profileId,
-      `${business.name} a ${replaced ? 'renvoyé' : 'ajouté'} : ${documentLabel(business.country_code, documentType)}.`,
+      `${business.name} ${replaced ? 'resent' : 'added'}: ${documentLabel(business.country_code, documentType)}.`,
     );
     return this.getBusinessForAdmin(profileId);
   }
@@ -2751,7 +2751,7 @@ export class ProfileService {
   private emitBusinessResubmitted(profileId: string, message: string): void {
     this.eventEmitter.emit(AdminNotificationEvent.PROFILE_UPDATED, {
       event: AdminNotificationEvent.PROFILE_UPDATED,
-      title: 'Organisation à revoir',
+      title: 'Organisation to review',
       message,
       entityType: 'profile',
       entityId: String(profileId),

@@ -765,19 +765,19 @@ export class ProfileChatService {
     });
     const nameOf = (id: string) => {
       const p = people.find((row) => row.id === id);
-      return p ? `${p.first_name} ${p.last_name}`.trim() : 'Un profil';
+      return p ? `${p.first_name} ${p.last_name}`.trim() : 'A profile';
     };
     const distinct = [...new Set(categories)];
     const event = held
       ? AdminNotificationEvent.CONVERSATION_MESSAGE_HELD
       : AdminNotificationEvent.CONVERSATION_CONTACT_MASKED;
     const what = held
-      ? 'un message a été retenu'
-      : 'des coordonnées ont été masquées';
+      ? 'a message was held'
+      : 'contact details were masked';
 
     this.events.emit(event, {
       event,
-      title: held ? 'Message retenu' : 'Coordonnées masquées',
+      title: held ? 'Message held' : 'Contact details masked',
       message:
         `${nameOf(senderId)} → ${nameOf(recipientId)} : ${what}` +
         (distinct.length ? ` (${distinct.join(', ')})` : ''),
