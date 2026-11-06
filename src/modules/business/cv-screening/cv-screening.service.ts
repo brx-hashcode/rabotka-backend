@@ -285,6 +285,57 @@ export class CvScreeningService {
   }
 
   /**
+   * More CVs for a screening the business opened by hand: a batch too large
+   * for one request (the business site takes 50 MB a request) is sent in
+   * several, the first opening the screening, the next adding to it. Each
+   * request is charged on its own, all or nothing; the plan's « CV par
+   * analyse » counts for the whole screening.
+   */
+  async addFiles(profileId: string, screeningId: string, files: CvUpload[]) {
+    const businessId = await this.requireBusiness(profileId);
+    const screening = await this.prisma.cvScreening.findFirst({
+      where: { id: screeningId, business_id: businessId },
+      select: {
+        id: true,
+        external: true,
+        offer_id: true,
+        job_title: true,
+        job_text: true,
+        purged_at: true,
+        expires_at: true,
+        _count: { select: { resumes: true } },
+      },
+    });
+    if (!screening) throw new NotFoundException('Analyse introuvable.');
+    // The offer's shared screening fills itself from the careers page.
+    if (screening.external) {
+      throw new BadRequestException(
+        'Ajoutez ces CV depuis une nouvelle analyse.',
+      );
+    }
+    if (screening.purged_at || screening.expires_at <= new Date()) {
+      throw new BadRequestException(
+        'Cette analyse a dépassé sa durée de conservation.',
+      );
+    }
+    const e = await this.subscriptions.entitlements(businessId);
+    const total = screening._count.resumes + files.length;
+    if (total > e.cvBatchMax) {
+      throw new BadRequestException(
+        `Votre formule permet ${e.cvBatchMax} CV par analyse : cette analyse en a déjà ${screening._count.resumes}.`,
+      );
+    }
+    return this.create(
+      profileId,
+      files,
+      screening.offer_id
+        ? { offerId: screening.offer_id }
+        : { jobTitle: screening.job_title, jobText: screening.job_text },
+      screening.id,
+    );
+  }
+
+  /**
    * Adds CVs to the offer's one shared screening (opened on first use): the
    * careers-page CVs and the Rabotka applicants' land together, so any of them
    * can be compared. `tag` is a token in each file name that tells which

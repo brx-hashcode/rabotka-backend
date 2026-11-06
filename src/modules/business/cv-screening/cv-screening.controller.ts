@@ -44,6 +44,7 @@ import {
   MIN_COMPARED,
 } from './cv-compare.service';
 import {
+  AddCvScreeningFilesDto,
   CreateCvScreeningDto,
   CvChatQuestionDto,
   CvCompareDto,
@@ -101,6 +102,37 @@ export class CvScreeningController {
       [...(files ?? []), ...fromMail],
       job,
     );
+  }
+
+  @Post(':id/files')
+  // A large batch arrives in several requests.
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @UseInterceptors(
+    FilesInterceptor('files', MAX_FILES, {
+      limits: { fileSize: MAX_FILE_BYTES },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary:
+      'Add CVs to a screening opened by hand (a batch sent in several requests)',
+    description:
+      'Multipart: `files` and/or `mailAttachments`. Charged on the plan’s « CV inclus » per request; the plan’s CVs per analysis count for the whole screening.',
+  })
+  async addFiles(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFiles() files: Express.Multer.File[] | undefined,
+    @Body() dto: AddCvScreeningFilesDto,
+  ) {
+    const fromMail = await this.mailboxes.download(
+      req.user.profileId,
+      dto.mailAttachments ?? [],
+    );
+    return this.screenings.addFiles(req.user.profileId, id, [
+      ...(files ?? []),
+      ...fromMail,
+    ]);
   }
 
   @Get()

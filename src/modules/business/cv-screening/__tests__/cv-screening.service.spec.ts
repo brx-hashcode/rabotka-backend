@@ -151,6 +151,66 @@ const closing = (statuses: string[]) => ({
 });
 
 describe('CvScreeningService', () => {
+  describe('addFiles: a large batch sent in several requests', () => {
+    const opened = (over: Record<string, unknown> = {}) => ({
+      id: 's1',
+      external: false,
+      offer_id: null,
+      job_title: 'Caissier',
+      job_text: 'Tenir la caisse.',
+      purged_at: null,
+      expires_at: new Date(Date.now() + 86_400_000),
+      _count: { resumes: 2 },
+      ...over,
+    });
+
+    it('adds the CVs to the screening, for its job, charged on their own', async () => {
+      const { service, prisma } = make();
+      prisma.cvScreening.findFirst = jest.fn().mockResolvedValue(opened());
+      const create = jest
+        .spyOn(service, 'create')
+        .mockResolvedValue({} as never);
+
+      await service.addFiles('p1', 's1', [file('c.pdf')]);
+
+      expect(create).toHaveBeenCalledWith(
+        'p1',
+        [expect.objectContaining({ originalname: 'c.pdf' })],
+        { jobTitle: 'Caissier', jobText: 'Tenir la caisse.' },
+        's1',
+      );
+    });
+
+    it('holds the plan’s CVs per analysis for the whole screening', async () => {
+      const { service, prisma, subscriptions } = make();
+      subscriptions.entitlements.mockResolvedValue(
+        entitlements({ cvBatchMax: 3 }),
+      );
+      prisma.cvScreening.findFirst = jest.fn().mockResolvedValue(opened());
+      await expect(
+        service.addFiles('p1', 's1', [file('c.pdf'), file('d.pdf')]),
+      ).rejects.toThrow('3 CV par analyse');
+    });
+
+    it('refuses an offer’s shared screening, one purged, or another business’s', async () => {
+      const { service, prisma } = make();
+      prisma.cvScreening.findFirst = jest
+        .fn()
+        .mockResolvedValueOnce(opened({ external: true }))
+        .mockResolvedValueOnce(opened({ purged_at: new Date() }))
+        .mockResolvedValueOnce(null);
+      await expect(
+        service.addFiles('p1', 's1', [file('c.pdf')]),
+      ).rejects.toThrow('nouvelle analyse');
+      await expect(
+        service.addFiles('p1', 's1', [file('c.pdf')]),
+      ).rejects.toThrow('conservation');
+      await expect(
+        service.addFiles('p1', 's1', [file('c.pdf')]),
+      ).rejects.toThrow('introuvable');
+    });
+  });
+
   describe('create', () => {
     it('stores the CVs privately, takes them from the plan and queues one job each', async () => {
       const { service, storage, subscriptions, queue, prisma } = make();
