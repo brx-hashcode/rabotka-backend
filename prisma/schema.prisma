@@ -3684,6 +3684,10 @@ model CvScreeningResume {
   /// when it is not read. Not always the screening's: an offer's screening
   /// lasts across periods, and its later CVs are charged to the period then.
   subscription_id String?                @db.Uuid
+  /// When this CV loses its file, text and contact details: its own
+  /// retention, from the period it was charged to. An offer's screening lasts
+  /// across periods, and its later CVs were purged with its first ones.
+  expires_at      DateTime?              @db.Timestamptz
 
   subscription         BusinessSubscription? @relation(fields: [subscription_id], references: [id], onDelete: SetNull)
   external_application ExternalApplication?
