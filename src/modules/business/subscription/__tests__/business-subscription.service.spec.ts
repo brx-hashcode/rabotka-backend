@@ -90,6 +90,9 @@ const running = (over: Record<string, unknown> = {}) => ({
   id: 'sub-1',
   business_id: 'b1',
   status: 'ACTIVE',
+  // Started yesterday: still in its first month, so no counter reset.
+  starts_at: new Date(Date.now() - 86_400_000),
+  counters_from: null,
   ends_at: new Date('2099-01-01T00:00:00Z'),
   unlocks_used: 0,
   plan: plan(),
@@ -187,7 +190,7 @@ describe('BusinessSubscriptionService', () => {
       const { service, prisma } = make({ sub: withCv() });
       prisma.businessSubscription.updateMany.mockResolvedValue({ count: 0 });
       await expect(service.consumeCv('b1', 9)).rejects.toThrow(
-        'Il vous reste 7 CV inclus ce mois-ci : retirez-en 2',
+        /Il vous reste 7 CV inclus jusqu'au \d+ \S+ \d{4} : retirez-en 2/,
       );
     });
 
@@ -1017,6 +1020,48 @@ describe('BusinessSubscriptionService', () => {
         service.grantByAdmin('b1', 'plan-1', 'MONTHLY' as any, 'admin'),
       ).rejects.toThrow(/pas disponible/);
       expect(prisma.businessSubscription.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('monthly counters of a longer period', () => {
+    it('starts the counters again once a new month of an annual period begins', async () => {
+      const now = new Date('2026-11-06T10:00:00Z');
+      const annual = running({
+        starts_at: new Date('2026-09-15T08:00:00Z'),
+        ends_at: new Date('2027-09-15T08:00:00Z'),
+        counters_from: new Date('2026-09-15T08:00:00Z'),
+        cv_screened: 10,
+      });
+      const { service, prisma } = make({ sub: annual });
+      prisma.businessSubscription.findFirst
+        .mockResolvedValueOnce(annual)
+        .mockResolvedValueOnce({ ...annual, cv_screened: 0 });
+
+      const sub = await service.current('b1', prisma, now);
+
+      expect(prisma.businessSubscription.updateMany).toHaveBeenCalledWith({
+        where: { id: 'sub-1', counters_from: annual.counters_from },
+        data: {
+          counters_from: new Date('2026-10-15T08:00:00Z'),
+          unlocks_used: 0,
+          cv_screened: 0,
+          offer_drafts_used: 0,
+          offers_published: 0,
+        },
+      });
+      expect(sub?.cv_screened).toBe(0);
+    });
+
+    it('leaves the counters of the running month alone', async () => {
+      const now = new Date('2026-11-06T10:00:00Z');
+      const annual = running({
+        starts_at: new Date('2026-09-15T08:00:00Z'),
+        ends_at: new Date('2027-09-15T08:00:00Z'),
+        counters_from: new Date('2026-10-15T08:00:00Z'),
+      });
+      const { service, prisma } = make({ sub: annual });
+      await service.current('b1', prisma, now);
+      expect(prisma.businessSubscription.updateMany).not.toHaveBeenCalled();
     });
   });
 

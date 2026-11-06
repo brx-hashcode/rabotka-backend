@@ -1,4 +1,5 @@
 import {
+  counterWindow,
   dueReminder,
   isUpgrade,
   nextPeriodStart,
@@ -123,5 +124,42 @@ describe('upgrade', () => {
       { plan: pro, period: 'MONTHLY' },
     );
     expect(end).toEqual(d('2026-12-16T00:00:00Z'));
+  });
+});
+
+describe('counterWindow', () => {
+  const start = new Date('2026-01-31T09:00:00Z');
+  const end = new Date('2027-01-31T09:00:00Z');
+
+  it('is the period start during the first month', () => {
+    expect(counterWindow(start, end, new Date('2026-02-10T00:00:00Z'))).toEqual(
+      {
+        from: start,
+        resetsAt: new Date('2026-02-28T09:00:00Z'),
+      },
+    );
+  });
+
+  it('moves a calendar month at a time, clamped like the periods', () => {
+    expect(
+      counterWindow(start, end, new Date('2026-04-15T00:00:00Z')).from,
+    ).toEqual(new Date('2026-03-31T09:00:00Z'));
+  });
+
+  it('has no reset in the last month: the period ends first', () => {
+    expect(
+      counterWindow(start, end, new Date('2027-01-05T00:00:00Z')).resetsAt,
+    ).toBeNull();
+  });
+
+  it('never resets a monthly period or a trial', () => {
+    const m = new Date('2026-11-01T00:00:00Z');
+    expect(
+      counterWindow(
+        m,
+        new Date('2026-12-01T00:00:00Z'),
+        new Date('2026-11-30T00:00:00Z'),
+      ),
+    ).toEqual({ from: m, resetsAt: null });
   });
 });
