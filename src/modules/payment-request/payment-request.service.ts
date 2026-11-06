@@ -71,6 +71,7 @@ import type { PollPaymentStatusJobData } from './poll-payment-status.processor';
 import { ListPaymentRequestsDto } from './dto/list-payment-requests.dto';
 import { SubmitPaymentDto } from './dto/submit-payment.dto';
 import { CONTACTABLE_WORKER } from '../recommendation/contactable-worker';
+import { paymentFailureMessage } from '../../common/services/payment/payment-failure';
 
 const PAYMENT_REQUEST_SELECT = {
   id: true,
@@ -239,6 +240,7 @@ export class PaymentRequestService {
     if (request.status === PaymentRequestStatus.APPROVED) {
       throw new BadRequestException('Cette demande a déjà été traitée');
     }
+    const rejected = request.status === PaymentRequestStatus.REJECTED;
 
     const activeGateway = this.config.get<string>('PAYMENT_GATEWAY_DRIVER');
     if (!activeGateway)
@@ -259,6 +261,12 @@ export class PaymentRequestService {
       // The profile's own ISO alpha-2 code, so the page can find the
       // payer's country among the gateway's live ones by calling code.
       payerCountryCode: request.profile?.country_code ?? null,
+      // Why the last attempt was refused, in the operator's code and said to
+      // the payer (null when the operator gave no reason worth telling).
+      failureCode: rejected ? request.rejection_note : null,
+      failureReason: rejected
+        ? paymentFailureMessage(request.rejection_note)
+        : null,
     };
   }
 
@@ -390,6 +398,7 @@ export class PaymentRequestService {
         operator,
         gateway_payment_ref: null,
         gateway_tx_id: null,
+        rejection_note: null,
       },
     });
 
@@ -518,8 +527,14 @@ export class PaymentRequestService {
   async handlePaymentCallback(
     payload: Record<string, string>,
   ): Promise<{ received: boolean }> {
-    const { gatewayRef, status, transactionId, amount, currency } =
-      await this.paymentGateway.handleWebhookPayload(payload);
+    const {
+      gatewayRef,
+      status,
+      transactionId,
+      failureReason,
+      amount,
+      currency,
+    } = await this.paymentGateway.handleWebhookPayload(payload);
 
     if (typeof gatewayRef !== 'string' || !gatewayRef) {
       this.logger.warn('Payment callback missing gatewayRef');
@@ -564,6 +579,8 @@ export class PaymentRequestService {
         },
         data: {
           status: PaymentRequestStatus.REJECTED,
+          // The operator's code, so the payer is told why (pay/:token).
+          rejection_note: failureReason ?? null,
           ...(transactionId && { gateway_tx_id: transactionId }),
         },
       });
@@ -573,6 +590,7 @@ export class PaymentRequestService {
       await this.persistFailedPayment(request, {
         reason: status === 'FAILED' ? 'GATEWAY_FAILED' : 'GATEWAY_CANCELLED',
         gatewayStatus: status,
+        failureCode: failureReason,
         transactionId,
         gatewayRef,
       });
@@ -909,6 +927,8 @@ export class PaymentRequestService {
         | 'POLL_TIMEOUT'
         | 'GATEWAY_INIT_ERROR';
       gatewayStatus?: string;
+      /** The gateway's own code for the refusal (INSUFFICIENT_BALANCE…). */
+      failureCode?: string;
       transactionId?: string;
       gatewayRef?: string;
       errorMessage?: string;
@@ -931,7 +951,12 @@ export class PaymentRequestService {
           payment_method: PaymentMethod.MOBILE_MONEY,
           transaction_id: transactionRef,
           status: PaymentStatus.FAILED,
-          description: request.description ?? 'Paiement échoué',
+          description: [
+            request.description ?? 'Paiement échoué',
+            options.failureCode,
+          ]
+            .filter(Boolean)
+            .join(' — '),
         },
       });
     } catch (err) {
@@ -950,6 +975,7 @@ export class PaymentRequestService {
         metadata: {
           reason: options.reason,
           gatewayStatus: options.gatewayStatus ?? null,
+          failureCode: options.failureCode ?? null,
           transactionId: options.transactionId ?? null,
           gatewayRef: options.gatewayRef ?? request.gateway_payment_ref ?? null,
           gateway: request.gateway ?? null,

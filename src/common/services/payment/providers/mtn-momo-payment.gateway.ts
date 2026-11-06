@@ -217,6 +217,7 @@ export class MtnMomoPaymentGateway implements IPaymentGateway {
       gatewayRef,
       status: verified.status === 'PENDING' ? 'PENDING' : verified.status,
       transactionId: verified.transactionId,
+      failureReason: verified.failureReason,
       rawPayload: payload,
     };
   }

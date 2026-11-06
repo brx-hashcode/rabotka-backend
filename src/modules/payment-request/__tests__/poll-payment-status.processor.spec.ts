@@ -148,6 +148,22 @@ describe('PollPaymentStatusProcessor', () => {
     );
   });
 
+  it('keeps the operator’s failure code on the request', async () => {
+    mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({
+      status: 'FAILED',
+      failureReason: 'INSUFFICIENT_BALANCE',
+    });
+    await processor.process({ data: baseJobData });
+    expect(mockPrisma.paymentRequest.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'REJECTED',
+          rejection_note: 'INSUFFICIENT_BALANCE',
+        }),
+      }),
+    );
+  });
+
   it('puts a failure in the payer’s bell, deduplicated with the webhook', async () => {
     mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({
       status: 'FAILED',

@@ -89,7 +89,7 @@ export class PollPaymentStatusProcessor {
       `Poll attempt ${attempt}/${maxAttempts} for request ${requestId} (gatewayRef: ${gatewayRef})`,
     );
 
-    const { status, transactionId, amount, currency } =
+    const { status, transactionId, failureReason, amount, currency } =
       await this.paymentGateway.checkPaymentStatus(gatewayRef);
 
     if (status === 'COMPLETED') {
@@ -107,6 +107,8 @@ export class PollPaymentStatusProcessor {
         where: this.stillPolledBy(requestId, gatewayRef),
         data: {
           status: PaymentRequestStatus.REJECTED,
+          // The operator's code, so the payer is told why (pay/:token).
+          rejection_note: failureReason ?? null,
           ...(transactionId && { gateway_tx_id: transactionId }),
         },
       });
@@ -119,6 +121,7 @@ export class PollPaymentStatusProcessor {
       await this.recordFailure(job.data, {
         reason: status === 'FAILED' ? 'GATEWAY_FAILED' : 'GATEWAY_CANCELLED',
         gatewayStatus: status,
+        failureCode: failureReason,
         transactionId,
         attempt,
       });
@@ -195,6 +198,8 @@ export class PollPaymentStatusProcessor {
     options: {
       reason: 'GATEWAY_FAILED' | 'GATEWAY_CANCELLED' | 'POLL_TIMEOUT';
       gatewayStatus?: string;
+      /** The gateway's own code for the refusal (INSUFFICIENT_BALANCE…). */
+      failureCode?: string;
       transactionId?: string;
       attempt: number;
     },
@@ -223,7 +228,7 @@ export class PollPaymentStatusProcessor {
           payment_method: PaymentMethod.MOBILE_MONEY,
           transaction_id: generatePaymentReference(),
           status: PaymentStatus.FAILED,
-          description: `Paiement échoué — ${options.reason}`,
+          description: `Paiement échoué — ${options.failureCode ?? options.reason}`,
         },
       });
     } catch (err) {
@@ -242,6 +247,7 @@ export class PollPaymentStatusProcessor {
         metadata: {
           reason: options.reason,
           gatewayStatus: options.gatewayStatus ?? null,
+          failureCode: options.failureCode ?? null,
           transactionId: options.transactionId ?? null,
           gatewayRef,
           gateway: gateway ?? null,
@@ -260,7 +266,7 @@ export class PollPaymentStatusProcessor {
       );
 
     this.logger.warn(
-      `Payment FAILED — request ${requestId} | reason: ${options.reason} | amount: ${amount} FCFA | phone: ${phone ?? 'n/a'} | gatewayRef: ${gatewayRef} | attempt: ${options.attempt}`,
+      `Payment FAILED — request ${requestId} | reason: ${options.reason}${options.failureCode ? ` (${options.failureCode})` : ''} | amount: ${amount} FCFA | phone: ${phone ?? 'n/a'} | gatewayRef: ${gatewayRef} | attempt: ${options.attempt}`,
     );
   }
 }
