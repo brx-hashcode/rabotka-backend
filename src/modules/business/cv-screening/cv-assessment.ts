@@ -59,6 +59,27 @@ const nullableText = (max: number) =>
     .trim()
     .nullish()
     .transform((s) => (s ? s.slice(0, max) : null));
+/**
+ * A model writes `null` where there is nothing to say (« strengths »: null
+ * for a candidate with none): read as absent, so the default applies. Without
+ * it, a weak match's whole answer was rejected and its CV marked failed.
+ */
+const absentIfNull = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((v) => (v === null ? undefined : v), schema);
+/** Up to three short lines; null, or null items, read as none. */
+const lines = (max: number) =>
+  absentIfNull(
+    z
+      .array(z.string().trim().nullish())
+      .default([])
+      .transform((a) =>
+        a
+          .filter((s): s is string => !!s)
+          .map((s) => s.slice(0, max))
+          .slice(0, 3),
+      ),
+  );
+
 const mark = z
   .number()
   .nullish()
@@ -70,51 +91,49 @@ const mark = z
 
 const answerSchema = z.object({
   isCv: z.boolean(),
-  candidate: z
-    .object({
-      name: nullableText(120),
-      currentTitle: nullableText(120),
-      city: nullableText(80),
-      yearsExperience: z
-        .number()
-        .nullish()
-        .transform((n) =>
-          n === null || n === undefined || !Number.isFinite(n) || n < 0
-            ? null
-            : Math.min(60, Math.round(n)),
-        ),
-      email: nullableText(160),
-      phone: nullableText(40),
-      experiences: experiencesSchema,
-    })
-    .default({
-      experiences: [],
-      name: null,
-      currentTitle: null,
-      city: null,
-      yearsExperience: null,
-      email: null,
-      phone: null,
-    }),
-  criteria: z
-    .object({
-      skills: mark,
-      experience: mark,
-      training: mark,
-      location: mark,
-      languages: mark,
-    })
-    .partial()
-    .default({}),
-  summary: text(600).default(''),
-  strengths: z
-    .array(text(200))
-    .default([])
-    .transform((a) => a.filter(Boolean).slice(0, 3)),
-  gaps: z
-    .array(text(200))
-    .default([])
-    .transform((a) => a.filter(Boolean).slice(0, 3)),
+  candidate: absentIfNull(
+    z
+      .object({
+        name: nullableText(120),
+        currentTitle: nullableText(120),
+        city: nullableText(80),
+        yearsExperience: z
+          .number()
+          .nullish()
+          .transform((n) =>
+            n === null || n === undefined || !Number.isFinite(n) || n < 0
+              ? null
+              : Math.min(60, Math.round(n)),
+          ),
+        email: nullableText(160),
+        phone: nullableText(40),
+        experiences: experiencesSchema,
+      })
+      .default({
+        experiences: [],
+        name: null,
+        currentTitle: null,
+        city: null,
+        yearsExperience: null,
+        email: null,
+        phone: null,
+      }),
+  ),
+  criteria: absentIfNull(
+    z
+      .object({
+        skills: mark,
+        experience: mark,
+        training: mark,
+        location: mark,
+        languages: mark,
+      })
+      .partial()
+      .default({}),
+  ),
+  summary: absentIfNull(text(600).default('')),
+  strengths: lines(200),
+  gaps: lines(200),
 });
 
 /**

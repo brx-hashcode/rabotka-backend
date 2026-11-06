@@ -29,6 +29,54 @@ const answer = (over: Record<string, unknown> = {}) =>
   });
 
 describe('parseAssessment', () => {
+  it('reads a weak match the model answered with nulls (no strengths, no criteria)', () => {
+    // As gemini-flash-lite answered for a carpenter applying as a waiter.
+    const parsed = parseAssessment(
+      JSON.stringify({
+        isCv: true,
+        candidate: {
+          name: 'Ibrahim Menuisier',
+          email: null,
+          phone: null,
+          experiences: null,
+        },
+        criteria: {
+          skills: 0,
+          experience: 0,
+          training: null,
+          location: 0,
+          languages: null,
+        },
+        summary: 'Ne correspond pas au poste.',
+        strengths: null,
+        gaps: ['Aucune expérience en restauration', null],
+      }),
+    );
+    expect(parsed).not.toBeNull();
+    expect(parsed!.strengths).toEqual([]);
+    expect(parsed!.gaps).toEqual(['Aucune expérience en restauration']);
+  });
+
+  it('reads null summary and candidate as absent, but still wants marks', () => {
+    const parsed = parseAssessment(
+      JSON.stringify({
+        isCv: true,
+        candidate: null,
+        criteria: { skills: 10 },
+        summary: null,
+        strengths: null,
+        gaps: null,
+      }),
+    );
+    expect(parsed).not.toBeNull();
+    expect(parsed!.summary).toBe('');
+    expect(parsed!.candidate.name).toBeNull();
+    // A CV with no mark at all is still asked again, never scored 0.
+    expect(
+      parseAssessment(JSON.stringify({ isCv: true, criteria: null })),
+    ).toBeNull();
+  });
+
   it('refuses a CV answer with no marks at all, rather than scoring it 0', () => {
     expect(
       parseAssessment(

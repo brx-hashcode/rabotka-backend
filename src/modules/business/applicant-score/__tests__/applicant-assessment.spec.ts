@@ -6,6 +6,20 @@ import {
 } from '../applicant-assessment';
 
 describe('applicant-assessment', () => {
+  it('reads nulls as nothing to say rather than refusing the answer', () => {
+    const parsed = parseApplicantAssessment(
+      JSON.stringify({
+        criteria: null,
+        summary: null,
+        strengths: null,
+        gaps: ['Loin', null],
+      }),
+    );
+    expect(parsed).not.toBeNull();
+    expect(parsed!.strengths).toEqual([]);
+    expect(parsed!.gaps).toEqual(['Loin']);
+  });
+
   it('reads the AI’s three marks, bounded, and keeps reliability out of its hands', () => {
     const parsed = parseApplicantAssessment(
       'Voici : {"criteria": {"trade": 140, "experience": 66.6, "location": null, "reliability": 5}, "summary": "Bon profil.", "strengths": ["a","b","c","d"], "gaps": []}',

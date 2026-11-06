@@ -3596,6 +3596,7 @@ model BusinessSubscription {
   plan     BusinessPlan         @relation(fields: [plan_id], references: [id])
   usages   BusinessQuotaUsage[]
   cv_screenings CvScreening[]
+  cv_resumes    CvScreeningResume[]
 
   @@index([business_id, ends_at], name: "idx_business_subscription_business_end")
   @@index([status, ends_at], name: "idx_business_subscription_status_end")
@@ -3675,7 +3676,12 @@ model CvScreeningResume {
   /// email/phone until the purge.
   candidate      Json?
   error          String?
+  /// The period this CV's « CV inclus » was taken from, and is given back to
+  /// when it is not read. Not always the screening's: an offer's screening
+  /// lasts across periods, and its later CVs are charged to the period then.
+  subscription_id String?                @db.Uuid
 
+  subscription         BusinessSubscription? @relation(fields: [subscription_id], references: [id], onDelete: SetNull)
   external_application ExternalApplication?
   application          Application?
   screening CvScreening          @relation(fields: [screening_id], references: [id], onDelete: Cascade)
