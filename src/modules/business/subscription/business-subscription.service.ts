@@ -145,6 +145,8 @@ export type BusinessEntitlements = {
   offerDraftsQuota: number | null;
   includesPreselection: boolean;
   priorityVisibility: boolean;
+  /** « Publier sur LinkedIn » from Rabotka (the share link is open to all). */
+  linkedinPosting: boolean;
   /** Recruteurs the business may have (the holder is its one administrator). Null: unlimited; 0: none. */
   recruitersLimit: number | null;
   /** Évaluateurs the business may have. Null: unlimited; 0: none. */
@@ -308,6 +310,7 @@ export class BusinessSubscriptionService {
         offerDraftsQuota: 0,
         includesPreselection: false,
         priorityVisibility: false,
+        linkedinPosting: false,
         recruitersLimit: 0,
         reviewersLimit: 0,
         recruiters,
@@ -359,6 +362,7 @@ export class BusinessSubscriptionService {
       offerDraftsQuota: draftsLocked ? 0 : sub.plan.offer_drafts_per_period,
       includesPreselection: sub.plan.includes_preselection,
       priorityVisibility: sub.plan.priority_visibility,
+      linkedinPosting: sub.plan.linkedin_posting,
       recruitersLimit: sub.plan.recruiters_limit,
       reviewersLimit: sub.plan.reviewers_limit,
       recruiters,

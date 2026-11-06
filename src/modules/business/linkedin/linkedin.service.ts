@@ -125,8 +125,11 @@ export class LinkedinService implements OnModuleInit {
   // ── The connection ───────────────────────────────────────────────────
 
   async account(profileId: string, memberId: string | undefined) {
-    if (!this.available) return { available: false, account: null };
+    if (!this.available) {
+      return { available: false, included: false, account: null };
+    }
     const businessId = await this.businessId(profileId);
+    const included = await this.included(businessId);
     const row = await this.prisma.businessLinkedinAccount.findUnique({
       where: {
         business_id_person: {
@@ -137,6 +140,8 @@ export class LinkedinService implements OnModuleInit {
     });
     return {
       available: true,
+      /** The business's plan has « Publier sur LinkedIn »; else the share link only. */
+      included,
       account: row
         ? {
             name: row.name,
@@ -155,6 +160,7 @@ export class LinkedinService implements OnModuleInit {
       );
     }
     const businessId = await this.businessId(profileId);
+    await this.mustBeIncluded(businessId);
     const state = await this.jwt.signAsync(
       { b: businessId, p: personOf(memberId), n: randomUUID() } satisfies State,
       { audience: STATE_AUDIENCE, expiresIn: '10m' },
@@ -286,6 +292,7 @@ export class LinkedinService implements OnModuleInit {
     if (account.expired_at || account.expires_at <= new Date()) {
       throw new BadRequestException(EXPIRED_MESSAGE);
     }
+    await this.mustBeIncluded(businessId);
     await this.publicOffer(businessId, offerId);
     if (!again) {
       const previous = await this.prisma.jobOfferLinkedinPost.findFirst({
@@ -548,6 +555,19 @@ export class LinkedinService implements OnModuleInit {
       slug: business.public_slug,
       businessName: business.name,
     };
+  }
+
+  /** Whether the business's plan has « Publier sur LinkedIn ». */
+  private async included(businessId: string): Promise<boolean> {
+    return (await this.subscriptions.entitlements(businessId)).linkedinPosting;
+  }
+
+  private async mustBeIncluded(businessId: string): Promise<void> {
+    if (!(await this.included(businessId))) {
+      throw new ForbiddenException(
+        'La publication sur LinkedIn depuis Rabotka n’est pas incluse dans votre formule.',
+      );
+    }
   }
 
   private async businessId(profileId: string): Promise<string> {
