@@ -362,6 +362,7 @@ export class PawapayPaymentGateway implements IPaymentGateway {
       gatewayRef,
       status: verified.status,
       transactionId: verified.transactionId,
+      failureReason: verified.failureReason,
       amount: verified.amount,
       currency: verified.currency,
       rawPayload: payload,

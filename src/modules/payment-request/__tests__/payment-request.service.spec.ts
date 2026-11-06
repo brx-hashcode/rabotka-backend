@@ -320,6 +320,28 @@ describe('PaymentRequestService', () => {
         PaymentRequestStatus.REJECTED,
       );
     });
+
+    it('says why the last attempt was refused', async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.REJECTED, {
+          rejection_note: 'INSUFFICIENT_BALANCE',
+        }),
+      );
+
+      const result = await service.getByToken(TOKEN);
+      expect(result.failureCode).toBe('INSUFFICIENT_BALANCE');
+      expect(result.failureReason).toMatch(/Solde mobile money insuffisant/);
+    });
+
+    it('gives no reason for a request not refused', async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING, {
+          rejection_note: 'INSUFFICIENT_BALANCE',
+        }),
+      );
+
+      expect((await service.getByToken(TOKEN)).failureReason).toBeNull();
+    });
   });
 
   describe('submitPayment()', () => {
