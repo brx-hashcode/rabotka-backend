@@ -32,7 +32,9 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────
   test:
     name: Test Suite
-    if: github.event.pull_request.merged == true
+    # A merged PR, or « Run workflow » by hand (e.g. to pick up new Vault
+    # values): before, a manual run skipped every job.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
 
     steps:
