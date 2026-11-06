@@ -760,7 +760,7 @@ export class CvScreeningService {
   async backfillCareers(limit = 30): Promise<number> {
     const rows = await this.prisma.$queryRaw<{ id: string }[]>`
       SELECT id FROM cv_screening_resumes
-      WHERE status = 'SCORED' AND cv_text IS NOT NULL
+      WHERE status = 'SCORED' AND cv_text IS NOT NULL AND cv_text <> ''
         AND (candidate IS NULL OR NOT (candidate ? 'experiences'))
       ORDER BY created_at DESC
       LIMIT ${limit}`;
