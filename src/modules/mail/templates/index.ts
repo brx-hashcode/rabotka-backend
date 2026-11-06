@@ -59,3 +59,4 @@ export { advertisementCreatedEmail } from './advertisement-created';
 export { advertisementCompletedEmail } from './advertisement-completed';
 export * from './broadcast';
 export * from './business-team-invite';
+export * from './business-activity';

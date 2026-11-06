@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { businessEmailRecipientsOfProfile } from '../team/business-recipients';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { createHash, randomBytes } from 'node:crypto';
 import {
@@ -323,12 +324,10 @@ export class InterviewService {
         answer,
       },
     });
-    await this.send(
-      updated.business.profile.email,
+    await this.sendToBusiness(
+      updated.business.profile_id,
       `${updated.candidate_name} — ${answer === 'CONFIRMED' ? 'entretien confirmé' : answer === 'DECLINED' ? 'entretien décliné' : 'autre moment demandé'}`,
       interviewAnsweredEmail(this.mailOf(updated), answer, clean),
-      [],
-      true,
     );
     return publicView(updated);
   }
@@ -362,12 +361,10 @@ export class InterviewService {
           interviewReminderEmail(mail, 'candidate'),
         );
       }
-      await this.send(
-        interview.business.profile.email,
+      await this.sendToBusiness(
+        interview.business.profile_id,
         `Rappel : entretien avec ${interview.candidate_name} demain`,
         interviewReminderEmail(mail, 'business'),
-        [],
-        true,
       );
       sent++;
     }
@@ -547,6 +544,25 @@ export class InterviewService {
         cancelled,
       }),
     };
+  }
+
+  /**
+   * To the team, as its other recruiting e-mails: the holder and every member
+   * who left them on — the Recruteur who booked the interview included.
+   */
+  private async sendToBusiness(
+    profileId: string,
+    subject: string,
+    content: string,
+  ) {
+    const recipients = await businessEmailRecipientsOfProfile(
+      this.prisma,
+      profileId,
+      'recruiting',
+    ).catch(() => []);
+    for (const r of recipients) {
+      await this.send(r.email, subject, content, [], true);
+    }
   }
 
   private async send(

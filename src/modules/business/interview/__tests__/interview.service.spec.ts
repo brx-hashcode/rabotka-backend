@@ -45,6 +45,17 @@ function make() {
       }),
     },
     application: { findFirst: jest.fn() },
+    // Who of the business is e-mailed: the holder, no team yet.
+    business: {
+      findUnique: jest.fn().mockResolvedValue({
+        id: 'b1',
+        profile: { email: 'boss@zua.cg', first_name: 'Awa' },
+      }),
+    },
+    businessMember: {
+      findMany: jest.fn().mockResolvedValue([]),
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
     interview: {
       create: jest.fn().mockImplementation(({ data }) => loaded(data)),
       update: jest.fn().mockImplementation(({ data }) => loaded(data)),
