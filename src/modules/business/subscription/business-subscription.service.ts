@@ -16,6 +16,10 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
+import {
+  AdminNotificationEvent,
+  type AdminNotificationPayload,
+} from '../../../common/events/admin-notification.events';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { MailService } from '../../mail/mail.service';
 import { LayoutService } from '../../mail/layout.service';
@@ -47,6 +51,13 @@ import {
 import { businessEmailRecipients } from '../team/business-recipients';
 
 type Db = Prisma.TransactionClient | PrismaService;
+
+/** How far back a paid subscription without its period is looked for. */
+const RECONCILE_DAYS = 30;
+/** Left to the payment event before the sweep steps in. */
+const RECONCILE_GRACE_MS = 5 * 60 * 1000;
+/** The hourly run that tells the admins: the first after the grace. */
+const RECONCILE_ALERT_WINDOW_MS = 60 * 60 * 1000;
 
 const RUNNING: BusinessSubscriptionStatus[] = [
   BusinessSubscriptionStatus.TRIAL,
@@ -1296,6 +1307,80 @@ export class BusinessSubscriptionService {
   }
 
   // ── Scheduled ────────────────────────────────────────────────────────
+
+  /**
+   * A payment taken whose period was never created: `onPaid` runs once, off
+   * an event, and only logs when it fails (a database error, a plan moved to
+   * another business since the checkout). Every approved subscription payment
+   * of the last 30 days with no period is activated again here
+   * (activateFromPayment is idempotent). The admins hear of one that still
+   * fails, once: on the first run after it was paid. Five minutes of grace
+   * leave the event its turn.
+   */
+  async reconcilePaidSubscriptions(
+    now = new Date(),
+  ): Promise<{ activated: number; failed: number }> {
+    const paid = await this.prisma.paymentRequest.findMany({
+      where: {
+        request_type: PaymentRequestType.BUSINESS_SUBSCRIPTION,
+        status: PaymentRequestStatus.APPROVED,
+        updated_at: {
+          gte: new Date(now.getTime() - RECONCILE_DAYS * 86_400_000),
+          lte: new Date(now.getTime() - RECONCILE_GRACE_MS),
+        },
+      },
+      select: { id: true, updated_at: true },
+      orderBy: { updated_at: 'asc' },
+      take: 200,
+    });
+    if (paid.length === 0) return { activated: 0, failed: 0 };
+    const linked = new Set(
+      (
+        await this.prisma.businessSubscription.findMany({
+          where: { payment_request_id: { in: paid.map((p) => p.id) } },
+          select: { payment_request_id: true },
+        })
+      ).map((s) => s.payment_request_id),
+    );
+
+    let activated = 0;
+    let failed = 0;
+    for (const request of paid.filter((p) => !linked.has(p.id))) {
+      let error: string | null = null;
+      try {
+        const sub = await this.activateFromPayment(request.id, now);
+        if (!sub) error = 'aucune période créée';
+      } catch (err) {
+        error = err instanceof Error ? err.message : String(err);
+      }
+      if (!error) {
+        activated++;
+        this.logger.warn(
+          `Paid subscription ${request.id} had no period: activated by the sweep`,
+        );
+        continue;
+      }
+      failed++;
+      this.logger.error(
+        `Paid subscription ${request.id} still has no period: ${error}`,
+      );
+      // Once: on the first sweep after the payment, not every hour after.
+      if (
+        now.getTime() - request.updated_at.getTime() <
+        RECONCILE_GRACE_MS + RECONCILE_ALERT_WINDOW_MS
+      ) {
+        this.events.emit(AdminNotificationEvent.PAYMENT_ACTIVATION, {
+          event: AdminNotificationEvent.PAYMENT_ACTIVATION,
+          title: 'Abonnement payé sans période',
+          message: `Le paiement ${request.id} est validé mais la période de l'abonnement n'a pas pu être créée (${error}). À attribuer à la main.`,
+          entityType: 'payment',
+          entityId: request.id,
+          timestamp: now.toISOString(),
+        } satisfies AdminNotificationPayload);
+      }
+    }
+    return { activated, failed };
+  }
 
   /** Reminders before the end, then expiry. Idempotent; safe to rerun. */
   async sweep(

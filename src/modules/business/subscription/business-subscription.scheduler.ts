@@ -21,6 +21,13 @@ export class BusinessSubscriptionScheduler implements OnModuleInit {
     this.queueService.createWorker<SweepJob>(
       BUSINESS_SUBSCRIPTION_QUEUE,
       async () => {
+        // First: a payment taken whose period was never created.
+        const paid = await this.subscriptions.reconcilePaidSubscriptions();
+        if (paid.activated > 0 || paid.failed > 0) {
+          this.logger.warn(
+            `Paid subscriptions without a period: ${paid.activated} activated, ${paid.failed} still failing`,
+          );
+        }
         const result = await this.subscriptions.sweep();
         if (result.reminded > 0 || result.expired > 0) {
           this.logger.log(

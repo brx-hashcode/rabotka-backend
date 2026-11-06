@@ -913,6 +913,70 @@ describe('BusinessSubscriptionService', () => {
     });
   });
 
+  describe('reconcilePaidSubscriptions', () => {
+    const now = new Date('2026-11-06T10:00:00Z');
+    const paidAt = (minutesAgo: number) =>
+      new Date(now.getTime() - minutesAgo * 60_000);
+
+    function setup(
+      requests: { id: string; updated_at: Date }[],
+      linked: string[],
+    ) {
+      const ctx = make();
+      ctx.prisma.paymentRequest.findMany = jest
+        .fn()
+        .mockResolvedValue(requests);
+      ctx.prisma.businessSubscription.findMany.mockResolvedValue(
+        linked.map((id) => ({ payment_request_id: id })),
+      );
+      return ctx;
+    }
+
+    it('activates a paid subscription that has no period', async () => {
+      const { service, prisma } = setup(
+        [
+          { id: 'pr-ok', updated_at: paidAt(30) },
+          { id: 'pr-lost', updated_at: paidAt(30) },
+        ],
+        ['pr-ok'],
+      );
+      const activate = jest
+        .spyOn(service, 'activateFromPayment')
+        .mockResolvedValue({ id: 'sub' } as any);
+
+      await expect(service.reconcilePaidSubscriptions(now)).resolves.toEqual({
+        activated: 1,
+        failed: 0,
+      });
+      expect(activate).toHaveBeenCalledTimes(1);
+      expect(activate).toHaveBeenCalledWith('pr-lost', now);
+      // Leaves the payment event its first five minutes.
+      expect(
+        prisma.paymentRequest.findMany.mock.calls[0][0].where.updated_at.lte,
+      ).toEqual(paidAt(5));
+    });
+
+    it('tells the admins of one that still fails, once', async () => {
+      const recent = setup([{ id: 'pr-1', updated_at: paidAt(30) }], []);
+      jest
+        .spyOn(recent.service, 'activateFromPayment')
+        .mockRejectedValue(new Error('plan moved'));
+      await expect(
+        recent.service.reconcilePaidSubscriptions(now),
+      ).resolves.toEqual({ activated: 0, failed: 1 });
+      expect(recent.events.emit).toHaveBeenCalledWith(
+        'admin.notification.payment.activation',
+        expect.objectContaining({ entityId: 'pr-1', entityType: 'payment' }),
+      );
+
+      // Hours later: still retried, but no second alert.
+      const later = setup([{ id: 'pr-1', updated_at: paidAt(300) }], []);
+      jest.spyOn(later.service, 'activateFromPayment').mockResolvedValue(null);
+      await later.service.reconcilePaidSubscriptions(now);
+      expect(later.events.emit).not.toHaveBeenCalled();
+    });
+  });
+
   describe('custom plans', () => {
     it('shows a business the catalog and its own custom plans only', async () => {
       const { service, prisma } = make();
