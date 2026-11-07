@@ -54,7 +54,7 @@ function chargedOf(pr: Charged | undefined): {
   }
   return {
     chargedCurrency: currency,
-    chargedAmount: String(pr.charged_amount as string | number),
+    chargedAmount: Number(pr.charged_amount).toString(),
   };
 }
 
