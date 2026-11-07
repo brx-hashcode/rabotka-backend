@@ -1560,6 +1560,11 @@ export class PaymentRequestService {
       gateway: r.gateway ?? null,
       gatewayPaymentRef: r.gateway_payment_ref ?? null,
       amount: r.amount === null ? null : Number(r.amount),
+      // What the network was charged, in its own currency (USD in the DRC);
+      // null before any attempt.
+      chargedCurrency: r.charged_currency ?? null,
+      chargedAmount:
+        r.charged_amount === null ? null : Number(r.charged_amount),
       description: r.description,
       paymentReference: r.payment_reference,
       proofImages: r.proof_images,
