@@ -24,6 +24,7 @@ import {
   REDIS_CONNECTION,
   REDIS_KEY_PREFIX,
 } from '../../common/services/redis/redis.constants';
+import { isCfa } from '../../common/services/fx/local-price';
 
 const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
   [ProfileType.WORKER]: 'Travailleur',
@@ -37,11 +38,69 @@ const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   [PaymentMethod.OTHER]: 'Autre',
 };
 
+type Charged = {
+  charged_currency?: string | null;
+  charged_amount?: unknown;
+} | null;
+
+/** The charge in another currency than the XAF price, or nulls. */
+function chargedOf(pr: Charged | undefined): {
+  chargedCurrency: string | null;
+  chargedAmount: string | null;
+} {
+  const currency = pr?.charged_currency ?? null;
+  if (!currency || isCfa(currency) || pr?.charged_amount == null) {
+    return { chargedCurrency: null, chargedAmount: null };
+  }
+  return {
+    chargedCurrency: currency,
+    chargedAmount: String(pr.charged_amount as string | number),
+  };
+}
+
+/**
+ * The invoice template's fields for the amount actually paid: CHARGED_AMOUNT
+ * and CURRENCY are the XAF price and FCFA in the CFA zone, the converted
+ * charge elsewhere (8,5 / USD), so a template can say what left the payer's
+ * account, beside AMOUNT, the price in XAF.
+ */
+function chargedFields(
+  xaf: unknown,
+  pr: Charged | undefined,
+): { CHARGED_AMOUNT: string; CURRENCY: string } {
+  const { chargedCurrency, chargedAmount } = chargedOf(pr);
+  return chargedCurrency
+    ? {
+        CHARGED_AMOUNT: Number(chargedAmount).toLocaleString('fr-FR'),
+        CURRENCY: chargedCurrency,
+      }
+    : {
+        CHARGED_AMOUNT: Number(xaf).toLocaleString('fr-FR'),
+        CURRENCY: 'FCFA',
+      };
+}
+
+/** « 5 000 FCFA », or « 8,5 USD (5 000 FCFA) » for a converted charge. */
+function paidLabel(xaf: unknown, pr: Charged | undefined): string {
+  const fcfa = `${Number(xaf).toLocaleString('fr-FR')} FCFA`;
+  const { chargedCurrency, chargedAmount } = chargedOf(pr);
+  return chargedCurrency
+    ? `${Number(chargedAmount).toLocaleString('fr-FR')} ${chargedCurrency} (${fcfa})`
+    : fcfa;
+}
+
 export type InvoiceItem = {
   id: string;
   profileId: string;
   paymentRequestId: string | null;
+  /** The price, in XAF (the books). */
   amount: string;
+  /**
+   * What the network was actually charged, when not the XAF price itself:
+   * a DRC payment is `amount` 5000 and `chargedAmount` "8.5" `USD`.
+   */
+  chargedCurrency: string | null;
+  chargedAmount: string | null;
   reason: string;
   relatedEntityType: string | null;
   relatedEntityId: string | null;
@@ -129,7 +188,13 @@ export class InvoiceService {
         amount: true,
         reason: true,
         profile: { select: { phone: true } },
-        payment_request: { select: { description: true } },
+        payment_request: {
+          select: {
+            description: true,
+            charged_currency: true,
+            charged_amount: true,
+          },
+        },
       },
     });
     const phone = invoice?.profile.phone;
@@ -154,6 +219,7 @@ export class InvoiceService {
           profileId: requestingProfileId,
           template: 'paymentReceiptDocument',
           params: {
+            // The approved template says « {{1}} FCFA »: the XAF price.
             amount: Number(invoice.amount).toLocaleString('fr-FR'),
             purpose,
           },
@@ -162,7 +228,7 @@ export class InvoiceService {
           // One object per invoice: a resend overwrites it.
           storageKey: `invoices/${invoiceId}.pdf`,
           // Used when the 24h window is open (plain document, no template).
-          caption: `Votre reçu pour le paiement de ${Number(invoice.amount).toLocaleString('fr-FR')} FCFA — ${purpose}.`,
+          caption: `Votre reçu pour le paiement de ${paidLabel(invoice.amount, invoice.payment_request)} — ${purpose}.`,
         })) ?? false;
     } catch (err) {
       this.logger.warn(
@@ -231,6 +297,11 @@ export class InvoiceService {
     const invoices = await this.prisma.invoice.findMany({
       where: { profile_id: profileId },
       orderBy: { created_at: 'desc' },
+      include: {
+        payment_request: {
+          select: { charged_currency: true, charged_amount: true },
+        },
+      },
     });
     return invoices.map(this.mapInvoice);
   }
@@ -288,6 +359,7 @@ export class InvoiceService {
       ...invoiceClient(invoice.profile),
       PROFILE_TYPE: invoice.profile.profile_type,
       AMOUNT: invoice.amount.toString(),
+      ...chargedFields(invoice.amount, invoice.payment_request),
       REASON: reasonLabel[invoice.reason] ?? invoice.reason,
       PAYMENT_REF:
         invoice.payment?.transaction_id ??
@@ -367,6 +439,7 @@ export class InvoiceService {
       ...invoiceClient(invoice.profile),
       PROFILE_TYPE: this.getProfileTypeLabel(invoice.profile.profile_type),
       AMOUNT: invoice.amount.toString(),
+      ...chargedFields(invoice.amount, invoice.payment_request),
       REASON: reasonLabel[invoice.reason] ?? invoice.reason,
       PAYMENT_REF:
         invoice.payment?.transaction_id ??
@@ -396,6 +469,7 @@ export class InvoiceService {
       profileId: inv.profile_id,
       paymentRequestId: inv.payment_request_id,
       amount: inv.amount.toString(),
+      ...chargedOf(inv.payment_request),
       reason: inv.reason,
       relatedEntityType: inv.related_entity_type ?? null,
       relatedEntityId: inv.related_entity_id ?? null,
