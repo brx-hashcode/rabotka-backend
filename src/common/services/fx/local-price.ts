@@ -30,7 +30,8 @@ export function toLocalAmount(
   return Number(rounded.toFixed(decimals));
 }
 
-/** pawaPay's `decimalsInAmount` ("NONE", "TWO") as a count. */
+/** pawaPay's `decimalsInAmount` ("NONE", "TWO_PLACES") as a count. */
 export function decimalsOf(value: unknown): number {
-  return value === 'TWO' ? 2 : 0;
+  // pawaPay says `TWO_PLACES` (and `NONE`); `TWO` kept for safety.
+  return value === 'TWO_PLACES' || value === 'TWO' ? 2 : 0;
 }

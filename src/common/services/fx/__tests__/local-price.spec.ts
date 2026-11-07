@@ -46,6 +46,7 @@ describe('toLocalAmount', () => {
 
 describe('decimalsOf', () => {
   it("reads pawaPay's decimalsInAmount", () => {
+    expect(decimalsOf('TWO_PLACES')).toBe(2);
     expect(decimalsOf('TWO')).toBe(2);
     expect(decimalsOf('NONE')).toBe(0);
     expect(decimalsOf(undefined)).toBe(0);
