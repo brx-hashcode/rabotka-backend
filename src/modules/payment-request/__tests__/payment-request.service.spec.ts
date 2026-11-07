@@ -1,11 +1,20 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { PaymentRequestService } from '../payment-request.service';
+import {
+  PaymentRequestService,
+  moneyLabel,
+  pickNetworkCurrencies,
+} from '../payment-request.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { WhatsAppFeedbackService } from '../../whatsapp/feedback/whatsapp-feedback.service';
 import { ReferralService } from '../../referral/referral.service';
 import { ContactRecordService } from '../../contact-unlock/contact-record.service';
+import { ExchangeRateService } from '../../../common/services/fx/exchange-rate.service';
+import {
+  DEFAULT_FX_RULES,
+  fakeFx,
+} from '../../../common/services/fx/__tests__/fake-fx';
 import { LogService } from '../../log/log.service';
 import { ConfigService } from '@nestjs/config';
 import { MailService } from '../../mail/mail.service';
@@ -122,6 +131,7 @@ describe('PaymentRequestService', () => {
           provide: ContactRecordService,
           useValue: { record: jest.fn().mockResolvedValue(undefined) },
         },
+        { provide: ExchangeRateService, useValue: fakeFx() },
         { provide: LogService, useValue: mockLog },
         { provide: ConfigService, useValue: mockConfig },
         {
@@ -145,6 +155,7 @@ describe('PaymentRequestService', () => {
             getRaw: jest.fn().mockResolvedValue('5000'),
             get: jest.fn().mockResolvedValue(''),
             getPaymentGatewayDriver: jest.fn().mockResolvedValue('PAWAPAY'),
+            getFxRules: jest.fn().mockResolvedValue(DEFAULT_FX_RULES),
           },
         },
         {
@@ -169,7 +180,7 @@ describe('PaymentRequestService', () => {
             getActiveMetadata: jest.fn().mockReturnValue(PAWAPAY_METADATA),
             // What the account's live configuration would say, with each
             // network's calling code.
-            activeOperators: jest.fn().mockResolvedValue(
+            depositOperators: jest.fn().mockResolvedValue(
               PAWAPAY_METADATA.operators.map((o) => ({
                 ...o,
                 dialCode: o.country === 'CMR' ? '237' : '242',
@@ -532,7 +543,7 @@ describe('PaymentRequestService', () => {
 
     it('charges a network in its own franc: XOF for Bénin', async () => {
       const paymentGateway = (service as any).paymentGateway;
-      (paymentGateway.activeOperators as jest.Mock).mockResolvedValueOnce([
+      (paymentGateway.depositOperators as jest.Mock).mockResolvedValueOnce([
         {
           code: 'MTN_MOMO_BEN',
           label: 'MTN',
@@ -580,6 +591,157 @@ describe('PaymentRequestService', () => {
     });
   });
 
+  describe('payments outside the CFA zone', () => {
+    const DRC = [
+      {
+        code: 'ORANGE_COD',
+        label: 'Orange',
+        country: 'COD',
+        dialCode: '243',
+        currency: 'CDF',
+        decimals: 0,
+        minAmount: 10,
+        maxAmount: 1000000,
+      },
+      {
+        code: 'ORANGE_COD',
+        label: 'Orange',
+        country: 'COD',
+        dialCode: '243',
+        currency: 'USD',
+        decimals: 2,
+        minAmount: 0.01,
+        maxAmount: 2500,
+      },
+    ];
+    const pending = () =>
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING, { amount: 5000 }),
+      );
+
+    beforeEach(() => {
+      (service as any).fx = fakeFx({ USD: 0.001701, CDF: 3.974701 });
+      (
+        (service as any).paymentGateway.depositOperators as jest.Mock
+      ).mockResolvedValue(DRC);
+    });
+
+    afterEach(() => {
+      (service as any).fx = fakeFx();
+      (
+        (service as any).paymentGateway.depositOperators as jest.Mock
+      ).mockResolvedValue(
+        PAWAPAY_METADATA.operators.map((o) => ({
+          ...o,
+          dialCode: o.country === 'CMR' ? '237' : '242',
+        })),
+      );
+    });
+
+    it('charges a DRC network in dollars, converted and rounded, and records it', async () => {
+      pending();
+      const gw = (service as any).paymentGateway;
+      gw.initiatePayment.mockResolvedValueOnce({ gatewayRef: 'dep-cd' });
+
+      await service
+        .initiatePayment(TOKEN, '+243810000000', 'ORANGE_COD')
+        .catch(() => undefined);
+
+      // 5 000 XAF × 0.001701 = 8.505 → $8.50
+      expect(gw.initiatePayment).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 8.5, currency: 'USD' }),
+      );
+      expect(prisma.paymentRequest.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            charged_currency: 'USD',
+            charged_amount: 8.5,
+            fx_per_xaf: 0.001701,
+          }),
+        }),
+      );
+    });
+
+    it("refuses a charge under the network's minimum, before claiming the request", async () => {
+      pending();
+      (
+        (service as any).paymentGateway.depositOperators as jest.Mock
+      ).mockResolvedValue([{ ...DRC[1], minAmount: 10 }]);
+
+      await expect(
+        service.initiatePayment(TOKEN, '+243810000000', 'ORANGE_COD'),
+      ).rejects.toThrow('moins de 10 USD');
+      expect(prisma.paymentRequest.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('does not offer a network whose currency has no fresh rate', async () => {
+      (service as any).fx = fakeFx();
+      const result = await service.listGateways();
+      expect(result.gateways[0].operators).toEqual([]);
+    });
+
+    it('shows the page the price in each currency on offer', async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING, { amount: 5000 }),
+      );
+      const page = await service.getByToken(TOKEN);
+      expect(page.prices).toEqual([{ currency: 'USD', amount: 8.5 }]);
+    });
+
+    it("gives a country's payers its preferred currency, and XAF elsewhere", async () => {
+      await expect(service.currencyFor('CD')).resolves.toMatchObject({
+        currency: 'USD',
+        perXaf: 0.001701,
+        decimals: 2,
+        significantDigits: 2,
+      });
+      await expect(service.currencyFor('FR')).resolves.toMatchObject({
+        currency: 'XAF',
+        perXaf: 1,
+      });
+    });
+  });
+
+  describe('pickNetworkCurrencies', () => {
+    const op = (code: string, currency: string) => ({
+      code,
+      label: code,
+      currency,
+    });
+
+    it('offers each network once, in the preferred currency, else a CFA franc', () => {
+      const picked = pickNetworkCurrencies(
+        [
+          op('ORANGE_COD', 'CDF'),
+          op('ORANGE_COD', 'USD'),
+          op('MTN_MOMO_COG', 'XAF'),
+          op('MPESA_KEN', 'KES'),
+        ],
+        ['USD'],
+        () => true,
+      );
+      expect(picked.map((o) => `${o.code} ${o.currency}`)).toEqual([
+        'ORANGE_COD USD',
+        'MTN_MOMO_COG XAF',
+        'MPESA_KEN KES',
+      ]);
+    });
+
+    it('falls back to a currency it can price', () => {
+      const picked = pickNetworkCurrencies(
+        [op('ORANGE_COD', 'CDF'), op('ORANGE_COD', 'USD')],
+        ['USD'],
+        (c) => c !== 'USD',
+      );
+      expect(picked.map((o) => o.currency)).toEqual(['CDF']);
+    });
+  });
+
+  it('says amounts to a payer', () => {
+    expect(moneyLabel(1000, 'XAF')).toBe('1\u202f000 FCFA');
+    expect(moneyLabel(1.7, 'USD')).toBe('1,7 USD');
+  });
+
   describe('listGateways()', () => {
     it('reports the active gateway alongside every registered one', async () => {
       const result = await service.listGateways();
@@ -592,7 +754,7 @@ describe('PaymentRequestService', () => {
 
     it("gives the live gateway the account's live networks, not its declared list", async () => {
       const paymentGateway = (service as any).paymentGateway;
-      (paymentGateway.activeOperators as jest.Mock).mockResolvedValueOnce([
+      (paymentGateway.depositOperators as jest.Mock).mockResolvedValueOnce([
         {
           code: 'AIRTEL_GAB',
           label: 'Airtel',
@@ -604,10 +766,7 @@ describe('PaymentRequestService', () => {
       expect(result.gateways[0].operators.map((o) => o.code)).toEqual([
         'AIRTEL_GAB',
       ]);
-      expect(paymentGateway.activeOperators).toHaveBeenCalledWith([
-        'XAF',
-        'XOF',
-      ]);
+      expect(paymentGateway.depositOperators).toHaveBeenCalled();
     });
   });
 
@@ -1547,6 +1706,43 @@ describe('PaymentRequestService', () => {
         .catch(() => undefined);
 
       expect(mismatchLogged()).toBe(false);
+    });
+
+    it('checks a converted charge in the currency it was charged in', async () => {
+      const usd = () =>
+        makeRequest(PaymentRequestStatus.PROCESSING, {
+          amount: 5000,
+          gateway_payment_ref: 'dep-1',
+          charged_currency: 'USD',
+          charged_amount: 8.5,
+        });
+      const gw = (service as any).paymentGateway;
+      (prisma.$transaction as jest.Mock).mockResolvedValue(undefined);
+
+      gw.handleWebhookPayload.mockResolvedValueOnce({
+        gatewayRef: 'dep-1',
+        status: 'COMPLETED',
+        transactionId: 'tx-1',
+        amount: 8.5,
+        currency: 'USD',
+      });
+      (prisma.paymentRequest.findFirst as jest.Mock).mockResolvedValue(usd());
+      await service
+        .handlePaymentCallback({ depositId: 'dep-1' })
+        .catch(() => undefined);
+      expect(mismatchLogged()).toBe(false);
+
+      // The XAF price coming back for a USD charge is not what was charged.
+      gw.handleWebhookPayload.mockResolvedValueOnce({
+        gatewayRef: 'dep-1',
+        status: 'COMPLETED',
+        transactionId: 'tx-1',
+        amount: 5000,
+        currency: 'XAF',
+      });
+      (prisma.paymentRequest.findFirst as jest.Mock).mockResolvedValue(usd());
+      await service.handlePaymentCallback({ depositId: 'dep-1' });
+      expect(mismatchLogged()).toBe(true);
     });
 
     it('approves the same amount settled in XOF — the CFA francs are at par', async () => {

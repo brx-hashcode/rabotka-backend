@@ -5,6 +5,11 @@ import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { WhatsAppFeedbackService } from '../../whatsapp/feedback/whatsapp-feedback.service';
 import { ReferralService } from '../../referral/referral.service';
 import { ContactRecordService } from '../../contact-unlock/contact-record.service';
+import { ExchangeRateService } from '../../../common/services/fx/exchange-rate.service';
+import {
+  DEFAULT_FX_RULES,
+  fakeFx,
+} from '../../../common/services/fx/__tests__/fake-fx';
 import { LogService } from '../../log/log.service';
 import { ConfigService } from '@nestjs/config';
 import { MailService } from '../../mail/mail.service';
@@ -176,6 +181,7 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
           provide: ContactRecordService,
           useValue: { record: jest.fn().mockResolvedValue(undefined) },
         },
+        { provide: ExchangeRateService, useValue: fakeFx() },
         {
           provide: LogService,
           useValue: { create: jest.fn().mockResolvedValue({}) },
@@ -204,6 +210,7 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
             get: jest.fn().mockResolvedValue(''),
             getPaymentGatewayDriver: jest.fn().mockResolvedValue('MONETBIL'),
             getFees: jest.fn().mockResolvedValue({ billingBlockThreshold: 3 }),
+            getFxRules: jest.fn().mockResolvedValue(DEFAULT_FX_RULES),
           },
         },
         { provide: WalletService, useValue: mockWalletService },

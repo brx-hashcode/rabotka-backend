@@ -81,6 +81,7 @@ import { ContactUnlockModule } from './modules/contact-unlock/contact-unlock.mod
 import { FieldAgentModule } from './modules/field-agent/field-agent.module';
 import { StorageModule } from './common/services/storage/storage.module';
 import { PaymentGatewayModule } from './common/services/payment/payment-gateway.module';
+import { FxModule } from './common/services/fx/fx.module';
 import { AdvertisementModule } from './modules/advertisement/advertisement.module';
 import { ImageWatermarkModule } from './common/services/image-watermark/image-watermark.module';
 import { AppController } from './app.controller';
@@ -197,6 +198,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     StorageFetchModule,
     StorageModule,
     PaymentGatewayModule,
+    FxModule,
     ImageWatermarkModule,
     FileModule,
     GeoModule,
