@@ -48,6 +48,9 @@ describe('BusinessTalentService', () => {
       prisma as never,
       {} as never,
       {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
     );
 
     const [talent] = await service.list('e1');
@@ -132,24 +135,48 @@ describe('BusinessTalentService', () => {
         applied?: number;
         worker?: boolean;
         noPlan?: boolean;
+        email?: string | null;
+        claimed?: boolean;
+        mailFails?: boolean;
+        noSlug?: boolean;
       } = {},
     ) => {
       const emit = jest.fn();
+      const sendMail = o.mailFails
+        ? jest.fn().mockRejectedValue(new Error('smtp down'))
+        : jest.fn().mockResolvedValue({ jobId: 'j1' });
+      const claim = jest.fn().mockResolvedValue(o.claimed ?? true);
+      const release = jest.fn().mockResolvedValue(undefined);
       const prisma = {
         jobOffer: {
           findFirst: jest.fn().mockResolvedValue({
             id: 'o1',
             title: 'Serveuse',
             status: o.status ?? 'ACTIVE',
+            reference: 'RBK-1234',
+            employment_type: 'MISSION',
+            city: 'Brazzaville',
+            country_name: 'Congo',
+            is_remote: false,
+            scheduled_at: new Date('2026-11-24T08:00:00Z'),
           }),
         },
         profile: {
-          findFirst: jest
-            .fn()
-            .mockResolvedValue(o.worker === false ? null : { id: 'w1' }),
+          findFirst: jest.fn().mockResolvedValue(
+            o.worker === false
+              ? null
+              : {
+                  id: 'w1',
+                  first_name: 'Awa',
+                  email: o.email === undefined ? 'awa@example.com' : o.email,
+                },
+          ),
         },
         business: {
-          findUnique: jest.fn().mockResolvedValue({ name: 'Love Life' }),
+          findUnique: jest.fn().mockResolvedValue({
+            name: 'Love Life',
+            public_slug: o.noSlug ? null : 'love-life',
+          }),
         },
         application: { count: jest.fn().mockResolvedValue(o.applied ?? 0) },
       };
@@ -162,8 +189,14 @@ describe('BusinessTalentService', () => {
           prisma as never,
           { emit } as never,
           { assertCanInvite } as never,
+          { sendMail } as never,
+          { wrap: jest.fn((html: string) => Promise.resolve(html)) } as never,
+          { claim, release } as never,
         ),
         emit,
+        sendMail,
+        claim,
+        release,
       };
     };
 
@@ -192,6 +225,57 @@ describe('BusinessTalentService', () => {
             businessName: 'Love Life',
           },
         }),
+      );
+    });
+
+    it('e-mails the invitation to the offer, once per worker and offer', async () => {
+      const { service, sendMail, claim } = setup();
+      await service.invite('biz', 'w1', 'o1');
+      expect(claim).toHaveBeenCalledWith(
+        expect.stringContaining('invite-mail:o1:w1'),
+        expect.any(Number),
+      );
+      expect(sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: 'awa@example.com',
+          subject: 'Love Life vous invite à postuler — Serveuse',
+          html: expect.stringContaining(
+            '/carrieres/love-life/RBK-1234?source=invitation',
+          ),
+        }),
+      );
+      const html = (sendMail.mock.calls[0] as [{ html: string }])[0].html;
+      expect(html).toContain('RBK-1234');
+      expect(html).toContain('Brazzaville, Congo');
+      expect(html).toContain('Commence le mardi 24 novembre à 09:00');
+    });
+
+    it('still names the reference when the business has no careers page', async () => {
+      const { service, sendMail } = setup({ noSlug: true });
+      await service.invite('biz', 'w1', 'o1');
+      const html = (sendMail.mock.calls[0] as [{ html: string }])[0].html;
+      expect(html).not.toContain('/carrieres/');
+      expect(html).toContain('RBK-1234');
+    });
+
+    it('sends no e-mail without an address, or when already sent', async () => {
+      const none = setup({ email: null });
+      await none.service.invite('biz', 'w1', 'o1');
+      expect(none.sendMail).not.toHaveBeenCalled();
+
+      const again = setup({ claimed: false });
+      await again.service.invite('biz', 'w1', 'o1');
+      expect(again.sendMail).not.toHaveBeenCalled();
+    });
+
+    it('still invites when the e-mail fails, and frees it for a retry', async () => {
+      const { service, emit, release } = setup({ mailFails: true });
+      await expect(service.invite('biz', 'w1', 'o1')).resolves.toEqual({
+        invited: true,
+      });
+      expect(emit).toHaveBeenCalled();
+      expect(release).toHaveBeenCalledWith(
+        expect.stringContaining('invite-mail:o1:w1'),
       );
     });
 

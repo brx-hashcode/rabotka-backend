@@ -209,7 +209,7 @@ export class BusinessController {
   @ApiOperation({
     summary: 'Invite a worker to apply to one of its open offers',
     description:
-      'In-app notification to the worker, once per worker and offer. 409 if they already applied.',
+      'In-app notification to the worker, and an e-mail when they have an address, once per worker and offer. 409 if they already applied.',
   })
   inviteTalent(
     @Req() req: ProfileAuthenticatedRequest,
