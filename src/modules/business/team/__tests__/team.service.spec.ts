@@ -81,7 +81,10 @@ describe('TeamService', () => {
       },
       profile: { findFirst: jest.fn().mockResolvedValue(null) },
       businessActivity: { create: jest.fn().mockResolvedValue({}) },
+      // The writes of a removal run together.
+      $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
     };
+    (prisma.business as any).update = jest.fn().mockResolvedValue({});
     limits = { RECRUITER: 2, REVIEWER: 0 };
     taken = { RECRUITER: 0, REVIEWER: 0 };
     subscriptions = {
@@ -98,7 +101,6 @@ describe('TeamService', () => {
             return Promise.resolve({ subscriptionId: 'sub-1' });
           },
         ),
-      releaseSeat: jest.fn().mockResolvedValue(undefined),
     };
     mail = { sendMail: jest.fn().mockResolvedValue({ jobId: 'j' }) };
     const layout = {
@@ -167,20 +169,16 @@ describe('TeamService', () => {
       limits.REVIEWER = null;
       taken.RECRUITER = 2;
       await expect(service.invite(admin, dto)).rejects.toThrow(
-        /déjà ajouté 2 recruteurs sur cette période/,
+        /permet 2 recruteurs dans l’équipe, déjà atteint/,
       );
       await expect(
         service.invite(admin, { ...dto, role: 'REVIEWER' }),
       ).resolves.toBeDefined();
     });
 
-    it('gives the place back when the invitation cannot be saved', async () => {
+    it('takes no place when the invitation cannot be saved: the team counts people', async () => {
       prisma.businessMember.create.mockRejectedValueOnce(new Error('db'));
       await expect(service.invite(admin, dto)).rejects.toThrow('db');
-      expect(subscriptions.releaseSeat).toHaveBeenCalledWith(
-        'sub-1',
-        'RECRUITER',
-      );
     });
 
     it('never makes a second administrator', async () => {
@@ -273,7 +271,7 @@ describe('TeamService', () => {
       prisma.businessMember.findFirst.mockResolvedValue(row({ id: 'm-2' })),
     );
 
-    it('changes a role only within the new role’s places this period', async () => {
+    it('changes a role only if the new role has room, the member itself aside', async () => {
       await expect(service.setRole(admin, 'm-2', 'REVIEWER')).rejects.toThrow(
         /évaluateurs/,
       );
@@ -283,19 +281,12 @@ describe('TeamService', () => {
         where: { id: 'm-2' },
         data: { role: 'REVIEWER', seat_subscription_id: 'sub-1' },
       });
-      // Added on an earlier period: its old place is not this period's.
-      expect(subscriptions.releaseSeat).not.toHaveBeenCalled();
-    });
-
-    it('frees the old role’s place when moved within the period it was added in', async () => {
-      limits.REVIEWER = 1;
-      prisma.businessMember.findFirst.mockResolvedValue(
-        row({ id: 'm-2', seat_subscription_id: 'sub-1' }),
-      );
-      await service.setRole(admin, 'm-2', 'REVIEWER');
-      expect(subscriptions.releaseSeat).toHaveBeenCalledWith(
-        'sub-1',
-        'RECRUITER',
+      // Counted without the member being moved: its old place frees itself.
+      expect(subscriptions.consumeSeat).toHaveBeenLastCalledWith(
+        BUSINESS,
+        'REVIEWER',
+        expect.any(Function),
+        'm-2',
       );
     });
 
@@ -306,7 +297,7 @@ describe('TeamService', () => {
       );
     });
 
-    it('removes a member: its next call is refused, its place stays used', async () => {
+    it('removes a member: its next call is refused, its place is free again', async () => {
       prisma.businessMember.findFirst.mockResolvedValue(
         row({ id: 'm-2', seat_subscription_id: 'sub-1' }),
       );
@@ -319,18 +310,11 @@ describe('TeamService', () => {
           seat_subscription_id: null,
         },
       });
-      expect(subscriptions.releaseSeat).not.toHaveBeenCalled();
-    });
-
-    it('cancelling an invitation never accepted gives its place back', async () => {
-      prisma.businessMember.findFirst.mockResolvedValue(
-        row({ id: 'm-2', status: 'INVITED', seat_subscription_id: 'sub-1' }),
-      );
-      await service.remove(admin, 'm-2');
-      expect(subscriptions.releaseSeat).toHaveBeenCalledWith(
-        'sub-1',
-        'RECRUITER',
-      );
+      // The shared interview calendar link is renewed: they had it.
+      expect((prisma.business as any).update).toHaveBeenCalledWith({
+        where: { id: expect.any(String) },
+        data: { calendar_token: null },
+      });
     });
   });
 });

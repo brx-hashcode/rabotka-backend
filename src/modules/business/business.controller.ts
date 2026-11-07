@@ -38,7 +38,7 @@ import { UpdateBusinessDto } from './dto/update-business.dto';
 import { UploadBusinessDocumentDto } from './dto/upload-business-document.dto';
 import { BusinessCheckoutService } from './subscription/business-checkout.service';
 import { BusinessSubscriptionService } from './subscription/business-subscription.service';
-import { SubscribeDto } from './subscription/dto/business-plan.dto';
+import { BuyPackDto, SubscribeDto } from './subscription/dto/business-plan.dto';
 import { planView } from './subscription/plan-view';
 import { BusinessStatsService } from './business-stats.service';
 import { BusinessContactsService } from './business-contacts.service';
@@ -65,9 +65,13 @@ export class BusinessController {
   ) {}
 
   @Get('plans')
-  @ApiOperation({ summary: 'The plans a business can choose' })
-  async plans() {
-    return (await this.subscriptions.listPlans(true)).map(planView);
+  @ApiOperation({
+    summary:
+      'The plans a business can choose: the catalog, and its own custom plans',
+  })
+  async plans(@Req() req: ProfileAuthenticatedRequest) {
+    const businessId = await this.subscriptions.businessOf(req.user.profileId);
+    return (await this.subscriptions.plansFor(businessId!)).map(planView);
   }
 
   @Get('me/subscription')
@@ -111,6 +115,31 @@ export class BusinessController {
       dto.planId,
       dto.billingPeriod,
     );
+  }
+
+  @Get('me/packs')
+  @ApiOperation({
+    summary: 'Packs on sale and the credits bought, not expired',
+    description:
+      "A pack adds units (CVs, offers, contacts, AI-written offers) spent once the plan's own quota for the period is used up; kept 12 months.",
+  })
+  async packs(@Req() req: ProfileAuthenticatedRequest) {
+    const businessId = await this.subscriptions.businessOf(req.user.profileId);
+    return this.subscriptions.packs(businessId!);
+  }
+
+  @Post('me/packs')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Buy packs: returns the token of their payment page',
+    description:
+      'Needs a plan running. The credits are added when the payment succeeds.',
+  })
+  async buyPack(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Body() dto: BuyPackDto,
+  ) {
+    return this.checkout.buyPack(req.user.profileId, dto.kind, dto.count);
   }
 
   @Get('me/stats')

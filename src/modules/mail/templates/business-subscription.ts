@@ -75,6 +75,29 @@ export function businessSubscriptionActiveEmail(
   `;
 }
 
+export function businessCreditsAddedEmail(
+  name: string,
+  p: { what: string; expiresAt: Date; url: string },
+): string {
+  return `
+    <p>Bonjour ${escapeHtml(name)},</p>
+
+    <p>
+      Votre paiement est confirmé : votre pack est ajouté, soit
+      <strong>${escapeHtml(p.what)}</strong> en plus de votre formule, à
+      utiliser jusqu'au <strong>${frDate(p.expiresAt)}</strong>.
+    </p>
+
+    <p>
+      Ils servent une fois ceux de votre formule épuisés pour la période.
+      Votre facture vous est envoyée dans un e-mail séparé.
+    </p>
+
+    ${emailButton(p.url, 'Voir mon abonnement')}
+    ${SIGN_OFF}
+  `;
+}
+
 export function businessSubscriptionExpiringEmail(
   name: string,
   p: { planName: string; endsAt: Date; trial: boolean; url: string },

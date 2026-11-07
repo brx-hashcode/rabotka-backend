@@ -216,6 +216,86 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: "Entreprises – Formule offerte pendant l'essai (code)",
     isSecret: false,
   },
+  // The AI features the trial includes ('true' / 'false'); off by default: they
+  // cost a model call each, and come with a paid plan.
+  {
+    key: 'business.trial_cv_analysis',
+    value: 'false',
+    category: ConfigCategory.FEES,
+    label: "Entreprises – Analyse de CV pendant l'essai (true/false)",
+    isSecret: false,
+  },
+  {
+    key: 'business.trial_cv_chat',
+    value: 'false',
+    category: ConfigCategory.FEES,
+    label: "Entreprises – Questions au CV et comparaison pendant l'essai (true/false)",
+    isSecret: false,
+  },
+  {
+    key: 'business.trial_offer_writer',
+    value: 'false',
+    category: ConfigCategory.FEES,
+    label: "Entreprises – Rédaction d'offre par l'IA pendant l'essai (true/false)",
+    isSecret: false,
+  },
+  // Packs: units a business buys on top of its plan. Price 0: not sold.
+  {
+    key: 'business.pack_cv_quantity',
+    value: '50',
+    category: ConfigCategory.FEES,
+    label: "Entreprises – Pack CV à analyser : quantité",
+    isSecret: false,
+  },
+  {
+    key: 'business.pack_cv_price_fcfa',
+    value: '0',
+    category: ConfigCategory.FEES,
+    label: "Entreprises – Pack CV à analyser : prix (FCFA, 0 = non vendu)",
+    isSecret: false,
+  },
+  {
+    key: 'business.pack_offers_quantity',
+    value: '5',
+    category: ConfigCategory.FEES,
+    label: "Entreprises – Pack offres à publier : quantité",
+    isSecret: false,
+  },
+  {
+    key: 'business.pack_offers_price_fcfa',
+    value: '0',
+    category: ConfigCategory.FEES,
+    label: "Entreprises – Pack offres à publier : prix (FCFA, 0 = non vendu)",
+    isSecret: false,
+  },
+  {
+    key: 'business.pack_contacts_quantity',
+    value: '10',
+    category: ConfigCategory.FEES,
+    label: "Entreprises – Pack contacts à obtenir : quantité",
+    isSecret: false,
+  },
+  {
+    key: 'business.pack_contacts_price_fcfa',
+    value: '0',
+    category: ConfigCategory.FEES,
+    label: "Entreprises – Pack contacts à obtenir : prix (FCFA, 0 = non vendu)",
+    isSecret: false,
+  },
+  {
+    key: 'business.pack_offer_drafts_quantity',
+    value: '10',
+    category: ConfigCategory.FEES,
+    label: "Entreprises – Pack offres rédigées par l'IA : quantité",
+    isSecret: false,
+  },
+  {
+    key: 'business.pack_offer_drafts_price_fcfa',
+    value: '0',
+    category: ConfigCategory.FEES,
+    label: "Entreprises – Pack offres rédigées par l'IA : prix (FCFA, 0 = non vendu)",
+    isSecret: false,
+  },
   {
     // 0 = no reminder.
     key: 'business.offer_expiry_reminder_days',
@@ -648,16 +728,6 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
 
-  // ── GENERAL ───────────────────────────────────────────────────────────────
-  {
-    key: 'general.description',
-    value:
-      'Plateforme de mise en relation entre employeurs et travailleurs informels en Afrique.',
-    category: ConfigCategory.GENERAL,
-    label: 'Description courte de Rabotka (utilisée dans les emails)',
-    isSecret: false,
-  },
-
   // ── VOVA AI (assistant) ───────────────────────────────────────────────────
   {
     key: 'vova.enabled',
@@ -791,6 +861,72 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     value: '',
     category: ConfigCategory.CONTACT,
     label: 'Adresse physique',
+    isSecret: false,
+  },
+  // The company, as the foot of every email names it.
+  {
+    key: 'company.legal_name',
+    value: 'Rabotka',
+    category: ConfigCategory.CONTACT,
+    label: 'Raison sociale (pied des e-mails)',
+    isSecret: false,
+  },
+  {
+    key: 'company.rccm',
+    value: '',
+    category: ConfigCategory.CONTACT,
+    label: 'Numéro RCCM (pied des e-mails ; vide = masqué)',
+    isSecret: false,
+  },
+  // The networks' links, as icons at the foot of every email. Empty: no icon.
+  // The first three are the website footer's.
+  {
+    key: 'social.facebook',
+    value: 'https://www.facebook.com/share/18pxQBc8nD',
+    category: ConfigCategory.CONTACT,
+    label: 'Page Facebook',
+    isSecret: false,
+  },
+  {
+    key: 'social.instagram',
+    value: 'https://www.instagram.com/rabotka__',
+    category: ConfigCategory.CONTACT,
+    label: 'Compte Instagram',
+    isSecret: false,
+  },
+  {
+    key: 'social.linkedin',
+    value: 'https://www.linkedin.com/company/rabotka',
+    category: ConfigCategory.CONTACT,
+    label: 'Page LinkedIn',
+    isSecret: false,
+  },
+  {
+    key: 'social.tiktok',
+    value: '',
+    category: ConfigCategory.CONTACT,
+    label: 'Compte TikTok',
+    isSecret: false,
+  },
+  {
+    key: 'social.x',
+    value: '',
+    category: ConfigCategory.CONTACT,
+    label: 'Compte X',
+    isSecret: false,
+  },
+  {
+    key: 'social.youtube',
+    value: '',
+    category: ConfigCategory.CONTACT,
+    label: 'Chaîne YouTube',
+    isSecret: false,
+  },
+  {
+    key: 'social.whatsapp',
+    value: '',
+    category: ConfigCategory.CONTACT,
+    label: 'Lien WhatsApp (wa.me ou chaîne)',
     isSecret: false,
   },
   {

@@ -104,6 +104,8 @@ export type WebhookHandleResult = {
   gatewayRef: string;
   status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'PENDING';
   transactionId?: string;
+  /** As in `PaymentStatusResult`: the gateway's code for a refusal. */
+  failureReason?: string;
   /** As in `PaymentStatusResult`: what was actually paid, when known. */
   amount?: number;
   currency?: string;

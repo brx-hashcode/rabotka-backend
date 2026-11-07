@@ -21,6 +21,8 @@ import {
   DEFAULT_SYSTEM_CONFIGS,
   STORAGE_ENV_OVERRIDES,
 } from './system-config.constants';
+import { SOCIAL_NETWORKS } from '../mail/templates/social-icons-asset';
+import type { FooterInfo } from '../mail/templates/layout';
 
 const CACHE_PREFIX = `${REDIS_KEY_PREFIX}syscfg:`;
 const CACHE_TTL_SECONDS = 300; // 5 minutes
@@ -766,17 +768,26 @@ export class SystemConfigService implements OnModuleInit {
     return { email, phone, address };
   }
 
-  async getEmailFooterInfo() {
-    const [description, email, address] = await this.mgetBatch([
-      {
-        key: 'general.description',
-        fallback:
-          'Plateforme de mise en relation entre employeurs et travailleurs informels en Afrique.',
-      },
-      { key: 'contact.email', fallback: 'contact@rabotka.com' },
-      { key: 'contact.address', fallback: '' },
-    ]);
-    return { description, email, address };
+  /**
+   * What the foot of every email says: who Rabotka is (legal name, RCCM,
+   * address, contact) and where to follow it. Social links that are not an
+   * http(s) URL are left out, so a typo never becomes a broken icon.
+   */
+  async getEmailFooterInfo(): Promise<FooterInfo> {
+    const [email, address, phone, legalName, rccm, ...links] =
+      await this.mgetBatch([
+        { key: 'contact.email', fallback: 'contact@rabotka.com' },
+        { key: 'contact.address', fallback: '' },
+        { key: 'contact.phone', fallback: '' },
+        { key: 'company.legal_name', fallback: 'Rabotka' },
+        { key: 'company.rccm', fallback: '' },
+        ...SOCIAL_NETWORKS.map((n) => ({ key: `social.${n}`, fallback: '' })),
+      ]);
+    const socials = SOCIAL_NETWORKS.flatMap((network, i) => {
+      const url = links[i]?.trim() ?? '';
+      return /^https?:\/\/\S+$/i.test(url) ? [{ network, url }] : [];
+    });
+    return { email, address, phone, legalName, rccm, socials };
   }
 
   async getFees() {
@@ -1010,6 +1021,32 @@ export class SystemConfigService implements OnModuleInit {
   }
 
   /**
+   * The packs a business may buy on top of its plan: how many units each
+   * brings and its price. A price of 0 (or a quantity of 0) is not sold.
+   */
+  async getBusinessPackSettings(): Promise<
+    Record<
+      'cv' | 'offers' | 'contacts' | 'offerDrafts',
+      { quantity: number; priceFcfa: number }
+    >
+  > {
+    const keys = ['cv', 'offers', 'contacts', 'offer_drafts'] as const;
+    const values = await this.mgetBatch(
+      keys.flatMap((k) => [
+        { key: `business.pack_${k}_quantity`, fallback: '0' },
+        { key: `business.pack_${k}_price_fcfa`, fallback: '0' },
+      ]),
+    );
+    const int = (v: string | null | undefined) =>
+      Math.max(0, Math.floor(Number(v) || 0));
+    const at = (i: number) => ({
+      quantity: int(values[i * 2]),
+      priceFcfa: int(values[i * 2 + 1]),
+    });
+    return { cv: at(0), offers: at(1), contacts: at(2), offerDrafts: at(3) };
+  }
+
+  /**
    * The business trial and renewal reminders. The plans (prices, quotas) are
    * the business_plans table. `trialDays` 0 or no `trialPlanCode`: no trial.
    */
@@ -1017,13 +1054,31 @@ export class SystemConfigService implements OnModuleInit {
     trialDays: number;
     trialPlanCode: string | null;
     reminderDays: number[];
+    /** The AI features the trial includes; each is off unless set to 'true'. */
+    trialAi: { cvAnalysis: boolean; cvChat: boolean; offerWriter: boolean };
   }> {
-    const [trialDays, trialPlanCode, reminderDays] = await this.mgetBatch([
+    const [
+      trialDays,
+      trialPlanCode,
+      reminderDays,
+      trialCvAnalysis,
+      trialCvChat,
+      trialOfferWriter,
+    ] = await this.mgetBatch([
       { key: 'business.trial_days', fallback: '14' },
       { key: 'business.trial_plan_code', fallback: '' },
       { key: 'business.renewal_reminder_days', fallback: '7,1' },
+      { key: 'business.trial_cv_analysis', fallback: 'false' },
+      { key: 'business.trial_cv_chat', fallback: 'false' },
+      { key: 'business.trial_offer_writer', fallback: 'false' },
     ]);
+    const on = (v: string | null | undefined) => v?.trim() === 'true';
     return {
+      trialAi: {
+        cvAnalysis: on(trialCvAnalysis),
+        cvChat: on(trialCvChat),
+        offerWriter: on(trialOfferWriter),
+      },
       trialDays: Math.max(0, Math.floor(Number(trialDays) || 0)),
       trialPlanCode: trialPlanCode?.trim() || null,
       reminderDays: (reminderDays ?? '')

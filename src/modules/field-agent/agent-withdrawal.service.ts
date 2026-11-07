@@ -181,8 +181,8 @@ export class AgentWithdrawalService {
       });
       this.events.emit(AdminNotificationEvent.AGENT_WITHDRAWAL_REQUESTED, {
         event: AdminNotificationEvent.AGENT_WITHDRAWAL_REQUESTED,
-        title: 'Demande de retrait agent',
-        message: `${withdrawal.agent.first_name} ${withdrawal.agent.last_name} demande ${input.amount.toLocaleString('fr-FR')} FCFA (${input.momoOperator})`,
+        title: 'Agent payout request',
+        message: `${withdrawal.agent.first_name} ${withdrawal.agent.last_name} requests ${input.amount.toLocaleString('fr-FR')} FCFA (${input.momoOperator})`,
         entityType: 'agent-withdrawal',
         entityId: withdrawal.id,
         metadata: { agentId, amount: input.amount },

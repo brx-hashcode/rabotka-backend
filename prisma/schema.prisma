@@ -309,6 +309,8 @@ enum PaymentRequestType {
   WALLET_TOP_UP
   /// A period of a business plan (BusinessSubscription).
   BUSINESS_SUBSCRIPTION
+  /// A pack of credits bought on top of the plan (BusinessCredit).
+  BUSINESS_CREDIT_PACK
 }
 
 enum ClaimStatus {
@@ -1396,6 +1398,7 @@ model JobOffer {
   agent_leads             AgentLead[]
   cv_screenings           CvScreening[]
   interviews              Interview[]
+  linkedin_posts          JobOfferLinkedinPost[]
   deleted_at              DateTime?              @db.Timestamptz
   /// The employer closed it. Nothing reopens it until they republish, not even
   /// a hire dropping out; an EXPIRED status alone cannot tell this from expiry.
@@ -1426,6 +1429,12 @@ model Application {
   /// Its CV analysis, once the business ran one: it then sits in the offer's
   /// screening with the careers-page CVs, to be asked about and compared.
   cv_resume_id        String?                 @unique @db.Uuid
+  /// CV analyses started for it (each charged, a failed one given back):
+  /// retried with a growing wait, never past MAX_ANALYSIS_ATTEMPTS.
+  analysis_attempts   Int                     @default(0)
+  /// Taken by an analysis being prepared, so « Analyser tout » and the
+  /// queued jobs never charge the same CV twice. Stale after 30 minutes.
+  analysis_claimed_at DateTime?               @db.Timestamptz
   cancelled_at        DateTime?
   cancellation_reason String?
   /// Who cancelled, and therefore whether the worker may apply again: only a
@@ -2010,6 +2019,9 @@ model PaymentRequest {
   /// when the request was created (a later price change does not touch it).
   business_plan_id          String?              @db.Uuid
   business_billing_period   BusinessBillingPeriod?
+  /// BUSINESS_CREDIT_PACK: what this payment buys, priced when created.
+  business_credit_kind      BusinessCreditKind?
+  business_credit_quantity  Int?
 
   profile    Profile   @relation(fields: [profile_id], references: [id], onDelete: Cascade)
   invoice    Invoice?
@@ -2264,6 +2276,10 @@ enum ProfileNotificationType {
   INTERVIEW_INVITED
   INTERVIEW_CANCELLED
   INTERVIEW_ANSWERED
+  /// An offer posted on LinkedIn from Rabotka, or the post that failed.
+  LINKEDIN_POST
+  /// A pack bought: its credits are there to use.
+  BUSINESS_CREDITS_ADDED
 }
 
 /// The in-app feed behind the bell in rabotka-client.
@@ -2363,6 +2379,7 @@ enum InvoiceReason {
   PENALTY
   WALLET_TOP_UP
   BUSINESS_SUBSCRIPTION
+  BUSINESS_CREDIT_PACK
   OTHER
 }
 
@@ -3453,11 +3470,15 @@ model Business {
   profile       Profile                @relation(fields: [profile_id], references: [id], onDelete: Cascade)
   documents     BusinessDocument[]
   subscriptions BusinessSubscription[]
+  /// Plans made for it alone (« sur mesure »).
+  custom_plans  BusinessPlan[]
   cv_screenings CvScreening[]
   interviews    Interview[]
   mailboxes     BusinessMailbox[]
+  linkedin_accounts BusinessLinkedinAccount[]
   members       BusinessMember[]
   activities    BusinessActivity[]
+  credits            BusinessCredit[]
   candidate_notes    CandidateNote[]
   candidate_opinions CandidateOpinion[]
   admin_notes        AdminBusinessNote[]
@@ -3527,9 +3548,14 @@ model BusinessPlan {
   active_offers_limit   Int?
   includes_preselection Boolean  @default(false)
   priority_visibility   Boolean  @default(false)
+  /// « Publier sur LinkedIn »: the business's team posts its offers on their
+  /// own LinkedIn from Rabotka. The share link stays open to every plan.
+  linkedin_posting      Boolean  @default(false)
+  /// « Exports RH »: an offer's candidates, the staff register, the ACPE file.
+  hr_exports            Boolean  @default(false)
   /// CVs the AI screening reads per period. Null: unlimited; 0: not included.
   cv_screenings_per_period Int?  @default(0)
-  /// CVs in one screening (one upload), 5 at most.
+  /// CVs in one screening, 100 at most: sent in several requests when many.
   cv_batch_max          Int      @default(5)
   /// Largest CV file accepted, in MB.
   cv_file_max_mb        Int      @default(5)
@@ -3547,9 +3573,14 @@ model BusinessPlan {
   sort_order            Int      @default(0)
   /// Deleted by an admin: hidden everywhere, kept for the periods and payments that point to it.
   deleted_at            DateTime?
+  /// A custom plan (« sur mesure »): made for this business alone, which is
+  /// the only one to see, buy or be granted it. Null: the public catalog.
+  business_id           String?  @db.Uuid
 
+  business      Business?             @relation(fields: [business_id], references: [id], onDelete: Cascade)
   subscriptions BusinessSubscription[]
 
+  @@index([business_id], name: "idx_business_plan_business")
   @@map("business_plans")
 }
 
@@ -3573,6 +3604,15 @@ model BusinessSubscription {
   offer_drafts_used   Int                        @default(0)
   /// Offers published (or republished) during this period.
   offers_published    Int                        @default(0)
+  /// Of the units above, those paid from the business's credits (packs),
+  /// not from the plan: given back to the credits first.
+  cv_from_credits           Int                  @default(0)
+  offers_from_credits       Int                  @default(0)
+  offer_drafts_from_credits Int                  @default(0)
+  /// The month the counters above belong to (null: the period's first). A
+  /// period longer than a month starts them again every month
+  /// (counterWindow in subscription-rules.ts).
+  counters_from       DateTime?                  @db.Timestamptz
   /// Recruiters / evaluators added to the team during this period (an
   /// invitation, or a member moved to the role). Counted from 0 each period:
   /// the people already in the team stay.
@@ -3589,6 +3629,7 @@ model BusinessSubscription {
   plan     BusinessPlan         @relation(fields: [plan_id], references: [id])
   usages   BusinessQuotaUsage[]
   cv_screenings CvScreening[]
+  cv_resumes    CvScreeningResume[]
 
   @@index([business_id, ends_at], name: "idx_business_subscription_business_end")
   @@index([status, ends_at], name: "idx_business_subscription_status_end")
@@ -3668,7 +3709,16 @@ model CvScreeningResume {
   /// email/phone until the purge.
   candidate      Json?
   error          String?
+  /// The period this CV's « CV inclus » was taken from, and is given back to
+  /// when it is not read. Not always the screening's: an offer's screening
+  /// lasts across periods, and its later CVs are charged to the period then.
+  subscription_id String?                @db.Uuid
+  /// When this CV loses its file, text and contact details: its own
+  /// retention, from the period it was charged to. An offer's screening lasts
+  /// across periods, and its later CVs were purged with its first ones.
+  expires_at      DateTime?              @db.Timestamptz
 
+  subscription         BusinessSubscription? @relation(fields: [subscription_id], references: [id], onDelete: SetNull)
   external_application ExternalApplication?
   application          Application?
   screening CvScreening          @relation(fields: [screening_id], references: [id], onDelete: Cascade)
@@ -3757,9 +3807,12 @@ model Interview {
   created_at       DateTime        @default(now())
   updated_at       DateTime        @updatedAt
   business_id      String          @db.Uuid
-  /// Exactly one of the two: where the candidate comes from.
+  /// Exactly one of the three: where the candidate comes from.
   cv_resume_id     String?         @db.Uuid
   application_id   String?         @db.Uuid
+  /// A careers-page candidate invited without a CV analysis (none left on
+  /// the plan, or not run): reached at the address they applied with.
+  external_application_id String?  @db.Uuid
   offer_id         String?         @db.Uuid
   job_title        String
   candidate_name   String
@@ -3783,12 +3836,14 @@ model Interview {
   business  Business           @relation(fields: [business_id], references: [id], onDelete: Cascade)
   cv_resume CvScreeningResume? @relation(fields: [cv_resume_id], references: [id], onDelete: SetNull)
   application Application?     @relation(fields: [application_id], references: [id], onDelete: SetNull)
+  external_application ExternalApplication? @relation(fields: [external_application_id], references: [id], onDelete: SetNull)
   offer     JobOffer?          @relation(fields: [offer_id], references: [id], onDelete: SetNull)
 
   @@index([business_id, starts_at], name: "idx_interview_business_starts")
   @@index([status, starts_at], name: "idx_interview_status_starts")
   @@index([cv_resume_id], name: "idx_interview_cv_resume")
   @@index([application_id], name: "idx_interview_application")
+  @@index([external_application_id], name: "idx_interview_external_application")
   @@map("interviews")
 }
 
@@ -3823,6 +3878,8 @@ model BusinessQuotaUsage {
   contact_unlock_attempt_id String?   @unique @db.Uuid
   contact_record_id         String?   @unique @db.Uuid
   released_at               DateTime? @db.Timestamptz
+  /// Paid from a contacts pack rather than the plan: given back to it.
+  credit_id                 String?   @db.Uuid
 
   subscription BusinessSubscription @relation(fields: [subscription_id], references: [id], onDelete: Cascade)
 
@@ -3860,6 +3917,91 @@ enum MailProvider {
 /// A mailbox a business connected (OAuth) to pick CVs from its e-mails for
 /// « Analyse de CV ». Only the tokens are kept, encrypted (MAILBOX_TOKEN_KEY):
 /// mails are read on demand, never stored.
+enum BusinessCreditKind {
+  CV
+  OFFER
+  CONTACT
+  OFFER_DRAFT
+}
+
+/// Units bought on top of the plan (a pack): spent once the period's own
+/// quota is used up, oldest-expiring first, kept 12 months.
+model BusinessCredit {
+  id                  String             @id @default(uuid()) @db.Uuid
+  created_at          DateTime           @default(now())
+  updated_at          DateTime           @updatedAt
+  business_id         String             @db.Uuid
+  kind                BusinessCreditKind
+  quantity            Int
+  used                Int                @default(0)
+  expires_at          DateTime           @db.Timestamptz
+  /// The pack's payment; null for credits an admin granted.
+  payment_request_id  String?            @unique @db.Uuid
+  granted_by_admin_id String?            @db.Uuid
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@index([business_id, kind, expires_at])
+  @@map("business_credits")
+}
+
+/// A team member's own LinkedIn account, connected to post the business's
+/// offers on it (« Share on LinkedIn »). One per person: the account holder
+/// (`person` = "holder") or a member (`person` = its member id).
+model BusinessLinkedinAccount {
+  id               String    @id @default(uuid()) @db.Uuid
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+  business_id      String    @db.Uuid
+  person           String
+  /// The member's OpenID subject: the author of its posts (urn:li:person:<sub>).
+  linkedin_sub     String
+  name             String
+  picture_url      String?
+  /// Sealed like the mailbox tokens (MAILBOX_TOKEN_KEY). About 60 days, no refresh token.
+  access_token_enc String    @db.Text
+  expires_at       DateTime
+  /// LinkedIn refused the token before its date: connect again.
+  expired_at       DateTime?
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@unique([business_id, person])
+  @@map("business_linkedin_accounts")
+}
+
+enum LinkedinPostStatus {
+  QUEUED
+  PUBLISHED
+  FAILED
+}
+
+/// An offer posted on LinkedIn from Rabotka: what the offer page shows
+/// (« Publiée sur LinkedIn le … ») and what stops a double post.
+model JobOfferLinkedinPost {
+  id           String             @id @default(uuid()) @db.Uuid
+  created_at   DateTime           @default(now())
+  updated_at   DateTime           @updatedAt
+  offer_id     String             @db.Uuid
+  business_id  String             @db.Uuid
+  person       String
+  author_name  String
+  text         String             @db.Text
+  /// The recruiter's own card picture, already on LinkedIn (urn:li:image:…);
+  /// null: the offer's share picture is uploaded when it is posted.
+  thumbnail_urn String?
+  status       LinkedinPostStatus @default(QUEUED)
+  /// urn:li:share:… or urn:li:ugcPost:…, from the x-restli-id header.
+  post_urn     String?
+  error        String?
+  published_at DateTime?
+
+  offer JobOffer @relation(fields: [offer_id], references: [id], onDelete: Cascade)
+
+  @@index([offer_id, created_at])
+  @@map("job_offer_linkedin_posts")
+}
+
 model BusinessMailbox {
   id                      String       @id @default(uuid()) @db.Uuid
   created_at              DateTime     @default(now())
@@ -4023,6 +4165,9 @@ model CandidateOpinion {
 
   @@unique([member_id, application_id])
   @@unique([member_id, external_application_id])
+  // The opinions of one candidate, read per offer and per application.
+  @@index([application_id], name: "idx_candidate_opinion_application")
+  @@index([external_application_id], name: "idx_candidate_opinion_external")
   @@map("candidate_opinions")
 }
 
@@ -4066,14 +4211,22 @@ model ExternalApplication {
 
   /// Its analysis, once the business asked for one.
   cv_resume_id    String?                   @unique @db.Uuid
+  /// CV analyses started for it: retried with a growing wait, never past
+  /// MAX_ANALYSIS_ATTEMPTS.
+  analysis_attempts   Int                     @default(0)
+  /// Taken by an analysis being prepared: never charged twice.
+  analysis_claimed_at DateTime?               @db.Timestamptz
 
   job_offer JobOffer @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
   cv_resume CvScreeningResume? @relation(fields: [cv_resume_id], references: [id], onDelete: SetNull)
+  interviews Interview[]
   team_notes    CandidateNote[]
   team_opinions CandidateOpinion[]
 
   @@unique([job_offer_id, email])
   @@index([created_at], name: "idx_external_application_created")
+  // Per offer and status: the offer page, the sweeps every few minutes.
+  @@index([job_offer_id, status], name: "idx_external_application_offer_status")
   @@map("external_applications")
 }
 

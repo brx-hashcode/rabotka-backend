@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { answerSnippet } from './lenient-answer';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'node:crypto';
@@ -26,7 +27,10 @@ import { QueueService } from '../../../common/services/queue/queue.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { LlmService } from '../../rag/llm/llm.service';
 import { notifyProfile } from '../../profile-notification/profile-notification.events';
-import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
+import {
+  BusinessSubscriptionService,
+  TRIAL_AI_REFUSAL,
+} from '../subscription/business-subscription.service';
 import {
   CV_EXTENSION,
   MIN_TEXT_CHARS,
@@ -124,9 +128,15 @@ export class CvScreeningService {
   ) {
     const businessId = await this.requireBusiness(profileId);
     const e = await this.subscriptions.entitlements(businessId);
-    if (e.cvQuota === 0) {
+    // Not in the plan, and no pack bought: refused before reading the files.
+    if (
+      e.cvQuota === 0 &&
+      (e.cvRemaining === 0 || e.trialLocked.includes('cvAnalysis'))
+    ) {
       throw new ForbiddenException(
-        'L’analyse de CV est incluse dans les formules supérieures. Changez de formule depuis votre espace, rubrique « Abonnement ».',
+        e.trialLocked.includes('cvAnalysis')
+          ? TRIAL_AI_REFUSAL
+          : 'L’analyse de CV est incluse dans les formules supérieures. Changez de formule depuis votre espace, rubrique « Abonnement ».',
       );
     }
     if (files.length === 0) {
@@ -187,52 +197,146 @@ export class CvScreeningService {
       );
     }
 
-    const plan = await this.prisma.businessSubscription.findUnique({
-      where: { id: subscriptionId },
-      select: { plan: { select: { cv_retention_days: true } } },
-    });
-    const retentionDays = plan?.plan.cv_retention_days ?? 30;
+    let screening: ScreeningRow;
+    try {
+      const plan = await this.prisma.businessSubscription.findUnique({
+        where: { id: subscriptionId },
+        select: { plan: { select: { cv_retention_days: true } } },
+      });
+      const retentionDays = plan?.plan.cv_retention_days ?? 30;
+      // Each CV keeps its file as long as the plan it was charged to says.
+      const expiresAt = new Date(
+        Date.now() + retentionDays * 24 * 60 * 60 * 1000,
+      );
 
-    const resumes = typed.map(({ file, type, name }, i) => ({
-      file_name: name.slice(0, 200),
-      mime_type: type,
-      size_bytes: file.size,
-      storage_key: uploaded[i].key,
-      storage_bucket: uploaded[i].bucket,
-    }));
-    const screening = into
-      ? await this.prisma.cvScreening.update({
-          where: { id: into },
-          data: {
-            status: CvScreeningStatus.PROCESSING,
-            resumes: { create: resumes },
-          },
-          include: { resumes: true },
-        })
-      : await this.prisma.cvScreening.create({
-          data: {
-            id,
-            business_id: businessId,
-            subscription_id: subscriptionId,
-            offer_id: brief.offerId,
-            job_title: brief.title,
-            job_text: brief.text,
-            expires_at: new Date(
-              Date.now() + retentionDays * 24 * 60 * 60 * 1000,
-            ),
-            resumes: { create: resumes },
-          },
-          include: { resumes: true },
+      const resumes = typed.map(({ file, type, name }, i) => ({
+        file_name: name.slice(0, 200),
+        mime_type: type,
+        size_bytes: file.size,
+        storage_key: uploaded[i].key,
+        storage_bucket: uploaded[i].bucket,
+        // Charged now, to this period: given back here if it can't be read.
+        subscription_id: subscriptionId,
+        expires_at: expiresAt,
+      }));
+      if (into) {
+        // The offer's screening stays open as long as its latest CV.
+        await this.prisma.cvScreening.updateMany({
+          where: { id: into, expires_at: { lt: expiresAt } },
+          data: { expires_at: expiresAt },
         });
+      }
+      screening = into
+        ? await this.prisma.cvScreening.update({
+            where: { id: into },
+            data: {
+              status: CvScreeningStatus.PROCESSING,
+              resumes: { create: resumes },
+            },
+            include: { resumes: true },
+          })
+        : await this.prisma.cvScreening.create({
+            data: {
+              id,
+              business_id: businessId,
+              subscription_id: subscriptionId,
+              offer_id: brief.offerId,
+              job_title: brief.title,
+              job_text: brief.text,
+              expires_at: expiresAt,
+              resumes: { create: resumes },
+            },
+            include: { resumes: true },
+          });
+    } catch (err) {
+      // Not saved: the CVs go back to the plan and their files are deleted,
+      // rather than charged for nothing and left in the bucket.
+      await this.subscriptions.releaseCv(subscriptionId, files.length);
+      await this.deleteObjects(uploaded);
+      this.logger.error(
+        `CV screening not saved for business ${businessId}`,
+        err,
+      );
+      throw new BadRequestException(
+        "L'envoi des CV a échoué. Réessayez dans un instant.",
+      );
+    }
 
-    const fresh = new Set(resumes.map((r) => r.storage_key));
+    const fresh = new Set(uploaded.map((u) => u.key));
     for (const resume of screening.resumes) {
       if (!resume.storage_key || !fresh.has(resume.storage_key)) continue;
-      await this.queue.addJob<CvScreeningJob>(CV_SCREENING_QUEUE, {
-        resumeId: resume.id,
-      });
+      try {
+        await this.queue.addJob<CvScreeningJob>(CV_SCREENING_QUEUE, {
+          resumeId: resume.id,
+        });
+      } catch (err) {
+        // Never queued, never read: settled (and given back) now, rather
+        // than « en cours » until the stuck sweep two hours later.
+        this.logger.error(`CV ${resume.id} could not be queued`, err);
+        await this.settle(
+          {
+            ...resume,
+            screening: {
+              id: screening.id,
+              subscription_id: screening.subscription_id,
+            },
+          },
+          { status: 'FAILED', error: "L'analyse n'a pas abouti." },
+        );
+      }
     }
     return screeningDetail(screening);
+  }
+
+  /**
+   * More CVs for a screening the business opened by hand: a batch too large
+   * for one request (the business site takes 50 MB a request) is sent in
+   * several, the first opening the screening, the next adding to it. Each
+   * request is charged on its own, all or nothing; the plan's « CV par
+   * analyse » counts for the whole screening.
+   */
+  async addFiles(profileId: string, screeningId: string, files: CvUpload[]) {
+    const businessId = await this.requireBusiness(profileId);
+    const screening = await this.prisma.cvScreening.findFirst({
+      where: { id: screeningId, business_id: businessId },
+      select: {
+        id: true,
+        external: true,
+        offer_id: true,
+        job_title: true,
+        job_text: true,
+        purged_at: true,
+        expires_at: true,
+        _count: { select: { resumes: true } },
+      },
+    });
+    if (!screening) throw new NotFoundException('Analyse introuvable.');
+    // The offer's shared screening fills itself from the careers page.
+    if (screening.external) {
+      throw new BadRequestException(
+        'Ajoutez ces CV depuis une nouvelle analyse.',
+      );
+    }
+    if (screening.purged_at || screening.expires_at <= new Date()) {
+      throw new BadRequestException(
+        'Cette analyse a dépassé sa durée de conservation.',
+      );
+    }
+    const e = await this.subscriptions.entitlements(businessId);
+    const total = screening._count.resumes + files.length;
+    if (total > e.cvBatchMax) {
+      throw new BadRequestException(
+        `Votre formule permet ${e.cvBatchMax} CV par analyse : cette analyse en a déjà ${screening._count.resumes}.`,
+      );
+    }
+    return this.create(
+      profileId,
+      files,
+      screening.offer_id
+        ? { offerId: screening.offer_id }
+        : { jobTitle: screening.job_title, jobText: screening.job_text },
+      screening.id,
+    );
   }
 
   /**
@@ -396,13 +500,19 @@ export class CvScreeningService {
   /** Deletes a screening: its files at once, then its rows. CVs already read are not given back. */
   async remove(profileId: string, id: string): Promise<void> {
     const screening = await this.owned(profileId, id);
-    await this.deleteObjects(
+    const failed = await this.deleteObjects(
       screening.resumes.flatMap((r) =>
         r.storage_key
           ? [{ key: r.storage_key, bucket: r.storage_bucket ?? undefined }]
           : [],
       ),
     );
+    if (failed.size > 0) {
+      // The rows go as asked; the keys are in the log to clean up by hand.
+      this.logger.error(
+        `Screening ${screening.id} deleted; files left in storage: ${[...failed].join(', ')}`,
+      );
+    }
     await this.prisma.cvScreening.delete({ where: { id: screening.id } });
   }
 
@@ -507,8 +617,11 @@ export class CvScreeningService {
       data,
     });
     if (count === 0) return;
-    if (outcome.status !== 'SCORED' && resume.screening.subscription_id) {
-      await this.subscriptions.releaseCv(resume.screening.subscription_id, 1);
+    // Given back to the period it was taken from, not the screening's: an
+    // offer's screening outlives a period, and the period may have changed.
+    const charged = resume.subscription_id ?? resume.screening.subscription_id;
+    if (outcome.status !== 'SCORED' && charged) {
+      await this.subscriptions.releaseCv(charged, 1);
     }
     await this.afterProgress(resume.screening.id);
   }
@@ -609,7 +722,14 @@ export class CvScreeningService {
       new AIMessage(first),
       new HumanMessage(JSON_REMINDER),
     ]);
-    return parseAssessment(second);
+    const read = parseAssessment(second);
+    if (!read) {
+      // Logged now: until today a failed CV said only « n'a pas abouti ».
+      this.logger.warn(
+        `CV ${correlationId} answer unreadable: ${answerSnippet(second)}`,
+      );
+    }
+    return read;
   }
 
   /**
@@ -695,7 +815,7 @@ export class CvScreeningService {
   async backfillCareers(limit = 30): Promise<number> {
     const rows = await this.prisma.$queryRaw<{ id: string }[]>`
       SELECT id FROM cv_screening_resumes
-      WHERE status = 'SCORED' AND cv_text IS NOT NULL
+      WHERE status = 'SCORED' AND cv_text IS NOT NULL AND cv_text <> ''
         AND (candidate IS NULL OR NOT (candidate ? 'experiences'))
       ORDER BY created_at DESC
       LIMIT ${limit}`;
@@ -763,12 +883,14 @@ export class CvScreeningService {
       take: 200,
     });
     for (const a of due) {
-      await this.deleteObjects([
+      const failed = await this.deleteObjects([
         {
           key: a.cv_storage_key as string,
           bucket: a.cv_storage_bucket ?? undefined,
         },
       ]);
+      // Kept when the delete failed: the next sweep tries again.
+      if (failed.size > 0) continue;
       await this.prisma.externalApplication.update({
         where: { id: a.id },
         data: { cv_storage_key: null, cv_storage_bucket: null },
@@ -794,59 +916,90 @@ export class CvScreeningService {
 
     await this.purgeExternalCvs(now);
 
-    const expired = await this.prisma.cvScreening.findMany({
-      where: { expires_at: { lte: now }, purged_at: null },
-      include: { resumes: true },
-      take: 100,
+    // Each CV past its own retention loses its file, text and contact
+    // details; its conversations go with it (they quote the CV). A file the
+    // storage would not delete keeps its key, and is tried again next time.
+    const due = await this.prisma.cvScreeningResume.findMany({
+      where: {
+        OR: [{ storage_key: { not: null } }, { cv_text: { not: null } }],
+        AND: [
+          {
+            OR: [
+              { expires_at: { lte: now } },
+              { expires_at: null, screening: { expires_at: { lte: now } } },
+            ],
+          },
+        ],
+      },
+      select: {
+        id: true,
+        screening_id: true,
+        storage_key: true,
+        storage_bucket: true,
+        candidate: true,
+      },
+      take: 300,
     });
-    for (const screening of expired) {
-      await this.deleteObjects(
-        screening.resumes.flatMap((r) =>
-          r.storage_key
-            ? [{ key: r.storage_key, bucket: r.storage_bucket ?? undefined }]
-            : [],
-        ),
-      );
+    for (const r of due) {
+      const failed = r.storage_key
+        ? await this.deleteObjects([
+            { key: r.storage_key, bucket: r.storage_bucket ?? undefined },
+          ])
+        : new Set<string>();
+      const kept = r.storage_key && failed.has(r.storage_key);
       await this.prisma.$transaction([
-        // The conversations quote the CV: they go with it.
-        this.prisma.cvResumeMessage.deleteMany({
-          where: { resume_id: { in: screening.resumes.map((r) => r.id) } },
-        }),
+        this.prisma.cvResumeMessage.deleteMany({ where: { resume_id: r.id } }),
         this.prisma.cvComparisonMessage.deleteMany({
-          where: { comparison: { screening_id: screening.id } },
+          where: { comparison: { resume_ids: { has: r.id } } },
         }),
-        ...screening.resumes.map((r) =>
-          this.prisma.cvScreeningResume.update({
-            where: { id: r.id },
-            data: {
-              storage_key: null,
-              storage_bucket: null,
-              cv_text: null,
-              candidate: withoutContact(r.candidate),
-            },
-          }),
-        ),
-        this.prisma.cvScreening.update({
-          where: { id: screening.id },
-          data: { purged_at: now },
+        this.prisma.cvScreeningResume.update({
+          where: { id: r.id },
+          data: {
+            ...(kept ? {} : { storage_key: null, storage_bucket: null }),
+            cv_text: null,
+            candidate: withoutContact(r.candidate),
+          },
         }),
       ]);
     }
-    return { stuck: stuck.length, purged: expired.length };
+
+    // A screening is purged once it has expired and none of its CVs keeps a
+    // file or a text.
+    const purged = await this.prisma.cvScreening.updateMany({
+      where: {
+        expires_at: { lte: now },
+        purged_at: null,
+        resumes: {
+          none: {
+            OR: [{ storage_key: { not: null } }, { cv_text: { not: null } }],
+          },
+        },
+      },
+      data: { purged_at: now },
+    });
+    return { stuck: stuck.length, purged: purged.count };
   }
 
+  /**
+   * Deletes CV files; returns the keys it could not delete, which the caller
+   * keeps on its row so the next purge tries again — forgotten, a file stayed
+   * in the private bucket for good.
+   */
   private async deleteObjects(
     objects: { key: string; bucket?: string }[],
-  ): Promise<void> {
+  ): Promise<Set<string>> {
+    const failed = new Set<string>();
     for (const { key, bucket } of objects) {
-      await this.storage
-        .delete(key, { bucket })
-        .catch((err: unknown) =>
-          this.logger.warn(
-            `Could not delete CV object ${key}: ${err instanceof Error ? err.message : String(err)}`,
-          ),
+      try {
+        await this.storage.delete(key, { bucket });
+      } catch (err) {
+        failed.add(key);
+        this.logger.error(
+          `Could not delete CV object ${key}: ${err instanceof Error ? err.message : String(err)}`,
         );
+      }
     }
+    return failed;
   }
 }
 

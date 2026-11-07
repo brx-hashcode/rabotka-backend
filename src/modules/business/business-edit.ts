@@ -14,6 +14,9 @@ export const REVIEWED_BUSINESS_FIELDS = [
   'registrationNumber',
   'taxId',
   'statisticalId',
+  // The papers and their numbers (RCCM, NIU…) are a country's: another
+  // country makes them mean something else.
+  'countryCode',
 ] as const;
 
 type ReviewedField = (typeof REVIEWED_BUSINESS_FIELDS)[number];

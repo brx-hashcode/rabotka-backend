@@ -1100,6 +1100,17 @@ describe('ApplicationService', () => {
       );
     });
 
+    it('retaining the last post refuses nobody yet: only a confirmed hire does', async () => {
+      (prisma.application.updateMany as jest.Mock).mockClear();
+      await service.accept(APPLICATION_ID, EMPLOYER_ID);
+      // The offer is FILLED (seats taken), but the others stay waiting until
+      // the contact is obtained (contact-unlock → rejectLeftoversIfOfferFilled).
+      expect(prisma.application.updateMany as jest.Mock).not.toHaveBeenCalled();
+      expect(
+        botNotification.sendApplicationRejectedToWorker,
+      ).not.toHaveBeenCalled();
+    });
+
     it('quantity=4: first acceptance → offer becomes PARTIALLY_FILLED', async () => {
       const offerWithQty4 = { ...mockJobOffer, quantity: 4 };
       (prisma.application.findUnique as jest.Mock).mockResolvedValue({

@@ -2,6 +2,7 @@ import {
   BUSINESS_IDENTITY_SELECT,
   publicEmployerName,
 } from '../business/public-employer';
+import { takenSeats } from './utils/offer-seats';
 import {
   AdminCacheService,
   ADMIN_LIST_TTL_SECONDS,
@@ -631,8 +632,8 @@ export class JobOfferService {
 
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_CREATED, {
       event: AdminNotificationEvent.JOB_OFFER_CREATED,
-      title: 'Nouvelle offre',
-      message: `Nouvelle offre d'emploi créée : ${offer.title}`,
+      title: 'New job offer',
+      message: `New job offer created: ${offer.title}`,
       entityType: 'job-offer',
       entityId: String(offer.id),
       timestamp: new Date().toISOString(),
@@ -1315,9 +1316,22 @@ export class JobOfferService {
       );
     }
     assertKycVerified(actor.verification_status);
-    if (offer.status !== JobOfferStatus.EXPIRED) {
+    // Expired, or closed by hand with posts still free (closing an offer with
+    // a hire made it FILLED, and it could never recruit again).
+    const seatsTaken =
+      offer.status === JobOfferStatus.FILLED
+        ? await takenSeats(this.prisma, id)
+        : 0;
+    const reopenable =
+      offer.status === JobOfferStatus.EXPIRED ||
+      (offer.status === JobOfferStatus.FILLED &&
+        offer.closed_at !== null &&
+        seatsTaken < offer.quantity);
+    if (!reopenable) {
       throw new BadRequestException(
-        'Seule une offre expirée peut être republiée',
+        offer.status === JobOfferStatus.FILLED
+          ? 'Tous les postes de cette offre sont pourvus : augmentez le nombre de postes ou publiez une nouvelle offre.'
+          : 'Seule une offre expirée ou fermée peut être republiée',
       );
     }
     await this.subscriptions?.assertCanPublishOffer(actorProfileId);
@@ -1349,7 +1363,10 @@ export class JobOfferService {
         where: { id },
         data: {
           scheduled_at: scheduledAt,
-          status: JobOfferStatus.ACTIVE,
+          status:
+            seatsTaken > 0
+              ? JobOfferStatus.PARTIALLY_FILLED
+              : JobOfferStatus.ACTIVE,
           priority_until: priorityUntil,
           closed_at: null,
         },
@@ -1362,8 +1379,8 @@ export class JobOfferService {
 
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED, {
       event: AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED,
-      title: 'Offre republiée',
-      message: `L'offre "${updated.title}" a été republiée`,
+      title: 'Job offer republished',
+      message: `The job offer "${updated.title}" was republished`,
       entityType: 'job-offer',
       entityId: String(updated.id),
       timestamp: new Date().toISOString(),
@@ -1407,8 +1424,8 @@ export class JobOfferService {
 
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED, {
       event: AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED,
-      title: 'Statut offre modifié',
-      message: `Le statut de l'offre "${updated.title}" a été changé en ${status}`,
+      title: 'Job offer status changed',
+      message: `The job offer "${updated.title}" changed status to ${status}`,
       entityType: 'job-offer',
       entityId: String(updated.id),
       timestamp: new Date().toISOString(),
@@ -1964,8 +1981,8 @@ export class JobOfferService {
 
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_DELETED, {
       event: AdminNotificationEvent.JOB_OFFER_DELETED,
-      title: 'Offre supprimée',
-      message: `L'offre d'emploi "${offer.title}" a été supprimée`,
+      title: 'Job offer deleted',
+      message: `The job offer "${offer.title}" was deleted`,
       entityType: 'job-offer',
       entityId: String(id),
       timestamp: new Date().toISOString(),
@@ -2341,9 +2358,14 @@ export class JobOfferService {
         "Vous n'êtes pas l'employeur de cette offre",
       );
     }
-    if (offer.status !== JobOfferStatus.ACTIVE) {
+    // Still recruiting, with some posts already filled, it can be edited too:
+    // a description to fix, a post to add.
+    if (
+      offer.status !== JobOfferStatus.ACTIVE &&
+      offer.status !== JobOfferStatus.PARTIALLY_FILLED
+    ) {
       throw new BadRequestException(
-        'Seule une offre active peut être modifiée.',
+        'Seule une offre en ligne peut être modifiée.',
       );
     }
 
@@ -2405,9 +2427,8 @@ export class JobOfferService {
         'Le type de contrat ne peut plus être modifié : des candidats ont déjà postulé.',
       );
     }
-    const slotsTaken = applications.filter((a) =>
-      SLOT_HOLDING_APPLICATION_STATUSES.includes(a.status),
-    ).length;
+    // Rabotka hires and careers-page candidates retained alike.
+    const slotsTaken = await takenSeats(this.prisma, id);
     if (dto.quantity !== undefined && dto.quantity < slotsTaken) {
       throw new BadRequestException(
         `Le nombre de personnes ne peut pas être inférieur aux ${slotsTaken} candidat(s) déjà retenu(s).`,
@@ -2436,7 +2457,16 @@ export class JobOfferService {
       data.payment_flow = dto.payment_flow ?? null;
     if (dto.category_id) data.category = { connect: { id: dto.category_id } };
     if (dto.note !== undefined) data.note = dto.note.trim() || null;
-    if (dto.quantity !== undefined) data.quantity = dto.quantity;
+    if (dto.quantity !== undefined) {
+      data.quantity = dto.quantity;
+      // The posts taken against the new number: full, partly, or none yet.
+      data.status =
+        slotsTaken === 0
+          ? JobOfferStatus.ACTIVE
+          : slotsTaken >= dto.quantity
+            ? JobOfferStatus.FILLED
+            : JobOfferStatus.PARTIALLY_FILLED;
+    }
     if (dto.isRemote !== undefined) data.is_remote = dto.isRemote;
     if (dto.isRemote) {
       // Same rule as creation: a remote job keeps no location at all.
@@ -2539,8 +2569,8 @@ export class JobOfferService {
       );
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_UPDATED, {
       event: AdminNotificationEvent.JOB_OFFER_UPDATED,
-      title: 'Offre mise à jour',
-      message: `L'offre d'emploi "${title}" a été mise à jour par ${editor}`,
+      title: 'Job offer updated',
+      message: `The job offer "${title}" was updated by ${editor}`,
       entityType: 'job-offer',
       entityId: String(id),
       timestamp: new Date().toISOString(),

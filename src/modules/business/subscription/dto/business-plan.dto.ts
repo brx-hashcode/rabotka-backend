@@ -15,7 +15,7 @@ import {
   Min,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { BusinessBillingPeriod } from '@prisma/client';
+import { BusinessBillingPeriod, BusinessCreditKind } from '@prisma/client';
 
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
@@ -78,11 +78,14 @@ export class CreateBusinessPlanDto {
   @Min(0)
   cvScreeningsPerPeriod?: number | null;
 
-  @ApiPropertyOptional({ description: 'CVs in one screening, 5 at most' })
+  @ApiPropertyOptional({
+    description:
+      'CVs in one screening, 100 at most (the business app sends them in several requests)',
+  })
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(5)
+  @Max(100)
   cvBatchMax?: number;
 
   @ApiPropertyOptional({ description: 'Largest CV file, in MB' })
@@ -151,6 +154,21 @@ export class CreateBusinessPlanDto {
   @IsBoolean()
   priorityVisibility?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      '« Publier sur LinkedIn » from Rabotka (the share link is open to all)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  linkedinPosting?: boolean;
+
+  @ApiPropertyOptional({
+    description: '« Exports RH »: candidates, staff register, ACPE declaration',
+  })
+  @IsOptional()
+  @IsBoolean()
+  hrExports?: boolean;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()
@@ -160,6 +178,15 @@ export class CreateBusinessPlanDto {
   @IsOptional()
   @IsInt()
   sortOrder?: number;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'A custom plan: the business (id) it is made for, the only one to see it. Null: the public catalog',
+  })
+  @IsOptional()
+  @IsUUID()
+  businessId?: string | null;
 }
 
 export class UpdateBusinessPlanDto extends PartialType(CreateBusinessPlanDto) {}
@@ -174,6 +201,19 @@ export class SubscribeDto {
   @IsEnum(BusinessBillingPeriod)
   @IsIn(['MONTHLY', 'ANNUAL'])
   billingPeriod: BusinessBillingPeriod;
+}
+
+/** Buying packs: `count` times the pack of this kind, at its current price. */
+export class BuyPackDto {
+  @ApiProperty({ enum: BusinessCreditKind })
+  @IsEnum(BusinessCreditKind)
+  kind: BusinessCreditKind;
+
+  @ApiProperty({ minimum: 1, maximum: 10 })
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  count: number;
 }
 
 /** An admin assigning a plan: queued by default, or replacing the running one. */

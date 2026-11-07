@@ -270,6 +270,7 @@ export class InvoiceService {
       PENALTY: 'Régularisation',
       WALLET_TOP_UP: 'Recharge de wallet',
       BUSINESS_SUBSCRIPTION: 'Abonnement Rabotka Business',
+      BUSINESS_CREDIT_PACK: 'Pack Rabotka Business',
       OTHER: 'Autre',
     };
 
@@ -348,6 +349,7 @@ export class InvoiceService {
       PENALTY: 'Régularisation',
       WALLET_TOP_UP: 'Recharge de wallet',
       BUSINESS_SUBSCRIPTION: 'Abonnement Rabotka Business',
+      BUSINESS_CREDIT_PACK: 'Pack Rabotka Business',
       OTHER: 'Autre',
     };
 

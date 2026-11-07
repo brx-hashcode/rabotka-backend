@@ -1,4 +1,5 @@
 import {
+  BUSINESS_CREDIT_PACK_PAID_EVENT,
   BUSINESS_SUBSCRIPTION_PAID_EVENT,
   type BusinessSubscriptionPaidPayload,
 } from '../business/subscription/subscription.events';
@@ -15,6 +16,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '@nestjs/config';
 import {
+  BusinessCreditKind,
   AccountStatus,
   BillingStatus,
   BusinessBillingPeriod,
@@ -69,6 +71,7 @@ import type { PollPaymentStatusJobData } from './poll-payment-status.processor';
 import { ListPaymentRequestsDto } from './dto/list-payment-requests.dto';
 import { SubmitPaymentDto } from './dto/submit-payment.dto';
 import { CONTACTABLE_WORKER } from '../recommendation/contactable-worker';
+import { paymentFailureMessage } from '../../common/services/payment/payment-failure';
 
 const PAYMENT_REQUEST_SELECT = {
   id: true,
@@ -178,6 +181,8 @@ export class PaymentRequestService {
       urlFor?: (token: string) => string;
       /** BUSINESS_SUBSCRIPTION: what this payment buys. */
       businessPlan?: { planId: string; period: BusinessBillingPeriod };
+      /** BUSINESS_CREDIT_PACK: the credits this payment buys. */
+      creditPack?: { kind: BusinessCreditKind; quantity: number };
     } = {},
   ): Promise<string> {
     const token = randomUUID();
@@ -198,6 +203,10 @@ export class PaymentRequestService {
         ...(options.businessPlan && {
           business_plan_id: options.businessPlan.planId,
           business_billing_period: options.businessPlan.period,
+        }),
+        ...(options.creditPack && {
+          business_credit_kind: options.creditPack.kind,
+          business_credit_quantity: options.creditPack.quantity,
         }),
       },
     });
@@ -225,13 +234,13 @@ export class PaymentRequestService {
       throw new NotFoundException('Demande de paiement introuvable');
     }
 
-    const isSettled =
-      request.status === PaymentRequestStatus.APPROVED ||
-      request.status === PaymentRequestStatus.REJECTED;
-
-    if (isSettled) {
+    // Only a paid request is spent. A REJECTED one is an attempt the
+    // operator declined (nothing was charged): still served, so the page
+    // can say so and the payer can try again with the same link.
+    if (request.status === PaymentRequestStatus.APPROVED) {
       throw new BadRequestException('Cette demande a déjà été traitée');
     }
+    const rejected = request.status === PaymentRequestStatus.REJECTED;
 
     const activeGateway = this.config.get<string>('PAYMENT_GATEWAY_DRIVER');
     if (!activeGateway)
@@ -252,6 +261,12 @@ export class PaymentRequestService {
       // The profile's own ISO alpha-2 code, so the page can find the
       // payer's country among the gateway's live ones by calling code.
       payerCountryCode: request.profile?.country_code ?? null,
+      // Why the last attempt was refused, in the operator's code and said to
+      // the payer (null when the operator gave no reason worth telling).
+      failureCode: rejected ? request.rejection_note : null,
+      failureReason: rejected
+        ? paymentFailureMessage(request.rejection_note)
+        : null,
     };
   }
 
@@ -367,14 +382,32 @@ export class PaymentRequestService {
 
     // Atomically claim PENDING → PROCESSING before calling the gateway.
     // Concurrent double-taps both attempt this; only one succeeds (count === 1).
+    // REJECTED too: only the gateway sets it, when the payer declined or could
+    // not pay (nothing charged), and a new attempt gets a new gateway
+    // reference, so the old attempt's late webhook or poll cannot touch it.
     const locked = await this.prisma.paymentRequest.updateMany({
-      where: { id: request.id, status: PaymentRequestStatus.PENDING },
-      data: { status: PaymentRequestStatus.PROCESSING, phone, operator },
+      where: {
+        id: request.id,
+        status: {
+          in: [PaymentRequestStatus.PENDING, PaymentRequestStatus.REJECTED],
+        },
+      },
+      data: {
+        status: PaymentRequestStatus.PROCESSING,
+        phone,
+        operator,
+        gateway_payment_ref: null,
+        gateway_tx_id: null,
+        rejection_note: null,
+      },
     });
 
     if (locked.count === 0) {
+      // PROCESSING (a request still open on the phone) or APPROVED.
       throw new BadRequestException(
-        "Cette demande n'est pas en attente de paiement",
+        request.status === PaymentRequestStatus.APPROVED
+          ? 'Cette demande a déjà été payée'
+          : 'Une demande est déjà en cours sur votre téléphone : validez-la, ou réessayez dans 2 minutes.',
       );
     }
 
@@ -494,8 +527,14 @@ export class PaymentRequestService {
   async handlePaymentCallback(
     payload: Record<string, string>,
   ): Promise<{ received: boolean }> {
-    const { gatewayRef, status, transactionId, amount, currency } =
-      await this.paymentGateway.handleWebhookPayload(payload);
+    const {
+      gatewayRef,
+      status,
+      transactionId,
+      failureReason,
+      amount,
+      currency,
+    } = await this.paymentGateway.handleWebhookPayload(payload);
 
     if (typeof gatewayRef !== 'string' || !gatewayRef) {
       this.logger.warn('Payment callback missing gatewayRef');
@@ -540,6 +579,8 @@ export class PaymentRequestService {
         },
         data: {
           status: PaymentRequestStatus.REJECTED,
+          // The operator's code, so the payer is told why (pay/:token).
+          rejection_note: failureReason ?? null,
           ...(transactionId && { gateway_tx_id: transactionId }),
         },
       });
@@ -549,6 +590,7 @@ export class PaymentRequestService {
       await this.persistFailedPayment(request, {
         reason: status === 'FAILED' ? 'GATEWAY_FAILED' : 'GATEWAY_CANCELLED',
         gatewayStatus: status,
+        failureCode: failureReason,
         transactionId,
         gatewayRef,
       });
@@ -666,6 +708,12 @@ export class PaymentRequestService {
     // this module does not import (it depends on payments, not the reverse).
     if (request.request_type === PaymentRequestType.BUSINESS_SUBSCRIPTION) {
       this.eventEmitter.emit(BUSINESS_SUBSCRIPTION_PAID_EVENT, {
+        paymentRequestId: request.id,
+      } satisfies BusinessSubscriptionPaidPayload);
+    }
+    // A pack: its credits are added by BusinessSubscriptionService.
+    if (request.request_type === PaymentRequestType.BUSINESS_CREDIT_PACK) {
+      this.eventEmitter.emit(BUSINESS_CREDIT_PACK_PAID_EVENT, {
         paymentRequestId: request.id,
       } satisfies BusinessSubscriptionPaidPayload);
     }
@@ -879,6 +927,8 @@ export class PaymentRequestService {
         | 'POLL_TIMEOUT'
         | 'GATEWAY_INIT_ERROR';
       gatewayStatus?: string;
+      /** The gateway's own code for the refusal (INSUFFICIENT_BALANCE…). */
+      failureCode?: string;
       transactionId?: string;
       gatewayRef?: string;
       errorMessage?: string;
@@ -901,7 +951,12 @@ export class PaymentRequestService {
           payment_method: PaymentMethod.MOBILE_MONEY,
           transaction_id: transactionRef,
           status: PaymentStatus.FAILED,
-          description: request.description ?? 'Paiement échoué',
+          description: [
+            request.description ?? 'Paiement échoué',
+            options.failureCode,
+          ]
+            .filter(Boolean)
+            .join(' — '),
         },
       });
     } catch (err) {
@@ -920,6 +975,7 @@ export class PaymentRequestService {
         metadata: {
           reason: options.reason,
           gatewayStatus: options.gatewayStatus ?? null,
+          failureCode: options.failureCode ?? null,
           transactionId: options.transactionId ?? null,
           gatewayRef: options.gatewayRef ?? request.gateway_payment_ref ?? null,
           gateway: request.gateway ?? null,
@@ -951,8 +1007,8 @@ export class PaymentRequestService {
     const profileName = this.fullName(request.profile);
     this.eventEmitter.emit(AdminNotificationEvent.PAYMENT_PENALTY, {
       event: AdminNotificationEvent.PAYMENT_PENALTY,
-      title: 'Paiement reçu',
-      message: `${profileName} a effectué un paiement de ${context.amount.toLocaleString('fr-FR')} FCFA — ${context.paymentDescription}`,
+      title: 'Payment received',
+      message: `${profileName} paid ${context.amount.toLocaleString('fr-FR')} FCFA — ${context.paymentDescription}`,
       entityType: 'profile',
       entityId: request.profile_id,
       timestamp: new Date().toISOString(),
@@ -1021,7 +1077,9 @@ export class PaymentRequestService {
             ? InvoiceReason.WALLET_TOP_UP
             : request.request_type === PaymentRequestType.BUSINESS_SUBSCRIPTION
               ? InvoiceReason.BUSINESS_SUBSCRIPTION
-              : InvoiceReason.PENALTY,
+              : request.request_type === PaymentRequestType.BUSINESS_CREDIT_PACK
+                ? InvoiceReason.BUSINESS_CREDIT_PACK
+                : InvoiceReason.PENALTY,
       relatedEntityType: relatedEntity?.type,
       relatedEntityId: relatedEntity?.id,
     });

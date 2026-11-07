@@ -363,6 +363,9 @@ export const APPLICANT_PUBLIC_SELECT = {
   reliability_score: true,
 } as const satisfies Prisma.ProfileSelect;
 
+/** Applicants listed for one offer (the newest). */
+const MAX_OFFER_APPLICANTS = 300;
+
 @Injectable()
 export class ApplicationService {
   constructor(
@@ -560,8 +563,8 @@ export class ApplicationService {
 
     this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_CREATED, {
       event: AdminNotificationEvent.APPLICATION_CREATED,
-      title: 'Nouvelle candidature',
-      message: `Nouvelle candidature pour l'offre "${application.job_offer.title}"`,
+      title: 'New application',
+      message: `New application for the job offer "${application.job_offer.title}"`,
       entityType: 'application',
       entityId: String(application.id),
       timestamp: new Date().toISOString(),
@@ -806,8 +809,10 @@ export class ApplicationService {
 
   async findByJobOffer(jobOfferId: string): Promise<ApplicationWithOffer[]> {
     const applications = await this.prisma.application.findMany({
-      where: { job_offer_id: jobOfferId },
+      // Not one an admin deleted; the newest, polled every 30 s by the offer page.
+      where: { job_offer_id: jobOfferId, deleted_at: null },
       orderBy: { created_at: 'desc' },
+      take: MAX_OFFER_APPLICANTS,
       include: {
         job_offer: {
           include: {
@@ -980,8 +985,6 @@ export class ApplicationService {
       throw new BadRequestException("Cette candidature n'est plus en attente");
     }
 
-    let autoRejectedIds: string[] = [];
-
     await this.prisma.$transaction(async (tx) => {
       // Lock the application row first to prevent concurrent duplicate-accept
       await tx.$executeRaw`SELECT id FROM "applications" WHERE id = ${applicationId}::uuid FOR UPDATE`;
@@ -1056,47 +1059,15 @@ export class ApplicationService {
         },
       });
       await this.contactUnlock.initiateUnlock(applicationId, employerId, tx);
-
-      if (offerStatus === JobOfferStatus.FILLED) {
-        const toAutoReject = await tx.application.findMany({
-          where: {
-            job_offer_id: application.job_offer_id,
-            id: { not: applicationId },
-            status: {
-              in: [ApplicationStatus.PENDING, ApplicationStatus.VIEWED],
-            },
-          },
-          select: { id: true },
-        });
-        autoRejectedIds = toAutoReject.map((a) => a.id);
-
-        if (autoRejectedIds.length > 0) {
-          await tx.application.updateMany({
-            where: { id: { in: autoRejectedIds } },
-            data: {
-              status: ApplicationStatus.REJECTED,
-              rejected_at: new Date(),
-              // The offer filled up — nobody judged these workers. Marking them
-              // AUTO_FILL keeps them out of negative preference signals; without
-              // it, losing two races looks identical to being turned down twice.
-              rejection_source: RejectionSource.AUTO_FILL,
-            },
-          });
-        }
-      }
+      // The others still waiting are refused only once this hire is
+      // confirmed (contact obtained → ACCEPTED, rejectLeftoversIfOfferFilled):
+      // refused now, a hire that falls through reopened the offer with
+      // nobody left to retain.
     });
 
-    for (const appId of autoRejectedIds) {
-      this.botNotification
-        .sendApplicationRejectedToWorker(appId)
-        .catch((err: unknown) =>
-          console.warn(`[accept] auto-reject notify failed for ${appId}:`, err),
-        );
-    }
-
     // The accepted worker was only ever notified from the WhatsApp accept flow,
-    // so accepting on the web left them uninformed while their rivals got their
-    // rejection. Fires here so both channels behave the same.
+    // so accepting on the web left them uninformed. Fires here so both
+    // channels behave the same.
     void this.botNotification
       .sendApplicationAcceptedToWorker(applicationId)
       .catch((err: unknown) =>
@@ -1112,8 +1083,8 @@ export class ApplicationService {
 
     this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_ACCEPTED, {
       event: AdminNotificationEvent.APPLICATION_ACCEPTED,
-      title: 'Candidature acceptée',
-      message: `La candidature de ${application.worker.first_name} ${application.worker.last_name} pour l'offre "${application.job_offer.title}" a été acceptée`,
+      title: 'Application accepted',
+      message: `${application.worker.first_name} ${application.worker.last_name}'s application for "${application.job_offer.title}" was accepted`,
       entityType: 'application',
       entityId: String(applicationId),
       timestamp: new Date().toISOString(),
@@ -1171,8 +1142,14 @@ export class ApplicationService {
     }
     const message = refusalMessage(reason);
 
-    const updated = await this.prisma.application.update({
-      where: { id: applicationId },
+    // Refused only if still waiting at the moment of writing: a retention in
+    // another tab (or the bulk loop) between the check above and here must
+    // not be overwritten, leaving an open hire behind a refused application.
+    const { count } = await this.prisma.application.updateMany({
+      where: {
+        id: applicationId,
+        status: { in: [ApplicationStatus.PENDING, ApplicationStatus.VIEWED] },
+      },
       data: {
         status: ApplicationStatus.REJECTED,
         rejected_at: new Date(),
@@ -1182,6 +1159,12 @@ export class ApplicationService {
         // variant may ever be read as a negative preference signal.
         rejection_source: RejectionSource.EMPLOYER,
       },
+    });
+    if (count === 0) {
+      throw new BadRequestException("Cette candidature n'est plus en attente");
+    }
+    const updated = await this.prisma.application.findUniqueOrThrow({
+      where: { id: applicationId },
       include: {
         job_offer: {
           include: {
@@ -1214,8 +1197,8 @@ export class ApplicationService {
 
     this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_REJECTED, {
       event: AdminNotificationEvent.APPLICATION_REJECTED,
-      title: 'Candidature refusée',
-      message: `La candidature de ${updated.worker.first_name} ${updated.worker.last_name} pour l'offre "${updated.job_offer.title}" a été refusée`,
+      title: 'Application refused',
+      message: `${updated.worker.first_name} ${updated.worker.last_name}'s application for "${updated.job_offer.title}" was refused`,
       entityType: 'application',
       entityId: String(applicationId),
       timestamp: new Date().toISOString(),
@@ -1494,8 +1477,8 @@ export class ApplicationService {
 
     this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_CANCELLED, {
       event: AdminNotificationEvent.APPLICATION_CANCELLED,
-      title: 'Candidature annulée',
-      message: `La candidature de ${application.worker.first_name} ${application.worker.last_name} pour l'offre "${application.job_offer.title}" a été annulée par le travailleur`,
+      title: 'Application cancelled',
+      message: `${application.worker.first_name} ${application.worker.last_name} cancelled their application for "${application.job_offer.title}"`,
       entityType: 'application',
       entityId: String(applicationId),
       timestamp: new Date().toISOString(),
@@ -1504,8 +1487,8 @@ export class ApplicationService {
     if (penaltyApplied) {
       this.eventEmitter.emit(AdminNotificationEvent.PENALTY_CREATED, {
         event: AdminNotificationEvent.PENALTY_CREATED,
-        title: 'Pénalité créée',
-        message: `Pénalité de ${penaltyAmount} FCFA créée pour annulation tardive de ${application.worker.first_name} ${application.worker.last_name} sur l'offre "${application.job_offer.title}"`,
+        title: 'Penalty created',
+        message: `${penaltyAmount} FCFA penalty for ${application.worker.first_name} ${application.worker.last_name}'s late cancellation on "${application.job_offer.title}"`,
         entityType: 'penalty',
         entityId: String(applicationId),
         timestamp: new Date().toISOString(),
@@ -1605,8 +1588,8 @@ export class ApplicationService {
     } satisfies ProfileAutoSuspendedPayload);
     this.eventEmitter.emit(AdminNotificationEvent.PROFILE_STATUS_CHANGED, {
       event: AdminNotificationEvent.PROFILE_STATUS_CHANGED,
-      title: 'Compte suspendu automatiquement',
-      message: `Compte suspendu : ${reason}`,
+      title: 'Account suspended automatically',
+      message: `Account suspended: ${reason}`,
       entityType: 'profile',
       entityId: String(workerId),
       timestamp: new Date().toISOString(),
@@ -2312,8 +2295,8 @@ export class ApplicationService {
 
     this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_COMPLETED, {
       event: AdminNotificationEvent.APPLICATION_COMPLETED,
-      title: 'Recrutement clôturé',
-      message: `L'employeur a confirmé l'embauche pour l'offre "${offer.title}"`,
+      title: 'Hiring closed',
+      message: `The employer confirmed the hire for "${offer.title}"`,
       entityType: 'job_offer',
       entityId: String(jobOfferId),
       timestamp: new Date().toISOString(),
@@ -2451,8 +2434,8 @@ export class ApplicationService {
 
     this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_COMPLETED, {
       event: AdminNotificationEvent.APPLICATION_COMPLETED,
-      title: 'Travail terminé',
-      message: `${application.worker.first_name} ${application.worker.last_name} a confirmé la fin de sa mission pour l'offre "${application.job_offer.title}"`,
+      title: 'Work finished',
+      message: `${application.worker.first_name} ${application.worker.last_name} confirmed the end of their job for "${application.job_offer.title}"`,
       entityType: 'application',
       entityId: String(applicationId),
       timestamp: new Date().toISOString(),
@@ -2802,8 +2785,8 @@ export class ApplicationService {
 
     this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_CANCELLED, {
       event: AdminNotificationEvent.APPLICATION_CANCELLED,
-      title: 'Candidature annulée par employeur',
-      message: `La candidature de ${application.worker.first_name} ${application.worker.last_name} pour l'offre "${application.job_offer.title}" a été annulée par l'employeur`,
+      title: 'Application cancelled by the employer',
+      message: `The employer cancelled ${application.worker.first_name} ${application.worker.last_name}'s application for "${application.job_offer.title}"`,
       entityType: 'application',
       entityId: String(applicationId),
       timestamp: new Date().toISOString(),

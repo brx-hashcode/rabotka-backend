@@ -63,6 +63,14 @@ export class CreateInterviewDto extends InterviewSlotDto {
   applicationId?: string;
 
   @ApiPropertyOptional({
+    description:
+      'A careers-page candidate, invited without a CV analysis (at the address they applied with)',
+  })
+  @IsOptional()
+  @IsUUID('all')
+  externalApplicationId?: string;
+
+  @ApiPropertyOptional({
     description: 'For an analysed CV: where to send the invitation',
   })
   @Transform(trim)

@@ -112,8 +112,11 @@ export class ExternalApplicationsController {
 
   @Get()
   @ApiOperation({ summary: 'Applications from the public careers page' })
-  list(@Req() req: { user: { profileId: string } }) {
-    return this.careers.listForBusiness(req.user.profileId);
+  list(
+    @Req() req: { user: { profileId: string } },
+    @Query('offerId', new ParseUUIDPipe({ optional: true })) offerId?: string,
+  ) {
+    return this.careers.listForBusiness(req.user.profileId, offerId);
   }
 
   @Get(':id/cv')
@@ -149,6 +152,18 @@ export class ExternalApplicationsController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.careers.retain(req.user.profileId, id);
+  }
+
+  @Post(':id/unretain')
+  @ApiOperation({
+    summary:
+      'Take a retention back: the candidate waits again and is told by e-mail',
+  })
+  unretain(
+    @Req() req: { user: { profileId: string } },
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.careers.unretain(req.user.profileId, id);
   }
 
   @Post(':id/refuse')

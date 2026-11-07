@@ -311,14 +311,36 @@ describe('PaymentRequestService', () => {
       );
     });
 
-    it('throws BadRequestException when request is already REJECTED', async () => {
+    it('still serves a REJECTED request: the payer declined, and may try again', async () => {
       (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
         makeRequest(PaymentRequestStatus.REJECTED),
       );
 
-      await expect(service.getByToken(TOKEN)).rejects.toThrow(
-        BadRequestException,
+      expect((await service.getByToken(TOKEN)).status).toBe(
+        PaymentRequestStatus.REJECTED,
       );
+    });
+
+    it('says why the last attempt was refused', async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.REJECTED, {
+          rejection_note: 'INSUFFICIENT_BALANCE',
+        }),
+      );
+
+      const result = await service.getByToken(TOKEN);
+      expect(result.failureCode).toBe('INSUFFICIENT_BALANCE');
+      expect(result.failureReason).toMatch(/Solde mobile money insuffisant/);
+    });
+
+    it('gives no reason for a request not refused', async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING, {
+          rejection_note: 'INSUFFICIENT_BALANCE',
+        }),
+      );
+
+      expect((await service.getByToken(TOKEN)).failureReason).toBeNull();
     });
   });
 
@@ -609,6 +631,44 @@ describe('PaymentRequestService', () => {
       await expect(
         service.initiatePayment(TOKEN, '+242001', 'MTN_MOMO_COG'),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('claims a declined (REJECTED) request again, under a fresh reference', async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.REJECTED, { amount: 5000 }),
+      );
+      (prisma.paymentRequest.updateMany as jest.Mock).mockResolvedValue({
+        count: 1,
+      });
+      (prisma.paymentRequest.update as jest.Mock).mockResolvedValue({});
+      const paymentGateway = (service as any).paymentGateway;
+      paymentGateway.initiatePayment = jest
+        .fn()
+        .mockResolvedValue({ gatewayRef: 'gw-ref-2' });
+      (service as any).queueService.addJob = jest
+        .fn()
+        .mockResolvedValue(undefined);
+
+      const result = await service.initiatePayment(
+        TOKEN,
+        '+242001',
+        'MTN_MOMO_COG',
+      );
+
+      expect(result.success).toBe(true);
+      expect(prisma.paymentRequest.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: expect.any(String),
+          status: {
+            in: [PaymentRequestStatus.PENDING, PaymentRequestStatus.REJECTED],
+          },
+        },
+        data: expect.objectContaining({
+          status: PaymentRequestStatus.PROCESSING,
+          gateway_payment_ref: null,
+          gateway_tx_id: null,
+        }),
+      });
     });
 
     it('reverts to PENDING when gateway fails', async () => {

@@ -22,6 +22,7 @@ const entitlements = (over: Record<string, unknown> = {}) => ({
   cvBatchMax: 3,
   cvFileMaxMb: 1,
   cvRetentionDays: 30,
+  trialLocked: [],
   ...over,
 });
 
@@ -150,6 +151,66 @@ const closing = (statuses: string[]) => ({
 });
 
 describe('CvScreeningService', () => {
+  describe('addFiles: a large batch sent in several requests', () => {
+    const opened = (over: Record<string, unknown> = {}) => ({
+      id: 's1',
+      external: false,
+      offer_id: null,
+      job_title: 'Caissier',
+      job_text: 'Tenir la caisse.',
+      purged_at: null,
+      expires_at: new Date(Date.now() + 86_400_000),
+      _count: { resumes: 2 },
+      ...over,
+    });
+
+    it('adds the CVs to the screening, for its job, charged on their own', async () => {
+      const { service, prisma } = make();
+      prisma.cvScreening.findFirst = jest.fn().mockResolvedValue(opened());
+      const create = jest
+        .spyOn(service, 'create')
+        .mockResolvedValue({} as never);
+
+      await service.addFiles('p1', 's1', [file('c.pdf')]);
+
+      expect(create).toHaveBeenCalledWith(
+        'p1',
+        [expect.objectContaining({ originalname: 'c.pdf' })],
+        { jobTitle: 'Caissier', jobText: 'Tenir la caisse.' },
+        's1',
+      );
+    });
+
+    it('holds the plan’s CVs per analysis for the whole screening', async () => {
+      const { service, prisma, subscriptions } = make();
+      subscriptions.entitlements.mockResolvedValue(
+        entitlements({ cvBatchMax: 3 }),
+      );
+      prisma.cvScreening.findFirst = jest.fn().mockResolvedValue(opened());
+      await expect(
+        service.addFiles('p1', 's1', [file('c.pdf'), file('d.pdf')]),
+      ).rejects.toThrow('3 CV par analyse');
+    });
+
+    it('refuses an offer’s shared screening, one purged, or another business’s', async () => {
+      const { service, prisma } = make();
+      prisma.cvScreening.findFirst = jest
+        .fn()
+        .mockResolvedValueOnce(opened({ external: true }))
+        .mockResolvedValueOnce(opened({ purged_at: new Date() }))
+        .mockResolvedValueOnce(null);
+      await expect(
+        service.addFiles('p1', 's1', [file('c.pdf')]),
+      ).rejects.toThrow('nouvelle analyse');
+      await expect(
+        service.addFiles('p1', 's1', [file('c.pdf')]),
+      ).rejects.toThrow('conservation');
+      await expect(
+        service.addFiles('p1', 's1', [file('c.pdf')]),
+      ).rejects.toThrow('introuvable');
+    });
+  });
+
   describe('create', () => {
     it('stores the CVs privately, takes them from the plan and queues one job each', async () => {
       const { service, storage, subscriptions, queue, prisma } = make();
@@ -172,8 +233,28 @@ describe('CvScreeningService', () => {
         offer_id: null,
         job_title: 'Caissier',
       });
+      // Each CV records the period it was charged to.
+      expect(
+        prisma.cvScreening.create.mock.calls[0][0].data.resumes.create,
+      ).toEqual([
+        expect.objectContaining({ subscription_id: 'sub-1' }),
+        expect.objectContaining({ subscription_id: 'sub-1' }),
+      ]);
       expect(queue.addJob).toHaveBeenCalledTimes(2);
       expect(result.total).toBe(2);
+    });
+
+    it('gives the CVs back and deletes the files when the screening cannot be saved', async () => {
+      const { service, prisma, storage, subscriptions, queue } = make();
+      prisma.cvScreening.create.mockRejectedValueOnce(new Error('db down'));
+
+      await expect(
+        service.create('p1', [file('a.pdf'), file('b.pdf')], JOB),
+      ).rejects.toThrow('a échoué');
+
+      expect(subscriptions.releaseCv).toHaveBeenCalledWith('sub-1', 2);
+      expect(storage.delete).toHaveBeenCalledTimes(2);
+      expect(queue.addJob).not.toHaveBeenCalled();
     });
 
     it('measures against an offer of the business only', async () => {
@@ -201,15 +282,34 @@ describe('CvScreeningService', () => {
       expect(data.job_text).toContain('Lieu : Pointe-Noire, Congo');
     });
 
+    it('says a trial gets it with a paid plan', async () => {
+      const { service, subscriptions } = make();
+      subscriptions.entitlements.mockResolvedValue(
+        entitlements({ cvQuota: 0, trialLocked: ['cvAnalysis'] }),
+      );
+      await expect(service.create('p1', [file('a.pdf')], JOB)).rejects.toThrow(
+        /après votre essai/,
+      );
+    });
+
     it('refuses when the plan does not include it', async () => {
       const { service, subscriptions, storage } = make();
       subscriptions.entitlements.mockResolvedValue(
-        entitlements({ cvQuota: 0 }),
+        entitlements({ cvQuota: 0, cvRemaining: 0 }),
       );
       await expect(service.create('p1', [file('a.pdf')], JOB)).rejects.toThrow(
         ForbiddenException,
       );
       expect(storage.upload).not.toHaveBeenCalled();
+    });
+
+    it('lets a pack of CVs in when the plan has none', async () => {
+      const { service, subscriptions } = make();
+      subscriptions.entitlements.mockResolvedValue(
+        entitlements({ cvQuota: 0, cvRemaining: 50 }),
+      );
+      await service.create('p1', [file('a.pdf')], JOB);
+      expect(subscriptions.consumeCv).toHaveBeenCalledWith('b1', 1);
     });
 
     it('holds to the plan’s batch size, file size and the accepted types', async () => {
@@ -455,6 +555,23 @@ describe('CvScreeningService', () => {
       expect(subscriptions.releaseCv).toHaveBeenCalledWith('sub-1', 1);
     });
 
+    it('gives a failed CV back to the period it was charged to, not the screening’s', async () => {
+      const { service, prisma, storage, llm, subscriptions } = make();
+      // An offer's screening opened under an older period; this CV was
+      // charged to the period running when it arrived.
+      prisma.cvScreeningResume.findUnique.mockResolvedValue(
+        queued({ subscription_id: 'sub-now' }),
+      );
+      storage.download.mockResolvedValue({ body: Readable.from([PNG]) });
+      prisma.cvScreening.findUnique.mockResolvedValue(closing(['FAILED']));
+      llm.invoke.mockRejectedValue(new Error('chain exhausted'));
+
+      await service.process('r1');
+
+      expect(subscriptions.releaseCv).toHaveBeenCalledWith('sub-now', 1);
+      expect(subscriptions.releaseCv).not.toHaveBeenCalledWith('sub-1', 1);
+    });
+
     it('leaves a CV already decided alone', async () => {
       const { service, prisma, llm } = make();
       prisma.cvScreeningResume.findUnique.mockResolvedValue(
@@ -633,39 +750,36 @@ describe('CvScreeningService', () => {
   });
 
   describe('sweep', () => {
-    it('purges files and contact details past retention, and keeps the scores', async () => {
+    it('purges each CV past its own retention, and keeps the scores', async () => {
       const { service, prisma, storage } = make();
       const now = new Date('2026-12-01T00:00:00Z');
-      prisma.cvScreening.findMany.mockResolvedValue([
-        {
-          id: 's1',
-          resumes: [
-            {
-              id: 'r1',
-              storage_key: 'k/r1.pdf',
-              storage_bucket: 'kyc-bucket',
-              candidate: { name: 'Awa', email: 'a@b.c', phone: '06' },
-            },
-            {
-              id: 'r2',
-              storage_key: null,
-              storage_bucket: null,
-              candidate: null,
-            },
-          ],
-        },
-      ]);
+      (prisma.cvScreening as any).updateMany = jest
+        .fn()
+        .mockResolvedValue({ count: 1 });
+      prisma.cvScreeningResume.findMany
+        .mockResolvedValueOnce([]) // stuck
+        .mockResolvedValueOnce([
+          {
+            id: 'r1',
+            screening_id: 's1',
+            storage_key: 'k/r1.pdf',
+            storage_bucket: 'kyc-bucket',
+            candidate: { name: 'Awa', email: 'a@b.c', phone: '06' },
+          },
+        ]);
 
       await expect(service.sweep(now)).resolves.toEqual({
         stuck: 0,
         purged: 1,
       });
 
-      expect(prisma.cvScreening.findMany.mock.calls[0][0].where).toEqual({
-        expires_at: { lte: now },
-        purged_at: null,
-      });
-      expect(storage.delete).toHaveBeenCalledTimes(1);
+      // Due by its own date, or its screening's for a CV from before.
+      expect(
+        prisma.cvScreeningResume.findMany.mock.calls[1][0].where.AND[0].OR,
+      ).toEqual([
+        { expires_at: { lte: now } },
+        { expires_at: null, screening: { expires_at: { lte: now } } },
+      ]);
       expect(storage.delete).toHaveBeenCalledWith('k/r1.pdf', {
         bucket: 'kyc-bucket',
       });
@@ -678,24 +792,51 @@ describe('CvScreeningService', () => {
           candidate: { name: 'Awa', email: null, phone: null },
         },
       });
-      expect(prisma.cvScreening.update).toHaveBeenCalledWith({
-        where: { id: 's1' },
-        data: { purged_at: now },
-      });
-      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       // The conversations quote the CV: purged with it.
       expect(prisma.cvResumeMessage.deleteMany).toHaveBeenCalledWith({
-        where: { resume_id: { in: ['r1', 'r2'] } },
+        where: { resume_id: 'r1' },
       });
       expect(prisma.cvComparisonMessage.deleteMany).toHaveBeenCalledWith({
-        where: { comparison: { screening_id: 's1' } },
+        where: { comparison: { resume_ids: { has: 'r1' } } },
       });
+      // The screening is marked purged once none of its CVs keeps anything.
+      expect(
+        (prisma.cvScreening as any).updateMany.mock.calls[0][0].data,
+      ).toEqual({ purged_at: now });
+    });
+
+    it('keeps the key of a file the storage would not delete, to try again', async () => {
+      const { service, prisma, storage } = make();
+      (prisma.cvScreening as any).updateMany = jest
+        .fn()
+        .mockResolvedValue({ count: 0 });
+      prisma.cvScreeningResume.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          {
+            id: 'r1',
+            screening_id: 's1',
+            storage_key: 'k/r1.pdf',
+            storage_bucket: null,
+            candidate: null,
+          },
+        ]);
+      storage.delete.mockRejectedValueOnce(new Error('S3 down'));
+
+      await service.sweep(new Date('2026-12-01T00:00:00Z'));
+
+      const data = prisma.cvScreeningResume.update.mock.calls[0][0].data;
+      expect(data).not.toHaveProperty('storage_key');
+      expect(data.cv_text).toBeNull();
     });
 
     it('gives up CVs stuck in the queue, and gives them back', async () => {
       const { service, prisma, subscriptions } = make();
-      prisma.cvScreeningResume.findMany.mockResolvedValue([queued()]);
+      prisma.cvScreeningResume.findMany.mockResolvedValueOnce([queued()]);
       prisma.cvScreening.findUnique.mockResolvedValue(closing(['FAILED']));
+      (prisma.cvScreening as any).updateMany = jest
+        .fn()
+        .mockResolvedValue({ count: 0 });
 
       await expect(service.sweep()).resolves.toEqual({ stuck: 1, purged: 0 });
 

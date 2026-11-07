@@ -56,7 +56,16 @@ describe('JobOfferService.updateByEmployer', () => {
       },
       application: {
         findMany: jest.fn().mockResolvedValue(opts.applications ?? []),
+        // The posts taken (takenSeats): hires and those waiting to confirm.
+        count: jest
+          .fn()
+          .mockResolvedValue(
+            (opts.applications ?? []).filter((a) =>
+              ['ACCEPTED', 'WAITING_PAYMENT', 'STARTED'].includes(a.status),
+            ).length,
+          ),
       },
+      externalApplication: { count: jest.fn().mockResolvedValue(0) },
       jobCategory: {
         findUnique: jest.fn().mockResolvedValue({ id: 'cat-1' }),
       },
@@ -137,7 +146,7 @@ describe('JobOfferService.updateByEmployer', () => {
   });
 
   it.each([
-    JobOfferStatus.PARTIALLY_FILLED,
+    JobOfferStatus.FILLED,
     JobOfferStatus.EXPIRED,
     JobOfferStatus.IN_PROGRESS,
   ])('refuses a %s offer', async (status) => {
@@ -146,6 +155,36 @@ describe('JobOfferService.updateByEmployer', () => {
     await expect(edit({ title: 'Autre titre ici' })).rejects.toThrow(
       BadRequestException,
     );
+  });
+
+  it('edits a partly filled offer, and follows the posts added', async () => {
+    const { edit, prisma } = setup({
+      offer: { status: JobOfferStatus.PARTIALLY_FILLED, quantity: 2 },
+      applications: [{ id: 'a', status: ApplicationStatus.ACCEPTED }],
+    });
+
+    await edit({ quantity: 3 });
+
+    const update = (prisma.jobOffer as { update: jest.Mock }).update;
+    expect(update.mock.calls[0][0].data).toMatchObject({
+      quantity: 3,
+      status: JobOfferStatus.PARTIALLY_FILLED,
+    });
+  });
+
+  it('fills the offer when the posts come down to those taken', async () => {
+    const { edit, prisma } = setup({
+      offer: { status: JobOfferStatus.PARTIALLY_FILLED, quantity: 3 },
+      applications: [
+        { id: 'a', status: ApplicationStatus.ACCEPTED },
+        { id: 'b', status: ApplicationStatus.ACCEPTED },
+      ],
+    });
+
+    await edit({ quantity: 2 });
+
+    const update = (prisma.jobOffer as { update: jest.Mock }).update;
+    expect(update.mock.calls[0][0].data.status).toBe(JobOfferStatus.FILLED);
   });
 
   it('holds the merged offer to the creation rules', async () => {

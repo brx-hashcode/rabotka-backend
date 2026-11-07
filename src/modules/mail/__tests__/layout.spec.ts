@@ -1,4 +1,4 @@
-import { wrapEmailHtml } from '../templates/layout';
+import { displayPhone, wrapEmailHtml } from '../templates/layout';
 import {
   RABOTKA_LOGO_CID,
   rabotkaLogoBuffer,
@@ -62,6 +62,107 @@ describe('wrapEmailHtml', () => {
 
     expect(html).toContain('<p>hello</p>');
     expect(html).toContain('contact@rabotka.co');
+  });
+
+  describe('footer', () => {
+    const footer = {
+      email: 'contact@rabotka.work',
+      address: 'Brazzaville, Congo',
+      legalName: 'Rabotka SARL',
+      rccm: 'CG-BZV-01-2025-B12-00042',
+      socials: [
+        { network: 'facebook' as const, url: 'https://facebook.com/rabotka' },
+        {
+          network: 'linkedin' as const,
+          url: 'https://linkedin.com/company/rabotka',
+        },
+      ],
+    };
+
+    it('shows the company, its RCCM, address, contact and legal links', () => {
+      // No logo or tagline down there: the card's header already carries the brand.
+      const html = wrapEmailHtml('<p>hi</p>', { footer });
+      expect(html).toContain(
+        'Rabotka SARL&nbsp;&middot;&nbsp;RCCM CG-BZV-01-2025-B12-00042',
+      );
+      expect(html).toContain('Brazzaville, Congo');
+      expect(html).toContain('href="mailto:contact@rabotka.work"');
+      expect(html).toContain('href="https://www.rabotka.work/terms"');
+      expect(html).toContain('href="https://www.rabotka.work/privacy"');
+      expect(html).toContain(
+        `&copy; ${new Date().getFullYear()} Rabotka SARL`,
+      );
+    });
+
+    it('draws an icon per network set, embedded, linking to it', () => {
+      const html = wrapEmailHtml('<p>hi</p>', { footer });
+      expect(html).toContain('src="cid:rabotka-social-facebook"');
+      expect(html).toContain('href="https://facebook.com/rabotka"');
+      expect(html).toContain('alt="LinkedIn"');
+      expect(html).not.toContain('rabotka-social-instagram');
+    });
+
+    it('leaves out what is not set: no RCCM, no address, no icons', () => {
+      const html = wrapEmailHtml('<p>hi</p>', {
+        footer: { email: 'contact@rabotka.work' },
+      });
+      expect(html).not.toContain('RCCM');
+      expect(html).not.toContain('rabotka-social-');
+      expect(html).toContain(`${new Date().getFullYear()} Rabotka.`);
+    });
+
+    it('points a business email to business.rabotka.work', () => {
+      expect(
+        wrapEmailHtml('<p>hi</p>', { footer, product: 'business' }),
+      ).toContain('href="https://business.rabotka.work"');
+      expect(wrapEmailHtml('<p>hi</p>', { footer })).toContain(
+        'href="https://www.rabotka.work"',
+      );
+    });
+
+    it('escapes what the settings hold', () => {
+      const html = wrapEmailHtml('<p>hi</p>', {
+        footer: { rccm: '<b>x</b>', address: '"><script>' },
+      });
+      expect(html).not.toContain('<script>');
+      expect(html).toContain('RCCM &lt;b&gt;x&lt;/b&gt;');
+    });
+  });
+
+  describe('displayPhone', () => {
+    it('spaces a Congo number as people write it, leaves others alone', () => {
+      expect(displayPhone('+242055183391')).toBe('+242 05 518 33 91');
+      expect(displayPhone('+242 05 518 33 91')).toBe('+242 05 518 33 91');
+      expect(displayPhone('+33 6 12 34 56 78')).toBe('+33 6 12 34 56 78');
+    });
+
+    it('shows it under « Besoin d’aide ? », dialable', () => {
+      const html = wrapEmailHtml('<p>hi</p>', { footer: { phone: '+242055183391' } });
+      expect(html).toContain('Besoin d’aide ?');
+      expect(html).toContain('href="tel:+242055183391"');
+      expect(html).toContain('+242 05 518 33 91');
+    });
+  });
+
+  it('closes the card with a 4px brand-green line', () => {
+    expect(wrapEmailHtml('<p>hi</p>')).toContain(
+      '<td height="4" bgcolor="#25d366" style="height:4px;',
+    );
+  });
+
+  it('leaves a place for the recipient, filled in when the email is queued', () => {
+    expect(wrapEmailHtml('<p>hi</p>', { footer: {} })).toContain(
+      'Cet e-mail était destiné à {{rk:recipient}}.',
+    );
+  });
+
+  it('signs in one line: copyright, legal name, RCCM, address', () => {
+    const html = wrapEmailHtml('<p>hi</p>', {
+      footer: { legalName: 'Rabotka SARL', rccm: 'CG-1', address: 'Brazzaville' },
+    });
+    expect(html).toContain(
+      `&copy; ${new Date().getFullYear()} Rabotka SARL&nbsp;&middot;&nbsp;RCCM CG-1&nbsp;&middot;&nbsp;Brazzaville. Tous droits réservés.`,
+    );
   });
 
   it('leaves the raw layout alone', () => {

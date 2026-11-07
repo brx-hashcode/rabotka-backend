@@ -1,10 +1,13 @@
 import {
   BadRequestException,
+  HttpException,
+  HttpStatus,
   ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { businessEmailRecipientsOfProfile } from '../team/business-recipients';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { createHash, randomBytes } from 'node:crypto';
 import {
@@ -40,6 +43,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export type InterviewInput = {
   cvResumeId?: string;
   applicationId?: string;
+  externalApplicationId?: string;
   startsAt: string;
   durationMinutes: number;
   mode: InterviewMode;
@@ -95,21 +99,35 @@ export class InterviewService {
 
   async create(profileId: string, input: InterviewInput) {
     const businessId = await this.businessOf(profileId);
-    if (!input.cvResumeId === !input.applicationId) {
+    const sources = [
+      input.cvResumeId,
+      input.applicationId,
+      input.externalApplicationId,
+    ].filter(Boolean);
+    if (sources.length !== 1) {
       throw new BadRequestException(
         'Choisissez le candidat : un CV analysé ou une candidature.',
       );
     }
     const slot = this.slot(input);
+    const externalId = input.externalApplicationId ?? null;
     // A CV analysed for a Rabotka applicant is their application: invited as
     // one (profile e-mail, in-app notice), never through the CV's masked
     // contacts, and closed with it if they are turned down.
     const applicationId =
       input.applicationId ??
-      (await this.applicationOfResume(businessId, input.cvResumeId!));
+      (input.cvResumeId
+        ? await this.applicationOfResume(businessId, input.cvResumeId)
+        : null);
     const who = applicationId
       ? await this.fromApplication(profileId, applicationId)
-      : await this.fromCv(businessId, input.cvResumeId!, input.candidateEmail);
+      : externalId
+        ? await this.fromExternal(profileId, externalId)
+        : await this.fromCv(
+            businessId,
+            input.cvResumeId!,
+            input.candidateEmail,
+          );
 
     const token = randomBytes(24).toString('base64url');
     const created = await this.prisma.interview.create({
@@ -117,12 +135,16 @@ export class InterviewService {
         business_id: businessId,
         cv_resume_id: applicationId ? null : (input.cvResumeId ?? null),
         application_id: applicationId ?? null,
+        external_application_id: externalId,
         offer_id: who.offerId,
         job_title: who.jobTitle,
         candidate_name: who.name,
         candidate_email: who.email,
         ...slot,
         token_hash: hashToken(token),
+        // Within a day the invitation itself is the reminder: « demain »
+        // would be wrong, and it came a few minutes after it.
+        reminded_at: soon(slot.starts_at) ? new Date() : null,
       },
       include: LOAD,
     });
@@ -136,6 +158,7 @@ export class InterviewService {
       scope?: 'upcoming' | 'past';
       cvResumeId?: string;
       applicationId?: string;
+      externalApplicationId?: string;
     },
   ) {
     const businessId = await this.businessOf(profileId);
@@ -147,6 +170,9 @@ export class InterviewService {
         ...(filter.applicationId
           ? { application_id: filter.applicationId }
           : {}),
+        ...(filter.externalApplicationId
+          ? { external_application_id: filter.externalApplicationId }
+          : {}),
         ...(filter.scope === 'upcoming'
           ? { starts_at: { gte: new Date(now.getTime() - 2 * 60 * 60 * 1000) } }
           : filter.scope === 'past'
@@ -155,7 +181,9 @@ export class InterviewService {
               }
             : {}),
       },
-      orderBy: { starts_at: filter.scope === 'past' ? 'desc' : 'asc' },
+      // Upcoming soonest first; otherwise the newest: unscoped, the 200
+      // oldest came back and recent interviews went missing from the cards.
+      orderBy: { starts_at: filter.scope === 'upcoming' ? 'asc' : 'desc' },
       take: 200,
     });
     return rows.map(view);
@@ -182,7 +210,7 @@ export class InterviewService {
         status: InterviewStatus.PENDING,
         response_note: null,
         responded_at: null,
-        reminded_at: null,
+        reminded_at: soon(this.slot(input).starts_at) ? new Date() : null,
         // A new link: the old e-mail's answers would be about the old time.
         token_hash: hashToken(token),
       },
@@ -305,6 +333,20 @@ export class InterviewService {
         'Indiquez les moments qui vous conviennent.',
       );
     }
+    // The same answer again: nothing to tell the recruiter.
+    if (interview.status === answer && interview.response_note === clean) {
+      return publicView(interview);
+    }
+    // One change of mind every few minutes: each one e-mails the business.
+    if (
+      interview.responded_at &&
+      Date.now() - interview.responded_at.getTime() < ANSWER_COOLDOWN_MS
+    ) {
+      throw new HttpException(
+        'Vous venez de répondre : patientez quelques minutes avant de changer votre réponse.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
     const updated = await this.prisma.interview.update({
       where: { id: interview.id },
       data: { status: answer, response_note: clean, responded_at: new Date() },
@@ -323,12 +365,10 @@ export class InterviewService {
         answer,
       },
     });
-    await this.send(
-      updated.business.profile.email,
+    await this.sendToBusiness(
+      updated.business.profile_id,
       `${updated.candidate_name} — ${answer === 'CONFIRMED' ? 'entretien confirmé' : answer === 'DECLINED' ? 'entretien décliné' : 'autre moment demandé'}`,
       interviewAnsweredEmail(this.mailOf(updated), answer, clean),
-      [],
-      true,
     );
     return publicView(updated);
   }
@@ -362,12 +402,10 @@ export class InterviewService {
           interviewReminderEmail(mail, 'candidate'),
         );
       }
-      await this.send(
-        interview.business.profile.email,
+      await this.sendToBusiness(
+        interview.business.profile_id,
         `Rappel : entretien avec ${interview.candidate_name} demain`,
         interviewReminderEmail(mail, 'business'),
-        [],
-        true,
       );
       sent++;
     }
@@ -441,6 +479,18 @@ export class InterviewService {
     if (resume.status !== CvScreeningResumeStatus.SCORED) {
       throw new BadRequestException('Ce CV n’a pas pu être lu.');
     }
+    const refused = await this.prisma.externalApplication.findFirst({
+      where: {
+        cv_resume_id: resumeId,
+        status: ExternalApplicationStatus.REFUSED,
+      },
+      select: { id: true },
+    });
+    if (refused) {
+      throw new BadRequestException(
+        'Cette candidature a été refusée : pas d’entretien.',
+      );
+    }
     const c = (resume.candidate ?? {}) as {
       name?: string | null;
       email?: string | null;
@@ -459,6 +509,31 @@ export class InterviewService {
     };
   }
 
+  /** A careers-page candidate, with or without a CV analysis. */
+  private async fromExternal(profileId: string, id: string) {
+    const application = await this.prisma.externalApplication.findFirst({
+      where: { id, job_offer: { employer_id: profileId } },
+      include: {
+        job_offer: { select: { id: true, title: true, status: true } },
+      },
+    });
+    if (!application) throw new NotFoundException('Candidature introuvable.');
+    if (isTerminalJobOfferStatus(application.job_offer.status)) {
+      throw new BadRequestException('Cette offre ne recrute plus.');
+    }
+    if (application.status === ExternalApplicationStatus.REFUSED) {
+      throw new BadRequestException(
+        'Cette candidature a été refusée : pas d’entretien.',
+      );
+    }
+    return {
+      name: `${application.first_name} ${application.last_name}`.trim(),
+      email: application.email.trim().toLowerCase(),
+      jobTitle: application.job_offer.title,
+      offerId: application.job_offer.id,
+    };
+  }
+
   private async fromApplication(profileId: string, applicationId: string) {
     const application = await this.prisma.application.findFirst({
       where: {
@@ -474,6 +549,15 @@ export class InterviewService {
     if (!application) throw new NotFoundException('Candidature introuvable.');
     if (isTerminalJobOfferStatus(application.job_offer.status)) {
       throw new BadRequestException('Cette offre ne recrute plus.');
+    }
+    // Refused or withdrawn: invited, then cancelled 15 minutes later.
+    if (
+      application.status === ApplicationStatus.REJECTED ||
+      application.status === ApplicationStatus.CANCELLED
+    ) {
+      throw new BadRequestException(
+        'Cette candidature a été refusée ou retirée : pas d’entretien.',
+      );
     }
     return {
       name: `${application.worker.first_name} ${application.worker.last_name}`.trim(),
@@ -549,6 +633,25 @@ export class InterviewService {
     };
   }
 
+  /**
+   * To the team, as its other recruiting e-mails: the holder and every member
+   * who left them on — the Recruteur who booked the interview included.
+   */
+  private async sendToBusiness(
+    profileId: string,
+    subject: string,
+    content: string,
+  ) {
+    const recipients = await businessEmailRecipientsOfProfile(
+      this.prisma,
+      profileId,
+      'recruiting',
+    ).catch(() => []);
+    for (const r of recipients) {
+      await this.send(r.email, subject, content, [], true);
+    }
+  }
+
   private async send(
     to: string | null | undefined,
     subject: string,
@@ -604,10 +707,19 @@ function answerUrl(token: string): string {
 }
 
 /** For the business. An applicant's e-mail is never part of it. */
+/** One change of answer per candidate in this time: each e-mails the business. */
+const ANSWER_COOLDOWN_MS = 10 * 60 * 1000;
+
+/** Under a day away: the invitation already serves as the reminder. */
+function soon(startsAt: Date): boolean {
+  return startsAt.getTime() - Date.now() < DAY_MS;
+}
+
 function view(i: Interview) {
   return {
     id: i.id,
     cvResumeId: i.cv_resume_id,
+    externalApplicationId: i.external_application_id,
     applicationId: i.application_id,
     offerId: i.offer_id,
     jobTitle: i.job_title,

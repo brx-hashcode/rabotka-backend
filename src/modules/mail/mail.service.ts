@@ -1,11 +1,44 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { QueueService } from '../../common/services/queue/queue.service';
+import {
+  SOCIAL_NETWORKS,
+  socialIconBuffer,
+  socialIconCid,
+  socialIconFilename,
+} from './templates/social-icons-asset';
+import { escapeHtml, RECIPIENT_TOKEN } from './templates/layout';
 
 export type MailAttachment = {
   filename: string;
   content: Buffer | string;
   contentType?: string;
+  /** `base64` when `content` is a base64 string (nodemailer decodes it). */
+  encoding?: 'base64';
+  /** An inline image the HTML shows as `cid:<cid>`. */
+  cid?: string;
+  contentDisposition?: 'inline' | 'attachment';
 };
+
+/**
+ * The footer's network icons this HTML shows, as inline attachments. Queued
+ * with the job rather than added by the worker, so a worker running an older
+ * build (a deploy in progress, a long-running dev worker) still sends them:
+ * it forwards whatever attachments the job carries. Base64 strings, ~3 KB
+ * each: a Buffer would be JSON-serialised into Redis as an array of numbers.
+ */
+export function socialIconAttachments(html?: string): MailAttachment[] {
+  if (!html) return [];
+  return SOCIAL_NETWORKS.filter((n) =>
+    html.includes(`cid:${socialIconCid(n)}`),
+  ).map((n) => ({
+    filename: socialIconFilename(n),
+    content: socialIconBuffer(n).toString('base64'),
+    encoding: 'base64' as const,
+    contentType: 'image/png',
+    cid: socialIconCid(n),
+    contentDisposition: 'inline' as const,
+  }));
+}
 
 export type SendMailOptions = {
   /**
@@ -51,14 +84,23 @@ export class MailService {
       return { jobId: '' };
     }
 
+    // The footer's « Cet e-mail était destiné à … » (layout.ts).
+    const html = options.html?.replaceAll(
+      RECIPIENT_TOKEN,
+      escapeHtml(options.to.trim()),
+    );
+    const attachments = [
+      ...(options.attachments ?? []),
+      ...socialIconAttachments(html),
+    ];
     const jobId = await this.queueService.addEmailJob({
       to: options.to,
       subject: options.subject,
       ...(options.text !== undefined && { text: options.text }),
-      ...(options.html !== undefined && { html: options.html }),
+      ...(html !== undefined && { html }),
       ...(options.from !== undefined && { from: options.from }),
       ...(options.fromName !== undefined && { fromName: options.fromName }),
-      ...(options.attachments?.length && { attachments: options.attachments }),
+      ...(attachments.length && { attachments }),
     });
 
     return { jobId: jobId ?? '' };

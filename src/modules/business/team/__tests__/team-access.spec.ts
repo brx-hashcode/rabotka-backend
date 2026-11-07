@@ -23,6 +23,11 @@ describe('team access', () => {
       ['PUT', '/business/me/talents/:workerId'],
       ['POST', '/business/me/contacts/:workerId'],
       ['PATCH', '/business/me/member'],
+      // Writing to candidates is hiring, not the account.
+      ['POST', '/profile/discussions/applications/:applicationId'],
+      ['POST', '/profile/discussions/profiles/:profileId'],
+      ['POST', '/profile/discussions/:id/messages'],
+      ['POST', '/profile/discussions/:id/read'],
     ])('hires: %s %s', (method, path) => {
       expect(may('RECRUITER', method, path)).toBe(true);
     });

@@ -45,6 +45,8 @@ export const CV_ANALYSIS_QUEUE = 'cv-analysis-queue';
 export const APPLICANT_SCORE_QUEUE = 'applicant-score-queue';
 /** Interview reminders, the day before. */
 export const INTERVIEW_QUEUE = 'interview-queue';
+/** An offer posted on a team member's LinkedIn (linkedin.service.ts). */
+export const LINKEDIN_POST_QUEUE = 'linkedin-post-queue';
 
 @Module({})
 export class QueueModule {

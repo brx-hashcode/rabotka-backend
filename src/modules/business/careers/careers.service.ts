@@ -6,9 +6,14 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import {
+  MAX_ANALYSIS_ATTEMPTS,
+  claimable,
+} from '../applicant-score/analysis-attempts';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import {
+  CvScreeningResumeStatus,
   ExternalApplicationStatus,
   JobOfferStatus,
   OfferQuestionKind,
@@ -33,6 +38,7 @@ import { MailService } from '../../mail/mail.service';
 import {
   applicationReceivedEmail,
   applicationRefusedEmail,
+  applicationRetainCancelledEmail,
   applicationRetainedEmail,
   newExternalApplicationEmail,
 } from '../../mail/templates/external-application';
@@ -61,6 +67,7 @@ import {
   DOCX_MIME,
 } from '../cv-screening/cv-files';
 import type { ApplyDto } from './dto/apply.dto';
+import { businessEmailRecipientsOfProfile } from '../team/business-recipients';
 
 const OPEN: JobOfferStatus[] = [
   JobOfferStatus.ACTIVE,
@@ -68,6 +75,8 @@ const OPEN: JobOfferStatus[] = [
 ];
 
 const MAX_COMPANIES = 200;
+/** Careers applications listed at once for a business (the newest). */
+const MAX_LISTED = 500;
 /** Well above what Rabotka's businesses have open; a feed stays one file. */
 const MAX_FEED_JOBS = 5000;
 
@@ -405,16 +414,30 @@ export class CareersService {
       `Candidature envoyée à ${business.name}`,
       applicationReceivedEmail(firstName, business.name, offer.title),
     );
-    void this.send(
-      business.email,
-      `Nouvelle candidature : ${offer.title}`,
-      newExternalApplicationEmail(
-        name,
-        offer.title,
-        // The offer, where its candidates are, rather than every candidature.
-        `${businessDashboardUrl()}/offres/${offer.id}`,
-      ),
-    );
+    // To the team, as its other recruiting e-mails: the holder and every
+    // member who left them on (not the organisation's contact address).
+    void businessEmailRecipientsOfProfile(
+      this.prisma,
+      business.profile_id,
+      'recruiting',
+    )
+      .then(async (recipients) => {
+        for (const r of recipients) {
+          await this.send(
+            r.email,
+            `Nouvelle candidature : ${offer.title}`,
+            newExternalApplicationEmail(
+              name,
+              offer.title,
+              // The offer, where its candidates are, rather than every candidature.
+              `${businessDashboardUrl()}/offres/${offer.id}`,
+            ),
+          );
+        }
+      })
+      .catch((err) =>
+        this.logger.warn(`Careers mail recipients failed: ${String(err)}`),
+      );
     // Scored at once, on the plan's « CV inclus ». The candidate is not kept
     // waiting, and a plan with none left simply shows the CV unscored.
     void enqueueCvAnalysis(this.queue, {
@@ -429,10 +452,20 @@ export class CareersService {
   }
 
   /** The business's own: newest first, a failed « éliminatoire » after the others. */
-  async listForBusiness(profileId: string) {
+  /**
+   * The careers-page applications of the business, or of one offer: the
+   * offer page asks for its own, rather than every application ever and a
+   * filter in the browser, polled every few seconds while a CV is read.
+   * The newest MAX_LISTED.
+   */
+  async listForBusiness(profileId: string, offerId?: string) {
     const rows = await this.prisma.externalApplication.findMany({
-      where: { job_offer: { employer_id: profileId, deleted_at: null } },
+      where: {
+        job_offer: { employer_id: profileId, deleted_at: null },
+        ...(offerId ? { job_offer_id: offerId } : {}),
+      },
       orderBy: [{ knocked_out: 'asc' }, { created_at: 'desc' }],
+      take: MAX_LISTED,
       include: {
         job_offer: { select: { id: true, title: true, status: true } },
         cv_resume: {
@@ -487,7 +520,13 @@ export class CareersService {
    * read, up to what the plan takes at once. Each uses one of its « CV
    * inclus ». They all join the offer's one screening, so they can be compared.
    */
-  async analyse(profileId: string, offerId: string, applicationId?: string) {
+  async analyse(
+    profileId: string,
+    offerId: string,
+    applicationId?: string,
+    /** Also those whose analysis failed before then, tried again (capped). */
+    retryFailedBefore?: Date,
+  ) {
     const businessId = await this.subscriptions.businessOf(profileId);
     if (!businessId) throw new NotFoundException('Organisation introuvable.');
     const e = await this.subscriptions.entitlements(businessId);
@@ -505,24 +544,75 @@ export class CareersService {
         status: { in: OPEN },
       },
       status: ExternalApplicationStatus.PENDING,
-      cv_resume_id: null,
+      OR: [
+        { cv_resume_id: null },
+        ...(retryFailedBefore
+          ? [
+              {
+                cv_resume: {
+                  status: CvScreeningResumeStatus.FAILED,
+                  updated_at: { lte: retryFailedBefore },
+                },
+                analysis_attempts: { lt: MAX_ANALYSIS_ATTEMPTS },
+              },
+            ]
+          : []),
+      ],
       cv_storage_key: { not: null },
-      ...(applicationId
-        ? { id: applicationId }
-        : { cv_size_bytes: { lte: e.cvFileMaxMb * 1024 * 1024 } }),
+      // Above the plan's file size it would be refused: never sent.
+      cv_size_bytes: { lte: e.cvFileMaxMb * 1024 * 1024 },
+      ...(applicationId ? { id: applicationId } : {}),
     };
-    const [due, total] = await Promise.all([
+    const now = new Date();
+    const [found, total] = await Promise.all([
       this.prisma.externalApplication.findMany({
-        where,
+        where: { ...where, AND: [claimable(now)] },
         orderBy: { created_at: 'asc' },
         take: room,
       }),
       this.prisma.externalApplication.count({ where }),
     ]);
+    // Claimed before anything is charged: two runs never charge one CV twice.
+    const ids = found.map((a) => a.id);
+    if (ids.length > 0) {
+      await this.prisma.externalApplication.updateMany({
+        where: { id: { in: ids }, AND: [claimable(now)] },
+        data: { analysis_claimed_at: now },
+      });
+    }
+    const mine = new Set(
+      ids.length === 0
+        ? []
+        : (
+            await this.prisma.externalApplication.findMany({
+              where: { id: { in: ids }, analysis_claimed_at: now },
+              select: { id: true },
+            })
+          ).map((a) => a.id),
+    );
+    const due = found.filter((a) => mine.has(a.id));
     if (due.length === 0) {
       throw new BadRequestException('Aucun CV à analyser.');
     }
+    try {
+      return await this.analyseClaimed(profileId, offerId, due, total);
+    } finally {
+      await this.prisma.externalApplication
+        .updateMany({
+          where: { id: { in: [...mine] }, analysis_claimed_at: now },
+          data: { analysis_claimed_at: null },
+        })
+        .catch(() => undefined);
+    }
+  }
 
+  /** The CVs this run holds the claim on: read, sent, then linked. */
+  private async analyseClaimed(
+    profileId: string,
+    offerId: string,
+    due: Prisma.ExternalApplicationGetPayload<object>[],
+    total: number,
+  ) {
     // The application's id in the file name: it finds its resume again below.
     const files = await Promise.all(
       due.map(async (a) => ({
@@ -544,8 +634,14 @@ export class CareersService {
       if (!resumeId) continue;
       await this.prisma.externalApplication.update({
         where: { id: a.id },
-        data: { cv_resume_id: resumeId },
+        data: { cv_resume_id: resumeId, analysis_attempts: { increment: 1 } },
       });
+      // The failed try it replaces: gone, rather than a dead row in the screening.
+      if (a.cv_resume_id) {
+        await this.prisma.cvScreeningResume
+          .delete({ where: { id: a.cv_resume_id } })
+          .catch(() => undefined);
+      }
     }
     return {
       screeningId: screening.screeningId,
@@ -758,6 +854,64 @@ export class CareersService {
     return { retained: true };
   }
 
+  /**
+   * Takes a retention back (a mistaken click, a candidate who fell through):
+   * the candidate is waiting again, the post is free, the offer recruits
+   * again, and the candidate is told. Only while the offer still recruits:
+   * a started or ended one is past it.
+   */
+  async unretain(profileId: string, id: string) {
+    const application = await this.owned(profileId, id);
+    if (application.status !== ExternalApplicationStatus.RETAINED) {
+      throw new ConflictException("Cette candidature n'est pas retenue.");
+    }
+    const offerId = application.job_offer_id;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM "job_offers" WHERE id = ${offerId}::uuid FOR UPDATE`;
+      const offer = await tx.jobOffer.findUnique({
+        where: { id: offerId },
+        select: { status: true, quantity: true, deleted_at: true },
+      });
+      if (
+        !offer ||
+        offer.deleted_at ||
+        (!OPEN.includes(offer.status) && offer.status !== JobOfferStatus.FILLED)
+      ) {
+        throw new BadRequestException('Cette offre ne recrute plus.');
+      }
+      const { count } = await tx.externalApplication.updateMany({
+        where: { id, status: ExternalApplicationStatus.RETAINED },
+        data: { status: ExternalApplicationStatus.PENDING, retained_at: null },
+      });
+      if (count === 0) {
+        throw new ConflictException("Cette candidature n'est pas retenue.");
+      }
+      const taken = await takenSeats(tx, offerId);
+      await tx.jobOffer.update({
+        where: { id: offerId },
+        data: {
+          status:
+            taken === 0
+              ? JobOfferStatus.ACTIVE
+              : taken >= offer.quantity
+                ? JobOfferStatus.FILLED
+                : JobOfferStatus.PARTIALLY_FILLED,
+        },
+      });
+    });
+    const name = await this.businessName(profileId);
+    void this.send(
+      application.email,
+      `Votre candidature chez ${name}`,
+      applicationRetainCancelledEmail(
+        application.first_name,
+        name,
+        application.job_offer.title,
+      ),
+    );
+    return { retained: false };
+  }
+
   /** A closed offer: those still waiting hear it, as Rabotka's candidates do. */
   @OnEvent(JOB_OFFER_CLOSED)
   async refuseWaiting({ jobOfferId }: JobOfferClosedEvent) {
@@ -770,6 +924,12 @@ export class CareersService {
 
   async refuse(profileId: string, id: string, message?: string) {
     const application = await this.owned(profileId, id);
+    if (application.status === ExternalApplicationStatus.RETAINED) {
+      // Said, rather than a quiet { refused: false } the screen took for done.
+      throw new ConflictException(
+        'Ce candidat est retenu : annulez d’abord la décision.',
+      );
+    }
     if (application.status !== ExternalApplicationStatus.PENDING) {
       return {
         refused: application.status === ExternalApplicationStatus.REFUSED,

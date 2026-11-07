@@ -18,7 +18,10 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { LlmService } from '../../rag/llm/llm.service';
-import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
+import {
+  BusinessSubscriptionService,
+  TRIAL_AI_REFUSAL,
+} from '../subscription/business-subscription.service';
 import { CvScreeningService } from './cv-screening.service';
 import type { ChatReportCandidate, ChatReportInput } from './cv-chat-report';
 import { experiencesText, type CvExperience } from './cv-experience';
@@ -85,7 +88,15 @@ export type CvChatTurn = {
   resume: CvScreeningResume;
   messages: BaseMessage[];
   remaining: number;
+  /** The question saved for this turn: the one taken back if nothing came. */
+  questionId: string;
 };
+
+/**
+ * Kept as a CV's text when a scan could not be read: asked again, it is
+ * refused at once rather than sent to the vision model at every question.
+ */
+export const UNREADABLE_CV_TEXT = '';
 
 /**
  * Chat with one analysed CV: the business asks, the AI answers from the CV,
@@ -172,7 +183,7 @@ export class CvChatService {
   ): Promise<CvChatTurn> {
     const text = question.trim();
     if (text.length < 2) throw new BadRequestException('Posez votre question.');
-    const { resume, screening, limit } = await this.owned(
+    const { resume, screening, limit, trialLocked } = await this.owned(
       profileId,
       screeningId,
       resumeId,
@@ -195,15 +206,31 @@ export class CvChatService {
     const asked = past.filter((m) => m.role === CvChatRole.USER).length;
     if (asked >= limit) {
       throw new ForbiddenException(
-        limit === 0
-          ? 'La conversation avec un CV n’est pas incluse dans votre formule.'
-          : `Vous avez posé les ${limit} questions prévues pour ce CV.`,
+        trialLocked
+          ? TRIAL_AI_REFUSAL
+          : limit === 0
+            ? 'La conversation avec un CV n’est pas incluse dans votre formule.'
+            : `Vous avez posé les ${limit} questions prévues pour ce CV.`,
       );
     }
 
     const cvText = await this.cvTextOf(resume);
-    await this.prisma.cvResumeMessage.create({
-      data: { resume_id: resume.id, role: CvChatRole.USER, content: text },
+    // Counted and saved under one lock: two tabs asking at once both passed
+    // the count above, and went past the plan's questions.
+    const { saved, before } = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${resume.id}))`;
+      const before = await tx.cvResumeMessage.count({
+        where: { resume_id: resume.id, role: CvChatRole.USER },
+      });
+      if (before >= limit) {
+        throw new ForbiddenException(
+          `Vous avez posé les ${limit} questions prévues pour ce CV.`,
+        );
+      }
+      const saved = await tx.cvResumeMessage.create({
+        data: { resume_id: resume.id, role: CvChatRole.USER, content: text },
+      });
+      return { saved, before };
     });
 
     const history = past
@@ -215,7 +242,8 @@ export class CvChatService {
       );
     return {
       resume,
-      remaining: limit - asked - 1,
+      questionId: saved.id,
+      remaining: limit - before - 1,
       messages: [
         new SystemMessage(SYSTEM_PROMPT),
         contextMessage(
@@ -243,14 +271,12 @@ export class CvChatService {
           data: { resume_id: resumeId, role: CvChatRole.ASSISTANT, content },
         });
       },
+      // This turn's question, by its id: « the last message » could be
+      // another tab's question, or the answer it already got.
       takeBack: async () => {
-        const last = await this.prisma.cvResumeMessage.findFirst({
-          where: { resume_id: resumeId },
-          orderBy: { created_at: 'desc' },
+        await this.prisma.cvResumeMessage.deleteMany({
+          where: { id: turn.questionId, role: CvChatRole.USER },
         });
-        if (last?.role === CvChatRole.USER) {
-          await this.prisma.cvResumeMessage.delete({ where: { id: last.id } });
-        }
       },
     });
   }
@@ -323,12 +349,24 @@ export class CvChatService {
    * After that a question never downloads the file again.
    */
   async cvTextOf(resume: CvScreeningResume): Promise<string> {
+    if (resume.cv_text === UNREADABLE_CV_TEXT) {
+      throw new BadRequestException('Ce CV ne peut plus être lu.');
+    }
     if (resume.cv_text) return resume.cv_text;
     const source = await this.screenings.sourceOf(resume);
     const text = source
       ? await this.screenings.transcribe(source, resume.id)
       : null;
-    if (!text) throw new BadRequestException('Ce CV ne peut plus être lu.');
+    if (!text) {
+      // Remembered: the next question is refused without another model call.
+      await this.prisma.cvScreeningResume
+        .update({
+          where: { id: resume.id },
+          data: { cv_text: UNREADABLE_CV_TEXT },
+        })
+        .catch(() => undefined);
+      throw new BadRequestException('Ce CV ne peut plus être lu.');
+    }
     await this.prisma.cvScreeningResume.update({
       where: { id: resume.id },
       data: { cv_text: text },
@@ -355,7 +393,12 @@ export class CvChatService {
     if (!resume) throw new NotFoundException('CV introuvable.');
     const e = await this.subscriptions.entitlements(businessId);
     const { screening, ...row } = resume;
-    return { resume: row, screening, limit: e.cvChatQuestions };
+    return {
+      resume: row,
+      screening,
+      limit: e.cvChatQuestions,
+      trialLocked: e.trialLocked.includes('cvChat'),
+    };
   }
 }
 

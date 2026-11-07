@@ -4,6 +4,7 @@ import {
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { answerSnippet } from '../cv-screening/lenient-answer';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { LlmService } from '../../rag/llm/llm.service';
@@ -95,6 +96,11 @@ export class OfferWriterService {
           ).output.content,
         );
         draft = parseDraft(second, names);
+        if (!draft) {
+          this.logger.warn(
+            `Offer draft unreadable for business ${businessId}: ${answerSnippet(second)}`,
+          );
+        }
       }
     } catch (err) {
       this.logger.warn(

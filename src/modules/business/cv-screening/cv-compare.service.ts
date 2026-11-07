@@ -14,9 +14,13 @@ import {
   CvChatRole,
   CvScreeningResumeStatus,
   type CvScreeningResume,
+  type Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
-import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
+import {
+  BusinessSubscriptionService,
+  TRIAL_AI_REFUSAL,
+} from '../subscription/business-subscription.service';
 import {
   ANSWER_STYLE,
   CHAT_RULES,
@@ -50,6 +54,8 @@ export type CvCompareTurn = {
   comparisonId: string;
   messages: BaseMessage[];
   remaining: number;
+  /** The question saved for this turn: the one taken back if nothing came. */
+  questionId: string;
 };
 
 /**
@@ -158,7 +164,7 @@ export class CvCompareService {
   ): Promise<CvCompareTurn> {
     const text = question.trim();
     if (text.length < 2) throw new BadRequestException('Posez votre question.');
-    const { businessId, limit } = await this.business(profileId);
+    const { businessId, limit, trialLocked } = await this.business(profileId);
     const comparison = await this.prisma.cvComparison.findFirst({
       where: {
         id: comparisonId,
@@ -171,14 +177,16 @@ export class CvCompareService {
     });
     if (!comparison) throw new NotFoundException('Comparaison introuvable.');
 
-    const asked = comparison.messages.filter(
-      (m) => m.role === CvChatRole.USER,
-    ).length;
+    // Counted per CV, across every comparison it is in: counted per
+    // comparison, each new group of the same CVs gave the questions again.
+    const asked = await this.askedAbout(comparison.resume_ids);
     if (asked >= limit) {
       throw new ForbiddenException(
-        limit === 0
-          ? 'La conversation avec les CV n’est pas incluse dans votre formule.'
-          : `Vous avez posé les ${limit} questions prévues pour cette comparaison.`,
+        trialLocked
+          ? TRIAL_AI_REFUSAL
+          : limit === 0
+            ? 'La conversation avec les CV n’est pas incluse dans votre formule.'
+            : `Vous avez posé les ${limit} questions prévues pour l’un de ces CV dans vos comparaisons.`,
       );
     }
 
@@ -193,12 +201,24 @@ export class CvCompareService {
     }
     const texts = await Promise.all(resumes.map((r) => this.chat.cvTextOf(r)));
 
-    await this.prisma.cvComparisonMessage.create({
-      data: {
-        comparison_id: comparison.id,
-        role: CvChatRole.USER,
-        content: text,
-      },
+    // Counted and saved under one lock (per screening): two tabs at once
+    // both passed the count above.
+    const { saved, before } = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${screeningId}))`;
+      const before = await this.askedAbout(comparison.resume_ids, tx);
+      if (before >= limit) {
+        throw new ForbiddenException(
+          `Vous avez posé les ${limit} questions prévues pour l’un de ces CV dans vos comparaisons.`,
+        );
+      }
+      const saved = await tx.cvComparisonMessage.create({
+        data: {
+          comparison_id: comparison.id,
+          role: CvChatRole.USER,
+          content: text,
+        },
+      });
+      return { saved, before };
     });
 
     const history = comparison.messages
@@ -210,7 +230,8 @@ export class CvCompareService {
       );
     return {
       comparisonId: comparison.id,
-      remaining: limit - asked - 1,
+      questionId: saved.id,
+      remaining: limit - before - 1,
       messages: [
         new SystemMessage(SYSTEM_PROMPT),
         new HumanMessage(
@@ -241,18 +262,34 @@ export class CvCompareService {
           },
         });
       },
+      // This turn's question, by its id.
       takeBack: async () => {
-        const last = await this.prisma.cvComparisonMessage.findFirst({
-          where: { comparison_id: comparisonId },
-          orderBy: { created_at: 'desc' },
+        await this.prisma.cvComparisonMessage.deleteMany({
+          where: { id: turn.questionId, role: CvChatRole.USER },
         });
-        if (last?.role === CvChatRole.USER) {
-          await this.prisma.cvComparisonMessage.delete({
-            where: { id: last.id },
-          });
-        }
       },
     });
+  }
+
+  /**
+   * The most questions asked about any one of these CVs, across all the
+   * comparisons it is in: what the plan's questions limit.
+   */
+  private async askedAbout(
+    resumeIds: string[],
+    db: Pick<Prisma.TransactionClient, 'cvComparisonMessage'> = this.prisma,
+  ): Promise<number> {
+    const counts = await Promise.all(
+      resumeIds.map((id) =>
+        db.cvComparisonMessage.count({
+          where: {
+            role: CvChatRole.USER,
+            comparison: { resume_ids: { has: id } },
+          },
+        }),
+      ),
+    );
+    return Math.max(0, ...counts);
   }
 
   private async business(profileId: string) {
@@ -261,7 +298,11 @@ export class CvCompareService {
       throw new ForbiddenException('Espace réservé aux comptes entreprise.');
     }
     const e = await this.subscriptions.entitlements(businessId);
-    return { businessId, limit: e.cvChatQuestions };
+    return {
+      businessId,
+      limit: e.cvChatQuestions,
+      trialLocked: e.trialLocked.includes('cvChat'),
+    };
   }
 }
 

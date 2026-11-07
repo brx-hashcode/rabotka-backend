@@ -61,11 +61,13 @@ export class InterviewController {
     @Query('scope') scope?: 'upcoming' | 'past',
     @Query('cvResumeId') cvResumeId?: string,
     @Query('applicationId') applicationId?: string,
+    @Query('externalApplicationId') externalApplicationId?: string,
   ) {
     return this.interviews.list(req.user.profileId, {
       scope: scope === 'upcoming' || scope === 'past' ? scope : undefined,
       cvResumeId,
       applicationId,
+      externalApplicationId,
     });
   }
 

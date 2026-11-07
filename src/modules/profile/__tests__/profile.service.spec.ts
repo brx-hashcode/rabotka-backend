@@ -2028,6 +2028,23 @@ describe('ProfileService', () => {
         });
       });
 
+      it('tries the next free address once when another rename took it meanwhile', async () => {
+        const { Prisma } = jest.requireActual('@prisma/client');
+        const clash = new Prisma.PrismaClientKnownRequestError('Unique constraint', {
+          code: 'P2002',
+          clientVersion: 'test',
+        });
+        (prisma.$transaction as jest.Mock)
+          .mockRejectedValueOnce(clash)
+          .mockImplementation((calls: any) =>
+            Array.isArray(calls) ? Promise.resolve(calls) : calls(prisma),
+          );
+        await service.updateBusiness('p-1', { name: 'Autre nom' } as any, 'admin');
+        // The free slug looked up twice: once per try.
+        expect((prisma as any).business.findMany).toHaveBeenCalledTimes(2);
+        expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+      });
+
       it('leaves the address alone when the name is not changed', async () => {
         await service.updateBusiness(
           'p-1',
@@ -2039,16 +2056,23 @@ describe('ProfileService', () => {
         expect(data).not.toHaveProperty('previous_slugs');
       });
 
+      it('refuses the owner a new country: its papers are that country’s', async () => {
+        await expect(
+          service.updateBusiness('p-1', { countryCode: 'GA' } as any, 'owner'),
+        ).rejects.toThrow(ForbiddenException);
+        expect((prisma as any).business.update).not.toHaveBeenCalled();
+      });
+
       it('moves only to a country Rabotka Business is open in, and clears the address', async () => {
         await expect(
-          service.updateBusiness('p-1', { countryCode: 'FR' } as any, 'owner'),
+          service.updateBusiness('p-1', { countryCode: 'FR' } as any, 'admin'),
         ).rejects.toThrow(/disponible au Congo-Brazzaville/);
         expect((prisma as any).business.update).not.toHaveBeenCalled();
 
         await service.updateBusiness(
           'p-1',
           { countryCode: 'GA', address: null } as any,
-          'owner',
+          'admin',
         );
         expect((prisma as any).business.update).toHaveBeenCalledWith({
           where: { id: 'b-1' },
@@ -2075,6 +2099,23 @@ describe('ProfileService', () => {
       expect((prisma as any).business.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ verification_status: 'VERIFIED' }) }),
       );
+    });
+
+    it('starts the trial on approval unless the admin chose not to', async () => {
+      const emit = (service as any).eventEmitter.emit as jest.Mock;
+      await service.verifyBusiness('p-1', 'admin-1', 'VERIFIED');
+      expect(emit).toHaveBeenCalledWith('business.verified', {
+        businessId: 'b-1',
+        startTrial: true,
+      });
+      emit.mockClear();
+      await service.verifyBusiness('p-1', 'admin-1', 'VERIFIED', undefined, {
+        startTrial: false,
+      });
+      expect(emit).toHaveBeenCalledWith('business.verified', {
+        businessId: 'b-1',
+        startTrial: false,
+      });
     });
 
     it('refusing needs a reason, and does not activate', async () => {

@@ -19,6 +19,26 @@ export function periodEnd(
   );
 }
 
+/**
+ * The month a period's counters run in now. A period longer than a month (an
+ * annual plan, a monthly one with days carried over) starts its counters again
+ * every month from its start, clamped like the periods: what a plan gives is
+ * « par mois ». `resetsAt`: the next start, null when the period ends first.
+ */
+export function counterWindow(
+  start: Date,
+  end: Date,
+  now: Date,
+): { from: Date; resetsAt: Date | null } {
+  let k = 0;
+  while (addMonthsClamped(start, k + 1) <= now) k++;
+  const next = addMonthsClamped(start, k + 1);
+  return {
+    from: addMonthsClamped(start, k),
+    resetsAt: next < end ? next : null,
+  };
+}
+
 function addMonthsClamped(date: Date, months: number): Date {
   const d = new Date(date.getTime());
   const day = d.getUTCDate();
@@ -85,7 +105,18 @@ type PricedPlan = { monthly_price_fcfa: number; annual_price_fcfa: number };
 
 /** A move to a dearer plan (by monthly price): it starts at once, not after the running one. */
 export function isUpgrade(current: PricedPlan, next: PricedPlan): boolean {
-  return next.monthly_price_fcfa > current.monthly_price_fcfa;
+  return monthlyEquivalent(next) > monthlyEquivalent(current);
+}
+
+/**
+ * What a plan costs a month: its monthly price, or a twelfth of the year for
+ * a plan sold by the year only (a custom plan with no monthly price), which
+ * compared at 0 was never an upgrade and waited behind a cheaper plan.
+ */
+function monthlyEquivalent(p: PricedPlan): number {
+  return p.monthly_price_fcfa > 0
+    ? p.monthly_price_fcfa
+    : Math.round(p.annual_price_fcfa / 12);
 }
 
 /**

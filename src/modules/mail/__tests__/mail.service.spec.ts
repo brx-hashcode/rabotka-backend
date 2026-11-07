@@ -82,6 +82,50 @@ describe('MailService', () => {
   // phone and no email — so "send this profile an email" is routinely a no-op.
   // Dropping it here, at the one chokepoint every caller funnels through, is
   // what keeps twenty-odd call sites from each needing their own guard.
+  describe('footer icons', () => {
+    it('queues the icons the HTML shows with the job, so any worker sends them', async () => {
+      await service.sendMail({
+        to: 'user@example.com',
+        subject: 'S',
+        html: '<img src="cid:rabotka-social-facebook"><img src="cid:rabotka-social-linkedin">',
+        attachments: [{ filename: 'invoice.pdf', content: Buffer.from('pdf') }],
+      });
+
+      const job = queueService.addEmailJob.mock.calls[0][0];
+      const icons = job.attachments!.filter((a) => a.cid);
+      expect(icons.map((a) => a.cid)).toEqual([
+        'rabotka-social-facebook',
+        'rabotka-social-linkedin',
+      ]);
+      // A base64 string, not a Buffer: Redis gets ~3 KB, not an array of numbers.
+      expect(icons[0]).toMatchObject({
+        encoding: 'base64',
+        contentType: 'image/png',
+        contentDisposition: 'inline',
+      });
+      expect(typeof icons[0].content).toBe('string');
+      expect(job.attachments!.map((a) => a.filename)).toContain('invoice.pdf');
+    });
+
+    it('adds nothing when the HTML shows no icon', async () => {
+      await service.sendMail({ to: 'user@example.com', subject: 'S', html: '<p>x</p>' });
+      expect(queueService.addEmailJob.mock.calls[0][0].attachments).toBeUndefined();
+    });
+  });
+
+  describe('recipient line', () => {
+    it('puts the address the email goes to in the footer, escaped', async () => {
+      await service.sendMail({
+        to: 'a&b@example.com',
+        subject: 'S',
+        html: '<p>Cet e-mail était destiné à {{rk:recipient}}.</p>',
+      });
+      expect(queueService.addEmailJob.mock.calls[0][0].html).toBe(
+        '<p>Cet e-mail était destiné à a&amp;b@example.com.</p>',
+      );
+    });
+  });
+
   describe('sendMail() with no recipient', () => {
     it.each([
       ['null', null],

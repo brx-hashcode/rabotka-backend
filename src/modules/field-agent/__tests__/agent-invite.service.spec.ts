@@ -109,7 +109,7 @@ describe('AgentInviteService', () => {
       expect.objectContaining({
         entityType: 'agent-placement',
         entityId: 'app-1',
-        message: 'Jean a placé Sophie Test sur « Plombier »',
+        message: 'Jean placed Sophie Test on « Plombier »',
       }),
     );
   });

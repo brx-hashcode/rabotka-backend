@@ -65,7 +65,18 @@ const emit = jest.fn();
 
 const serviceWith = (found: unknown, offers: unknown[] = [], one?: unknown) => {
   const prisma = {
-    business: { findFirst: jest.fn().mockResolvedValue(found) },
+    business: {
+      findFirst: jest.fn().mockResolvedValue(found),
+      // Who of the business is e-mailed: its holder, no team yet.
+      findUnique: jest.fn().mockResolvedValue({
+        id: 'b1',
+        profile: { email: 'boss@kamoa.cg', first_name: 'Awa' },
+      }),
+    },
+    businessMember: {
+      findMany: jest.fn().mockResolvedValue([]),
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
     jobOffer: {
       findMany: jest.fn().mockResolvedValue(offers),
       findFirst: jest.fn().mockResolvedValue(one ?? null),
@@ -333,6 +344,10 @@ describe('CareersService', () => {
         .fn()
         .mockResolvedValue(ids.map(due));
       prisma.externalApplication.count = jest.fn().mockResolvedValue(3);
+      // The claim: taken by this run (the read-back returns the same rows).
+      prisma.externalApplication.updateMany = jest
+        .fn()
+        .mockResolvedValue({ count: ids.length });
       prisma.cvScreening = {
         findFirst: jest.fn().mockResolvedValue(open),
         update: jest.fn().mockResolvedValue({}),
@@ -383,8 +398,36 @@ describe('CareersService', () => {
         job_offer_id: 'o1',
         job_offer: { employer_id: 'p1' },
         status: 'PENDING',
-        cv_resume_id: null,
+        OR: [{ cv_resume_id: null }],
+        // Never one above the plan's file size: it would be refused.
+        cv_size_bytes: { lte: 5 * 1024 * 1024 },
       });
+    });
+
+    it('claims the CVs before charging them, and lets them go after', async () => {
+      const { service, prisma } = withDue(null);
+
+      await service.analyse('p1', 'o1');
+
+      const [claim, release] = prisma.externalApplication.updateMany.mock.calls;
+      expect(claim[0].where.id).toEqual({ in: ['a1', 'a2'] });
+      expect(claim[0].data.analysis_claimed_at).toBeInstanceOf(Date);
+      expect(release[0].data).toEqual({ analysis_claimed_at: null });
+      // Each linked try counts.
+      expect(prisma.externalApplication.update.mock.calls[0][0].data).toEqual({
+        cv_resume_id: 'r-a1',
+        analysis_attempts: { increment: 1 },
+      });
+    });
+
+    it('takes none another run already holds', async () => {
+      const { service, prisma } = withDue(null);
+      prisma.externalApplication.findMany
+        .mockResolvedValueOnce([due('a1')])
+        .mockResolvedValueOnce([]); // the claim went to the other run
+
+      await expect(service.analyse('p1', 'o1')).rejects.toThrow('Aucun CV');
+      expect(screenings.addToOffer).not.toHaveBeenCalled();
     });
 
     it('never takes more CVs than the « CV inclus » left', async () => {
@@ -436,12 +479,87 @@ describe('CareersService', () => {
       await expect(service.retain('p1', 'a1')).rejects.toThrow('refusée');
     });
 
-    it('does not refuse someone already retained', async () => {
+    it('does not refuse someone already retained, and says so', async () => {
       const { prisma, service } = owned('RETAINED');
 
-      await service.refuse('p1', 'a1');
+      await expect(service.refuse('p1', 'a1')).rejects.toThrow(
+        'annulez d’abord',
+      );
 
       expect(prisma.externalApplication.update).not.toHaveBeenCalled();
+    });
+
+    describe('taking a retention back', () => {
+      const retained = (
+        offer: Record<string, unknown>,
+        seatsAfter: { rabotka: number; outside: number },
+      ) => {
+        const made = owned('RETAINED');
+        const tx = {
+          $executeRaw: jest.fn().mockResolvedValue(1),
+          jobOffer: {
+            findUnique: jest.fn().mockResolvedValue({
+              status: 'FILLED',
+              quantity: 2,
+              deleted_at: null,
+              ...offer,
+            }),
+            update: jest.fn().mockResolvedValue({}),
+          },
+          application: {
+            count: jest.fn().mockResolvedValue(seatsAfter.rabotka),
+          },
+          externalApplication: {
+            count: jest.fn().mockResolvedValue(seatsAfter.outside),
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          },
+        };
+        (made.prisma as unknown as { $transaction: jest.Mock }).$transaction =
+          jest.fn((run: (t: typeof tx) => Promise<unknown>) => run(tx));
+        return { ...made, tx };
+      };
+
+      it('frees the post, reopens the offer and tells the candidate', async () => {
+        const { service, tx } = retained({}, { rabotka: 1, outside: 0 });
+
+        await expect(service.unretain('p1', 'a1')).resolves.toEqual({
+          retained: false,
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(tx.externalApplication.updateMany.mock.calls[0][0]).toEqual({
+          where: { id: 'a1', status: 'RETAINED' },
+          data: { status: 'PENDING', retained_at: null },
+        });
+        expect(tx.jobOffer.update.mock.calls[0][0].data.status).toBe(
+          'PARTIALLY_FILLED',
+        );
+        expect(sendMail.mock.calls[0][0].to).toBe('awa@example.com');
+      });
+
+      it('puts the offer back online when no post is taken any more', async () => {
+        const { service, tx } = retained({}, { rabotka: 0, outside: 0 });
+
+        await service.unretain('p1', 'a1');
+
+        expect(tx.jobOffer.update.mock.calls[0][0].data.status).toBe('ACTIVE');
+      });
+
+      it('refuses on an offer past recruiting, or a candidate not retained', async () => {
+        const ended = retained(
+          { status: 'IN_PROGRESS' },
+          { rabotka: 0, outside: 0 },
+        );
+        await expect(ended.service.unretain('p1', 'a1')).rejects.toThrow(
+          'ne recrute',
+        );
+        expect(ended.tx.externalApplication.updateMany).not.toHaveBeenCalled();
+
+        const { service } = owned('PENDING');
+        await expect(service.unretain('p1', 'a1')).rejects.toThrow(
+          "n'est pas retenue",
+        );
+      });
     });
 
     describe('retaining fills a post', () => {
@@ -624,12 +742,16 @@ describe('CareersService', () => {
       const { service } = serviceWith(business, [], open);
 
       await service.apply('kamoa', 'RBT-AC5LF', pdf, { ...dto, answers });
-      await new Promise((resolve) => setImmediate(resolve));
+      for (let i = 0; i < 5; i++) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
 
       expect(emit).toHaveBeenCalled();
+      // The candidate, then the team (the holder's address, not the
+      // organisation's contact one).
       expect(sendMail.mock.calls.map(([mail]) => mail.to)).toEqual([
         'awa@example.com',
-        'rh@kamoa.cg',
+        'boss@kamoa.cg',
       ]);
     });
 

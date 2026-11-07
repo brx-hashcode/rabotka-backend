@@ -37,6 +37,7 @@ function make(
       findMany: jest.fn().mockResolvedValue([]),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       create: jest.fn(),
+      update: jest.fn().mockResolvedValue({}),
     },
     businessQuotaUsage: {
       create: jest.fn().mockResolvedValue({}),
@@ -44,23 +45,41 @@ function make(
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     businessPlan: { findUnique: jest.fn().mockResolvedValue(plan()) },
+    // No pack bought: the plan alone.
+    businessCredit: {
+      findMany: jest.fn().mockResolvedValue([]),
+      findUnique: jest.fn().mockResolvedValue(null),
+      create: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    $queryRaw: jest.fn().mockResolvedValue([]),
     jobOffer: { count: jest.fn().mockResolvedValue(0), updateMany: jest.fn() },
     paymentRequest: { findUnique: jest.fn() },
     // No team yet: e-mails go to the account holder.
     businessMember: {
       findMany: jest.fn().mockResolvedValue([]),
       findFirst: jest.fn().mockResolvedValue(null),
+      groupBy: jest.fn().mockResolvedValue([]),
     },
   };
   const systemConfig: any = {
+    getBusinessPackSettings: jest.fn().mockResolvedValue({
+      cv: { quantity: 50, priceFcfa: 0 },
+      offers: { quantity: 5, priceFcfa: 0 },
+      contacts: { quantity: 10, priceFcfa: 0 },
+      offerDrafts: { quantity: 10, priceFcfa: 0 },
+    }),
     getBusinessSubscriptionSettings: jest.fn().mockResolvedValue(
       over.settings ?? {
         trialDays: 14,
         trialPlanCode: 'pro',
         reminderDays: [7, 1],
+        trialAi: { cvAnalysis: false, cvChat: false, offerWriter: false },
       },
     ),
   };
+  // A transaction runs on the same mock.
+  prisma.$transaction = jest.fn((fn: (tx: unknown) => unknown) => fn(prisma));
   const layout: any = { wrap: jest.fn().mockResolvedValue('<html/>') };
   const mail: any = {
     sendMail: jest.fn().mockResolvedValue(undefined),
@@ -88,6 +107,9 @@ const running = (over: Record<string, unknown> = {}) => ({
   id: 'sub-1',
   business_id: 'b1',
   status: 'ACTIVE',
+  // Started yesterday: still in its first month, so no counter reset.
+  starts_at: new Date(Date.now() - 86_400_000),
+  counters_from: null,
   ends_at: new Date('2099-01-01T00:00:00Z'),
   unlocks_used: 0,
   plan: plan(),
@@ -185,7 +207,7 @@ describe('BusinessSubscriptionService', () => {
       const { service, prisma } = make({ sub: withCv() });
       prisma.businessSubscription.updateMany.mockResolvedValue({ count: 0 });
       await expect(service.consumeCv('b1', 9)).rejects.toThrow(
-        'Il vous reste 7 CV inclus ce mois-ci : retirez-en 2',
+        /Il vous reste 7 CV à analyser : retirez-en 2 ou changez de formule\./,
       );
     });
 
@@ -217,12 +239,12 @@ describe('BusinessSubscriptionService', () => {
 
     it('gives back in one statement, and nothing for zero', async () => {
       const { service, prisma } = make();
-      prisma.$executeRaw = jest.fn().mockResolvedValue(1);
       await service.releaseCv('sub-1', 0);
-      expect(prisma.$executeRaw).not.toHaveBeenCalled();
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
       await service.releaseCv('sub-1', 2);
-      expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
-      expect(prisma.$executeRaw.mock.calls[0].slice(1)).toEqual([2, 'sub-1']);
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      // None of them came from a pack: no credit given back.
+      expect(prisma.businessCredit.updateMany).not.toHaveBeenCalled();
     });
   });
 
@@ -419,7 +441,7 @@ describe('BusinessSubscriptionService', () => {
         subscriptionId: 'sub-1',
       });
       expect(prisma.businessSubscription.updateMany).toHaveBeenCalledWith({
-        where: { id: 'sub-1', offer_drafts_used: { lt: 4 } },
+        where: { id: 'sub-1', offer_drafts_used: { lte: 3 } },
         data: { offer_drafts_used: { increment: 1 } },
       });
 
@@ -445,36 +467,54 @@ describe('BusinessSubscriptionService', () => {
 
   describe('consumeSeat', () => {
     const message = (limit: number) => `limit ${limit}`;
+    const team = (recruiters: number, reviewers: number) =>
+      jest.fn().mockResolvedValue([
+        { role: 'RECRUITER', _count: { _all: recruiters } },
+        { role: 'REVIEWER', _count: { _all: reviewers } },
+      ]);
 
-    it('takes a place of the role on the current period, never past the plan', async () => {
+    it('counts the people in the team, not a per-period tally', async () => {
       const { service, prisma } = make({
         sub: running({
           plan: plan({ recruiters_limit: 2, reviewers_limit: 1 }),
         }),
       });
-      await expect(
-        service.consumeSeat('b1', 'REVIEWER', message),
-      ).resolves.toEqual({ subscriptionId: 'sub-1' });
-      expect(prisma.businessSubscription.updateMany).toHaveBeenCalledWith({
-        where: { id: 'sub-1', reviewers_added: { lt: 1 } },
-        data: { reviewers_added: { increment: 1 } },
-      });
-
-      prisma.businessSubscription.updateMany.mockResolvedValue({ count: 0 });
+      prisma.businessMember.groupBy = team(1, 1);
       await expect(
         service.consumeSeat('b1', 'RECRUITER', message),
-      ).rejects.toThrow('limit 2');
+      ).resolves.toEqual({ subscriptionId: 'sub-1' });
+      await expect(
+        service.consumeSeat('b1', 'REVIEWER', message),
+      ).rejects.toThrow('limit 1');
+      expect(prisma.businessMember.groupBy.mock.calls[0][0].where).toEqual({
+        business_id: 'b1',
+        is_owner: false,
+        status: { in: ['INVITED', 'ACTIVE'] },
+        role: { in: ['RECRUITER', 'REVIEWER'] },
+      });
+      // Nothing is counted up any more: a new period frees no place.
+      expect(prisma.businessSubscription.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('leaves the member changing role out of the count', async () => {
+      const { service, prisma } = make({
+        sub: running({ plan: plan({ reviewers_limit: 1 }) }),
+      });
+      prisma.businessMember.groupBy = team(0, 0);
+      await service.consumeSeat('b1', 'REVIEWER', message, 'm-2');
+      expect(prisma.businessMember.groupBy.mock.calls[0][0].where.id).toEqual({
+        not: 'm-2',
+      });
     });
 
     it('has no ceiling for an unlimited role', async () => {
       const { service, prisma } = make({
         sub: running({ plan: plan({ recruiters_limit: null }) }),
       });
-      await service.consumeSeat('b1', 'RECRUITER', message);
-      expect(prisma.businessSubscription.updateMany).toHaveBeenCalledWith({
-        where: { id: 'sub-1' },
-        data: { recruiters_added: { increment: 1 } },
-      });
+      prisma.businessMember.groupBy = team(50, 0);
+      await expect(
+        service.consumeSeat('b1', 'RECRUITER', message),
+      ).resolves.toEqual({ subscriptionId: 'sub-1' });
     });
 
     it('is refused without a plan or with a plan that has none', async () => {
@@ -584,6 +624,22 @@ describe('BusinessSubscriptionService', () => {
       expect(prisma.businessSubscription.create).not.toHaveBeenCalled();
     });
 
+    it('never starts a custom plan as the trial', async () => {
+      const { service, prisma } = make();
+      prisma.businessPlan.findUnique.mockResolvedValue(
+        plan({ business_id: 'b9' }),
+      );
+      await expect(service.startTrial('b1')).resolves.toBeNull();
+      expect(prisma.businessSubscription.create).not.toHaveBeenCalled();
+    });
+
+    it('is skipped when the admin approved without it', async () => {
+      const { service, prisma } = make();
+      await service.onBusinessVerified({ businessId: 'b1', startTrial: false });
+      expect(prisma.businessSubscription.create).not.toHaveBeenCalled();
+      expect(prisma.businessPlan.findUnique).not.toHaveBeenCalled();
+    });
+
     it('starts the configured plan for the configured days, and tells the business', async () => {
       const { service, prisma, mail } = make();
       const now = new Date('2026-10-01T00:00:00Z');
@@ -670,8 +726,18 @@ describe('BusinessSubscriptionService', () => {
         ({ data }: any) => ({ ...data, plan: next }),
       );
       prisma.$transaction = (fn: (tx: unknown) => unknown) => fn(prisma);
+      prisma.$executeRaw = jest.fn().mockResolvedValue(1);
       return ctx;
     }
+
+    it('places one business’s periods one at a time (an advisory lock)', async () => {
+      const { service, prisma } = setup(null, cheap);
+      await service.grantByAdmin('b1', 'ess', 'MONTHLY' as any, 'admin');
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(prisma.$executeRaw.mock.calls[0][0].join('?')).toContain(
+        'pg_advisory_xact_lock',
+      );
+    });
 
     it('starts a dearer plan at once, closing the old period and moving what was queued', async () => {
       const current = runningPeriod(cheap);
@@ -867,7 +933,7 @@ describe('BusinessSubscriptionService', () => {
         subscriptionId: 'sub-1',
       });
       expect(prisma.businessSubscription.updateMany).toHaveBeenCalledWith({
-        where: { id: 'sub-1', offers_published: { lt: 1 } },
+        where: { id: 'sub-1', offers_published: { lte: 0 } },
         data: { offers_published: { increment: 1 } },
       });
 
@@ -893,6 +959,228 @@ describe('BusinessSubscriptionService', () => {
       await expect(noPlan.service.consumeOffer('p1')).rejects.toThrow(
         /Choisissez une formule/,
       );
+    });
+  });
+
+  describe('reconcilePaidSubscriptions', () => {
+    const now = new Date('2026-11-06T10:00:00Z');
+    const paidAt = (minutesAgo: number) =>
+      new Date(now.getTime() - minutesAgo * 60_000);
+
+    function setup(
+      requests: { id: string; updated_at: Date }[],
+      linked: string[],
+    ) {
+      const ctx = make();
+      ctx.prisma.paymentRequest.findMany = jest
+        .fn()
+        .mockResolvedValue(requests);
+      ctx.prisma.businessSubscription.findMany.mockResolvedValue(
+        linked.map((id) => ({ payment_request_id: id })),
+      );
+      return ctx;
+    }
+
+    it('activates a paid subscription that has no period', async () => {
+      const { service, prisma } = setup(
+        [
+          { id: 'pr-ok', updated_at: paidAt(30) },
+          { id: 'pr-lost', updated_at: paidAt(30) },
+        ],
+        ['pr-ok'],
+      );
+      const activate = jest
+        .spyOn(service, 'activateFromPayment')
+        .mockResolvedValue({ id: 'sub' } as any);
+
+      await expect(service.reconcilePaidSubscriptions(now)).resolves.toEqual({
+        activated: 1,
+        failed: 0,
+      });
+      expect(activate).toHaveBeenCalledTimes(1);
+      expect(activate).toHaveBeenCalledWith('pr-lost', now);
+      // Leaves the payment event its first five minutes.
+      expect(
+        prisma.paymentRequest.findMany.mock.calls[0][0].where.updated_at.lte,
+      ).toEqual(paidAt(5));
+    });
+
+    it('tells the admins of one that still fails, once', async () => {
+      const recent = setup([{ id: 'pr-1', updated_at: paidAt(30) }], []);
+      jest
+        .spyOn(recent.service, 'activateFromPayment')
+        .mockRejectedValue(new Error('plan moved'));
+      await expect(
+        recent.service.reconcilePaidSubscriptions(now),
+      ).resolves.toEqual({ activated: 0, failed: 1 });
+      expect(recent.events.emit).toHaveBeenCalledWith(
+        'admin.notification.payment.activation',
+        expect.objectContaining({ entityId: 'pr-1', entityType: 'payment' }),
+      );
+
+      // Hours later: still retried, but no second alert.
+      const later = setup([{ id: 'pr-1', updated_at: paidAt(300) }], []);
+      jest.spyOn(later.service, 'activateFromPayment').mockResolvedValue(null);
+      await later.service.reconcilePaidSubscriptions(now);
+      expect(later.events.emit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('custom plans', () => {
+    it('shows a business the catalog and its own custom plans only', async () => {
+      const { service, prisma } = make();
+      prisma.businessPlan.findMany = jest.fn().mockResolvedValue([]);
+      await service.plansFor('b1');
+      expect(prisma.businessPlan.findMany.mock.calls[0][0].where).toEqual({
+        deleted_at: null,
+        is_active: true,
+        OR: [{ business_id: null }, { business_id: 'b1' }],
+      });
+    });
+
+    it("refuses to grant another business's custom plan", async () => {
+      const { service, prisma } = make();
+      prisma.businessPlan.findUnique.mockResolvedValue(
+        plan({ business_id: 'b9' }),
+      );
+      await expect(
+        service.grantByAdmin('b1', 'plan-1', 'MONTHLY' as any, 'admin'),
+      ).rejects.toThrow(/pas disponible/);
+      expect(prisma.businessSubscription.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('monthly counters of a longer period', () => {
+    it('starts the counters again once a new month of an annual period begins', async () => {
+      const now = new Date('2026-11-06T10:00:00Z');
+      const annual = running({
+        starts_at: new Date('2026-09-15T08:00:00Z'),
+        ends_at: new Date('2027-09-15T08:00:00Z'),
+        counters_from: new Date('2026-09-15T08:00:00Z'),
+        cv_screened: 10,
+      });
+      const { service, prisma } = make({ sub: annual });
+      prisma.businessSubscription.findFirst
+        .mockResolvedValueOnce(annual)
+        .mockResolvedValueOnce({ ...annual, cv_screened: 0 });
+
+      const sub = await service.current('b1', prisma, now);
+
+      expect(prisma.businessSubscription.updateMany).toHaveBeenCalledWith({
+        where: { id: 'sub-1', counters_from: annual.counters_from },
+        data: {
+          counters_from: new Date('2026-10-15T08:00:00Z'),
+          unlocks_used: 0,
+          cv_screened: 0,
+          offer_drafts_used: 0,
+          offers_published: 0,
+          cv_from_credits: 0,
+          offers_from_credits: 0,
+          offer_drafts_from_credits: 0,
+        },
+      });
+      expect(sub?.cv_screened).toBe(0);
+    });
+
+    it('leaves the counters of the running month alone', async () => {
+      const now = new Date('2026-11-06T10:00:00Z');
+      const annual = running({
+        starts_at: new Date('2026-09-15T08:00:00Z'),
+        ends_at: new Date('2027-09-15T08:00:00Z'),
+        counters_from: new Date('2026-10-15T08:00:00Z'),
+      });
+      const { service, prisma } = make({ sub: annual });
+      await service.current('b1', prisma, now);
+      expect(prisma.businessSubscription.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('entitlements during the trial', () => {
+    const aiPlan = plan({
+      cv_screenings_per_period: 50,
+      cv_chat_questions: 20,
+      offer_drafts_per_period: 10,
+    });
+    const period = (billing_period: string) =>
+      running({
+        status: billing_period === 'TRIAL' ? 'TRIAL' : 'ACTIVE',
+        billing_period,
+        cv_screened: 0,
+        offer_drafts_used: 0,
+        plan: aiPlan,
+      });
+
+    it('leaves the AI features out of a trial', async () => {
+      const { service } = make({ sub: period('TRIAL') });
+      const e = await service.entitlements('b1');
+      expect(e).toMatchObject({
+        cvQuota: 0,
+        cvRemaining: 0,
+        cvChatQuestions: 0,
+        offerDraftsQuota: 0,
+        offerDraftsRemaining: 0,
+      });
+      expect(e.trialLocked.sort()).toEqual([
+        'cvAnalysis',
+        'cvChat',
+        'offerWriter',
+      ]);
+    });
+
+    it('gives a paid period on the same plan its AI quotas', async () => {
+      const { service } = make({ sub: period('MONTHLY') });
+      const e = await service.entitlements('b1');
+      expect(e).toMatchObject({
+        cvQuota: 50,
+        cvRemaining: 50,
+        cvChatQuestions: 20,
+        offerDraftsQuota: 10,
+        trialLocked: [],
+      });
+    });
+
+    it('keeps in the trial what the settings switch on', async () => {
+      const { service } = make({
+        sub: period('TRIAL'),
+        settings: {
+          trialDays: 14,
+          trialPlanCode: 'pro',
+          reminderDays: [],
+          trialAi: { cvAnalysis: true, cvChat: false, offerWriter: false },
+        },
+      });
+      const e = await service.entitlements('b1');
+      expect(e.cvQuota).toBe(50);
+      expect(e.cvChatQuestions).toBe(0);
+      expect(e.trialLocked).not.toContain('cvAnalysis');
+    });
+
+    it('refuses to charge a CV or an AI draft on a trial, saying why', async () => {
+      const { service, prisma } = make({ sub: period('TRIAL') });
+      await expect(service.consumeCv('b1', 1)).rejects.toThrow(
+        /après votre essai/,
+      );
+      await expect(service.consumeOfferDraft('b1')).rejects.toThrow(
+        /après votre essai/,
+      );
+      expect(prisma.businessSubscription.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('locks nothing the plan does not include anyway', async () => {
+      const { service } = make({
+        sub: running({
+          status: 'TRIAL',
+          billing_period: 'TRIAL',
+          cv_screened: 0,
+          offer_drafts_used: 0,
+          plan: plan({
+            cv_screenings_per_period: 0,
+            cv_chat_questions: 0,
+            offer_drafts_per_period: 0,
+          }),
+        }),
+      });
+      expect((await service.entitlements('b1')).trialLocked).toEqual([]);
     });
   });
 

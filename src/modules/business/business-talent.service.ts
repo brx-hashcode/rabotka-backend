@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { ApplicationStatus, JobOfferStatus, ProfileType } from '@prisma/client';
+import { ApplicationStatus, JobOfferStatus } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import {
   notificationDedupeKey,
@@ -206,15 +206,14 @@ export class BusinessTalentService {
     workerId: string,
     input: { note?: string | null; tags?: string[] },
   ) {
+    // The workers search shows and invitations reach: active and verified.
     const worker = await this.prisma.profile.findFirst({
-      where: {
-        id: workerId,
-        profile_type: ProfileType.WORKER,
-        deleted_at: null,
-      },
+      where: { id: workerId, ...CONTACTABLE_WORKER },
       select: { id: true },
     });
-    if (!worker) throw new NotFoundException('Travailleur introuvable');
+    if (!worker) {
+      throw new NotFoundException("Ce profil n'est plus actif ou vérifié.");
+    }
 
     const data = {
       ...(input.note !== undefined

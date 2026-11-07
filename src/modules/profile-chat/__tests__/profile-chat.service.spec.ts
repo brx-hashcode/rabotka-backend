@@ -432,7 +432,7 @@ describe('ProfileChatService', () => {
       expect(heldAlert()).toBeUndefined();
       const alert = maskedAlert();
       expect(alert).toMatchObject({
-        title: 'Coordonnées masquées',
+        title: 'Contact details masked',
         entityType: 'conversation',
         entityId: CONV,
         dedupeWindowMs: 60 * 60 * 1000,

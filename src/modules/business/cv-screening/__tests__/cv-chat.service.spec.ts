@@ -34,16 +34,26 @@ function make(
     },
     cvResumeMessage: {
       findMany: jest.fn().mockResolvedValue(opts.past ?? []),
-      create: jest.fn().mockResolvedValue({}),
+      // The question saved, by its id: the one taken back.
+      create: jest.fn().mockResolvedValue({ id: 'q1' }),
+      count: jest
+        .fn()
+        .mockResolvedValue(
+          (opts.past ?? []).filter((m: any) => m.role === 'USER').length,
+        ),
       findFirst: jest.fn(),
-      delete: jest.fn().mockResolvedValue({}),
+      deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
+    $executeRaw: jest.fn().mockResolvedValue(1),
   };
+  // The lock and the count run in a transaction: here, on the same mock.
+  prisma.$transaction = (fn: (tx: unknown) => unknown) => fn(prisma);
   const subscriptions: any = {
     businessOf: jest.fn().mockResolvedValue('b1'),
-    entitlements: jest
-      .fn()
-      .mockResolvedValue({ cvChatQuestions: opts.limit ?? 20 }),
+    entitlements: jest.fn().mockResolvedValue({
+      cvChatQuestions: opts.limit ?? 20,
+      trialLocked: [],
+    }),
   };
   const screenings: any = {
     transcribe: jest.fn((source: { kind: string; text?: string }) =>
@@ -194,6 +204,26 @@ describe('CvChatService', () => {
     });
   });
 
+  describe('an unreadable scan', () => {
+    it('is remembered, and refused at once the next time', async () => {
+      const { service, prisma, screenings } = make();
+      screenings.sourceOf.mockResolvedValue({ kind: 'image' });
+      await expect(service.cvTextOf(resume() as any)).rejects.toThrow(
+        'ne peut plus être lu',
+      );
+      expect(prisma.cvScreeningResume.update).toHaveBeenCalledWith({
+        where: { id: 'r1' },
+        data: { cv_text: '' },
+      });
+
+      screenings.transcribe.mockClear();
+      await expect(
+        service.cvTextOf(resume({ cv_text: '' }) as any),
+      ).rejects.toThrow('ne peut plus être lu');
+      expect(screenings.transcribe).not.toHaveBeenCalled();
+    });
+  });
+
   describe('answer', () => {
     it('streams and saves the whole answer', async () => {
       const { service, prisma, llm } = make();
@@ -230,8 +260,8 @@ describe('CvChatService', () => {
       await expect(
         drain(service.answer(turn, new AbortController().signal)),
       ).rejects.toThrow('chain exhausted');
-      expect(prisma.cvResumeMessage.delete).toHaveBeenCalledWith({
-        where: { id: 'USER-Q ?' },
+      expect(prisma.cvResumeMessage.deleteMany).toHaveBeenCalledWith({
+        where: { id: 'q1', role: 'USER' },
       });
     });
 
@@ -260,8 +290,8 @@ describe('CvChatService', () => {
       ).rejects.toBeInstanceOf(OffTopicError);
       expect(shown).toEqual([]);
       expect(prisma.cvResumeMessage.create).not.toHaveBeenCalled();
-      expect(prisma.cvResumeMessage.delete).toHaveBeenCalledWith({
-        where: { id: 'USER-Centrer une div ?' },
+      expect(prisma.cvResumeMessage.deleteMany).toHaveBeenCalledWith({
+        where: { id: 'q1', role: 'USER' },
       });
     });
 
@@ -298,7 +328,7 @@ describe('CvChatService', () => {
           content: 'Début de réponse',
         },
       });
-      expect(prisma.cvResumeMessage.delete).not.toHaveBeenCalled();
+      expect(prisma.cvResumeMessage.deleteMany).not.toHaveBeenCalled();
     });
   });
 });

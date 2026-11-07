@@ -237,6 +237,8 @@ export class CandidateNotesService {
       member?: { id: string; name: string; role: string } | null;
       verdict?: CandidateOpinionVerdict;
       interview?: { startsAt: string; status: string };
+      /** WITHDRAWN: who ended it — the worker, the business, or Rabotka (the offer closed or expired). */
+      cancelledBy?: 'WORKER' | 'EMPLOYER' | 'SYSTEM' | null;
     };
     const events: Event[] = [];
     const push = (at: Date | null | undefined, e: Omit<Event, 'at'>) => {
@@ -252,7 +254,10 @@ export class CandidateNotesService {
       kind: 'REFUSED',
       member: by(/\/(reject|refuse)$/),
     });
-    push(dates.withdrawn, { kind: 'WITHDRAWN' });
+    push(dates.withdrawn, {
+      kind: 'WITHDRAWN',
+      cancelledBy: dates.cancelledBy,
+    });
     for (const i of interviews) {
       push(i.created_at, {
         kind: 'INTERVIEW',
@@ -317,6 +322,7 @@ export class CandidateNotesService {
           accepted_at: true,
           rejected_at: true,
           cancelled_at: true,
+          cancelled_by: true,
         },
       });
       return {
@@ -325,6 +331,8 @@ export class CandidateNotesService {
         retained: a.accepted_at,
         refused: a.rejected_at,
         withdrawn: a.cancelled_at,
+        // « A retiré sa candidature » only when it was the worker.
+        cancelledBy: a.cancelled_by,
       };
     }
     const a = await this.prisma.externalApplication.findUniqueOrThrow({
@@ -342,6 +350,7 @@ export class CandidateNotesService {
       retained: a.retained_at,
       refused: a.refused_at,
       withdrawn: null,
+      cancelledBy: null,
     };
   }
 

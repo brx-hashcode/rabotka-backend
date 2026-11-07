@@ -267,20 +267,14 @@ export class TeamService {
       removed_at: null,
       seat_subscription_id: seat.subscriptionId,
     };
-    let member: BusinessMember;
-    try {
-      member = here
-        ? await this.prisma.businessMember.update({
-            where: { id: here.id },
-            data,
-          })
-        : await this.prisma.businessMember.create({
-            data: { ...data, business_id: actor.businessId, email },
-          });
-    } catch (err) {
-      await this.subscriptions.releaseSeat(seat.subscriptionId, dto.role);
-      throw err;
-    }
+    const member = here
+      ? await this.prisma.businessMember.update({
+          where: { id: here.id },
+          data,
+        })
+      : await this.prisma.businessMember.create({
+          data: { ...data, business_id: actor.businessId, email },
+        });
     await this.sendInvite(actor.businessId, member, actor.member.name);
     return memberView(member);
   }
@@ -314,24 +308,12 @@ export class TeamService {
     const member = await this.ownIn(actor.businessId, id);
     this.assertNotHolderOrSelf(actor, member);
     if (member.role === role) return memberView(member);
-    const seat = await this.takeSeat(actor.businessId, role);
-    let updated: BusinessMember;
-    try {
-      updated = await this.prisma.businessMember.update({
-        where: { id },
-        data: { role, seat_subscription_id: seat.subscriptionId },
-      });
-    } catch (err) {
-      await this.subscriptions.releaseSeat(seat.subscriptionId, role);
-      throw err;
-    }
-    // Moved within the period it was added in: its old place is free again.
-    if (member.seat_subscription_id === seat.subscriptionId) {
-      await this.subscriptions.releaseSeat(
-        seat.subscriptionId,
-        member.role as InvitedRole,
-      );
-    }
+    // Its old place is freed by the move itself: the team counts people.
+    const seat = await this.takeSeat(actor.businessId, role, member.id);
+    const updated = await this.prisma.businessMember.update({
+      where: { id },
+      data: { role, seat_subscription_id: seat.subscriptionId },
+    });
     return memberView(updated);
   }
 
@@ -481,37 +463,47 @@ export class TeamService {
   }
 
   /**
-   * One place of this role on the current period. Places are counted per
-   * period, like the offers: a new period frees them, the team stays.
+   * Room for one more of this role: the plan's limit is the number of people
+   * in the team (invited or active), freed when someone leaves.
    */
-  private takeSeat(businessId: string, role: InvitedRole) {
+  private takeSeat(
+    businessId: string,
+    role: InvitedRole,
+    excludeMemberId?: string,
+  ) {
     const [one, many] = ROLE_PLURAL[role];
-    return this.subscriptions.consumeSeat(businessId, role, (limit) =>
-      limit === 0
-        ? `Votre formule n’inclut pas d’${many}. Changez de formule pour en inviter.`
-        : `Vous avez déjà ajouté ${limit} ${limit > 1 ? many : one} sur cette période, le maximum de votre formule. Changez de formule ou attendez son renouvellement.`,
+    return this.subscriptions.consumeSeat(
+      businessId,
+      role,
+      (limit) =>
+        limit === 0
+          ? `Votre formule n’inclut pas d’${many}. Changez de formule pour en inviter.`
+          : `Votre formule permet ${limit} ${limit > 1 ? many : one} dans l’équipe, déjà atteint. Retirez-en un ou changez de formule.`,
+      excludeMemberId,
     );
   }
 
   /**
-   * Takes the member out of the team. An invitation never accepted gives its
-   * place back to the period it was taken on.
+   * Takes the member out of the team: its place is free again at once. The
+   * interview calendar link is renewed too: one link for the whole team, and
+   * someone who left kept the candidates' names and times in their agenda.
    */
   private async markRemoved(member: BusinessMember) {
-    await this.prisma.businessMember.update({
-      where: { id: member.id },
-      data: {
-        status: 'REMOVED',
-        removed_at: new Date(),
-        seat_subscription_id: null,
-      },
-    });
-    if (member.status === 'INVITED' && member.seat_subscription_id) {
-      await this.subscriptions.releaseSeat(
-        member.seat_subscription_id,
-        member.role as InvitedRole,
-      );
-    }
+    await this.prisma.$transaction([
+      this.prisma.businessMember.update({
+        where: { id: member.id },
+        data: {
+          status: 'REMOVED',
+          removed_at: new Date(),
+          seat_subscription_id: null,
+        },
+      }),
+      // A new one is made the next time someone asks for it.
+      this.prisma.business.update({
+        where: { id: member.business_id },
+        data: { calendar_token: null },
+      }),
+    ]);
   }
 
   private assertAdmin(actor: TeamActor) {

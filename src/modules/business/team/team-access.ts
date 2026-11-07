@@ -33,8 +33,8 @@ const ADMIN_CHANGES: RegExp[] = [
   /^\/business\/me\/team(\/|$)/,
   /^\/(pay|payments|wallet|invoices)(\/|$)/,
   // The profile is the organisation's account (logo, papers, settings); a
-  // Recruteur reaches it only through hiring.
-  /^\/profile(?!\/(job-offers|applications|notifications|claims)(\/|$))(\/|$)/,
+  // Recruteur reaches it only through hiring — and writing to candidates.
+  /^\/profile(?!\/(job-offers|applications|discussions|notifications|claims)(\/|$))(\/|$)/,
 ];
 
 /** The changes an Évaluateur may make. */
