@@ -35,7 +35,7 @@ jobs:
     # A merged PR, or « Run workflow » by hand (e.g. to pick up new Vault
     # values): before, a manual run skipped every job.
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -74,7 +74,7 @@ jobs:
   build-and-push:
     name: Build and Push Image
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
@@ -158,7 +158,7 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────
   deploy:
     name: Deploy to VPS (develop)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build-and-push
     # Hard cap so a stall can't hang for hours (GitHub default is 6h). The
     # Hard cap so a stall can't hang for hours. Native pull is fast; the SSH
@@ -751,7 +751,7 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────
   smoke-test:
     name: Smoke Test (develop)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: deploy
     permissions:
       contents: read
@@ -784,7 +784,7 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────
   notify:
     name: Slack Notification (develop)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [test, build-and-push, deploy, smoke-test]
     if: always()
     permissions:

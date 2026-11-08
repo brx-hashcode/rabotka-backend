@@ -24,7 +24,7 @@ concurrency:
 jobs:
   sync:
     name: Fast-forward develop to main
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       # Pushing to develop is the whole job.
       contents: write
