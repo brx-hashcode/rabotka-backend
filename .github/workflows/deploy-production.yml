@@ -40,7 +40,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch'
       || github.event.pull_request.merged == true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -84,7 +84,7 @@ jobs:
   build-and-push:
     name: Build and Push Release Image
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
@@ -133,7 +133,7 @@ jobs:
   deploy:
     name: Deploy to VPS (production)
     needs: [test, build-and-push]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
 
@@ -680,7 +680,7 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────
   smoke-test:
     name: Smoke Test (production)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: deploy
     permissions:
       contents: read
@@ -712,7 +712,7 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────
   notify:
     name: Slack Notification (production)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [test, deploy, smoke-test]
     # always(), but not for a pipeline that never ran: `notify` is the only job
     # without a dependency on `test`, so a skipped deploy still reached it and
