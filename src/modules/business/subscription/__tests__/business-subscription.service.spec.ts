@@ -341,6 +341,35 @@ describe('BusinessSubscriptionService', () => {
     });
   });
 
+  describe('overview', () => {
+    it('lists the periods to come soonest first: the first is the one to start', async () => {
+      const { service, prisma } = make();
+      jest.spyOn(service, 'entitlements').mockResolvedValue({} as never);
+      jest.spyOn(service as never, 'plansFor').mockResolvedValue([] as never);
+      const period = (id: string, startsInDays: number) => ({
+        id,
+        status: 'ACTIVE',
+        billing_period: 'MONTHLY',
+        starts_at: new Date(Date.now() + startsInDays * 86_400_000),
+        ends_at: new Date(Date.now() + (startsInDays + 30) * 86_400_000),
+        unlocks_used: 0,
+        payment_request_id: 'pr',
+        granted_by: null,
+        plan: { name: 'ZuaFood Plan', code: 'zua' },
+      });
+      // As the database gives them: newest first.
+      prisma.businessSubscription.findMany.mockResolvedValue([
+        period('january', 58),
+        period('december', 28),
+        period('running', -2),
+      ]);
+
+      const { upcoming } = await service.overview('b1');
+
+      expect(upcoming.map((p) => p.id)).toEqual(['december', 'january']);
+    });
+  });
+
   describe('startQueuedNow', () => {
     const now = new Date('2026-10-28T12:00:00Z');
     const queuedPeriod = (id: string, startDay: number, endDay: number) => ({
