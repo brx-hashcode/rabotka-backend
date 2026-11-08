@@ -72,6 +72,8 @@ import { ListPaymentRequestsDto } from './dto/list-payment-requests.dto';
 import { SubmitPaymentDto } from './dto/submit-payment.dto';
 import { CONTACTABLE_WORKER } from '../recommendation/contactable-worker';
 import { paymentFailureMessage } from '../../common/services/payment/payment-failure';
+import { ExchangeRateService } from '../../common/services/fx/exchange-rate.service';
+import { isCfa } from '../../common/services/fx/local-price';
 
 const PAYMENT_REQUEST_SELECT = {
   id: true,
@@ -93,6 +95,8 @@ const PAYMENT_REQUEST_SELECT = {
   recommendation_worker_id: true,
   contact_unlock_attempt_id: true,
   penalty_ids: true,
+  charged_currency: true,
+  charged_amount: true,
   profile: {
     select: {
       id: true,
@@ -128,8 +132,38 @@ type PaymentProcessingContext = {
 // rule instead, missed WALLET_TOP_UP, and filed failed wallet recharges as
 // penalties.
 
-/** Requests are priced in CFA francs; either franc can be charged (see CFA_CURRENCIES). */
-const PAYMENT_CURRENCIES = CFA_CURRENCIES;
+/** « 1 000 FCFA », « 1,7 USD »: an amount said to a payer. */
+export function moneyLabel(amount: number, currency: string): string {
+  const figure = amount.toLocaleString('fr-FR', { maximumFractionDigits: 2 });
+  return `${figure} ${isCfa(currency) ? 'FCFA' : currency}`;
+}
+
+/**
+ * One network as the payment page offers it: in ONE currency, the one the
+ * payer is charged in. A network that takes several (the DRC's, CDF and USD)
+ * is offered in the admin's preferred one (`payment.preferred_currencies`),
+ * else in a CFA franc, else in the first it lists.
+ */
+export function pickNetworkCurrencies(
+  operators: PaymentOperatorMetadata[],
+  preferred: string[],
+  priced: (currency: string) => boolean,
+): PaymentOperatorMetadata[] {
+  const byCode = new Map<string, PaymentOperatorMetadata[]>();
+  for (const o of operators) {
+    if (o.currency && !priced(o.currency)) continue;
+    byCode.set(o.code, [...(byCode.get(o.code) ?? []), o]);
+  }
+  const rank = (o: PaymentOperatorMetadata) => {
+    const c = o.currency ?? 'XAF';
+    const i = preferred.indexOf(c);
+    if (i >= 0) return i;
+    return isCfa(c) ? preferred.length : preferred.length + 1;
+  };
+  return [...byCode.values()].map(
+    (options) => [...options].sort((a, b) => rank(a) - rank(b))[0],
+  );
+}
 
 @Injectable()
 export class PaymentRequestService {
@@ -158,7 +192,131 @@ export class PaymentRequestService {
     private readonly referralService: ReferralService,
     // Appended for the same reason as `feedback` above: positional mocks.
     private readonly contactRecords: ContactRecordService,
+    private readonly fx: ExchangeRateService,
   ) {}
+
+  /**
+   * The networks a payer can be charged on now, each in one currency, and
+   * only in a currency with a fresh rate (the CFA francs always have one).
+   */
+  async payableOperators(): Promise<PaymentOperatorMetadata[]> {
+    const [operators, rules, rates] = await Promise.all([
+      this.paymentGateway.depositOperators(),
+      this.systemConfig.getFxRules(),
+      this.fx.freshRates(),
+    ]);
+    return pickNetworkCurrencies(
+      operators,
+      rules.preferredCurrencies,
+      (c) => isCfa(c) || rates.has(c),
+    );
+  }
+
+  /**
+   * The currency a country's payers see prices in: the one its networks are
+   * charged in (the preferred one when they take several), with the rate and
+   * rounding to convert an XAF price as checkout will. XAF, rate 1, when the
+   * country has no network we can price.
+   */
+  async currencyFor(countryAlpha2: string): Promise<{
+    country: string;
+    currency: string;
+    perXaf: number;
+    decimals: number;
+    significantDigits: number;
+    marginPercent: number;
+    asOf: string | null;
+  }> {
+    const country = (countryAlpha2 ?? '').trim().toUpperCase().slice(0, 2);
+    const alpha3 = toAlpha3(country);
+    const [operators, rules] = await Promise.all([
+      alpha3 ? this.payableOperators() : Promise.resolve([]),
+      this.systemConfig.getFxRules(),
+    ]);
+    const own = operators.filter((o) => o.country === alpha3);
+    const rank = (c: string) => {
+      const i = rules.preferredCurrencies.indexOf(c);
+      return i >= 0 ? i : rules.preferredCurrencies.length;
+    };
+    const network = [...own].sort(
+      (a, b) => rank(a.currency ?? 'XAF') - rank(b.currency ?? 'XAF'),
+    )[0];
+    const currency = network?.currency ?? 'XAF';
+    const rate = await this.fx.rate(currency);
+    const base = {
+      country,
+      significantDigits: rules.significantDigits,
+      marginPercent: rules.marginPercent,
+    };
+    if (!rate || isCfa(currency)) {
+      return {
+        ...base,
+        currency: rate ? currency : 'XAF',
+        perXaf: 1,
+        decimals: 0,
+        asOf: null,
+      };
+    }
+    return {
+      ...base,
+      currency,
+      perXaf: rate.perXaf,
+      decimals: network?.decimals ?? 0,
+      asOf: rate.asOf.toISOString(),
+    };
+  }
+
+  /** What `xaf` costs in each currency on offer, as the payment page shows it. */
+  private async localPrices(
+    xaf: number,
+  ): Promise<{ currency: string; amount: number }[]> {
+    const decimalsByCurrency = new Map<string, number>();
+    for (const o of await this.payableOperators()) {
+      decimalsByCurrency.set(o.currency ?? 'XAF', o.decimals ?? 0);
+    }
+    const quotes = await Promise.all(
+      [...decimalsByCurrency].map(([currency, decimals]) =>
+        this.fx.quote(xaf, currency, decimals),
+      ),
+    );
+    return quotes
+      .filter((q): q is NonNullable<typeof q> => q !== null)
+      .map((q) => ({ currency: q.currency, amount: q.amount }));
+  }
+
+  /**
+   * What the chosen network is charged for an XAF price: the price itself in
+   * the CFA zone, converted at the day's rate elsewhere — within the
+   * network's own limits.
+   */
+  private async chargeFor(
+    xaf: number,
+    network: PaymentOperatorMetadata | null,
+  ): Promise<{
+    currency: string;
+    amount: number;
+    perXaf: number;
+    asOf: Date;
+  }> {
+    const currency = network?.currency ?? 'XAF';
+    const quote = await this.fx.quote(xaf, currency, network?.decimals ?? 0);
+    if (!quote || quote.amount <= 0) {
+      throw new BadRequestException(
+        'Ce réseau n’est pas disponible pour le moment : choisissez-en un autre.',
+      );
+    }
+    if (network?.minAmount !== undefined && quote.amount < network.minAmount) {
+      throw new BadRequestException(
+        `Ce réseau n’accepte pas un paiement de moins de ${moneyLabel(network.minAmount, currency)}.`,
+      );
+    }
+    if (network?.maxAmount !== undefined && quote.amount > network.maxAmount) {
+      throw new BadRequestException(
+        `Ce réseau n’accepte pas un paiement de plus de ${moneyLabel(network.maxAmount, currency)}.`,
+      );
+    }
+    return quote;
+  }
 
   /**
    * Creates a payment request token for the given profile and returns
@@ -248,12 +406,16 @@ export class PaymentRequestService {
         'PAYMENT_GATEWAY_DRIVER env var is required but not set.',
       );
 
+    const amount = request.amount === null ? null : Number(request.amount);
     return {
       id: request.id,
       status: request.status,
       gateway: activeGateway,
       profileName: this.fullName(request.profile),
-      amount: request.amount === null ? null : Number(request.amount),
+      // The price as set, in XAF; `prices` says what each currency on offer
+      // charges for it, so the page shows the chosen network's own amount.
+      amount,
+      prices: amount === null ? [] : await this.localPrices(amount),
       description: request.description ?? null,
       // The payer's country (ISO3), so the page offers that country's
       // networks only. Null when the profile has no country we can map.
@@ -283,11 +445,9 @@ export class PaymentRequestService {
     gateways: PaymentGatewayMetadata[];
   }> {
     const active = this.paymentGateway.getActiveMetadataOrNull();
-    // The live gateway's networks are what its account can charge in our
-    // currency today, read from the provider — not a list kept in code.
-    const liveOperators = active
-      ? await this.paymentGateway.activeOperators(PAYMENT_CURRENCIES)
-      : [];
+    // The live gateway's networks are what its account can charge today, in
+    // a currency we can price, read from the provider — not a list in code.
+    const liveOperators = active ? await this.payableOperators() : [];
     return {
       active: active?.key ?? null,
       gateways: this.paymentGateway
@@ -314,8 +474,7 @@ export class PaymentRequestService {
 
     if (!gateway.requiresOperator) return null;
 
-    const operators =
-      await this.paymentGateway.activeOperators(PAYMENT_CURRENCIES);
+    const operators = await this.payableOperators();
     const network = operators.find((o) => o.code === operator);
     if (!operator || !network) {
       throw new BadRequestException(
@@ -379,6 +538,7 @@ export class PaymentRequestService {
     await this.assertPenaltiesStillOwed(request);
 
     const network = await this.assertOperatorMatchesGateway(operator, phone);
+    const charge = await this.chargeFor(Number(request.amount), network);
 
     // Atomically claim PENDING → PROCESSING before calling the gateway.
     // Concurrent double-taps both attempt this; only one succeeds (count === 1).
@@ -399,6 +559,10 @@ export class PaymentRequestService {
         gateway_payment_ref: null,
         gateway_tx_id: null,
         rejection_note: null,
+        charged_currency: charge.currency,
+        charged_amount: charge.amount,
+        fx_per_xaf: charge.perXaf,
+        fx_as_of: charge.asOf,
       },
     });
 
@@ -418,9 +582,10 @@ export class PaymentRequestService {
     let gatewayRef: string;
     try {
       const result = await this.paymentGateway.initiatePayment({
-        amount: Number(request.amount),
-        // The network's own franc: XOF in Bénin, XAF in Congo — same amount.
-        currency: network?.currency ?? 'XAF',
+        // In the network's own currency: the XAF price as is in the CFA
+        // zone (XOF in Bénin, XAF in Congo), converted elsewhere.
+        amount: charge.amount,
+        currency: charge.currency,
         externalId: request.id,
         phone,
         operator,
@@ -638,21 +803,30 @@ export class PaymentRequestService {
     request: {
       id: string;
       amount: unknown;
+      charged_currency?: string | null;
+      charged_amount?: unknown;
       gateway_payment_ref?: string | null;
     },
     settled: { amount?: number; currency?: string },
   ): Promise<boolean> {
-    const expected = Math.round(Number(request.amount));
+    // What the network was asked for: its own currency and amount once an
+    // attempt recorded them; the XAF price for a request from before that.
+    const charged = request.charged_currency ?? 'XAF';
+    const expected = Number(request.charged_amount ?? request.amount);
+    const cents = (n: number) => Math.round(n * 100);
     const amountOff =
-      settled.amount !== undefined && Math.round(settled.amount) !== expected;
-    // Either CFA franc: same value, so the same amount is right in both.
+      settled.amount !== undefined && cents(settled.amount) !== cents(expected);
+    // Either CFA franc is the same money, so a CFA charge may settle in
+    // either; any other currency must come back as charged.
     const currencyOff =
       settled.currency !== undefined &&
-      !(PAYMENT_CURRENCIES as readonly string[]).includes(settled.currency);
+      (isCfa(charged)
+        ? !isCfa(settled.currency)
+        : settled.currency !== charged);
     if (!amountOff && !currencyOff) return false;
 
     this.logger.warn(
-      `Payment ${request.id} settled ${settled.amount ?? '?'} ${settled.currency ?? '?'} instead of ${expected} XAF — not approved`,
+      `Payment ${request.id} settled ${settled.amount ?? '?'} ${settled.currency ?? '?'} instead of ${expected} ${charged} — not approved`,
     );
     await this.logService
       .create({
@@ -660,7 +834,7 @@ export class PaymentRequestService {
         entityType: 'payment_request',
         entityId: request.id,
         metadata: {
-          expected: { amount: expected, currency: 'XAF' },
+          expected: { amount: expected, currency: charged },
           settled,
           gatewayRef: request.gateway_payment_ref ?? null,
         },
@@ -1386,6 +1560,11 @@ export class PaymentRequestService {
       gateway: r.gateway ?? null,
       gatewayPaymentRef: r.gateway_payment_ref ?? null,
       amount: r.amount === null ? null : Number(r.amount),
+      // What the network was charged, in its own currency (USD in the DRC);
+      // null before any attempt.
+      chargedCurrency: r.charged_currency ?? null,
+      chargedAmount:
+        r.charged_amount === null ? null : Number(r.charged_amount),
       description: r.description,
       paymentReference: r.payment_reference,
       proofImages: r.proof_images,

@@ -442,7 +442,17 @@ describe('PawapayPaymentGateway live operators', () => {
         countryFlag: 'https://static-content.pawapay.io/country_flags/cog.svg',
         logo: 'https://static-content.pawapay.io/provider_logos/mtn.png',
         currency: 'XAF',
+        decimals: 0,
       },
+    ]);
+  });
+
+  it('lists every currency each network takes when asked for all', async () => {
+    fetchMock.mockResolvedValue(reply(200, ACTIVE_CONF));
+    const operators = await gateway.liveOperators(null);
+    expect(operators.map((o) => `${o.code} ${o.currency}`)).toEqual([
+      'MTN_MOMO_COG XAF',
+      'MTN_MOMO_RWA RWF',
     ]);
   });
 

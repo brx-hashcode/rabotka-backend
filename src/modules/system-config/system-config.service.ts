@@ -224,6 +224,8 @@ export class SystemConfigService implements OnModuleInit {
   // Fee keys that must be positive integers — setting them to 0 or negative
   // would break penalty/unlock/scoring logic throughout the app.
   private static readonly POSITIVE_INT_KEYS = new Set([
+    'payment.fx_max_age_hours',
+    'payment.fx_significant_digits',
     'fees.late_cancellation_penalty_fcfa',
     'fees.late_cancellation_score_deduction',
     'fees.cancellation_threshold_hours',
@@ -281,6 +283,8 @@ export class SystemConfigService implements OnModuleInit {
     'fees.cancellation_score_deduction',
     // 0 = no reminder before an offer ends.
     'business.offer_expiry_reminder_days',
+    // 0 = converted prices carry no margin.
+    'payment.fx_margin_percent',
   ]);
 
   /** Keys whose value is one of a fixed set; anything else is refused. */
@@ -360,6 +364,17 @@ export class SystemConfigService implements OnModuleInit {
 
   /** Rules that need only the one value being written. */
   private static assertValueValid(key: string, value: string): void {
+    if (
+      key === 'payment.preferred_currencies' &&
+      !/^\s*([A-Za-z]{3}\s*(,\s*[A-Za-z]{3}\s*)*)?$/.test(value)
+    ) {
+      throw new BadRequestException(
+        'Indiquez des codes de devise de 3 lettres séparés par des virgules (ex. USD, EUR)',
+      );
+    }
+    if (key === 'payment.fx_significant_digits' && Number(value) > 6) {
+      throw new BadRequestException('Gardez au plus 6 chiffres significatifs');
+    }
     if (SystemConfigService.POSITIVE_INT_KEYS.has(key)) {
       const n = Number(value);
       if (!Number.isFinite(n) || n <= 0) {
@@ -633,6 +648,39 @@ export class SystemConfigService implements OnModuleInit {
       return null;
     }
     return parsed;
+  }
+
+  /**
+   * How prices are converted outside the CFA zone (local-price.ts). The
+   * fallbacks match the seeded defaults: a missing key must not change what
+   * anybody is charged.
+   */
+  async getFxRules(): Promise<{
+    maxAgeHours: number;
+    significantDigits: number;
+    marginPercent: number;
+    preferredCurrencies: string[];
+  }> {
+    const [age, digits, margin, preferred] = await Promise.all([
+      this.get('payment.fx_max_age_hours', '72'),
+      this.get('payment.fx_significant_digits', '2'),
+      this.get('payment.fx_margin_percent', '0'),
+      this.get('payment.preferred_currencies', 'USD'),
+    ]);
+    const positive = (v: string, d: number) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n > 0 ? n : d;
+    };
+    const margin_ = Number(margin);
+    return {
+      maxAgeHours: positive(age, 72),
+      significantDigits: Math.min(6, Math.floor(positive(digits, 2))),
+      marginPercent: Number.isFinite(margin_) && margin_ >= 0 ? margin_ : 0,
+      preferredCurrencies: preferred
+        .split(',')
+        .map((c) => c.trim().toUpperCase())
+        .filter((c) => /^[A-Z]{3}$/.test(c)),
+    };
   }
 
   async getMinNotificationScore(): Promise<number> {

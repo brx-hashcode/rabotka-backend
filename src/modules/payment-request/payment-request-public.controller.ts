@@ -46,6 +46,20 @@ export class PaymentRequestPublicController {
     return this.service.listGateways();
   }
 
+  /**
+   * The currency prices are shown in for a country (ISO alpha-2), with what
+   * the apps need to convert an XAF price exactly as checkout will: the rate
+   * and the rounding rules. XAF, rate 1, for a country we cannot charge in.
+   */
+  @Public()
+  @Get('payment-currency/:country')
+  @ApiOperation({
+    summary: 'The display currency and conversion for a country',
+  })
+  currencyFor(@Param('country') country: string) {
+    return this.service.currencyFor(country);
+  }
+
   @Public()
   @Get('pay/:token')
   @ApiOperation({ summary: 'Get payment info by token' })

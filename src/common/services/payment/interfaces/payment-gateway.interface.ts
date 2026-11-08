@@ -46,12 +46,16 @@ export interface IPaymentGateway {
   /** Countries the account holds wallets in. */
   listBalanceCountries?(): Promise<GatewayCountry[]>;
   /**
-   * The networks the account can charge right now in `currency`, from the
-   * provider's live configuration — enabled countries and networks change
-   * without a deploy. Throws when the provider cannot be reached; callers
-   * fall back to `metadata.operators`.
+   * The networks the account can charge right now in `currency` — or, with
+   * null, in every currency each takes (one entry per network and currency) —
+   * from the provider's live configuration: enabled countries and networks
+   * change without a deploy. Throws when the provider cannot be reached;
+   * callers fall back to `metadata.operators`.
    */
-  liveOperators?(currency: string): Promise<PaymentOperatorMetadata[]>;
+  liveOperators?(
+    currency: string | null,
+    operation?: 'DEPOSIT' | 'PAYOUT',
+  ): Promise<PaymentOperatorMetadata[]>;
 }
 
 export type PayoutCapableGateway = IPaymentGateway &
