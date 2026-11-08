@@ -121,7 +121,7 @@ import {
 import {
   acceptedDocuments,
   BUSINESS_CATEGORY_LABELS,
-  BUSINESS_LEGAL_FORM_LABELS,
+  legalFormLabel,
   documentLabel,
   documentsFor,
   missingRecommendedDocuments,
@@ -2326,7 +2326,7 @@ export class ProfileService {
       categoryLabel: BUSINESS_CATEGORY_LABELS[business.category],
       legalForm: business.legal_form,
       legalFormLabel: business.legal_form
-        ? BUSINESS_LEGAL_FORM_LABELS[business.legal_form]
+        ? legalFormLabel(country, business.legal_form)
         : null,
       size: business.size,
       registrationNumber: business.registration_number,

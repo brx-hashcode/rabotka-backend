@@ -8,9 +8,9 @@ import type { SignupIdentity } from '../auth/signup-token';
 import {
   BUSINESS_CATEGORY_LABELS,
   BUSINESS_COUNTRIES_SENTENCE,
-  BUSINESS_LEGAL_FORM_LABELS,
   isBusinessCountry,
   legalFormFits,
+  legalFormLabel,
 } from './business-catalog';
 import { assertBusinessIsEmployer } from './business-rules';
 
@@ -74,10 +74,10 @@ export function assertBusinessSignupComplete(
 ): void {
   if (
     business.legalForm &&
-    !legalFormFits(business.category, business.legalForm)
+    !legalFormFits(business.category, business.legalForm, countryCode ?? null)
   ) {
     throw new BadRequestException(
-      `La forme juridique « ${BUSINESS_LEGAL_FORM_LABELS[business.legalForm]} » ne correspond pas à « ${BUSINESS_CATEGORY_LABELS[business.category]} ».`,
+      `La forme juridique « ${legalFormLabel(countryCode, business.legalForm)} » ne correspond pas à « ${BUSINESS_CATEGORY_LABELS[business.category]} ».`,
     );
   }
   assertBusinessCountry(countryCode);

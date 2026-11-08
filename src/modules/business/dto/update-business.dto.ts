@@ -86,7 +86,7 @@ export class UpdateBusinessDto {
 
   @ApiPropertyOptional({
     description:
-      'ISO 3166-1 alpha-2, one of the countries Rabotka Business is open in (CEMAC + RDC)',
+      'ISO 3166-1 alpha-2, one of the countries Rabotka Business is open in (where pawaPay collects mobile money)',
     example: 'CG',
   })
   @Transform(trim)

@@ -92,6 +92,25 @@ describe('assertBusinessSignupComplete', () => {
     ).toThrow(/Choisissez le pays/);
     expect(() =>
       assertBusinessSignupComplete({ category: 'STARTUP' }, 'NG'),
-    ).toThrow(/disponible au Congo-Brazzaville/);
+    ).toThrow(/disponible dans ces pays/);
+    // Closed to sign-up: no mobile money the gateway collects.
+    expect(() =>
+      assertBusinessSignupComplete({ category: 'STARTUP' }, 'TD'),
+    ).toThrow(/disponible dans ces pays/);
+  });
+
+  it('checks the legal form against the country: no SAS in Kenya', () => {
+    expect(() =>
+      assertBusinessSignupComplete(
+        { category: 'STARTUP', legalForm: 'SAS' },
+        'KE',
+      ),
+    ).toThrow(/ne correspond pas/);
+    expect(() =>
+      assertBusinessSignupComplete(
+        { category: 'STARTUP', legalForm: 'SARL' },
+        'KE',
+      ),
+    ).not.toThrow();
   });
 });
