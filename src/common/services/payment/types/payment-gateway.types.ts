@@ -28,8 +28,13 @@ export type PaymentOperatorMetadata = {
   countryFlag?: string;
   /** The gateway's own logo for the network. */
   logo?: string;
-  /** The currency the network is charged in (`XAF`, `XOF`), when known. */
+  /** The currency the network is charged in (`XAF`, `XOF`, `USD`…), when known. */
   currency?: string;
+  /** Decimals that currency takes on this network (0 or 2), when known. */
+  decimals?: number;
+  /** The network's limits for one operation, in `currency`, when known. */
+  minAmount?: number;
+  maxAmount?: number;
 };
 
 /**

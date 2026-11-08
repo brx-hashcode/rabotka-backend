@@ -2,17 +2,26 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ApplicationStatus, JobOfferStatus } from '@prisma/client';
+import { IdempotencyService } from '../../common/services/idempotency/idempotency.service';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { LayoutService } from '../mail/layout.service';
+import { MailService } from '../mail/mail.service';
 import {
   notificationDedupeKey,
   notifyProfile,
 } from '../profile-notification/profile-notification.events';
 import { CONTACTABLE_WORKER } from '../recommendation/contactable-worker';
 import { BusinessSubscriptionService } from './subscription/business-subscription.service';
+import {
+  talentInviteEmail,
+  talentInviteSubject,
+  type TalentInviteMail,
+} from './talent-invite-email';
 
 /** Hired, whatever happened after: a worker the business has worked with. */
 const WORKED_WITH: ApplicationStatus[] = [
@@ -93,10 +102,15 @@ export function cleanTags(tags: string[] | undefined): string[] {
  */
 @Injectable()
 export class BusinessTalentService {
+  private readonly logger = new Logger(BusinessTalentService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: EventEmitter2,
     private readonly subscriptions: BusinessSubscriptionService,
+    private readonly mail: MailService,
+    private readonly layout: LayoutService,
+    private readonly idempotency: IdempotencyService,
   ) {}
 
   async list(profileId: string) {
@@ -247,15 +261,25 @@ export class BusinessTalentService {
     const [offer, worker, business] = await Promise.all([
       this.prisma.jobOffer.findFirst({
         where: { id: offerId, employer_id: profileId, deleted_at: null },
-        select: { id: true, title: true, status: true },
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          reference: true,
+          employment_type: true,
+          city: true,
+          country_name: true,
+          is_remote: true,
+          scheduled_at: true,
+        },
       }),
       this.prisma.profile.findFirst({
         where: { id: workerId, ...CONTACTABLE_WORKER },
-        select: { id: true },
+        select: { id: true, first_name: true, email: true },
       }),
       this.prisma.business.findUnique({
         where: { profile_id: profileId },
-        select: { name: true },
+        select: { name: true, public_slug: true },
       }),
     ]);
     if (!offer) throw new NotFoundException('Offre introuvable');
@@ -279,6 +303,7 @@ export class BusinessTalentService {
       throw new ConflictException('Ce candidat a déjà postulé à cette offre.');
     }
 
+    const businessName = business?.name ?? 'Un employeur';
     notifyProfile(this.events, {
       recipientId: workerId,
       actorId: profileId,
@@ -288,9 +313,56 @@ export class BusinessTalentService {
         type: 'JOB_INVITATION',
         jobOfferId: offer.id,
         jobTitle: offer.title,
-        businessName: business?.name ?? 'Un employeur',
+        businessName,
       },
     });
+    await this.emailInvite(worker.id, offer.id, worker.email, {
+      firstName: worker.first_name,
+      businessName,
+      businessSlug: business?.public_slug ?? null,
+      jobTitle: offer.title,
+      reference: offer.reference,
+      employmentType: offer.employment_type,
+      city: offer.city,
+      countryName: offer.country_name,
+      isRemote: offer.is_remote,
+      scheduledAt: offer.scheduled_at,
+    });
     return { invited: true };
+  }
+
+  /**
+   * The invitation by e-mail too, when the worker has an address (most have
+   * only WhatsApp: then this is nothing). Once per worker and offer, like the
+   * notification — its own key, so a lost notification never eats the e-mail.
+   * A failure is logged, never the business's problem: the invitation stands.
+   */
+  private async emailInvite(
+    workerId: string,
+    offerId: string,
+    email: string | null,
+    mail: TalentInviteMail,
+  ): Promise<void> {
+    const to = email?.trim();
+    if (!to) return;
+    const key = notificationDedupeKey('invite-mail', offerId, workerId);
+    let claimed = false;
+    try {
+      claimed = await this.idempotency.claim(key, INVITE_DEDUPE_SECONDS);
+      if (!claimed) return;
+      const subject = talentInviteSubject(mail);
+      await this.mail.sendMail({
+        to,
+        subject,
+        html: await this.layout.wrap(talentInviteEmail(mail), {
+          previewText: subject,
+        }),
+      });
+    } catch (err) {
+      if (claimed) await this.idempotency.release(key).catch(() => undefined);
+      this.logger.warn(
+        `Invite mail for offer ${offerId} failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 }

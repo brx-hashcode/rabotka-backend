@@ -30,6 +30,7 @@ import {
   reportCandidate,
   view,
 } from './cv-chat.service';
+import { answersBlock, readApplicationAnswers } from './cv-assessment';
 import type { ChatReportInput } from './cv-chat-report';
 
 export const MIN_COMPARED = 2;
@@ -38,12 +39,12 @@ export const MAX_COMPARED = 5;
 const CV_CHARS_EACH = 6_000;
 
 const SYSTEM_PROMPT = [
-  "Tu es l'assistant d'un recruteur, expert du recrutement au Congo-Brazzaville. Il compare PLUSIEURS candidats pour UN poste, d'après leurs CV.",
-  'Appuie-toi uniquement sur les CV, l’offre et les analyses fournis. Nomme toujours les candidats par leur nom. Si une information manque dans un CV, dis-le plutôt que de la deviner.',
+  "Tu es l'assistant d'un recruteur, expert du recrutement en Afrique. Il compare PLUSIEURS candidats pour UN poste dans son pays, d'après leurs CV.",
+  'Appuie-toi uniquement sur les CV, l’offre, les analyses et les réponses des candidats aux questions de l’offre (déclarées par eux : à confronter au CV). Nomme toujours les candidats par leur nom. Si une information manque dans un CV, dis-le plutôt que de la deviner.',
   'Commence par repérer les exigences essentielles de l’offre (métier, savoir-faire, expérience, lieu), puis juge chaque candidat sur ces exigences.',
-  'Quand on te demande un classement ou qui retenir, tranche : une liste numérotée, du plus adapté au moins adapté, avec pour chacun ce qui le place à ce rang (ses atouts et ses manques précis, tirés du CV) et s’il mérite un entretien.',
+  'Quand on te demande un classement ou qui retenir, tranche : une liste numérotée, du plus adapté au moins adapté ; pour chacun, son nom en **gras**, puis une ligne « pourquoi ce rang » avec ses atouts et ses manques précis tirés du CV, et s’il mérite un entretien.',
   'Si AUCUN candidat ne remplit les exigences essentielles, dis-le dès la première phrase : un classement entre profils inadaptés ne doit pas laisser croire que le premier convient. Indique alors lequel, au besoin, serait le moins éloigné et pourquoi, et conseille de chercher d’autres profils.',
-  'Termine par une recommandation concrète : qui inviter en entretien en premier, et ce qu’il faudra y vérifier.',
+  'Termine par une recommandation concrète : l’ordre des entretiens, et pour chacun le point à y vérifier.',
   '',
   ANSWER_STYLE,
   '',
@@ -239,6 +240,9 @@ export class CvCompareService {
             {
               title: comparison.screening.job_title,
               text: comparison.screening.job_text,
+              country: await this.chat.countryOf(
+                comparison.screening.business_id,
+              ),
             },
             resumes.map((r, i) => ({ resume: r, text: texts[i] })),
           ),
@@ -308,7 +312,7 @@ export class CvCompareService {
 
 /** The job, then each candidate: name, score, what the analysis found, and the CV. */
 function contextText(
-  job: { title: string; text: string },
+  job: { title: string; text: string; country: string | null },
   candidates: { resume: CvScreeningResume; text: string }[],
 ): string {
   const blocks = candidates.map(({ resume, text }, i) => {
@@ -325,11 +329,12 @@ function contextText(
         : null,
       careerOf(resume),
       `CV :\n${text.slice(0, CV_CHARS_EACH)}`,
+      answersBlock(readApplicationAnswers(resume.application_answers)),
     ]
       .filter(Boolean)
       .join('\n');
   });
-  return `Offre : ${job.title}\n\n${job.text}\n\n---\nCandidats comparés (${candidates.length}) :\n\n${blocks.join('\n\n')}`;
+  return `${job.country ? `Pays de l’organisation : ${job.country}\n\n` : ''}Offre : ${job.title}\n\n${job.text}\n\n---\nCandidats comparés (${candidates.length}) :\n\n${blocks.join('\n\n')}`;
 }
 
 function candidateName(resume: CvScreeningResume): string | null {

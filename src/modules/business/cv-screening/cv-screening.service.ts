@@ -44,6 +44,8 @@ import {
   assessmentMessages,
   overallScore,
   parseAssessment,
+  readApplicationAnswers,
+  type ApplicationAnswerNote,
   type CvAssessment,
   type CvCandidate,
   type CvSource,
@@ -69,6 +71,8 @@ export type CvUpload = {
    * multer never sets it, so an upload is always sniffed.
    */
   internalType?: CvFileType;
+  /** Server code only: the answers of the application this CV came with. */
+  answers?: ApplicationAnswerNote[];
 };
 
 const EMPLOYMENT_LABEL: Record<string, string> = {
@@ -218,6 +222,8 @@ export class CvScreeningService {
         // Charged now, to this period: given back here if it can't be read.
         subscription_id: subscriptionId,
         expires_at: expiresAt,
+        // Read with the CV: the answers it came with, when it is an application's.
+        ...(file.answers?.length ? { application_answers: file.answers } : {}),
       }));
       if (into) {
         // The offer's screening stays open as long as its latest CV.
@@ -562,6 +568,7 @@ export class CvScreeningService {
           },
           source,
           resume.id,
+          readApplicationAnswers(resume.application_answers),
         );
         outcome = !assessment
           ? { status: 'FAILED', error: "L'analyse n'a pas abouti." }
@@ -709,8 +716,9 @@ export class CvScreeningService {
     job: { title: string; text: string },
     source: CvSource,
     correlationId: string,
+    answers: ApplicationAnswerNote[] = [],
   ): Promise<CvAssessment | null> {
-    const messages: BaseMessage[] = assessmentMessages(job, source);
+    const messages: BaseMessage[] = assessmentMessages(job, source, answers);
     const call = (input: BaseMessage[]) =>
       this.call(input, source, correlationId);
 
@@ -835,6 +843,7 @@ export class CvScreeningService {
           },
           { kind: 'text', text: resume.cv_text },
           resume.id,
+          readApplicationAnswers(resume.application_answers),
         );
       } catch (err) {
         this.logger.warn(
@@ -957,6 +966,7 @@ export class CvScreeningService {
           data: {
             ...(kept ? {} : { storage_key: null, storage_bucket: null }),
             cv_text: null,
+            application_answers: Prisma.DbNull,
             candidate: withoutContact(r.candidate),
           },
         }),

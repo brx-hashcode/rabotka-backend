@@ -621,6 +621,20 @@ export class CareersService {
         size: a.cv_size_bytes,
         buffer: await this.readCv(a),
         tag: a.id,
+        // Read with the CV: what the candidate answered when applying.
+        answers: (Array.isArray(a.answers)
+          ? (a.answers as {
+              label: string;
+              kind: OfferQuestionKind;
+              value: string;
+              passed?: boolean | null;
+            }[])
+          : []
+        ).map((x) => ({
+          question: x.label,
+          answer: answerText(x),
+          knockoutFailed: x.passed === false,
+        })),
       })),
     );
 

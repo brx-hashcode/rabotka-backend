@@ -14,9 +14,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { PaymentFlow,
-  EmploymentType,
-} from '@prisma/client';
+import { PaymentFlow, EmploymentType } from '@prisma/client';
 import { LocationDto } from '../../../common/dto/location.dto';
 
 export class AdminUpdateJobOfferDto extends LocationDto {
@@ -31,7 +29,7 @@ export class AdminUpdateJobOfferDto extends LocationDto {
   @IsOptional()
   @IsString()
   @MinLength(20)
-  @MaxLength(1000)
+  @MaxLength(2500)
   description?: string;
 
   @ApiPropertyOptional({

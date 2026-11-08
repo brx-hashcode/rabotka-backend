@@ -133,6 +133,44 @@ describe('InvoiceService', () => {
       });
     });
 
+    it('says what was charged when it was not the XAF price itself', async () => {
+      prisma.invoice.findMany.mockResolvedValue([
+        {
+          ...baseInvoice,
+          payment_request: { charged_currency: 'USD', charged_amount: 8.5 },
+        },
+        {
+          ...baseInvoice,
+          id: 'inv-2',
+          payment_request: { charged_currency: 'XOF', charged_amount: 5000 },
+        },
+      ]);
+      const [usd, cfa] = await service.listForProfile('profile-1');
+      expect(usd).toMatchObject({
+        amount: '5000',
+        chargedCurrency: 'USD',
+        chargedAmount: '8.5',
+      });
+      expect(cfa).toMatchObject({ chargedCurrency: null, chargedAmount: null });
+    });
+
+    it('fills the template with the amount actually paid', async () => {
+      prisma.invoice.findUnique.mockResolvedValue({
+        ...baseInvoice,
+        profile: baseProfile,
+        payment_request: { charged_currency: 'USD', charged_amount: 8.5 },
+      });
+      await service.download('inv-1', 'profile-1');
+      expect(documentService.fillDocumentTemplateAsPdf).toHaveBeenCalledWith(
+        'tpl-invoice-1',
+        expect.objectContaining({
+          AMOUNT: '5000',
+          CHARGED_AMOUNT: '8,5',
+          CURRENCY: 'USD',
+        }),
+      );
+    });
+
     it('returns empty array when no invoices', async () => {
       prisma.invoice.findMany.mockResolvedValue([]);
       const result = await service.listForProfile('profile-1');

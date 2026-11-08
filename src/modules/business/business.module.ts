@@ -5,6 +5,7 @@ import { BusinessCatalogController } from './business-catalog.controller';
 import { BusinessController } from './business.controller';
 import { PaymentRequestModule } from '../payment-request/payment-request.module';
 import { LogModule } from '../log/log.module';
+import { MailModule } from '../mail/mail.module';
 import { BusinessSubscriptionModule } from './subscription/business-subscription.module';
 import { BusinessCheckoutService } from './subscription/business-checkout.service';
 import { BusinessStatsService } from './business-stats.service';
@@ -36,6 +37,7 @@ import { CandidateNotesModule } from './candidate-notes/candidate-notes.module';
     ProfileModule,
     PaymentRequestModule,
     LogModule,
+    MailModule,
     BusinessSubscriptionModule,
     CvScreeningModule,
     InterviewModule,

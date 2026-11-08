@@ -336,11 +336,16 @@ describe('JobOfferService', () => {
       );
     });
 
-    it('throws BadRequestException when scheduled_at < 4h from now', async () => {
-      const dto = { ...baseDto, scheduled_at: futureDate(1) };
+    it('throws BadRequestException when scheduled_at has passed', async () => {
+      const dto = { ...baseDto, scheduled_at: futureDate(-1) };
       await expect(service.create(EMPLOYER_ID, dto)).rejects.toThrow(
-        BadRequestException,
+        'Choisissez une date et une heure à venir',
       );
+    });
+
+    it('accepts an urgent mission that starts within the hour', async () => {
+      const dto = { ...baseDto, scheduled_at: futureDate(0.25) };
+      await expect(service.create(EMPLOYER_ID, dto)).resolves.toBeDefined();
     });
 
     it('throws BadRequestException when amount is below minimum', async () => {
@@ -798,17 +803,16 @@ describe('JobOfferService', () => {
       ).rejects.toThrow('pourvus');
     });
 
-    it('rejects a date under the minimum lead time', async () => {
+    it('rejects a date that has passed', async () => {
       await expect(
-        service.republish(OFFER_ID, OWNER_ID, hoursFromNow(1)),
+        service.republish(OFFER_ID, OWNER_ID, hoursFromNow(-1)),
       ).rejects.toThrow(BadRequestException);
       expect(prisma.jobOffer.update).not.toHaveBeenCalled();
     });
 
-    it('accepts a date exactly at the boundary', async () => {
-      // 4h + a second of slack, since Date.now() advances between the two calls.
+    it('accepts a date minutes away: an urgent mission', async () => {
       await expect(
-        service.republish(OFFER_ID, OWNER_ID, hoursFromNow(4 + 1 / 3600)),
+        service.republish(OFFER_ID, OWNER_ID, hoursFromNow(0.1)),
       ).resolves.toBeDefined();
     });
 

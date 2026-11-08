@@ -1825,7 +1825,7 @@ describe('ProfileService', () => {
       });
     });
 
-    it('refuses a business without a country, or outside the CEMAC and the RDC, before writing anything', async () => {
+    it('refuses a business without a country, or where it cannot pay (no pawaPay), before writing anything', async () => {
       const tx = txWithBusiness();
 
       await expect(
@@ -1839,7 +1839,7 @@ describe('ProfileService', () => {
           { ...businessDto, countryCode: 'NG' } as any,
           'business',
         ),
-      ).rejects.toThrow(/disponible au Congo-Brazzaville/);
+      ).rejects.toThrow(/disponible dans ces pays/);
       expect(prisma.$transaction).not.toHaveBeenCalled();
       expect(tx.profile.create).not.toHaveBeenCalled();
     });
@@ -2066,7 +2066,7 @@ describe('ProfileService', () => {
       it('moves only to a country Rabotka Business is open in, and clears the address', async () => {
         await expect(
           service.updateBusiness('p-1', { countryCode: 'FR' } as any, 'admin'),
-        ).rejects.toThrow(/disponible au Congo-Brazzaville/);
+        ).rejects.toThrow(/disponible dans ces pays/);
         expect((prisma as any).business.update).not.toHaveBeenCalled();
 
         await service.updateBusiness(

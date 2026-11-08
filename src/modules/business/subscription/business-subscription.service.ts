@@ -495,8 +495,11 @@ export class BusinessSubscriptionService {
     const now = new Date();
     return {
       entitlements,
+      // Soonest first: `periods` is newest first (the history's order), and
+      // the first upcoming one is the only one startQueuedNow() will start.
       upcoming: periods
         .filter((p) => RUNNING.includes(p.status) && p.starts_at > now)
+        .sort((a, b) => a.starts_at.getTime() - b.starts_at.getTime())
         .map(toPeriodView),
       history: periods.map(toPeriodView),
       plans,

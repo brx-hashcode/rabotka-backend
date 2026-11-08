@@ -13,6 +13,7 @@ import {
   documentLabel,
   documentsFor,
   isBusinessCountry,
+  isKnownBusinessCountry,
   LEGAL_FORMS_BY_CATEGORY,
   legalFormFits,
   missingRecommendedDocuments,
@@ -47,19 +48,69 @@ describe('business catalog', () => {
     }
   });
 
-  it('is open in the CEMAC and the RDC only', () => {
-    expect(BUSINESS_COUNTRIES).toEqual([
-      'CG',
-      'CD',
-      'CM',
-      'GA',
-      'TD',
-      'CF',
-      'GQ',
-    ]);
+  it('is open where pawaPay collects mobile money', () => {
+    expect([...BUSINESS_COUNTRIES].sort()).toEqual(
+      [
+        'BJ',
+        'CD',
+        'CG',
+        'CI',
+        'CM',
+        'GA',
+        'KE',
+        'MZ',
+        'RW',
+        'SL',
+        'SN',
+        'UG',
+        'ZM',
+      ].sort(),
+    );
     expect(isBusinessCountry('cd')).toBe(true);
+    expect(isBusinessCountry('ke')).toBe(true);
     expect(isBusinessCountry('NG')).toBe(false);
     expect(isBusinessCountry(null)).toBe(false);
+  });
+
+  it('closes Chad, CAR and Equatorial Guinea to sign-up, keeping their rules', () => {
+    for (const code of ['TD', 'CF', 'GQ']) {
+      expect(isBusinessCountry(code)).toBe(false);
+      expect(isKnownBusinessCountry(code)).toBe(true);
+    }
+    expect(businessCatalog('TD').countries.map((c) => c.code)).not.toContain(
+      'TD',
+    );
+    expect(documentLabel('GQ', 'CNSS')).toBe(
+      "Attestation d'immatriculation INSESO",
+    );
+  });
+
+  it('names the papers, numbers and forms of a country outside OHADA', () => {
+    const kenya = businessCatalog('KE');
+    expect(kenya.identifiers.taxId?.label).toBe('KRA PIN');
+    expect(documentLabel('KE', 'RCCM')).toBe(
+      "Certificat d'immatriculation (BRS)",
+    );
+    expect(
+      kenya.categories.find((c) => c.value === 'STARTUP')?.legalForms,
+    ).toEqual(['SARL', 'OTHER']);
+    expect(kenya.legalForms.find((f) => f.value === 'SARL')?.label).toBe(
+      'Société privée à responsabilité limitée (Ltd)',
+    );
+    // A GIE has no form of its own there: « Autre ».
+    expect(kenya.categories.find((c) => c.value === 'GIE')?.legalForms).toEqual(
+      ['OTHER'],
+    );
+    expect(legalFormFits('STARTUP', 'SAS', 'KE')).toBe(false);
+    expect(legalFormFits('STARTUP', 'SAS')).toBe(true);
+  });
+
+  it('keeps the OHADA forms in West Africa, with the local tax number', () => {
+    expect(businessCatalog('SN').identifiers.taxId?.label).toBe('NINEA');
+    expect(
+      businessCatalog('CI').categories.find((c) => c.value === 'STARTUP')
+        ?.legalForms,
+    ).toContain('SAS');
   });
 
   it('recommends a Congolese PME its RCCM and NIU', () => {

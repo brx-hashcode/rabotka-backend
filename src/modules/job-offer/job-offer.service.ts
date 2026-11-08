@@ -34,7 +34,10 @@ import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { JOB_OFFER_CLOSED, type JobOfferClosedEvent } from './job-offer.events';
-import { MIN_HOURS_FROM_NOW } from './job-offer.constants';
+import {
+  DATE_NOT_AHEAD_MESSAGE,
+  MIN_HOURS_FROM_NOW,
+} from './job-offer.constants';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { MatchingService } from '../matching/matching.service';
@@ -548,9 +551,7 @@ export class JobOfferService {
       now.getTime() + MIN_HOURS_FROM_NOW * 60 * 60 * 1000,
     );
     if (scheduledAt !== null && scheduledAt < minDate) {
-      throw new BadRequestException(
-        `La date doit être au moins ${MIN_HOURS_FROM_NOW} heures dans le futur`,
-      );
+      throw new BadRequestException(DATE_NOT_AHEAD_MESSAGE);
     }
 
     const baseData = {
@@ -890,7 +891,8 @@ export class JobOfferService {
     excludeWorkerId?: string | null;
   }): Promise<number> {
     const { categoryId, city, excludeWorkerId } = params;
-    const minScheduledAt = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    // Shown until applications close: an urgent mission is open to the end.
+    const minScheduledAt = new Date();
 
     const rows = await this.prisma.$queryRaw<Array<{ count: bigint }>>`
       SELECT COUNT(*)::bigint AS count FROM (
@@ -934,7 +936,8 @@ export class JobOfferService {
     nextCursor: string | null;
   }> {
     const targetCount = limit + 1;
-    const minScheduledAt = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    // Shown until applications close: an urgent mission is open to the end.
+    const minScheduledAt = new Date();
 
     const rows = await this.queryOpenSlots({
       take: targetCount,
@@ -1349,9 +1352,7 @@ export class JobOfferService {
 
     const minDate = new Date(Date.now() + MIN_HOURS_FROM_NOW * 60 * 60 * 1000);
     if (scheduledAt && scheduledAt < minDate) {
-      throw new BadRequestException(
-        `La date doit être au moins ${MIN_HOURS_FROM_NOW} heures dans le futur`,
-      );
+      throw new BadRequestException(DATE_NOT_AHEAD_MESSAGE);
     }
 
     // Republishing is publishing: it counts for the period too.
@@ -2333,8 +2334,8 @@ export class JobOfferService {
    *
    * The merged result is held to the same rules as creation, so an edit can
    * never produce an offer `create()` would have refused. On top of that:
-   * - a new date must be at least MIN_HOURS_FROM_NOW ahead (an unchanged one
-   *   is left alone, however close it now is);
+   * - a new date must still be to come (an unchanged one is left alone,
+   *   however close it now is);
    * - the type of engagement is locked once anyone has applied, since it
    *   changes what they applied for;
    * - `quantity` cannot drop below the slots already taken.
@@ -2403,9 +2404,7 @@ export class JobOfferService {
       scheduledAt.getTime() !== offer.scheduled_at?.getTime() &&
       scheduledAt < new Date(Date.now() + MIN_HOURS_FROM_NOW * 60 * 60 * 1000)
     ) {
-      throw new BadRequestException(
-        `La date doit être au moins ${MIN_HOURS_FROM_NOW} heures dans le futur`,
-      );
+      throw new BadRequestException(DATE_NOT_AHEAD_MESSAGE);
     }
 
     const applications = await this.prisma.application.findMany({

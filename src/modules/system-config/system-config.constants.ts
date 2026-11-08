@@ -1139,6 +1139,38 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Vercel Blob – Read/Write Token',
     isSecret: true,
   },
+  // Payments outside the CFA zone: prices are set in XAF and converted.
+  {
+    key: 'payment.fx_max_age_hours',
+    value: '72',
+    category: ConfigCategory.FEES,
+    label:
+      'Taux de change : âge maximum (heures) avant de ne plus proposer la devise',
+    isSecret: false,
+  },
+  {
+    key: 'payment.fx_significant_digits',
+    value: '2',
+    category: ConfigCategory.FEES,
+    label:
+      'Prix convertis : chiffres significatifs gardés à l’arrondi (2 : 1 000 XAF = 1,70 $)',
+    isSecret: false,
+  },
+  {
+    key: 'payment.fx_margin_percent',
+    value: '0',
+    category: ConfigCategory.FEES,
+    label: 'Prix convertis : marge ajoutée pour le coût du change (%)',
+    isSecret: false,
+  },
+  {
+    key: 'payment.preferred_currencies',
+    value: 'USD',
+    category: ConfigCategory.FEES,
+    label:
+      'Devise choisie quand un réseau en accepte plusieurs (codes séparés par des virgules)',
+    isSecret: false,
+  },
 ];
 
 export const STORAGE_ENV_OVERRIDES: Record<string, Record<string, string>> = {

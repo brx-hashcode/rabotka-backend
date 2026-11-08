@@ -789,6 +789,8 @@ describe('CvScreeningService', () => {
           storage_key: null,
           storage_bucket: null,
           cv_text: null,
+          // The answers it came with go too: they speak of the person.
+          application_answers: expect.anything(),
           candidate: { name: 'Awa', email: null, phone: null },
         },
       });

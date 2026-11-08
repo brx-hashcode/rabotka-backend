@@ -111,6 +111,30 @@ export class PaymentGatewayService implements OnModuleInit {
   }
 
   /**
+   * Every network the active gateway can take a deposit on right now, in each
+   * currency it takes — XAF in Congo, CDF and USD in the DRC, KES in Kenya.
+   * Which of a network's currencies is offered, and whether it has a rate to
+   * be priced in, is the payment request's decision.
+   */
+  async depositOperators(): Promise<PaymentOperatorMetadata[]> {
+    const gateway = this.gateway;
+    if (!gateway) return [];
+    const live = gateway.liveOperators?.bind(gateway);
+    if (live) {
+      try {
+        return await live(null, 'DEPOSIT');
+      } catch (err) {
+        this.logger.warn(
+          `${gateway.metadata.label} live operators unavailable, using its declared list: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    return gateway.metadata.operators.map((o) => ({ currency: 'XAF', ...o }));
+  }
+
+  /**
    * Every gateway the application could run on, active or not.
    *
    * The admin lists these to label historical rows: a `payment_requests.gateway`

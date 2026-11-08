@@ -2022,6 +2022,14 @@ model PaymentRequest {
   /// BUSINESS_CREDIT_PACK: what this payment buys, priced when created.
   business_credit_kind      BusinessCreditKind?
   business_credit_quantity  Int?
+  /// What the payer's network was actually charged, set at initiation. The
+  /// request stays priced in XAF (`amount`, the books); outside the CFA zone
+  /// the network takes its own currency, converted at `fx_per_xaf` (units of
+  /// that currency for 1 XAF, as of `fx_as_of`). Null before any attempt.
+  charged_currency          String?              @db.VarChar(3)
+  charged_amount            Decimal?             @db.Decimal(14, 2)
+  fx_per_xaf                Decimal?             @db.Decimal(24, 12)
+  fx_as_of                  DateTime?            @db.Timestamptz
 
   profile    Profile   @relation(fields: [profile_id], references: [id], onDelete: Cascade)
   invoice    Invoice?
@@ -3708,6 +3716,10 @@ model CvScreeningResume {
   /// What the CV says of the person: name, city, years of experience, and
   /// email/phone until the purge.
   candidate      Json?
+  /// When the CV came with an application: the candidate's answers to the
+  /// offer's questions ([{question, answer, knockoutFailed?}]), read with the
+  /// CV by its analysis and its chat. Null once purged.
+  application_answers Json?
   error          String?
   /// The period this CV's « CV inclus » was taken from, and is given back to
   /// when it is not read. Not always the screening's: an offer's screening
@@ -4314,4 +4326,21 @@ model ProfileCv {
 
   @@index([profile_id, deleted_at], name: "idx_profile_cv_live")
   @@map("profile_cvs")
+}
+
+/// The day's rate of each currency a payment network may charge, against the
+/// XAF prices are set in: `per_xaf` units of `currency` for 1 XAF. Refreshed
+/// by ExchangeRateScheduler; a rate older than `payment.fx_max_age_hours` is
+/// not used, so its networks are not offered rather than mispriced. XAF and
+/// XOF are not stored: 1:1 by treaty.
+model ExchangeRate {
+  currency   String   @id @db.VarChar(3)
+  per_xaf    Decimal  @db.Decimal(24, 12)
+  /// Where it came from, for an audit by hand.
+  source     String
+  /// The source's own date for the rate.
+  as_of      DateTime @db.Timestamptz
+  fetched_at DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  @@map("exchange_rates")
 }

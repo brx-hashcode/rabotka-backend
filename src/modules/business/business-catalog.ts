@@ -9,10 +9,12 @@ import {
  * which papers each category is recommended to send, per country. A fixed list
  * (product decision): adding a value is a migration plus an entry here.
  *
- * Rabotka Business is open in the CEMAC and the RDC only: seven OHADA
- * countries, so the legal forms (OHADA uniform act) are the same everywhere;
- * the papers' names and a few of the papers differ. No paper is required: an
- * organisation sends what it has, the review asks for the rest.
+ * Rabotka Business is open where its payment gateway (pawaPay) collects
+ * mobile money: an organisation must be able to pay for its plan. Most are
+ * OHADA countries, with the same legal forms everywhere and the papers' names
+ * differing; the others (Kenya, Uganda, Rwanda, Zambia, Mozambique, Sierra
+ * Leone) name their papers, numbers and company forms their own way. No paper
+ * is required: an organisation sends what it has, the review asks for the rest.
  */
 
 /** Headcount brackets offered at sign-up. */
@@ -115,17 +117,36 @@ export const LEGAL_FORMS_BY_CATEGORY: Record<
   OTHER: Object.values(BusinessLegalForm),
 };
 
-/** The countries an organisation can sign up in: the CEMAC and the RDC. */
+/**
+ * The countries an organisation can sign up in: those pawaPay collects mobile
+ * money in, so it can pay. Central Africa first, then West, then East and South.
+ */
 export const BUSINESS_COUNTRIES = [
   'CG',
   'CD',
   'CM',
   'GA',
-  'TD',
-  'CF',
-  'GQ',
+  'BJ',
+  'CI',
+  'SN',
+  'SL',
+  'KE',
+  'UG',
+  'RW',
+  'ZM',
+  'MZ',
 ] as const;
-export type BusinessCountry = (typeof BUSINESS_COUNTRIES)[number];
+export type OpenBusinessCountry = (typeof BUSINESS_COUNTRIES)[number];
+
+/**
+ * Countries no longer open to sign-up (no mobile money the gateway collects),
+ * kept so the organisations registered there still read their own rules.
+ */
+const CLOSED_BUSINESS_COUNTRIES = ['TD', 'CF', 'GQ'] as const;
+
+/** Every country an organisation can be in: open, or registered before it closed. */
+export type BusinessCountry =
+  OpenBusinessCountry | (typeof CLOSED_BUSINESS_COUNTRIES)[number];
 
 /** Where an organisation with no (or an older, other) country is read from. */
 export const DEFAULT_BUSINESS_COUNTRY: BusinessCountry = 'CG';
@@ -135,20 +156,46 @@ export const BUSINESS_COUNTRY_NAMES: Record<BusinessCountry, string> = {
   CD: 'Congo-Kinshasa (RDC)',
   CM: 'Cameroun',
   GA: 'Gabon',
+  BJ: 'Bénin',
+  CI: "Côte d'Ivoire",
+  SN: 'Sénégal',
+  SL: 'Sierra Leone',
+  KE: 'Kenya',
+  UG: 'Ouganda',
+  RW: 'Rwanda',
+  ZM: 'Zambie',
+  MZ: 'Mozambique',
   TD: 'Tchad',
   CF: 'République centrafricaine',
   GQ: 'Guinée équatoriale',
 };
 
-export const BUSINESS_COUNTRIES_SENTENCE =
-  'Rabotka Business est disponible au Congo-Brazzaville, en RDC, au Cameroun, au Gabon, au Tchad, en Centrafrique et en Guinée équatoriale.';
+export const BUSINESS_COUNTRIES_SENTENCE = `Rabotka Business est disponible dans ces pays : ${BUSINESS_COUNTRIES.map(
+  (c) => BUSINESS_COUNTRY_NAMES[c],
+)
+  .sort((a, b) => a.localeCompare(b, 'fr'))
+  .join(', ')}.`;
 
+/** One an organisation can sign up in (or move to). */
 export function isBusinessCountry(
   code: string | null | undefined,
-): code is BusinessCountry {
+): code is OpenBusinessCountry {
   return (
     !!code &&
     (BUSINESS_COUNTRIES as readonly string[]).includes(code.toUpperCase())
+  );
+}
+
+/** Open, or closed with organisations still registered there. */
+export function isKnownBusinessCountry(
+  code: string | null | undefined,
+): code is BusinessCountry {
+  return (
+    isBusinessCountry(code) ||
+    (!!code &&
+      (CLOSED_BUSINESS_COUNTRIES as readonly string[]).includes(
+        code.toUpperCase(),
+      ))
   );
 }
 
@@ -175,6 +222,10 @@ type CountryRules = {
   documents: Partial<Record<BusinessCategory, DocumentList>>;
   /** Papers that do not exist there (no SCIEN / SCIET outside the Congo). */
   without: BusinessDocumentType[];
+  /** Each legal form's local name, over the OHADA one. */
+  legalFormLabels?: Partial<Record<BusinessLegalForm, string>>;
+  /** OHADA forms the country's law does not have. */
+  withoutForms?: BusinessLegalForm[];
 };
 
 const COMPANY_DOCS: DocumentList = {
@@ -261,6 +312,40 @@ const rccm = (placeholder: string): IdentifierField => ({
 const NIF: IdentifierField = { label: 'NIF' };
 
 /**
+ * Outside OHADA: companies are incorporated at a registrar (certificate of
+ * incorporation, a company number) and taxed under a TIN; the company forms
+ * are the private and public limited company, the partnership and the sole
+ * trader — no SAS, SCS, SCOOPS or GIE.
+ */
+const NON_OHADA_FORMS: Pick<CountryRules, 'legalFormLabels' | 'withoutForms'> =
+  {
+    legalFormLabels: {
+      EI: 'Entreprise individuelle (sole proprietorship)',
+      SARL: 'Société privée à responsabilité limitée (Ltd)',
+      SA: 'Société anonyme publique (PLC)',
+      SNC: 'Société de personnes (partnership)',
+      COOP_CA: 'Société coopérative',
+      ASSOCIATION: 'Association ou ONG enregistrée',
+    },
+    withoutForms: ['SARLU', 'SAS', 'SASU', 'SCS', 'SCOOPS', 'GIE'],
+  };
+
+/** The papers' names outside OHADA, the registrar and the social fund named. */
+function nonOhadaLabels(
+  registrar: string,
+  tax: string,
+  social: string,
+): Partial<Record<BusinessDocumentType, string>> {
+  return {
+    RCCM: `Certificat d'immatriculation (${registrar})`,
+    NIU: `Attestation d'immatriculation fiscale (${tax})`,
+    CNSS: `Attestation d'affiliation ${social}`,
+    PATENTE: "Licence d'exploitation (business permit)",
+    RECEPISSE: "Certificat d'enregistrement (association / ONG)",
+  };
+}
+
+/**
  * What changes from one country to the next. Sources: OHADA uniform acts
  * (RCCM everywhere); tax numbers (NIU in the Congo and Cameroon, NIF
  * elsewhere); social security (CNSS, CNPS in Cameroon and Chad, INSESO in
@@ -338,6 +423,127 @@ const COUNTRY_RULES: Record<BusinessCountry, CountryRules> = {
     documents: {},
     without: ['SCIEN_SCIET'],
   },
+  BJ: {
+    documentLabels: {
+      NIU: 'Attestation IFU',
+      CNSS: "Attestation d'immatriculation CNSS",
+    },
+    identifiers: {
+      registrationNumber: rccm('RB/COT/24 B 12345'),
+      taxId: { label: 'IFU', placeholder: '3202412345678' },
+      statisticalId: null,
+    },
+    documents: {},
+    without: ['SCIEN_SCIET'],
+  },
+  CI: {
+    documentLabels: {
+      NIU: 'Attestation de compte contribuable (NCC)',
+      CNSS: "Attestation d'immatriculation CNPS",
+    },
+    identifiers: {
+      registrationNumber: rccm('CI-ABJ-03-2024-B12-01234'),
+      taxId: { label: 'N° compte contribuable (NCC)', placeholder: '2412345A' },
+      statisticalId: null,
+    },
+    documents: {},
+    without: ['SCIEN_SCIET'],
+  },
+  SN: {
+    documentLabels: {
+      NIU: 'Attestation NINEA',
+      CNSS: "Attestation d'immatriculation CSS / IPRES",
+    },
+    identifiers: {
+      registrationNumber: rccm('SN-DKR-2024-B-12345'),
+      taxId: { label: 'NINEA', placeholder: '012345678 2G3' },
+      statisticalId: null,
+    },
+    documents: {},
+    without: ['SCIEN_SCIET'],
+  },
+  SL: {
+    documentLabels: nonOhadaLabels('CAC', 'TIN, NRA', 'NASSIT'),
+    identifiers: {
+      registrationNumber: { label: "N° d'immatriculation (CAC)" },
+      taxId: { label: 'TIN (NRA)' },
+      statisticalId: null,
+    },
+    documents: {},
+    without: ['SCIEN_SCIET'],
+    ...NON_OHADA_FORMS,
+  },
+  KE: {
+    documentLabels: nonOhadaLabels('BRS', 'KRA PIN', 'NSSF'),
+    identifiers: {
+      registrationNumber: {
+        label: "N° d'immatriculation (BRS)",
+        placeholder: 'PVT-AB1CD2EF',
+      },
+      taxId: { label: 'KRA PIN', placeholder: 'P051234567X' },
+      statisticalId: null,
+    },
+    documents: {},
+    without: ['SCIEN_SCIET'],
+    ...NON_OHADA_FORMS,
+  },
+  UG: {
+    documentLabels: nonOhadaLabels('URSB', 'TIN, URA', 'NSSF'),
+    identifiers: {
+      registrationNumber: { label: "N° d'immatriculation (URSB)" },
+      taxId: { label: 'TIN (URA)', placeholder: '1001234567' },
+      statisticalId: null,
+    },
+    documents: {},
+    without: ['SCIEN_SCIET'],
+    ...NON_OHADA_FORMS,
+  },
+  RW: {
+    documentLabels: nonOhadaLabels('RDB', 'TIN, RRA', 'RSSB'),
+    identifiers: {
+      registrationNumber: { label: "N° d'entreprise (RDB)" },
+      taxId: { label: 'TIN (RRA)', placeholder: '101234567' },
+      statisticalId: null,
+    },
+    documents: {},
+    without: ['SCIEN_SCIET'],
+    ...NON_OHADA_FORMS,
+  },
+  ZM: {
+    documentLabels: nonOhadaLabels('PACRA', 'TPIN, ZRA', 'NAPSA'),
+    identifiers: {
+      registrationNumber: { label: 'N° PACRA' },
+      taxId: { label: 'TPIN (ZRA)', placeholder: '1001234567' },
+      statisticalId: null,
+    },
+    documents: {},
+    without: ['SCIEN_SCIET'],
+    ...NON_OHADA_FORMS,
+  },
+  MZ: {
+    documentLabels: {
+      ...nonOhadaLabels('Conservatória', 'NUIT', 'INSS'),
+      RCCM: 'Certidão de registo comercial',
+      PATENTE: 'Alvará',
+    },
+    identifiers: {
+      registrationNumber: { label: 'N° de registo comercial' },
+      taxId: { label: 'NUIT', placeholder: '400123456' },
+      statisticalId: null,
+    },
+    documents: {},
+    without: ['SCIEN_SCIET'],
+    legalFormLabels: {
+      EI: 'Empresário em nome individual',
+      SARL: 'Sociedade por quotas (Lda)',
+      SARLU: 'Sociedade unipessoal por quotas',
+      SA: 'Sociedade anónima (SA)',
+      SNC: 'Sociedade em nome colectivo',
+      COOP_CA: 'Cooperativa',
+      ASSOCIATION: 'Associação',
+    },
+    withoutForms: ['SAS', 'SASU', 'SCS', 'SCOOPS', 'GIE'],
+  },
   TD: {
     documentLabels: {
       NIU: 'Attestation NIF',
@@ -388,7 +594,7 @@ const COUNTRY_RULES: Record<BusinessCountry, CountryRules> = {
 /** A country's rules; an organisation from before the list reads as Congo's. */
 function rulesFor(country: string | null | undefined): CountryRules {
   return COUNTRY_RULES[
-    isBusinessCountry(country)
+    isKnownBusinessCountry(country)
       ? (country.toUpperCase() as BusinessCountry)
       : DEFAULT_BUSINESS_COUNTRY
   ];
@@ -439,12 +645,41 @@ export function missingRecommendedDocuments(
   );
 }
 
-/** Whether a legal form fits a category. */
+/**
+ * The legal forms offered to a category in a country: the category's, less
+ * those the country's law does not have (« Autre » when none is left).
+ */
+export function legalFormsFor(
+  country: string | null | undefined,
+  category: BusinessCategory,
+): BusinessLegalForm[] {
+  const without = rulesFor(country).withoutForms ?? [];
+  const forms = LEGAL_FORMS_BY_CATEGORY[category].filter(
+    (f) => !without.includes(f),
+  );
+  return forms.length > 0 ? forms : ['OTHER'];
+}
+
+/** A legal form's name in the organisation's country. */
+export function legalFormLabel(
+  country: string | null | undefined,
+  legalForm: BusinessLegalForm,
+): string {
+  return (
+    rulesFor(country).legalFormLabels?.[legalForm] ??
+    BUSINESS_LEGAL_FORM_LABELS[legalForm]
+  );
+}
+
+/** Whether a legal form fits a category (in a country, when given). */
 export function legalFormFits(
   category: BusinessCategory,
   legalForm: BusinessLegalForm,
+  country?: string | null,
 ): boolean {
-  return LEGAL_FORMS_BY_CATEGORY[category].includes(legalForm);
+  return country === undefined
+    ? LEGAL_FORMS_BY_CATEGORY[category].includes(legalForm)
+    : legalFormsFor(country, category).includes(legalForm);
 }
 
 export type BusinessCatalog = {
@@ -485,12 +720,12 @@ export function businessCatalog(
     categories: Object.values(BusinessCategory).map((value) => ({
       value,
       label: BUSINESS_CATEGORY_LABELS[value],
-      legalForms: LEGAL_FORMS_BY_CATEGORY[value],
+      legalForms: legalFormsFor(country, value),
       documents: { required: [], ...documentsFor(country, value) },
     })),
     legalForms: Object.values(BusinessLegalForm).map((value) => ({
       value,
-      label: BUSINESS_LEGAL_FORM_LABELS[value],
+      label: legalFormLabel(country, value),
     })),
     documentTypes: Object.values(BusinessDocumentType).map((value) => ({
       value,

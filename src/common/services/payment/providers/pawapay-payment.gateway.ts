@@ -17,6 +17,7 @@ import {
   WebhookHandleResult,
 } from '../types/payment-gateway.types';
 import { fetchWithTimeout } from '../../../utils/fetch-with-timeout.util';
+import { decimalsOf } from '../../fx/local-price';
 
 /**
  * pawaPay routes by network, so the payer has to pick one. Codes are
@@ -125,9 +126,14 @@ function confCountryName(c: ConfCountry): string {
   return names['fr'] || names['en'] || text(c['country']);
 }
 
-/** Whole francs as a string: XAF has no decimals, and pawaPay rejects them. */
-function toAmount(amount: number): string {
-  return String(Math.round(amount));
+/**
+ * The amount as pawaPay takes it: whole units for a currency without decimals
+ * (XAF, XOF, CDF… — pawaPay rejects them there), cents at most otherwise
+ * (USD). The caller rounds already; this is the last guard.
+ */
+export function toAmount(amount: number, decimals = 0): string {
+  const factor = 10 ** (decimals > 0 ? 2 : 0);
+  return String(Math.round(amount * factor) / factor);
 }
 
 /**
@@ -267,7 +273,7 @@ export class PawapayPaymentGateway implements IPaymentGateway {
 
     const body = {
       depositId,
-      amount: toAmount(params.amount),
+      amount: toAmount(params.amount, network.decimals ?? 0),
       currency: params.currency,
       payer: {
         type: 'MMO',
@@ -494,7 +500,7 @@ export class PawapayPaymentGateway implements IPaymentGateway {
    * XAF payment can go through, and is not offered for one.
    */
   async liveOperators(
-    currency: string,
+    currency: string | null,
     operation: 'DEPOSIT' | 'PAYOUT' = 'DEPOSIT',
   ): Promise<PaymentOperatorMetadata[]> {
     const countries = await this.activeConf();
@@ -506,26 +512,32 @@ export class PawapayPaymentGateway implements IPaymentGateway {
         const code = text(p['provider']);
         if (!code) continue;
         const currencies = (p['currencies'] ?? []) as ConfCurrency[];
-        const match = currencies.find(
-          (cu) => text(cu['currency']) === currency,
-        );
-        const op = (match?.['operationTypes'] ?? {}) as Record<
-          string,
-          Record<string, unknown>
-        >;
-        const status = text(op[operation]?.['status']);
-        if (!match || !op[operation] || (status && status !== 'OPERATIONAL'))
-          continue;
-        out.push({
-          code,
-          label: text(p['displayName'], code),
-          country,
-          countryName: confCountryName(c),
-          dialCode: text(c['prefix']) || undefined,
-          countryFlag: text(c['flag']) || undefined,
-          logo: text(p['logo']) || undefined,
-          currency,
-        });
+        for (const cu of currencies) {
+          const cur = text(cu['currency']);
+          if (!cur || (currency !== null && cur !== currency)) continue;
+          const op = (cu['operationTypes'] ?? {}) as Record<
+            string,
+            Record<string, unknown>
+          >;
+          const conf = op[operation];
+          const status = text(conf?.['status']);
+          if (!conf || (status && status !== 'OPERATIONAL')) continue;
+          const min = Number(conf['minAmount']);
+          const max = Number(conf['maxAmount']);
+          out.push({
+            code,
+            label: text(p['displayName'], code),
+            country,
+            countryName: confCountryName(c),
+            dialCode: text(c['prefix']) || undefined,
+            countryFlag: text(c['flag']) || undefined,
+            logo: text(p['logo']) || undefined,
+            currency: cur,
+            decimals: decimalsOf(conf['decimalsInAmount']),
+            ...(Number.isFinite(min) ? { minAmount: min } : {}),
+            ...(Number.isFinite(max) ? { maxAmount: max } : {}),
+          });
+        }
       }
     }
     return out;

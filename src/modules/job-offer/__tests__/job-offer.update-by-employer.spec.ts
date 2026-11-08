@@ -195,12 +195,20 @@ describe('JobOfferService.updateByEmployer', () => {
     );
   });
 
-  it('refuses a new date less than 4 hours ahead', async () => {
+  it('refuses a new date that has passed', async () => {
     const { edit } = setup({});
 
     await expect(
-      edit({ scheduled_at: inHours(1).toISOString() }),
-    ).rejects.toThrow(/heures dans le futur/);
+      edit({ scheduled_at: inHours(-1).toISOString() }),
+    ).rejects.toThrow(/à venir/);
+  });
+
+  it('accepts a new date within the hour: an urgent mission', async () => {
+    const { edit, prisma } = setup({});
+
+    await edit({ scheduled_at: inHours(0.5).toISOString() });
+
+    expect(prisma.jobOffer.update).toHaveBeenCalled();
   });
 
   it('accepts an unchanged date even when it is now close', async () => {
