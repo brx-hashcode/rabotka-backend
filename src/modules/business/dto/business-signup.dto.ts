@@ -61,7 +61,7 @@ export class BusinessDocumentInputDto {
 /**
  * The organisation, sent with POST /profile by a business sign-up (a signup
  * token proven by email) and refused from any other. Its country is the
- * profile's `countryCode`, one of the CEMAC + RDC. Every document is optional;
+ * profile's `countryCode`, one of the countries Rabotka Business is open in. Every document is optional;
  * which ones are recommended depends on the country and the category — see
  * business-catalog.ts.
  */

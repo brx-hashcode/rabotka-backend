@@ -6,7 +6,7 @@ import {
   BUSINESS_COUNTRIES_SENTENCE,
   businessCatalog,
   DEFAULT_BUSINESS_COUNTRY,
-  isBusinessCountry,
+  isKnownBusinessCountry,
   type BusinessCountry,
 } from './business-catalog';
 
@@ -23,7 +23,7 @@ export class BusinessCatalogController {
     summary:
       'Business categories, legal forms, recommended documents and countries',
     description:
-      'The tables a business sign-up is checked against, for one of the countries Rabotka Business is open in (CEMAC + RDC): categories in display order, the legal forms each takes and the documents each is recommended to send (all optional), the local names of the documents and official identifiers, the countries to choose from, and the headcount brackets.',
+      'The tables a business sign-up is checked against, for one of the countries Rabotka Business is open in (where pawaPay collects mobile money): categories in display order, the legal forms each takes and the documents each is recommended to send (all optional), the local names of the documents and official identifiers, the countries to choose from, and the headcount brackets.',
   })
   @ApiQuery({
     name: 'country',
@@ -36,7 +36,8 @@ export class BusinessCatalogController {
   getCatalog(@Query('country') country?: string) {
     const code = country?.trim();
     if (!code) return businessCatalog();
-    if (!isBusinessCountry(code)) {
+    // A closed country still answers: its organisations edit their papers.
+    if (!isKnownBusinessCountry(code)) {
       throw new BadRequestException(BUSINESS_COUNTRIES_SENTENCE);
     }
     return businessCatalog(code.toUpperCase() as BusinessCountry);
