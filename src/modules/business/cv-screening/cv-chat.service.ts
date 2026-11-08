@@ -22,6 +22,11 @@ import {
   BusinessSubscriptionService,
   TRIAL_AI_REFUSAL,
 } from '../subscription/business-subscription.service';
+import { answersBlock, readApplicationAnswers } from './cv-assessment';
+import {
+  BUSINESS_COUNTRY_NAMES,
+  isKnownBusinessCountry,
+} from '../business-catalog';
 import { CvScreeningService } from './cv-screening.service';
 import type { ChatReportCandidate, ChatReportInput } from './cv-chat-report';
 import { experiencesText, type CvExperience } from './cv-experience';
@@ -53,23 +58,31 @@ export const CHAT_RULES = [
 
 /**
  * How an answer is laid out, for one CV or several: what the business pays
- * for is the reasoning, so a verdict alone is not an answer. Only the marks
- * the portal draws (paragraphs, « - » lists, numbered lists, **gras**).
+ * for is the reasoning, tied to the CV, so a verdict alone is not an answer.
+ * Only the marks the portal draws (paragraphs, « - » lists, numbered lists,
+ * **gras**).
  */
 export const ANSWER_STYLE = [
   'Forme de la réponse :',
-  '- Commence par une phrase qui répond directement à la question (le verdict, le chiffre, le oui ou le non).',
-  '- Puis explique, en t’appuyant sur des éléments PRÉCIS du CV : postes occupés, durées, missions, outils, diplômes, lieux. Cite-les plutôt que de rester général (« 3 ans comme électricien chez X » plutôt que « de l’expérience »).',
-  '- Relie toujours ces éléments aux exigences de l’offre : ce qui correspond, ce qui manque, ce qui reste incertain.',
-  '- Quand c’est utile, termine par ce que le recruteur peut faire ensuite : les points à vérifier en entretien, ou deux ou trois questions à poser.',
-  '- Mets en **gras** les intitulés de partie courts (par exemple **Points forts**, **À vérifier**), sans titre markdown (#) ni tableau.',
-  '- Longueur : de 120 à 250 mots en général ; plus court pour une question simple, plus long seulement si on te le demande.',
-  'Sois honnête et nuancé : si le profil ne correspond pas au poste, dis-le clairement et explique pourquoi. Distingue ce que le CV dit, ce que tu en déduis et ce qu’il ne dit pas.',
+  '- Première ligne : la réponse directe à la question (le verdict, le chiffre, le oui ou le non), en **gras** quand c’est un verdict, par exemple « **Profil adapté : à rencontrer en entretien.** ». Ne reformule jamais la question.',
+  '- Chaque affirmation s’appuie sur un fait PRÉCIS du CV : poste, employeur, durée, dates, outils, diplôme, ville. « 3 ans comme électricien chez X (2021-2024) » plutôt que « de l’expérience ».',
+  '- Distingue toujours ce que le CV dit, ce que tu en déduis (« ce qui laisse penser que… ») et ce qu’il ne dit pas (« le CV ne précise pas… »). Si l’analyse déjà faite contredit le CV, c’est le CV qui compte : dis-le.',
+  '- Juge l’adéquation sur les exigences essentielles de l’offre, une par une : ce qui est rempli, ce qui manque, ce qui reste incertain.',
+  '',
+  'Selon la question :',
+  '- Résumé du parcours : 4 à 6 tirets, du plus récent au plus ancien, chacun avec le poste, l’employeur et les dates ou la durée.',
+  '- « Faut-il le retenir ? », adéquation au poste : le verdict, puis **Points forts**, **Manques** et **À vérifier en entretien**, chacun en 2 ou 3 tirets.',
+  '- Questions d’entretien : 5 questions numérotées, chacune liée à un point précis du CV, suivie de « Une bonne réponse montre : … ».',
+  '- Information absente du CV (salaire, disponibilité, permis…) : dis-le en une phrase, puis la question à poser au candidat pour l’obtenir.',
+  '',
+  'Pas de remplissage : ni conseil général valable pour tout candidat, ni répétition de l’analyse déjà affichée, ni phrase de politesse finale. Mets en **gras** les intitulés de partie courts, sans titre markdown (#) ni tableau.',
+  'Longueur : de 80 à 200 mots en général ; plus court pour une question simple, plus long seulement si on te le demande.',
+  'Sois honnête : si le profil ne correspond pas au poste, dis-le dès la première ligne et explique pourquoi.',
 ].join('\n');
 
 const SYSTEM_PROMPT = [
-  "Tu es l'assistant d'un recruteur, expert du recrutement au Congo-Brazzaville. Il te pose des questions sur UN candidat, d'après son CV, pour UN poste.",
-  "Appuie-toi uniquement sur le CV, l'offre et l'analyse fournis. Si une information n'est pas dans le CV, dis-le clairement plutôt que de la deviner.",
+  "Tu es l'assistant d'un recruteur, expert du recrutement en Afrique. Il te pose des questions sur UN candidat, d'après son CV, pour UN poste dans son pays.",
+  "Appuie-toi uniquement sur le CV, l'offre, l'analyse et, s'il a postulé, ses réponses aux questions de l'offre (déclarées par lui : compare-les au CV, et signale une réponse que le CV ne confirme pas ou contredit). Si une information n'est pas dans le CV, dis-le clairement plutôt que de la deviner.",
   'Tu peux résumer le parcours, juger l’adéquation au poste, relever les forces et les manques, proposer des questions d’entretien et des points à vérifier.',
   '',
   ANSWER_STYLE,
@@ -113,6 +126,18 @@ export class CvChatService {
     private readonly subscriptions: BusinessSubscriptionService,
     private readonly screenings: CvScreeningService,
   ) {}
+
+  /** The organisation's country, by its French name: the context of the hire. */
+  async countryOf(businessId: string): Promise<string | null> {
+    const business = await this.prisma.business.findUnique({
+      where: { id: businessId },
+      select: { country_code: true },
+    });
+    const code = business?.country_code?.toUpperCase();
+    return code && isKnownBusinessCountry(code)
+      ? BUSINESS_COUNTRY_NAMES[code]
+      : null;
+  }
 
   /** The conversation so far, and how many questions are left. */
   async history(profileId: string, screeningId: string, resumeId: string) {
@@ -247,7 +272,11 @@ export class CvChatService {
       messages: [
         new SystemMessage(SYSTEM_PROMPT),
         contextMessage(
-          { title: screening.job_title, text: screening.job_text },
+          {
+            title: screening.job_title,
+            text: screening.job_text,
+            country: await this.countryOf(screening.business_id),
+          },
           resume,
           cvText,
         ),
@@ -461,7 +490,7 @@ export function view(m: {
 
 /** The job, what the analysis concluded, and the CV's text. */
 function contextMessage(
-  job: { title: string; text: string },
+  job: { title: string; text: string; country: string | null },
   resume: CvScreeningResume,
   cvText: string,
 ): HumanMessage {
@@ -478,7 +507,10 @@ function contextMessage(
   ]
     .filter(Boolean)
     .join('\n');
+  const declared = answersBlock(
+    readApplicationAnswers(resume.application_answers),
+  );
   return new HumanMessage(
-    `Offre : ${job.title}\n\n${job.text}\n\n---\nAnalyse déjà faite :\n${analysis}\n\n---\nCV :\n${cvText}`,
+    `${job.country ? `Pays de l’organisation : ${job.country}\n\n` : ''}Offre : ${job.title}\n\n${job.text}\n\n---\nAnalyse déjà faite :\n${analysis}\n\n---\nCV :\n${cvText}${declared ? `\n\n---\n${declared}` : ''}`,
   );
 }

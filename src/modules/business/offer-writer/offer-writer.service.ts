@@ -8,7 +8,11 @@ import { answerSnippet } from '../cv-screening/lenient-answer';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { LlmService } from '../../rag/llm/llm.service';
-import { BUSINESS_CATEGORY_LABELS } from '../business-catalog';
+import {
+  BUSINESS_CATEGORY_LABELS,
+  BUSINESS_COUNTRY_NAMES,
+  isKnownBusinessCountry,
+} from '../business-catalog';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
 import type { OfferDraftDto } from './dto/offer-draft.dto';
 import {
@@ -19,7 +23,8 @@ import {
 } from './offer-writer';
 
 /** Longest wait for one answer before the next model gets its turn. */
-const LLM_TIMEOUT_MS = 45_000;
+// A full offer (six sections, up to 2 200 characters) takes longer to write.
+const LLM_TIMEOUT_MS = 60_000;
 
 /**
  * « Rédiger avec l'IA »: writes an offer from a few words, within the plan's
@@ -44,7 +49,7 @@ export class OfferWriterService {
     const [business, trades] = await Promise.all([
       this.prisma.business.findUnique({
         where: { id: businessId },
-        select: { name: true, category: true },
+        select: { name: true, category: true, country_code: true },
       }),
       this.prisma.jobCategory.findMany({
         select: { id: true, name: true },
@@ -64,6 +69,11 @@ export class OfferWriterService {
         isRemote: dto.isRemote ?? false,
         quantity: dto.quantity ?? null,
         businessName: business?.name ?? '',
+        countryName: isKnownBusinessCountry(business?.country_code)
+          ? BUSINESS_COUNTRY_NAMES[
+              business.country_code.toUpperCase() as keyof typeof BUSINESS_COUNTRY_NAMES
+            ]
+          : null,
         businessCategory: business
           ? BUSINESS_CATEGORY_LABELS[business.category]
           : null,

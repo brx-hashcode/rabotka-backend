@@ -41,7 +41,7 @@ describe('offer-writer', () => {
 
   it('keeps within the form’s limits, cutting at a line, and drops markdown', () => {
     const long = Array.from(
-      { length: 60 },
+      { length: 160 },
       (_, i) => `- Tâche numéro ${i}`,
     ).join('\n');
     const d = parseDraft(
@@ -52,7 +52,7 @@ describe('offer-writer', () => {
       TRADES,
     );
     expect(d?.title.length).toBeLessThanOrEqual(100);
-    expect(d?.description.length).toBeLessThanOrEqual(1000);
+    expect(d?.description.length).toBeLessThanOrEqual(2500);
     expect(d?.description.startsWith('Missions :')).toBe(true);
     expect(d?.description.endsWith('…')).toBe(false);
   });
@@ -79,6 +79,7 @@ describe('offer-writer', () => {
         isRemote: false,
         quantity: 2,
         businessName: 'ZuaFood',
+        countryName: 'Congo-Brazzaville',
         businessCategory: 'Restauration',
       },
       TRADES,
@@ -87,8 +88,39 @@ describe('offer-writer', () => {
     expect(text).toContain('Cuisine & Restauration ; Nettoyage');
     expect(text).toContain('Lieu : Pointe-Noire');
     expect(text).toContain('Nombre de personnes : 2');
-    expect(text).toContain('Entreprise : ZuaFood (Restauration)');
+    expect(text).toContain('Organisation : ZuaFood (Restauration)');
+    expect(text).toContain('Pays : Congo-Brazzaville');
     expect(text).toContain('2 serveurs samedi');
+  });
+
+  it('asks for the six sections of a standard job ad, in order', () => {
+    const [system] = draftMessages(
+      {
+        brief: 'x',
+        title: null,
+        employmentType: null,
+        city: null,
+        isRemote: false,
+        quantity: null,
+        businessName: 'ZuaFood',
+        countryName: null,
+        businessCategory: null,
+      },
+      TRADES,
+    );
+    const prompt = system.content as string;
+    const order = [
+      '« Qui sommes-nous »',
+      '« Le poste »',
+      '« Vos missions »',
+      '« Profil recherché »',
+      '« Conditions »',
+      '« Pour postuler »',
+    ].map((label) => prompt.indexOf(label));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    // Never hard-coded to one country any more.
+    expect(prompt).not.toContain('Congo-Brazzaville');
   });
 
   it('keeps what the business should still add, short and at most four', () => {
