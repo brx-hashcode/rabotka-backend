@@ -26,6 +26,9 @@ function make(
   opts: { limit?: number; found?: unknown; past?: unknown[] } = {},
 ) {
   const prisma: any = {
+    business: {
+      findUnique: jest.fn().mockResolvedValue({ country_code: 'CI' }),
+    },
     cvScreeningResume: {
       findFirst: jest
         .fn()
@@ -114,6 +117,7 @@ describe('CvChatService', () => {
       expect(turn.remaining).toBe(18);
       const contents = turn.messages.map((m) => m.content);
       const context = contents[1] as string;
+      expect(context).toContain("Pays de l’organisation : Côte d'Ivoire");
       expect(context).toContain('Offre : Caissier');
       expect(context).toContain('Score : 74/100');
       expect(context).toContain('CV de Grâce, caissière.');

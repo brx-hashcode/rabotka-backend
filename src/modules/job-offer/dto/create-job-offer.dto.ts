@@ -82,9 +82,11 @@ export class CreateJobOfferDto extends LocationDto {
   })
   @IsString()
   @MinLength(20, {
-    message: 'La description doit contenir entre 20 et 1000 caractères',
+    message: 'La description doit contenir entre 20 et 2500 caractères',
   })
-  @MaxLength(1000)
+  @MaxLength(2500, {
+    message: 'La description doit contenir entre 20 et 2500 caractères',
+  })
   description!: string;
 
   @ApiPropertyOptional({

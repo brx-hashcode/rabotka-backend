@@ -63,6 +63,7 @@ function make(
   };
   const chat: any = {
     cvTextOf: jest.fn((r: { cv_text: string }) => Promise.resolve(r.cv_text)),
+    countryOf: jest.fn().mockResolvedValue('Kenya'),
     streamReply: jest.fn(),
   };
   return {
@@ -131,6 +132,7 @@ describe('CvCompareService', () => {
       });
       expect(chat.cvTextOf).toHaveBeenCalledTimes(2);
       const context = turn.messages[1].content as string;
+      expect(context).toContain('Pays de l’organisation : Kenya');
       expect(context).toContain('Offre : Caissier');
       expect(context).toContain('### Nom a');
       expect(context).toContain('CV de b');
