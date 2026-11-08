@@ -153,7 +153,7 @@ export class ApplicantScoreService {
       include: {
         job_offer: { include: { category: { select: { name: true } } } },
         answers: {
-          select: { label: true, kind: true, value: true },
+          select: { label: true, kind: true, value: true, passed: true },
           orderBy: { created_at: 'asc' },
         },
         profile_cv: { select: { cv_text: true } },
@@ -223,6 +223,7 @@ export class ApplicantScoreService {
       answers: (app.answers ?? []).map((x) => ({
         question: x.label,
         answer: answerText(x),
+        knockoutFailed: x.passed === false,
       })),
       cvText: app.profile_cv?.cv_text || undefined,
     };
@@ -604,6 +605,8 @@ export class ApplicantScoreService {
         size: buffer.length,
         buffer,
         tag: id,
+        // Beside the CV, not inside it: the analysis reads them as answers.
+        answers: loaded.applicant.answers,
       });
     }
 

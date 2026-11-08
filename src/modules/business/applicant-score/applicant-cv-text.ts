@@ -10,7 +10,8 @@ const day = (d: Date) =>
 
 /**
  * A Rabotka applicant's CV as text, for CV analysis: what their Rabotka CV
- * says, then « Mon CV » when they sent it. Never their contacts, which stay
+ * says, then « Mon CV » when they sent it. Their answers to the offer's
+ * questions go beside it (`CvUpload.answers`), read as answers, not as CV. Never their contacts, which stay
  * paid: the uploaded file has them printed on it, so it is its text (already
  * stripped) that goes, and the whole is stripped once more, since the
  * presentation is free text too.
@@ -38,11 +39,6 @@ export function applicantCvText(name: string, a: ApplicantFacts): string {
       : 'Missions menées à terme sur Rabotka : aucune pour l’instant',
     a.portfolio.length
       ? `Réalisations publiées\n${a.portfolio.map((p) => `- ${p}`).join('\n')}`
-      : null,
-    a.answers?.length
-      ? `Réponses aux questions de l'offre\n${a.answers
-          .map((x) => `- ${x.question} : ${x.answer}`)
-          .join('\n')}`
       : null,
     a.cvText?.trim() ? `\nCV joint par le candidat\n${a.cvText.trim()}` : null,
   ];

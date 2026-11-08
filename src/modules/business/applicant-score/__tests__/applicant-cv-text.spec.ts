@@ -24,7 +24,8 @@ describe('applicantCvText', () => {
     expect(text.startsWith('Awa Ngoma')).toBe(true);
     expect(text).toContain('Métiers : Comptabilité');
     expect(text).toContain('- Bilan annuel (Comptabilité)');
-    expect(text).toContain('- Disponible ? : Oui');
+    // The answers go beside the CV (CvUpload.answers), never inside it.
+    expect(text).not.toContain('Disponible ?');
   });
 
   it('never carries a contact, even typed in the presentation', () => {

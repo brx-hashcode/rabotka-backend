@@ -22,6 +22,7 @@ import {
   BusinessSubscriptionService,
   TRIAL_AI_REFUSAL,
 } from '../subscription/business-subscription.service';
+import { answersBlock, readApplicationAnswers } from './cv-assessment';
 import {
   BUSINESS_COUNTRY_NAMES,
   isKnownBusinessCountry,
@@ -81,7 +82,7 @@ export const ANSWER_STYLE = [
 
 const SYSTEM_PROMPT = [
   "Tu es l'assistant d'un recruteur, expert du recrutement en Afrique. Il te pose des questions sur UN candidat, d'après son CV, pour UN poste dans son pays.",
-  "Appuie-toi uniquement sur le CV, l'offre et l'analyse fournis. Si une information n'est pas dans le CV, dis-le clairement plutôt que de la deviner.",
+  "Appuie-toi uniquement sur le CV, l'offre, l'analyse et, s'il a postulé, ses réponses aux questions de l'offre (déclarées par lui : compare-les au CV, et signale une réponse que le CV ne confirme pas ou contredit). Si une information n'est pas dans le CV, dis-le clairement plutôt que de la deviner.",
   'Tu peux résumer le parcours, juger l’adéquation au poste, relever les forces et les manques, proposer des questions d’entretien et des points à vérifier.',
   '',
   ANSWER_STYLE,
@@ -506,7 +507,10 @@ function contextMessage(
   ]
     .filter(Boolean)
     .join('\n');
+  const declared = answersBlock(
+    readApplicationAnswers(resume.application_answers),
+  );
   return new HumanMessage(
-    `${job.country ? `Pays de l’organisation : ${job.country}\n\n` : ''}Offre : ${job.title}\n\n${job.text}\n\n---\nAnalyse déjà faite :\n${analysis}\n\n---\nCV :\n${cvText}`,
+    `${job.country ? `Pays de l’organisation : ${job.country}\n\n` : ''}Offre : ${job.title}\n\n${job.text}\n\n---\nAnalyse déjà faite :\n${analysis}\n\n---\nCV :\n${cvText}${declared ? `\n\n---\n${declared}` : ''}`,
   );
 }

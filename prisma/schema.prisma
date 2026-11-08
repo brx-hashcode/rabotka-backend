@@ -3716,6 +3716,10 @@ model CvScreeningResume {
   /// What the CV says of the person: name, city, years of experience, and
   /// email/phone until the purge.
   candidate      Json?
+  /// When the CV came with an application: the candidate's answers to the
+  /// offer's questions ([{question, answer, knockoutFailed?}]), read with the
+  /// CV by its analysis and its chat. Null once purged.
+  application_answers Json?
   error          String?
   /// The period this CV's « CV inclus » was taken from, and is given back to
   /// when it is not read. Not always the screening's: an offer's screening

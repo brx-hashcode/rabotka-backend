@@ -1,5 +1,6 @@
 import {
   assessmentMessages,
+  readApplicationAnswers,
   overallScore,
   parseAssessment,
 } from '../cv-assessment';
@@ -191,6 +192,53 @@ describe('overallScore', () => {
 
 describe('assessmentMessages', () => {
   const job = { title: 'Caissier', text: 'Tenir la caisse.' };
+
+  it('reads the answers of an application after the CV, a failed knockout marked', () => {
+    const answers = [
+      { question: 'Permis B ?', answer: 'Non', knockoutFailed: true },
+      { question: 'Disponible le', answer: '1 décembre 2026' },
+    ];
+    const [system, human] = assessmentMessages(
+      job,
+      { kind: 'text', text: 'CV ici' },
+      answers,
+    );
+    const text = human.content as string;
+    expect(text.indexOf('CV :\nCV ici')).toBeLessThan(
+      text.indexOf('Réponses du candidat'),
+    );
+    expect(text).toContain(
+      '- Permis B ? : Non [question éliminatoire : réponse non acceptée]',
+    );
+    expect(text).toContain('- Disponible le : 1 décembre 2026');
+    expect(system.content as string).toContain('« éliminatoire »');
+    // A scan or a photo gets them too, in the text beside the file.
+    const [, pdf] = assessmentMessages(
+      job,
+      { kind: 'pdf', base64: 'BBB' },
+      answers,
+    );
+    expect(
+      ((pdf.content as { text?: string }[])[0].text ?? '').includes(
+        'Permis B ?',
+      ),
+    ).toBe(true);
+    // No answers: nothing added.
+    const [, plain] = assessmentMessages(job, { kind: 'text', text: 'CV ici' });
+    expect(plain.content as string).not.toContain('Réponses du candidat');
+  });
+
+  it('reads back only well-formed answers', () => {
+    expect(
+      readApplicationAnswers([
+        { question: 'Q', answer: 'A', knockoutFailed: true },
+        { question: 'Q2' },
+        null,
+        'x',
+      ]),
+    ).toEqual([{ question: 'Q', answer: 'A', knockoutFailed: true }]);
+    expect(readApplicationAnswers(null)).toEqual([]);
+  });
 
   it('puts the CV text after the job', () => {
     const [, human] = assessmentMessages(job, { kind: 'text', text: 'CV ici' });
