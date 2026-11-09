@@ -30,6 +30,7 @@ import { AdminBusinessService } from './admin/admin-business.service';
 import { CandidateNotesModule } from './candidate-notes/candidate-notes.module';
 
 /** Business accounts: the public catalog and the dashboard's own routes. */
+import { DemoRequestModule } from './demo-request/demo-request.module';
 @Module({
   // AuthModule for ProfileAuthGuard's JwtService.
   imports: [
@@ -51,6 +52,7 @@ import { CandidateNotesModule } from './candidate-notes/candidate-notes.module';
     MailboxModule,
     LinkedinModule,
     HrExportsModule,
+    DemoRequestModule,
   ],
   controllers: [
     BusinessCatalogController,
