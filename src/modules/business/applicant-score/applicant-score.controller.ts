@@ -60,4 +60,18 @@ export class ApplicantScoreController {
   ) {
     return this.scores.analyse(req.user.profileId, offerId, applicationId);
   }
+
+  @Post(':offerId/applications/:applicationId/reanalyse')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary:
+      'Re-reads an applicant with the CV they added since applying: the score again, and the CV analysis again when it had one (1 « CV inclus »)',
+  })
+  reanalyse(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('offerId', ParseUUIDPipe) offerId: string,
+    @Param('applicationId', ParseUUIDPipe) applicationId: string,
+  ) {
+    return this.scores.reanalyse(req.user.profileId, offerId, applicationId);
+  }
 }

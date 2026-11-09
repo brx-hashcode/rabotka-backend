@@ -320,6 +320,9 @@ describe('ApplicationService (extended)', () => {
 
   describe('findByJobOffer()', () => {
     it('returns applications for job offer', async () => {
+      (prisma as unknown as Record<string, unknown>).profileCv = {
+        findMany: jest.fn().mockResolvedValue([]),
+      };
       (prisma.application.findMany as jest.Mock).mockResolvedValue([
         mockApplication,
       ]);
