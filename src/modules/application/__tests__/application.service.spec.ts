@@ -1311,11 +1311,40 @@ describe('ApplicationService', () => {
 
   describe('findByJobOffer()', () => {
     it('returns applications for job offer', async () => {
+      (prisma as unknown as Record<string, unknown>).profileCv = {
+        findMany: jest.fn().mockResolvedValue([]),
+      };
       (prisma.application.findMany as jest.Mock).mockResolvedValue([
         mockApplication,
       ]);
       const result = await service.findByJobOffer(JOB_OFFER_ID);
       expect(Array.isArray(result)).toBe(true);
+      expect(result[0]).toMatchObject({ newerCv: false });
+    });
+
+    it('flags a CV the candidate added since applying', async () => {
+      const findMany = jest
+        .fn()
+        .mockResolvedValue([{ id: 'cv-new', profile_id: WORKER_ID }]);
+      (prisma as unknown as Record<string, unknown>).profileCv = { findMany };
+      (prisma.application.findMany as jest.Mock).mockResolvedValue([
+        { ...mockApplication, profile_cv_id: null },
+        {
+          ...mockApplication,
+          id: 'other',
+          status: ApplicationStatus.REJECTED,
+          profile_cv_id: null,
+        },
+      ]);
+      const result = await service.findByJobOffer(JOB_OFFER_ID);
+      expect(result.map((r) => (r as { newerCv?: boolean }).newerCv)).toEqual([
+        true,
+        false,
+      ]);
+      // Only a CV the candidate chose to send.
+      expect(findMany.mock.calls[0][0].where.profile).toEqual({
+        preferred_cv: 'UPLOADED',
+      });
     });
   });
 

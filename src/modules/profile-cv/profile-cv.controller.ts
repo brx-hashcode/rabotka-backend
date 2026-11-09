@@ -23,6 +23,10 @@ import {
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
+import { UserRole } from '@prisma/client';
+import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { BusinessProfileGuard } from '../auth/guards/business-profile.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
@@ -113,5 +117,76 @@ export class BusinessApplicationCvController {
       res,
       await this.cvs.fileForEmployer(req.user.profileId, id),
     );
+  }
+}
+
+/**
+ * The CV on a candidate's profile, from the business's candidate sheet: not
+ * tied to an application, so it is the one they would send today.
+ */
+@ApiTags('Business')
+@ApiBearerAuth()
+@Controller('business/me/candidates')
+@UseGuards(ProfileAuthGuard, BusinessProfileGuard)
+export class BusinessCandidateCvController {
+  constructor(private readonly cvs: ProfileCvService) {}
+
+  @Get(':workerId/cv')
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @ApiOperation({
+    summary:
+      'Whether the candidate added a CV, and whether it opens for this business (null when none)',
+  })
+  async info(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('workerId', ParseUUIDPipe) workerId: string,
+  ) {
+    return { cv: await this.cvs.forCandidate(req.user.profileId, workerId) };
+  }
+
+  @Get(':workerId/cv/file')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @ApiOperation({
+    summary:
+      "The candidate's CV, once the contact is obtained or an application retained",
+  })
+  async file(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('workerId', ParseUUIDPipe) workerId: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    sendPrivateFile(
+      res,
+      await this.cvs.candidateFile(req.user.profileId, workerId),
+    );
+  }
+}
+
+/** The CV a worker uploaded (« Mon CV »), for the admin profile page. */
+@ApiTags('Admin – Profiles')
+@Controller('admin/profiles')
+@UseGuards(AdminAuthGuard, RolesGuard)
+@ApiBearerAuth()
+@ApiCookieAuth()
+export class AdminProfileCvController {
+  constructor(private readonly cvs: ProfileCvService) {}
+
+  @Get(':id/cv')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({
+    summary: "The worker's uploaded CV, if any (null when none)",
+  })
+  async info(@Param('id', ParseUUIDPipe) id: string) {
+    return { cv: await this.cvs.forAdmin(id) };
+  }
+
+  @Get(':id/cv/file')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({ summary: "The worker's uploaded CV file (admin only)" })
+  async file(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    sendPrivateFile(res, await this.cvs.adminFile(id));
   }
 }

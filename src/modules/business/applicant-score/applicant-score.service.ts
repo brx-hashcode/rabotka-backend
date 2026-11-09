@@ -42,6 +42,7 @@ import {
 } from '../cv-screening/cv-screening.service';
 import { TEXT_MIME } from '../cv-screening/cv-files';
 import { applicantCvText } from './applicant-cv-text';
+import { cvForApplication } from '../../profile-cv/profile-cv.rules';
 import {
   applicantMessages,
   applicantScore,
@@ -491,6 +492,8 @@ export class ApplicantScoreService {
     appliedBefore?: Date,
     /** Also those whose analysis failed before then: tried again, not forever. */
     retryFailedBefore?: Date,
+    /** This one application again, whatever its last analysis (a new CV). */
+    again = false,
   ) {
     const businessId = await this.subscriptions.businessOf(profileId);
     if (!businessId) {
@@ -516,6 +519,7 @@ export class ApplicantScoreService {
       deleted_at: null,
       OR: [
         { cv_resume_id: null },
+        ...(again && applicationId ? [{ id: applicationId }] : []),
         ...(retryFailedBefore
           ? [
               {
@@ -579,6 +583,85 @@ export class ApplicantScoreService {
       // Linked ones no longer need it; the others are free for a next try.
       await release().catch(() => undefined);
     }
+  }
+
+  /**
+   * The candidate added or replaced their CV after applying: the application
+   * now carries that CV, its score is made again (free), and so is its CV
+   * analysis when it had one (1 « CV inclus », like the first). Only with a
+   * CV they chose to send (« Mon CV » sent with their applications).
+   */
+  async reanalyse(profileId: string, offerId: string, applicationId: string) {
+    const businessId = await this.subscriptions.businessOf(profileId);
+    if (!businessId) {
+      throw new ForbiddenException('Espace réservé aux comptes entreprise.');
+    }
+    const app = await this.prisma.application.findFirst({
+      where: {
+        id: applicationId,
+        job_offer_id: offerId,
+        deleted_at: null,
+        job_offer: { employer_id: profileId, deleted_at: null },
+      },
+      select: {
+        worker_id: true,
+        status: true,
+        profile_cv_id: true,
+        cv_resume_id: true,
+      },
+    });
+    if (!app) throw new NotFoundException('Candidature introuvable.');
+    if (
+      app.status === ApplicationStatus.CANCELLED ||
+      app.status === ApplicationStatus.REJECTED
+    ) {
+      throw new BadRequestException('Cette candidature n’est plus en cours.');
+    }
+    const cvId = await cvForApplication(this.prisma, app.worker_id);
+    if (!cvId || cvId === app.profile_cv_id) {
+      throw new BadRequestException(
+        'Le candidat n’a pas ajouté de nouveau CV depuis sa candidature.',
+      );
+    }
+    await this.prisma.application.update({
+      where: { id: applicationId },
+      data: { profile_cv_id: cvId },
+    });
+
+    // The score: in the background (a model call, up to twice), so the page
+    // shows it as pending until the next refresh brings it.
+    await this.prisma.applicationAssessment
+      .deleteMany({ where: { application_id: applicationId } })
+      .catch(() => undefined);
+    void this.assess(applicationId).catch((err) =>
+      this.logger.warn(
+        `Applicant score after a new CV failed for ${applicationId}: ${err instanceof Error ? err.message : String(err)}`,
+      ),
+    );
+
+    let analysis: 'started' | 'no-room' | 'none' = 'none';
+    if (app.cv_resume_id) {
+      try {
+        await this.analyse(
+          profileId,
+          offerId,
+          applicationId,
+          undefined,
+          undefined,
+          true,
+        );
+        analysis = 'started';
+      } catch (err) {
+        // No « CV inclus » left (or one already running): the score still
+        // reads the new CV; the analysis waits for the business.
+        if (err instanceof HttpException && err.getStatus() < 500) {
+          analysis = 'no-room';
+        } else {
+          throw err;
+        }
+      }
+    }
+    return { cv: true, analysis };
   }
 
   /** The CVs of applications this run holds the claim on: sent, then linked. */
