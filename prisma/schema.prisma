@@ -3449,6 +3449,11 @@ model Business {
   photos              String[]           @default([])
   /// « Avantages »: a few short lines, on the careers page.
   benefits            String[]           @default([])
+  /// Picked by Rabotka staff: shown in « Ils recrutent avec Rabotka » on the
+  /// business site and first on the careers site. Never set by the business.
+  is_partner          Boolean            @default(false)
+  /// Order among partners, smallest first; null after the numbered ones.
+  partner_rank        Int?
   /// Raison sociale.
   name                String
   category            BusinessCategory

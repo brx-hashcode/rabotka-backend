@@ -30,6 +30,7 @@ import { CareersService } from './careers.service';
 import {
   AnalyseExternalDto,
   ApplyDto,
+  CareersOffersQuery,
   RefuseExternalDto,
 } from './dto/apply.dto';
 
@@ -66,6 +67,35 @@ export class CareersController {
   @ApiOperation({ summary: 'Pages search engines may list' })
   sitemap() {
     return this.careers.sitemap();
+  }
+
+  // Before `:slug` too; « offers » and « partners » are reserved slugs.
+  @Public()
+  @Get('offers')
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'The job board: open offers of every verified business',
+    description:
+      'Newest first, filtered by words, city and contract type; `filters` lists the cities and types to choose from.',
+  })
+  offers(@Query() query: CareersOffersQuery) {
+    return this.careers.offers({
+      q: query.q,
+      city: query.city,
+      type: query.type,
+      page: query.page ?? 1,
+      limit: query.limit ?? 20,
+    });
+  }
+
+  @Public()
+  @Get('partners')
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @ApiOperation({
+    summary: '« Ils recrutent avec Rabotka »: partners staff picked',
+  })
+  partners() {
+    return this.careers.partners();
   }
 
   @Public()

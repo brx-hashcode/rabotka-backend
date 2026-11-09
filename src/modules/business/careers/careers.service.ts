@@ -14,6 +14,7 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import {
   CvScreeningResumeStatus,
+  EmploymentType,
   ExternalApplicationStatus,
   JobOfferStatus,
   OfferQuestionKind,
@@ -94,8 +95,18 @@ const COMPANY_SELECT = {
   cover_url: true,
   photos: true,
   benefits: true,
+  size: true,
+  is_partner: true,
+  partner_rank: true,
   profile: { select: { avatar_url: true } },
 } as const;
+
+/** A page of the job board, at most. */
+const MAX_OFFERS_PAGE = 50;
+/** Cities offered as filters on the job board: those with the most offers. */
+const MAX_CITY_FILTERS = 20;
+/** Partners shown at once on the business site. */
+const MAX_PARTNERS = 24;
 
 const OFFER_SELECT = {
   reference: true,
@@ -132,7 +143,147 @@ export class CareersService {
     private readonly queue: QueueService,
   ) {}
 
-  /** Verified businesses that are hiring now, those with the most offers first. */
+  /** Where a business may be shown publicly: verified, with a careers page. */
+  private liveBusiness() {
+    return {
+      public_slug: { not: null },
+      deleted_at: null,
+      verification_status: VerificationStatus.VERIFIED,
+    };
+  }
+
+  /**
+   * The job board: every open offer of a live business, newest first, with
+   * its company. Filtered by words (title or description), city and contract
+   * type. `filters` lists what the unfiltered board offers to choose from.
+   */
+  async offers(params: {
+    q?: string;
+    city?: string;
+    type?: EmploymentType[];
+    page: number;
+    limit: number;
+  }) {
+    const limit = Math.min(params.limit, MAX_OFFERS_PAGE);
+    const base: Prisma.JobOfferWhereInput = {
+      ...this.openNow(),
+      employer: { business: this.liveBusiness() },
+    };
+    const q = params.q?.trim().slice(0, 100);
+    const city = params.city?.trim().slice(0, 80);
+    const where: Prisma.JobOfferWhereInput = {
+      AND: [
+        base,
+        ...(q
+          ? [
+              {
+                OR: [
+                  { title: { contains: q, mode: 'insensitive' as const } },
+                  {
+                    description: { contains: q, mode: 'insensitive' as const },
+                  },
+                ],
+              },
+            ]
+          : []),
+        ...(city
+          ? [{ city: { equals: city, mode: 'insensitive' as const } }]
+          : []),
+        ...(params.type?.length
+          ? [{ employment_type: { in: params.type } }]
+          : []),
+      ],
+    };
+    const [rows, total, cities, types] = await Promise.all([
+      this.prisma.jobOffer.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip: (params.page - 1) * limit,
+        take: limit,
+        select: {
+          ...OFFER_SELECT,
+          employer: {
+            select: {
+              avatar_url: true,
+              business: {
+                select: { public_slug: true, name: true, is_partner: true },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.jobOffer.count({ where }),
+      this.prisma.jobOffer.groupBy({
+        by: ['city'],
+        where: { ...base, city: { not: null } },
+        _count: { _all: true },
+        orderBy: { _count: { city: 'desc' } },
+        take: MAX_CITY_FILTERS,
+      }),
+      this.prisma.jobOffer.groupBy({
+        by: ['employment_type'],
+        where: base,
+        _count: { _all: true },
+      }),
+    ]);
+    return {
+      data: rows.map((o) => ({
+        ...this.offerView(o),
+        company: {
+          slug: o.employer.business!.public_slug as string,
+          name: o.employer.business!.name,
+          logoUrl: o.employer.avatar_url,
+          partner: o.employer.business!.is_partner,
+        },
+      })),
+      total,
+      page: params.page,
+      limit,
+      filters: {
+        cities: cities.map((c) => ({
+          city: c.city as string,
+          count: c._count._all,
+        })),
+        types: types
+          .map((t) => ({ type: t.employment_type, count: t._count._all }))
+          .sort((a, b) => b.count - a.count),
+      },
+    };
+  }
+
+  /**
+   * « Ils recrutent avec Rabotka »: the businesses staff picked, in their
+   * order. A partner shows with or without open offers; never without a logo.
+   */
+  async partners() {
+    const businesses = await this.prisma.business.findMany({
+      where: {
+        ...this.liveBusiness(),
+        is_partner: true,
+        profile: { avatar_url: { not: null } },
+      },
+      orderBy: [
+        { partner_rank: { sort: 'asc', nulls: 'last' } },
+        { name: 'asc' },
+      ],
+      take: MAX_PARTNERS,
+      select: {
+        public_slug: true,
+        name: true,
+        profile: { select: { avatar_url: true } },
+      },
+    });
+    return businesses.map((b) => ({
+      slug: b.public_slug as string,
+      name: b.name,
+      logoUrl: b.profile.avatar_url as string,
+    }));
+  }
+
+  /**
+   * Verified businesses that are hiring now: partners first, in staff's
+   * order, then those with the most offers.
+   */
   async companies() {
     const open = await this.prisma.jobOffer.groupBy({
       by: ['employer_id'],
@@ -149,15 +300,21 @@ export class CareersService {
       },
       select: COMPANY_SELECT,
     });
+    const rank = (b: { is_partner: boolean; partner_rank: number | null }) =>
+      b.is_partner
+        ? (b.partner_rank ?? Number.MAX_SAFE_INTEGER - 1)
+        : Number.MAX_SAFE_INTEGER;
     return businesses
+      .sort(
+        (a, b) =>
+          rank(a) - rank(b) ||
+          (counts.get(b.profile_id) ?? 0) - (counts.get(a.profile_id) ?? 0) ||
+          a.name.localeCompare(b.name, 'fr'),
+      )
       .map((b) => ({
         ...this.companyView(b),
         openOffers: counts.get(b.profile_id) ?? 0,
       }))
-      .sort(
-        (a, b) =>
-          b.openOffers - a.openOffers || a.name.localeCompare(b.name, 'fr'),
-      )
       .slice(0, MAX_COMPANIES);
   }
 
@@ -1069,6 +1226,8 @@ export class CareersService {
     cover_url: string | null;
     photos: string[];
     benefits: string[];
+    size: string | null;
+    is_partner: boolean;
     profile: { avatar_url: string | null };
   }) {
     return {
@@ -1084,6 +1243,9 @@ export class CareersService {
       coverUrl: b.cover_url,
       photos: b.photos,
       benefits: b.benefits,
+      /** A sign-up headcount bracket (1-5, 6-20…), when given. */
+      size: b.size,
+      partner: b.is_partner,
     };
   }
 
