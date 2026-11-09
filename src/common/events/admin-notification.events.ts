@@ -50,6 +50,10 @@ export enum AdminNotificationEvent {
   AGENT_PLACEMENT = 'admin.notification.agent.placement',
   /** An agent asked to be paid; it waits in Agent payouts. */
   AGENT_WITHDRAWAL_REQUESTED = 'admin.notification.agent.withdrawal_requested',
+
+  // Rabotka Business
+  /** A company asked for a demo from the business site. */
+  DEMO_REQUEST_CREATED = 'admin.notification.demo_request.created',
 }
 
 export type AdminEntityType =
@@ -64,7 +68,9 @@ export type AdminEntityType =
   | 'agent'
   /** An application a field agent brought in; entityId is the application. */
   | 'agent-placement'
-  | 'agent-withdrawal';
+  | 'agent-withdrawal'
+  /** A « Demander une démo » request; entityId is the DemoRequest. */
+  | 'demo-request';
 
 export interface AdminNotificationPayload {
   event: AdminNotificationEvent;

@@ -4344,3 +4344,44 @@ model ExchangeRate {
 
   @@map("exchange_rates")
 }
+
+enum DemoRequestStatus {
+  NEW
+  CONTACTED
+  DEMO_DONE
+  WON
+  LOST
+}
+
+/// A company asking for a Rabotka Business demo from the public site
+/// (« Demander une démo »). Followed up by staff in rabotka-admin.
+model DemoRequest {
+  id            String            @id @default(uuid()) @db.Uuid
+  created_at    DateTime          @default(now())
+  updated_at    DateTime          @updatedAt
+  first_name    String
+  last_name     String
+  /// Lower-cased: a second request from the same e-mail within a day updates this one.
+  email         String
+  phone         String
+  company       String
+  job_title     String
+  /// ISO 3166-1 alpha-2, one of the business countries.
+  country_code  String
+  /// One of the sign-up headcount brackets (BUSINESS_SIZES).
+  company_size  String
+  /// The features they want to see: analyse-cv, offres-candidatures…
+  interests     String[]          @default([])
+  message       String?           @db.Text
+  status        DemoRequestStatus @default(NEW)
+  /// Staff's follow-up notes.
+  notes         String?           @db.Text
+  /// The admin user who last changed it.
+  handled_by_id String?           @db.Uuid
+  ip            String?
+  user_agent    String?
+
+  @@index([status, created_at])
+  @@index([email, created_at])
+  @@map("demo_requests")
+}
