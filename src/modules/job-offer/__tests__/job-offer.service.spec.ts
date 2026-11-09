@@ -580,9 +580,18 @@ describe('JobOfferService', () => {
       expect(() =>
         service.validateCreateDto({
           ...baseDto,
-          description: 'x'.repeat(1001),
+          description: 'x'.repeat(2501),
         }),
       ).toThrow(BadRequestException);
+    });
+
+    it('accepts a description of up to 2500 characters', () => {
+      expect(() =>
+        service.validateCreateDto({
+          ...baseDto,
+          description: 'x'.repeat(2500),
+        }),
+      ).not.toThrow();
     });
 
     it('throws when scheduled_at is invalid date format', () => {

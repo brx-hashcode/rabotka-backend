@@ -193,7 +193,9 @@ function decodeOpenSlotsCursor(cursor?: string): OpenSlotsCursor | null {
 const TITLE_MIN = 5;
 const TITLE_MAX = 100;
 const DESCRIPTION_MIN = 20;
-const DESCRIPTION_MAX = 1000;
+// The DTO's bound, and the offer writer's: an AI-written offer (six parts)
+// runs past 1 000 characters and must still publish.
+const DESCRIPTION_MAX = 2500;
 const AMOUNT_MIN_FCFA = 1000;
 const AMOUNT_MAX_FCFA = 1_000_000;
 const ADDRESS_MIN = 10;
