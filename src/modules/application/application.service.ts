@@ -11,6 +11,7 @@ import {
 import {
   cvForApplication,
   cvOpen,
+  sendableCvs,
   unlockedWorkers,
 } from '../profile-cv/profile-cv.rules';
 import {
@@ -880,9 +881,22 @@ export class ApplicationService {
           applications.filter((a) => a.profile_cv).map((a) => a.worker_id),
         )
       : new Set<string>();
+    // A CV the candidate added (or replaced) since applying: the business
+    // may re-run the analysis on it.
+    const sendable = employerId
+      ? await sendableCvs(
+          this.prisma,
+          applications.map((a) => a.worker_id),
+        )
+      : new Map<string, string>();
 
     return applications.map((a) => ({
       ...this.toApplicationWithOffer(a),
+      newerCv:
+        sendable.has(a.worker_id) &&
+        sendable.get(a.worker_id) !== a.profile_cv_id &&
+        a.status !== ApplicationStatus.CANCELLED &&
+        a.status !== ApplicationStatus.REJECTED,
       cv:
         a.profile_cv && !a.profile_cv.purged_at
           ? {

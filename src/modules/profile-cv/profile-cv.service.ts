@@ -20,7 +20,12 @@ import {
   extractCvText,
   type CvFileType,
 } from '../business/cv-screening/cv-files';
-import { cvOpen, unlockedWorkers } from './profile-cv.rules';
+import {
+  CV_OPEN_STATUSES,
+  cvOpen,
+  sendableCvs,
+  unlockedWorkers,
+} from './profile-cv.rules';
 import {
   CANDIDATE_VIEWED,
   type CandidateViewed,
@@ -28,6 +33,14 @@ import {
 import { stripContacts } from './strip-contacts';
 
 export const MAX_PROFILE_CV_BYTES = 10 * 1024 * 1024;
+
+/** A CV as a reader other than the worker sees it, before opening the file. */
+export type CvInfo = {
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  uploadedAt: string;
+};
 
 export type ProfileCvView = {
   uploaded: {
@@ -217,6 +230,71 @@ export class ProfileCvService {
     return this.file(application.profile_cv);
   }
 
+  /**
+   * The CV on a candidate's profile, as a business sees it: their live « Mon
+   * CV » while they chose to send it, and whether it opens (the contact
+   * unlocked, or one of their applications to this business retained — the
+   * file has their phone and e-mail on it). Null when there is none.
+   */
+  async forCandidate(
+    employerId: string,
+    workerId: string,
+  ): Promise<(CvInfo & { available: boolean }) | null> {
+    const cv = await this.candidateCv(workerId);
+    if (!cv) return null;
+    return {
+      ...info(cv),
+      available: await this.candidateOpen(employerId, workerId),
+    };
+  }
+
+  /** That CV's file, once it opens. */
+  async candidateFile(employerId: string, workerId: string) {
+    const cv = await this.candidateCv(workerId);
+    if (!cv) throw new NotFoundException('Ce candidat n’a pas ajouté de CV.');
+    if (!(await this.candidateOpen(employerId, workerId))) {
+      throw new ForbiddenException(
+        'Le CV du candidat s’ouvre une fois son contact obtenu.',
+      );
+    }
+    return this.file(cv);
+  }
+
+  /** The admin's view: the live « Mon CV », whatever the worker sends. */
+  async forAdmin(profileId: string): Promise<CvInfo | null> {
+    const live = await this.live(profileId);
+    return live ? info(live) : null;
+  }
+
+  async adminFile(profileId: string) {
+    const live = await this.live(profileId);
+    if (!live) throw new NotFoundException('Aucun CV ajouté.');
+    return this.file(live);
+  }
+
+  private async candidateCv(workerId: string) {
+    const id = (await sendableCvs(this.prisma, [workerId])).get(workerId);
+    return id ? this.prisma.profileCv.findUnique({ where: { id } }) : null;
+  }
+
+  private async candidateOpen(
+    employerId: string,
+    workerId: string,
+  ): Promise<boolean> {
+    const [unlocked, retained] = await Promise.all([
+      unlockedWorkers(this.prisma, employerId, [workerId]),
+      this.prisma.application.count({
+        where: {
+          worker_id: workerId,
+          deleted_at: null,
+          status: { in: [...CV_OPEN_STATUSES] },
+          job_offer: { employer_id: employerId },
+        },
+      }),
+    ]);
+    return unlocked.has(workerId) || retained > 0;
+  }
+
   private async file(cv: {
     id: string;
     storage_key: string;
@@ -291,4 +369,18 @@ export function cleanName(original: string | undefined, extension: string) {
   return base.toLowerCase().endsWith(`.${extension}`)
     ? base
     : `${base}.${extension}`;
+}
+
+function info(cv: {
+  file_name: string;
+  mime_type: string;
+  size_bytes: number;
+  created_at: Date;
+}): CvInfo {
+  return {
+    fileName: cv.file_name,
+    mimeType: cv.mime_type,
+    sizeBytes: cv.size_bytes,
+    uploadedAt: cv.created_at.toISOString(),
+  };
 }

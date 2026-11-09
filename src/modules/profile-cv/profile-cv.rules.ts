@@ -64,3 +64,26 @@ export function cvOpen(
 ): boolean {
   return CV_OPEN_STATUSES.includes(status) || unlocked.has(workerId);
 }
+
+/**
+ * The CV each of these workers would send now: their live « Mon CV », only
+ * while they chose to send it (`preferred_cv` UPLOADED). By worker id.
+ */
+export async function sendableCvs(
+  db: Pick<PrismaClient, 'profileCv'>,
+  workerIds: readonly string[],
+): Promise<Map<string, string>> {
+  if (workerIds.length === 0) return new Map();
+  const rows = await db.profileCv.findMany({
+    where: {
+      profile_id: { in: [...new Set(workerIds)] },
+      deleted_at: null,
+      profile: { preferred_cv: CvChoice.UPLOADED },
+    },
+    orderBy: { created_at: 'desc' },
+    select: { id: true, profile_id: true },
+  });
+  const out = new Map<string, string>();
+  for (const r of rows) if (!out.has(r.profile_id)) out.set(r.profile_id, r.id);
+  return out;
+}

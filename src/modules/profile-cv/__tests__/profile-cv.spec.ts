@@ -264,3 +264,88 @@ describe('cleanName', () => {
     expect(cleanName('', 'docx')).toBe('mon-cv.docx');
   });
 });
+
+describe('ProfileCvService — the candidate sheet and the admin', () => {
+  function candidate(
+    opts: { unlocked?: boolean; retained?: number; sendable?: boolean } = {},
+  ) {
+    const s = setup();
+    const cv = {
+      id: 'cv-1',
+      profile_id: 'w1',
+      file_name: 'CV Awa.pdf',
+      mime_type: 'application/pdf',
+      size_bytes: 1234,
+      created_at: new Date('2026-11-01T00:00:00Z'),
+      storage_key: 'k',
+      storage_bucket: 'b',
+    };
+    s.prisma.profileCv.findMany.mockResolvedValue(
+      opts.sendable === false ? [] : [{ id: 'cv-1', profile_id: 'w1' }],
+    );
+    (s.prisma.profileCv as Record<string, jest.Mock>).findUnique = jest
+      .fn()
+      .mockResolvedValue(cv);
+    s.prisma.contactRecord.findMany.mockResolvedValue(
+      opts.unlocked ? [{ worker_id: 'w1' }] : [],
+    );
+    (s.prisma.application as Record<string, jest.Mock>).count = jest
+      .fn()
+      .mockResolvedValue(opts.retained ?? 0);
+    return { ...s, cv };
+  }
+
+  it('shows the CV as there but shut before the contact is obtained', async () => {
+    const { service, storage } = candidate();
+    await expect(service.forCandidate('e1', 'w1')).resolves.toEqual({
+      fileName: 'CV Awa.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 1234,
+      uploadedAt: '2026-11-01T00:00:00.000Z',
+      available: false,
+    });
+    await expect(service.candidateFile('e1', 'w1')).rejects.toThrow(
+      ForbiddenException,
+    );
+    expect(storage.download).not.toHaveBeenCalled();
+  });
+
+  it('opens it once the contact is unlocked, or an application retained', async () => {
+    const unlocked = candidate({ unlocked: true });
+    await expect(
+      unlocked.service.candidateFile('e1', 'w1'),
+    ).resolves.toMatchObject({
+      contentType: 'application/pdf',
+    });
+
+    const retained = candidate({ retained: 1 });
+    await expect(
+      retained.service.forCandidate('e1', 'w1'),
+    ).resolves.toMatchObject({
+      available: true,
+    });
+  });
+
+  it('has nothing to show when the candidate sends the Rabotka CV', async () => {
+    const { service } = candidate({ sendable: false });
+    await expect(service.forCandidate('e1', 'w1')).resolves.toBeNull();
+    await expect(service.candidateFile('e1', 'w1')).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+
+  it('gives the admin the live CV, whatever the worker sends', async () => {
+    const { service, storage } = setup({ live: {} });
+    await expect(service.forAdmin('w1')).resolves.toMatchObject({
+      fileName: 'Mon CV.pdf',
+    });
+    await service.adminFile('w1');
+    expect(storage.download).toHaveBeenCalledWith('k', { bucket: 'b' });
+
+    const none = setup();
+    await expect(none.service.forAdmin('w1')).resolves.toBeNull();
+    await expect(none.service.adminFile('w1')).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+});
