@@ -4,6 +4,11 @@ import { posterHtml } from '../poster';
 jest.mock('../../../../common/utils/puppeteer', () => ({
   htmlToPdf: jest.fn().mockResolvedValue(Buffer.from('%PDF')),
 }));
+// The PNG encoding behind a real QR code takes ~2 s inside Jest's sandbox
+// (20 ms in plain Node): enough to time this test out on a busy CI runner.
+jest.mock('qrcode', () => ({
+  toDataURL: jest.fn().mockResolvedValue('data:image/png;base64,QR'),
+}));
 
 const business = {
   name: 'KAMOA',
