@@ -1,4 +1,3 @@
-import type { ConfigService } from '@nestjs/config';
 import { AdminNotificationEvent } from '../../../../common/events/admin-notification.events';
 import type { PrismaService } from '../../../../common/services/prisma/prisma.service';
 import type { LayoutService } from '../../../mail/layout.service';
@@ -31,38 +30,32 @@ function setup(sendMail = jest.fn().mockResolvedValue(undefined)) {
         message: null,
       }),
     },
-    user: {
-      findMany: jest.fn().mockResolvedValue([
-        { email: 'a@rabotka.work', first_name: 'Alice' },
-        { email: 'b@rabotka.work', first_name: 'Bruno' },
-      ]),
-    },
   };
   const layout = { wrap: jest.fn((html: string) => Promise.resolve(html)) };
-  const config = {
-    get: jest.fn().mockReturnValue('https://admin.rabotka.work/'),
-  };
   const listener = new DemoRequestListener(
     prisma as unknown as PrismaService,
     { sendMail } as unknown as MailService,
     layout as unknown as LayoutService,
-    config as unknown as ConfigService,
   );
   return { listener, sendMail };
 }
 
 describe('DemoRequestListener', () => {
-  it('confirms to the company and e-mails each staff member a link', async () => {
+  it('sends one e-mail, the confirmation to the requester, never to staff', async () => {
     const { listener, sendMail } = setup();
 
     await listener.onCreated(payload);
 
-    const to = sendMail.mock.calls.map((c) => c[0].to);
-    expect(to).toEqual(['awa@example.com', 'a@rabotka.work', 'b@rabotka.work']);
-    expect(sendMail.mock.calls[1][0].html).toContain(
-      'https://admin.rabotka.work/demo-requests/demo-1',
+    expect(sendMail).toHaveBeenCalledTimes(1);
+    const mail = sendMail.mock.calls[0][0];
+    expect(mail.to).toBe('awa@example.com');
+    expect(mail.subject).toBe(
+      'Votre demande de démo Rabotka Business est bien reçue',
     );
-    expect(sendMail.mock.calls[1][0].html).toContain('Analyse de CV');
+    expect(mail.html).toContain('Boulangerie du Plateau');
+    expect(mail.html).toContain('Analyse de CV');
+    expect(mail.html).toContain('6-20 salariés');
+    expect(mail.html).toContain('+242 06 123 45 67');
   });
 
   it('never throws when the mail queue fails', async () => {
