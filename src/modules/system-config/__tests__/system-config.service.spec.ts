@@ -615,6 +615,27 @@ describe('SystemConfigService', () => {
     });
   });
 
+  describe('getPublicContact', () => {
+    it('adds the networks with a real link to the contact', async () => {
+      mockRedis.mget.mockResolvedValue(Array<null>(7).fill(null));
+      mockPrisma.systemConfig.findMany.mockResolvedValue([
+        { key: 'contact.email', value: 'contact@rabotka.work' },
+        {
+          key: 'social.linkedin',
+          value: 'https://linkedin.com/company/rabotka',
+        },
+        { key: 'social.instagram', value: 'instagram.com/rabotka' },
+      ]);
+
+      const contact = await service.getPublicContact();
+
+      expect(contact.email).toBe('contact@rabotka.work');
+      expect(contact.socials).toEqual([
+        { network: 'linkedin', url: 'https://linkedin.com/company/rabotka' },
+      ]);
+    });
+  });
+
   describe('getFees', () => {
     it('returns fees with defaults', async () => {
       // getFees requests 14 keys — return all null so every value falls back.
