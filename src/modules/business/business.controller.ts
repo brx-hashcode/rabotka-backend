@@ -5,6 +5,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseEnumPipe,
   ParseUUIDPipe,
   Patch,
   Post,
@@ -43,7 +44,21 @@ import { planView } from './subscription/plan-view';
 import { BusinessStatsService } from './business-stats.service';
 import { BusinessContactsService } from './business-contacts.service';
 import { BusinessTalentService } from './business-talent.service';
-import { InviteTalentDto, SaveTalentDto } from './dto/business-talent.dto';
+import {
+  InviteTalentDto,
+  PoolSearchDto,
+  SaveTalentDto,
+} from './dto/business-talent.dto';
+import {
+  PoolCandidatesService,
+  type PoolKind,
+} from './pool-candidates.service';
+
+/** `external` (careers-page candidature) or `cv` (a CV analysed). */
+const POOL_KIND = new ParseEnumPipe({
+  external: 'external',
+  cv: 'cv',
+} as const);
 import { STATS_PERIODS } from './business-stats';
 
 /**
@@ -62,6 +77,7 @@ export class BusinessController {
     private readonly statsService: BusinessStatsService,
     private readonly contacts: BusinessContactsService,
     private readonly talents: BusinessTalentService,
+    private readonly pool: PoolCandidatesService,
   ) {}
 
   @Get('plans')
@@ -183,6 +199,63 @@ export class BusinessController {
   })
   myTalents(@Req() req: ProfileAuthenticatedRequest) {
     return this.talents.list(req.user.profileId);
+  }
+
+  @Get('me/talents/candidates')
+  @ApiOperation({
+    summary:
+      '« Mes profils » beyond Rabotka: candidates kept with consent, and CVs analysed',
+    description:
+      '`source=external`: careers-page candidates who agreed to be kept, while that lasts. `source=cv`: CVs the business analysed, while its plan keeps them. Searched by what the CV says.',
+  })
+  poolCandidates(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Query() query: PoolSearchDto,
+  ) {
+    return this.pool.search(req.user.profileId, {
+      source: query.source,
+      q: query.q,
+      kept: query.kept === 'true',
+      page: query.page,
+    });
+  }
+
+  @Put('me/talents/candidates/:kind/:id')
+  @ApiOperation({
+    summary: 'Keep a candidate or a CV, or edit its note and tags',
+  })
+  keepPoolCandidate(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('kind', POOL_KIND) kind: PoolKind,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SaveTalentDto,
+  ) {
+    return this.pool.save(req.user.profileId, kind, id, dto);
+  }
+
+  @Delete('me/talents/candidates/:kind/:id')
+  @ApiOperation({ summary: 'Stop keeping a candidate or a CV' })
+  dropPoolCandidate(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('kind', POOL_KIND) kind: PoolKind,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.pool.remove(req.user.profileId, kind, id);
+  }
+
+  @Post('me/talents/candidates/:kind/:id/invite')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @ApiOperation({
+    summary:
+      'Invite a kept candidate or CV to apply to an open offer, by e-mail',
+  })
+  invitePoolCandidate(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('kind', POOL_KIND) kind: PoolKind,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: InviteTalentDto,
+  ) {
+    return this.pool.invite(req.user.profileId, kind, id, dto.offerId);
   }
 
   @Put('me/talents/:workerId')

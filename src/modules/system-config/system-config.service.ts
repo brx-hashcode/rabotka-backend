@@ -809,6 +809,18 @@ export class SystemConfigService implements OnModuleInit {
     return Number.isNaN(n) || n < 1 ? 168 : n;
   }
 
+  /**
+   * How long a careers-page candidate who agreed to be kept stays in the
+   * business's « Mes profils », with their CV: 1 to 36 months, 12 by default.
+   */
+  async getTalentPoolMonths(): Promise<number> {
+    const raw = Number.parseInt(
+      (await this.get('business.talent_pool_months', '12')).trim(),
+      10,
+    );
+    return Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 36) : 12;
+  }
+
   async getContactInfo() {
     const [email, phone, address] = await this.mgetBatch([
       { key: 'contact.email', fallback: 'contact@rabotka.com' },

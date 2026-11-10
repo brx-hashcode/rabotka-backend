@@ -1,4 +1,9 @@
+import { Type } from 'class-transformer';
 import {
+  IsBooleanString,
+  IsIn,
+  IsInt,
+  Min,
   ArrayMaxSize,
   IsArray,
   IsOptional,
@@ -27,4 +32,26 @@ export class SaveTalentDto {
 export class InviteTalentDto {
   @IsUUID()
   offerId!: string;
+}
+
+/** « Mes profils » search beyond Rabotka workers. */
+export class PoolSearchDto {
+  @IsIn(['external', 'cv'])
+  source!: 'external' | 'cv';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
+
+  /** Only those the business keeps. */
+  @IsOptional()
+  @IsBooleanString()
+  kept?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
 }

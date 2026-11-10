@@ -115,8 +115,9 @@ export class BusinessTalentService {
 
   async list(profileId: string) {
     const [kept, hires] = await Promise.all([
+      // Rabotka workers here; kept candidatures and CVs are `candidates()`.
       this.prisma.businessTalent.findMany({
-        where: { employer_id: profileId },
+        where: { employer_id: profileId, worker_id: { not: null } },
         orderBy: { created_at: 'desc' },
         select: {
           worker_id: true,
@@ -199,14 +200,18 @@ export class BusinessTalentService {
       };
     };
 
-    const out = kept.map((k) =>
+    const workers = kept.filter(
+      (k): k is typeof k & { worker_id: string; worker: WorkerRow } =>
+        !!k.worker_id && !!k.worker,
+    );
+    const out = workers.map((k) =>
       row(k.worker_id, k.worker, {
         note: k.note,
         tags: k.tags,
         savedAt: k.created_at,
       }),
     );
-    const keptIds = new Set(kept.map((k) => k.worker_id));
+    const keptIds = new Set(workers.map((k) => k.worker_id));
     const alumni = [...history.entries()]
       .filter(([id]) => !keptIds.has(id))
       .sort(([, a], [, b]) => b.lastAt.getTime() - a.lastAt.getTime())

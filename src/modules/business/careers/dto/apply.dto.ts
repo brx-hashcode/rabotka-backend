@@ -1,4 +1,5 @@
 import {
+  IsIn,
   Matches,
   Equals,
   IsEmail,
@@ -29,6 +30,11 @@ export class ApplyDto {
 
   @Equals('true', { message: 'Votre accord est nécessaire pour postuler.' })
   consent!: string;
+
+  /** « Garder ma candidature pour d'autres postes »: an opt-in, 'true' or absent. */
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  poolConsent?: string;
 
   /** JSON: [{ questionId, value }]. */
   // Up to 5 questions of 3,000 characters each, plus the JSON around them.
