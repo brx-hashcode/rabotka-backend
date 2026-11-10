@@ -228,6 +228,7 @@ export class CandidateNotesService {
       kind:
         | 'APPLIED'
         | 'VIEWED'
+        | 'SHORTLISTED'
         | 'RETAINED'
         | 'REFUSED'
         | 'WITHDRAWN'
@@ -246,6 +247,10 @@ export class CandidateNotesService {
     };
     push(dates.applied, { kind: 'APPLIED' });
     push(dates.viewed, { kind: 'VIEWED' });
+    push(dates.shortlisted, {
+      kind: 'SHORTLISTED',
+      member: by(/^POST .*\/shortlist$/),
+    });
     push(dates.retained, {
       kind: 'RETAINED',
       member: by(/\/(accept|retain)$/),
@@ -319,6 +324,7 @@ export class CandidateNotesService {
         select: {
           created_at: true,
           viewed_at: true,
+          shortlisted_at: true,
           accepted_at: true,
           rejected_at: true,
           cancelled_at: true,
@@ -328,6 +334,7 @@ export class CandidateNotesService {
       return {
         applied: a.created_at,
         viewed: a.viewed_at,
+        shortlisted: a.shortlisted_at,
         retained: a.accepted_at,
         refused: a.rejected_at,
         withdrawn: a.cancelled_at,
@@ -340,6 +347,7 @@ export class CandidateNotesService {
       select: {
         created_at: true,
         viewed_at: true,
+        shortlisted_at: true,
         retained_at: true,
         refused_at: true,
       },
@@ -347,6 +355,7 @@ export class CandidateNotesService {
     return {
       applied: a.created_at,
       viewed: a.viewed_at,
+      shortlisted: a.shortlisted_at,
       retained: a.retained_at,
       refused: a.refused_at,
       withdrawn: null,

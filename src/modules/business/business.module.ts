@@ -16,6 +16,7 @@ import { CvScreeningModule } from './cv-screening/cv-screening.module';
 import { InterviewModule } from './interview/interview.module';
 import { OfferWriterModule } from './offer-writer/offer-writer.module';
 import { RefusalsModule } from './refusals/refusals.module';
+import { ShortlistModule } from './shortlist/shortlist.module';
 import { ApplicantScoreModule } from './applicant-score/applicant-score.module';
 import { BusinessContractModule } from './contract/business-contract.module';
 import { BusinessReportController } from './report/business-report.controller';
@@ -44,6 +45,7 @@ import { DemoRequestModule } from './demo-request/demo-request.module';
     InterviewModule,
     OfferWriterModule,
     RefusalsModule,
+    ShortlistModule,
     ApplicantScoreModule,
     BusinessContractModule,
     CareersModule,
