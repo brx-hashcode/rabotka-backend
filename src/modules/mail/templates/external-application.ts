@@ -100,3 +100,35 @@ export function newExternalApplicationEmail(
     </p>
   `;
 }
+
+/**
+ * A business writes to someone who applied on its careers page (« Envoyer
+ * un message »): its words as they are, and how to answer it.
+ */
+export function businessMessageEmail(args: {
+  firstName: string;
+  businessName: string;
+  jobTitle: string;
+  body: string;
+  /** Where the candidate answers: the member who wrote, or the business. */
+  replyTo: string | null;
+}): string {
+  const paragraphs = escapeHtml(args.body)
+    .split(/\n{2,}/)
+    .map((p) => `<p>${p.replace(/\n/g, '<br />')}</p>`)
+    .join('');
+  return `
+    <p>Bonjour ${escapeHtml(args.firstName)},</p>
+    <p>
+      ${escapeHtml(args.businessName)} vous écrit à propos de votre candidature pour
+      <strong>${escapeHtml(args.jobTitle)}</strong> :
+    </p>
+    <div style="margin:20px 0;padding:16px 20px;border-radius:12px;background:#f1f4f8;">${paragraphs}</div>
+    ${
+      args.replyTo
+        ? `${emailButton(`mailto:${args.replyTo}`, `Répondre à ${args.businessName}`)}
+    <p style="color:#6b7570;font-size:14px;">Ou écrivez à ${escapeHtml(args.replyTo)}.</p>`
+        : ''
+    }
+  `;
+}

@@ -17,6 +17,7 @@ import { InterviewModule } from './interview/interview.module';
 import { OfferWriterModule } from './offer-writer/offer-writer.module';
 import { RefusalsModule } from './refusals/refusals.module';
 import { ShortlistModule } from './shortlist/shortlist.module';
+import { BusinessMessagesModule } from './messages/business-messages.module';
 import { ApplicantScoreModule } from './applicant-score/applicant-score.module';
 import { BusinessContractModule } from './contract/business-contract.module';
 import { BusinessReportController } from './report/business-report.controller';
@@ -46,6 +47,7 @@ import { DemoRequestModule } from './demo-request/demo-request.module';
     OfferWriterModule,
     RefusalsModule,
     ShortlistModule,
+    BusinessMessagesModule,
     ApplicantScoreModule,
     BusinessContractModule,
     CareersModule,
