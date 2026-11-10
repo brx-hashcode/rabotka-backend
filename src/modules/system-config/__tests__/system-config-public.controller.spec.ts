@@ -4,6 +4,7 @@ import { SystemConfigService } from '../system-config.service';
 
 const mockSystemConfigService = {
   getContactInfo: jest.fn(),
+  getPublicContact: jest.fn(),
   getWelcomeCredits: jest.fn(),
   getFees: jest.fn(),
 };

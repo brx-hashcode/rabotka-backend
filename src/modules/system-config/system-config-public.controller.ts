@@ -10,10 +10,14 @@ export class SystemConfigPublicController {
 
   @Public()
   @Get('contact')
-  @ApiOperation({ summary: 'Get public contact information' })
-  @ApiResponse({ status: 200, description: 'Contact info' })
+  @ApiOperation({
+    summary: 'Public contact information and social links',
+    description:
+      'E-mail, phone, address, and `socials`: the networks set in Settings → Contact, http(s) links only.',
+  })
+  @ApiResponse({ status: 200, description: 'Contact info and socials' })
   getContact() {
-    return this.systemConfigService.getContactInfo();
+    return this.systemConfigService.getPublicContact();
   }
 
   @Public()
