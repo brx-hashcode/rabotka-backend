@@ -3494,6 +3494,7 @@ model Business {
   mailboxes     BusinessMailbox[]
   linkedin_accounts BusinessLinkedinAccount[]
   members       BusinessMember[]
+  message_templates BusinessMessageTemplate[]
   activities    BusinessActivity[]
   credits            BusinessCredit[]
   candidate_notes    CandidateNote[]
@@ -4115,6 +4116,7 @@ model BusinessMember {
   activities BusinessActivity[]
   notes      CandidateNote[]
   opinions   CandidateOpinion[]
+  message_templates BusinessMessageTemplate[]
 
   @@unique([business_id, email])
   @@index([email, status], name: "idx_business_member_email_status")
@@ -4396,3 +4398,35 @@ model DemoRequest {
   @@index([email, created_at])
   @@map("demo_requests")
 }
+
+enum BusinessMessageKind {
+  /// « Invitation » : à un entretien, à passer, à rappeler.
+  INVITATION
+  /// « Refus » : the words sent with a refusal.
+  REFUSAL
+  /// « Demande d'information » : a document, an availability, a detail.
+  INFORMATION
+  OTHER
+}
+
+/// A message a business writes once and sends again (« Modèles de
+/// messages »): with a refusal, or to several candidates at once. `{prenom}`,
+/// `{poste}` and `{entreprise}` are filled in at send time.
+model BusinessMessageTemplate {
+  id          String              @id @default(uuid()) @db.Uuid
+  created_at  DateTime            @default(now()) @db.Timestamptz
+  updated_at  DateTime            @updatedAt @db.Timestamptz
+  business_id String              @db.Uuid
+  kind        BusinessMessageKind
+  title       String
+  body        String              @db.Text
+  /// Who wrote it; null once that member is gone.
+  member_id   String?             @db.Uuid
+
+  business Business        @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  member   BusinessMember? @relation(fields: [member_id], references: [id], onDelete: SetNull)
+
+  @@index([business_id, kind], name: "idx_business_message_template_business_kind")
+  @@map("business_message_templates")
+}
+
