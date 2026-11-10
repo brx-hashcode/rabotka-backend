@@ -436,4 +436,99 @@ describe('InterviewService', () => {
       expect(mail.sendMail).not.toHaveBeenCalled();
     });
   });
+
+  describe('several times offered', () => {
+    const times = [inHours(72), inHours(48), inHours(96)];
+
+    it('stores the times sorted, starts at the earliest, and invites without an agenda file', async () => {
+      const { service, prisma, mail } = make();
+      // As Prisma returns it with LOAD: the nested create comes back as rows.
+      prisma.interview.create.mockImplementation(({ data }: any) =>
+        loaded({
+          ...data,
+          slots: data.slots.create.map((x: { starts_at: Date }, n: number) => ({
+            id: `s${n}`,
+            starts_at: x.starts_at,
+          })),
+        }),
+      );
+      await service.create('p1', {
+        ...slot,
+        startsAt: undefined,
+        options: times,
+        cvResumeId: 'r1',
+      });
+      const data = prisma.interview.create.mock.calls[0][0].data;
+      expect(data.starts_at.toISOString()).toBe(times[1]);
+      expect(
+        data.slots.create.map((x: { starts_at: Date }) =>
+          x.starts_at.toISOString(),
+        ),
+      ).toEqual([times[1], times[0], times[2]]);
+      const sent = mail.sendMail.mock.calls[0][0];
+      expect(sent.html).toContain('Choisir mon créneau');
+      expect(sent.attachments ?? []).toHaveLength(0);
+    });
+
+    it('refuses more than three, or one in the past', async () => {
+      const { service } = make();
+      await expect(
+        service.create('p1', {
+          ...slot,
+          options: [...times, inHours(120)],
+          cvResumeId: 'r1',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        service.create('p1', {
+          ...slot,
+          options: [inHours(48), inHours(-1)],
+          cvResumeId: 'r1',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    const offered = (over: Record<string, unknown> = {}) =>
+      loaded({
+        starts_at: new Date(times[1]),
+        slots: [
+          { id: 's1', starts_at: new Date(times[1]) },
+          { id: 's2', starts_at: new Date(times[0]) },
+        ],
+        ...over,
+      });
+
+    it('confirming is choosing one: the time becomes it, the others go, the agenda file follows', async () => {
+      const { service, prisma, mail } = make();
+      prisma.interview.findUnique.mockResolvedValue(offered());
+      await service.respond('tok', 'CONFIRMED', null, 's2');
+      const data = prisma.interview.update.mock.calls[0][0].data;
+      expect(data.status).toBe('CONFIRMED');
+      expect(data.starts_at.toISOString()).toBe(times[0]);
+      expect(data.slots).toEqual({ deleteMany: {} });
+      const chosen = mail.sendMail.mock.calls.find((c: any[]) =>
+        c[0].subject.startsWith('Entretien confirmé'),
+      );
+      expect(chosen[0].attachments).toHaveLength(1);
+    });
+
+    it('asks to choose when no time or an unknown one is given', async () => {
+      const { service, prisma } = make();
+      prisma.interview.findUnique.mockResolvedValue(offered());
+      await expect(
+        service.respond('tok', 'CONFIRMED', null),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        service.respond('tok', 'CONFIRMED', null, 'nope'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('sends no reminder of a time not chosen yet', async () => {
+      const { service, prisma } = make();
+      await service.remind();
+      expect(prisma.interview.findMany.mock.calls[0][0].where.slots).toEqual({
+        none: {},
+      });
+    });
+  });
 });
