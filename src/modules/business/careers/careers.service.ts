@@ -20,7 +20,7 @@ import {
   Prisma,
   VerificationStatus,
 } from '@prisma/client';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { kycBucket } from '../../../common/services/storage/kyc-bucket';
 import { StorageService } from '../../../common/services/storage/storage.service';
@@ -413,6 +413,9 @@ export class CareersService {
 
     const firstName = dto.firstName.trim();
     const lastName = dto.lastName.trim();
+    // « Garder ma candidature »: for a set time, with a link to take it back.
+    const pool =
+      dto.poolConsent === 'true' ? await this.poolTerms(new Date()) : null;
     try {
       await this.prisma.externalApplication.create({
         data: {
@@ -431,6 +434,13 @@ export class CareersService {
           knocked_out: knockedOut,
           source: dto.source ?? null,
           consented_at: new Date(),
+          ...(pool
+            ? {
+                pool_consent_at: new Date(),
+                pool_expires_at: pool.expiresAt,
+                pool_token_hash: pool.tokenHash,
+              }
+            : {}),
           cv_file_name: file.originalname.slice(0, 200),
           cv_mime_type: type,
           cv_size_bytes: file.size,
@@ -464,7 +474,14 @@ export class CareersService {
     void this.send(
       email,
       `Candidature envoyée à ${business.name}`,
-      applicationReceivedEmail(firstName, business.name, offer.title),
+      applicationReceivedEmail(
+        firstName,
+        business.name,
+        offer.title,
+        pool
+          ? { until: pool.expiresAt, withdrawUrl: this.withdrawUrl(pool.token) }
+          : null,
+      ),
     );
     // To the team, as its other recruiting e-mails: the holder and every
     // member who left them on (not the organisation's contact address).
@@ -699,10 +716,25 @@ export class CareersService {
     for (const a of due) {
       const resumeId = screening.resumeIds.get(a.id);
       if (!resumeId) continue;
-      await this.prisma.externalApplication.update({
+      const linked = await this.prisma.externalApplication.update({
         where: { id: a.id },
         data: { cv_resume_id: resumeId, analysis_attempts: { increment: 1 } },
+        select: { pool_expires_at: true },
       });
+      // Kept with the candidate's consent: their CV and its analysis last as
+      // long, so the business can still find them in « Mes profils ».
+      if (linked.pool_expires_at && linked.pool_expires_at > new Date()) {
+        await this.prisma.cvScreeningResume.updateMany({
+          where: {
+            id: resumeId,
+            OR: [
+              { expires_at: null },
+              { expires_at: { lt: linked.pool_expires_at } },
+            ],
+          },
+          data: { expires_at: linked.pool_expires_at },
+        });
+      }
       // The failed try it replaces: gone, rather than a dead row in the screening.
       if (a.cv_resume_id) {
         await this.prisma.cvScreeningResume
@@ -1025,6 +1057,71 @@ export class CareersService {
     return { refused: true };
   }
 
+  /** Until when a consenting candidate is kept, and their withdrawal token. */
+  private async poolTerms(now: Date) {
+    const months = await this.systemConfig.getTalentPoolMonths();
+    const expiresAt = new Date(now);
+    expiresAt.setMonth(expiresAt.getMonth() + months);
+    const token = randomBytes(24).toString('base64url');
+    return { expiresAt, token, tokenHash: poolTokenHash(token) };
+  }
+
+  /** The candidate's « retirer ma candidature » page. */
+  private withdrawUrl(token: string): string {
+    return `${businessSiteUrl()}/carrieres/retrait/${token}`;
+  }
+
+  /**
+   * « Retirer ma candidature de la liste » from the e-mail link: the
+   * consent ends at once, the business no longer keeps or finds them, and
+   * their CV goes back to the usual retention.
+   */
+  async withdrawFromPool(token: string) {
+    const application = await this.prisma.externalApplication.findUnique({
+      where: { pool_token_hash: poolTokenHash(token) },
+      select: {
+        id: true,
+        cv_resume_id: true,
+        job_offer: { select: { title: true } },
+      },
+    });
+    if (!application) {
+      throw new NotFoundException('Ce lien n’est plus valable.');
+    }
+    await this.prisma.$transaction([
+      this.prisma.externalApplication.update({
+        where: { id: application.id },
+        data: {
+          pool_consent_at: null,
+          pool_expires_at: null,
+          pool_token_hash: null,
+        },
+      }),
+      this.prisma.businessTalent.deleteMany({
+        where: {
+          OR: [
+            { external_application_id: application.id },
+            ...(application.cv_resume_id
+              ? [{ cv_resume_id: application.cv_resume_id }]
+              : []),
+          ],
+        },
+      }),
+    ]);
+    // Their CV goes back to the offer's own retention (no longer the pool's).
+    if (application.cv_resume_id) {
+      const resume = await this.prisma.cvScreeningResume.findUnique({
+        where: { id: application.cv_resume_id },
+        select: { screening: { select: { expires_at: true } } },
+      });
+      await this.prisma.cvScreeningResume.update({
+        where: { id: application.cv_resume_id },
+        data: { expires_at: resume?.screening.expires_at ?? new Date() },
+      });
+    }
+    return { withdrawn: true, jobTitle: application.job_offer.title };
+  }
+
   private async businessName(profileId: string): Promise<string> {
     const business = await this.prisma.business.findUnique({
       where: { profile_id: profileId },
@@ -1165,4 +1262,9 @@ export class CareersService {
       quantity: o.quantity,
     };
   }
+}
+
+/** Only the hash of a withdrawal link is stored, as for interview links. */
+function poolTokenHash(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
 }

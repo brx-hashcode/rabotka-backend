@@ -3749,6 +3749,7 @@ model CvScreeningResume {
 
   @@index([screening_id], name: "idx_cv_screening_resume_screening")
   @@map("cv_screening_resumes")
+  kept_by BusinessTalent[]
 }
 
 enum CvChatRole {
@@ -3872,21 +3873,29 @@ model Interview {
   @@map("interviews")
 }
 
-/// A worker a business keeps for later — its talent pool. Private to the
-/// business: a note and tags only it reads. One row per business and worker.
+/// Someone a business keeps for later — its talent pool, « Mes profils ».
+/// Private to the business: a note and tags only it reads. Exactly one of:
+/// a Rabotka worker, a careers-page candidature (with the candidate's
+/// consent, until it ends), or a CV it analysed (while the plan keeps it).
 model BusinessTalent {
   id          String   @id @default(uuid()) @db.Uuid
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
   /// The business's profile (the employer side), as on every offer.
   employer_id String   @db.Uuid
-  worker_id   String   @db.Uuid
+  worker_id   String?  @db.Uuid
+  external_application_id String? @db.Uuid
+  cv_resume_id String?  @db.Uuid
   note        String?  @db.Text
   tags        String[] @default([])
 
   employer Profile @relation("BusinessTalentEmployer", fields: [employer_id], references: [id], onDelete: Cascade)
-  worker   Profile @relation("BusinessTalentWorker", fields: [worker_id], references: [id], onDelete: Cascade)
+  worker   Profile? @relation("BusinessTalentWorker", fields: [worker_id], references: [id], onDelete: Cascade)
+  external_application ExternalApplication? @relation(fields: [external_application_id], references: [id], onDelete: Cascade)
+  cv_resume CvScreeningResume? @relation(fields: [cv_resume_id], references: [id], onDelete: Cascade)
 
+  @@unique([employer_id, external_application_id])
+  @@unique([employer_id, cv_resume_id])
   @@unique([employer_id, worker_id])
   @@index([employer_id], name: "idx_business_talent_employer")
   @@map("business_talents")
@@ -4224,6 +4233,13 @@ model ExternalApplication {
   /// Where they came from: google, jooble, qr, whatsapp… Null before tracking.
   source          String?
   consented_at    DateTime                  @db.Timestamptz
+  /// « Garder ma candidature pour d'autres postes »: an opt-in on the form.
+  /// Until pool_expires_at the business may keep and search the candidate
+  /// in « Mes profils », and the CV is kept that long.
+  pool_consent_at DateTime?                 @db.Timestamptz
+  pool_expires_at DateTime?                 @db.Timestamptz
+  /// The candidate's own « retirer ma candidature » link (its hash).
+  pool_token_hash String?                   @unique
   viewed_at       DateTime?                 @db.Timestamptz
   /// « Présélectionnée », while PENDING: seen by the business only.
   shortlisted_at  DateTime?                 @db.Timestamptz
@@ -4256,6 +4272,7 @@ model ExternalApplication {
   // Per offer and status: the offer page, the sweeps every few minutes.
   @@index([job_offer_id, status], name: "idx_external_application_offer_status")
   @@map("external_applications")
+  kept_by BusinessTalent[]
 }
 
 enum OfferQuestionKind {

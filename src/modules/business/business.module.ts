@@ -11,6 +11,7 @@ import { BusinessCheckoutService } from './subscription/business-checkout.servic
 import { BusinessStatsService } from './business-stats.service';
 import { BusinessContactsService } from './business-contacts.service';
 import { BusinessTalentService } from './business-talent.service';
+import { PoolCandidatesService } from './pool-candidates.service';
 import { AdminBusinessSubscriptionController } from './subscription/admin-business-subscription.controller';
 import { CvScreeningModule } from './cv-screening/cv-screening.module';
 import { InterviewModule } from './interview/interview.module';
@@ -70,6 +71,7 @@ import { DemoRequestModule } from './demo-request/demo-request.module';
     BusinessStatsService,
     BusinessContactsService,
     BusinessTalentService,
+    PoolCandidatesService,
     BusinessReportService,
     AdminBusinessService,
   ],
