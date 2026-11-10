@@ -125,7 +125,7 @@ export class PublicInterviewController {
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({ summary: 'Confirm, decline, or ask for another time' })
   answer(@Param('token') token: string, @Body() dto: InterviewAnswerDto) {
-    return this.interviews.respond(token, dto.answer, dto.note);
+    return this.interviews.respond(token, dto.answer, dto.note, dto.slotId);
   }
 }
 

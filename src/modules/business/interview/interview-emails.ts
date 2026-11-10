@@ -69,7 +69,29 @@ export function interviewInviteEmail(
   i: InterviewMail,
   url: string,
   changed = false,
+  /** Several times offered: the candidate picks one through the link. */
+  options: Date[] = [],
 ): string {
+  if (options.length > 0) {
+    const list = options
+      .map((d) => `<li style="margin:4px 0;">${escapeHtml(frWhen(d))}</li>`)
+      .join('');
+    return `
+    <p>Bonjour ${escapeHtml(i.candidateName)},</p>
+    <p>
+      <strong>${escapeHtml(i.businessName)}</strong> ${changed ? 'vous propose de nouveaux créneaux' : 'vous propose un entretien'}
+      pour le poste « ${escapeHtml(i.jobTitle)} » (${i.durationMinutes} min, ${escapeHtml(modeLine(i).replace(/ : https?:\/\/\S+$/, ''))}).
+      Choisissez le moment qui vous convient :
+    </p>
+    <ul style="margin:12px 0;padding-left:20px;font-size:15px;">${list}</ul>
+    ${note(i.message)}
+    <p>
+      <a href="${escapeHtml(url)}"><strong>Choisir mon créneau</strong></a>,
+      ou proposer un autre moment si aucun ne vous convient.
+    </p>
+    <p>Cordialement,<br /><strong>${escapeHtml(i.businessName)}</strong>, via Rabotka</p>
+  `;
+  }
   return `
     <p>Bonjour ${escapeHtml(i.candidateName)},</p>
     <p>
@@ -136,3 +158,18 @@ export function interviewAnsweredEmail(
 }
 
 export { ANSWER_SENTENCE };
+
+/** To the candidate once they chose one of the times offered: the settled interview. */
+export function interviewChosenEmail(i: InterviewMail): string {
+  return `
+    <p>Bonjour ${escapeHtml(i.candidateName)},</p>
+    <p>
+      C’est noté : votre entretien avec <strong>${escapeHtml(i.businessName)}</strong>
+      est confirmé.
+    </p>
+    ${details(i)}
+    ${note(i.message)}
+    <p style="color:#6b7280;font-size:13px;">Le fichier joint ajoute l’entretien à votre agenda.</p>
+    <p>Cordialement,<br /><strong>${escapeHtml(i.businessName)}</strong>, via Rabotka</p>
+  `;
+}

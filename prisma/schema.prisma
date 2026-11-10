@@ -3860,6 +3860,9 @@ model Interview {
   application Application?     @relation(fields: [application_id], references: [id], onDelete: SetNull)
   external_application ExternalApplication? @relation(fields: [external_application_id], references: [id], onDelete: SetNull)
   offer     JobOffer?          @relation(fields: [offer_id], references: [id], onDelete: SetNull)
+  /// The times offered when the business proposed several: the candidate
+  /// picks one, `starts_at` becomes it and these go. Empty for one time.
+  slots     InterviewSlot[]
 
   @@index([business_id, starts_at], name: "idx_interview_business_starts")
   @@index([status, starts_at], name: "idx_interview_status_starts")
@@ -4428,5 +4431,18 @@ model BusinessMessageTemplate {
 
   @@index([business_id, kind], name: "idx_business_message_template_business_kind")
   @@map("business_message_templates")
+}
+
+/// One of the (2 or 3) times a business offered for an interview, until the
+/// candidate picks one; meanwhile the interview's `starts_at` is the earliest.
+model InterviewSlot {
+  id           String    @id @default(uuid()) @db.Uuid
+  interview_id String    @db.Uuid
+  starts_at    DateTime  @db.Timestamptz
+
+  interview Interview @relation(fields: [interview_id], references: [id], onDelete: Cascade)
+
+  @@index([interview_id], name: "idx_interview_slot_interview")
+  @@map("interview_slots")
 }
 
