@@ -3,22 +3,6 @@ import { uniqueBusinessSlug } from '../careers-slug';
 import { CareersService } from '../careers.service';
 import { AdminBusinessService } from '../../admin/admin-business.service';
 
-const offerRow = {
-  reference: 'RBT-1',
-  title: 'Caissière',
-  employment_type: 'CDI',
-  scheduled_at: null,
-  is_remote: false,
-  city: 'Brazzaville',
-  country_name: 'Congo',
-  quantity: 1,
-  created_at: new Date('2026-11-01T08:00:00Z'),
-  employer: {
-    avatar_url: 'https://cdn/logo.png',
-    business: { public_slug: 'kamoa', name: 'KAMOA', is_partner: true },
-  },
-};
-
 const companyRow = (over: Record<string, unknown>) => ({
   profile_id: 'p1',
   public_slug: 'kamoa',
@@ -31,7 +15,6 @@ const companyRow = (over: Record<string, unknown>) => ({
   cover_url: null,
   photos: [],
   benefits: [],
-  size: '6-20',
   is_partner: false,
   partner_rank: null,
   profile: { avatar_url: 'https://cdn/logo.png' },
@@ -40,20 +23,7 @@ const companyRow = (over: Record<string, unknown>) => ({
 
 function setup() {
   const prisma = {
-    jobOffer: {
-      findMany: jest.fn().mockResolvedValue([offerRow]),
-      count: jest.fn().mockResolvedValue(1),
-      groupBy: jest.fn().mockImplementation(({ by }: { by: string[] }) =>
-        Promise.resolve(
-          by[0] === 'city'
-            ? [{ city: 'Brazzaville', _count: { _all: 3 } }]
-            : [
-                { employment_type: 'MISSION', _count: { _all: 1 } },
-                { employment_type: 'CDI', _count: { _all: 2 } },
-              ],
-        ),
-      ),
-    },
+    jobOffer: { groupBy: jest.fn().mockResolvedValue([]) },
     business: { findMany: jest.fn().mockResolvedValue([]) },
   };
   const service = new CareersService(
@@ -62,49 +32,6 @@ function setup() {
   );
   return { prisma, service };
 }
-
-describe('CareersService.offers (job board)', () => {
-  it('lists open offers of live businesses with their company, and the filters', async () => {
-    const { prisma, service } = setup();
-
-    const res = await service.offers({
-      q: ' caisse ',
-      city: 'brazzaville',
-      type: ['CDI'],
-      page: 2,
-      limit: 10,
-    });
-
-    const args = prisma.jobOffer.findMany.mock.calls[0][0];
-    expect(args.skip).toBe(10);
-    expect(args.take).toBe(10);
-    const [base, words, city, type] = args.where.AND;
-    expect(base.employer.business).toMatchObject({
-      verification_status: 'VERIFIED',
-      deleted_at: null,
-    });
-    expect(words.OR[0].title).toEqual({
-      contains: 'caisse',
-      mode: 'insensitive',
-    });
-    expect(city).toEqual({
-      city: { equals: 'brazzaville', mode: 'insensitive' },
-    });
-    expect(type).toEqual({ employment_type: { in: ['CDI'] } });
-    expect(res.data[0]).toMatchObject({
-      reference: 'RBT-1',
-      company: { slug: 'kamoa', name: 'KAMOA', partner: true },
-    });
-    expect(res.filters.types.map((t) => t.type)).toEqual(['CDI', 'MISSION']);
-    expect(res.filters.cities).toEqual([{ city: 'Brazzaville', count: 3 }]);
-  });
-
-  it('never returns more than 50 at once', async () => {
-    const { prisma, service } = setup();
-    await service.offers({ page: 1, limit: 500 });
-    expect(prisma.jobOffer.findMany.mock.calls[0][0].take).toBe(50);
-  });
-});
 
 describe('CareersService.partners', () => {
   it('lists the partners staff picked, with a logo, in their order', async () => {
@@ -164,7 +91,6 @@ describe('CareersService.companies', () => {
     expect(res.map((c) => c.slug)).toEqual(['first', 'second', 'big']);
     expect(res[0]).toMatchObject({
       partner: true,
-      size: '6-20',
       openOffers: 1,
     });
   });

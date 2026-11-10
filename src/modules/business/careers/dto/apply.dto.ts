@@ -1,11 +1,4 @@
-import { EmploymentType } from '@prisma/client';
-import { Transform, Type } from 'class-transformer';
 import {
-  IsArray,
-  IsEnum,
-  IsInt,
-  Max,
-  Min,
   Matches,
   Equals,
   IsEmail,
@@ -70,39 +63,4 @@ export class AnalyseExternalDto {
   @IsOptional()
   @IsUUID()
   applicationId?: string;
-}
-
-const toArray = (v: unknown) => (typeof v === 'string' ? v.split(',') : v);
-
-/** The job board's search: words, a city, contract types, a page. */
-export class CareersOffersQuery {
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  q?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(80)
-  city?: string;
-
-  @IsOptional()
-  @Transform(({ value }) => toArray(value))
-  @IsArray()
-  @IsEnum(EmploymentType, { each: true })
-  type?: EmploymentType[];
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(200)
-  page?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(50)
-  limit?: number;
 }
