@@ -68,6 +68,17 @@ export class CareersController {
     return this.careers.sitemap();
   }
 
+  // Before `:slug` too; « partners » is a reserved slug.
+  @Public()
+  @Get('partners')
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @ApiOperation({
+    summary: '« Ils recrutent avec Rabotka »: partners staff picked',
+  })
+  partners() {
+    return this.careers.partners();
+  }
+
   @Public()
   @Get(':slug')
   @Throttle({ default: { limit: 60, ttl: 60_000 } })

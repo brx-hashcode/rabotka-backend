@@ -94,8 +94,13 @@ const COMPANY_SELECT = {
   cover_url: true,
   photos: true,
   benefits: true,
+  is_partner: true,
+  partner_rank: true,
   profile: { select: { avatar_url: true } },
 } as const;
+
+/** Partners shown at once on the business site. */
+const MAX_PARTNERS = 24;
 
 const OFFER_SELECT = {
   reference: true,
@@ -132,7 +137,48 @@ export class CareersService {
     private readonly queue: QueueService,
   ) {}
 
-  /** Verified businesses that are hiring now, those with the most offers first. */
+  /** Where a business may be shown publicly: verified, with a careers page. */
+  private liveBusiness() {
+    return {
+      public_slug: { not: null },
+      deleted_at: null,
+      verification_status: VerificationStatus.VERIFIED,
+    };
+  }
+
+  /**
+   * « Ils recrutent avec Rabotka »: the businesses staff picked, in their
+   * order. A partner shows with or without open offers; never without a logo.
+   */
+  async partners() {
+    const businesses = await this.prisma.business.findMany({
+      where: {
+        ...this.liveBusiness(),
+        is_partner: true,
+        profile: { avatar_url: { not: null } },
+      },
+      orderBy: [
+        { partner_rank: { sort: 'asc', nulls: 'last' } },
+        { name: 'asc' },
+      ],
+      take: MAX_PARTNERS,
+      select: {
+        public_slug: true,
+        name: true,
+        profile: { select: { avatar_url: true } },
+      },
+    });
+    return businesses.map((b) => ({
+      slug: b.public_slug as string,
+      name: b.name,
+      logoUrl: b.profile.avatar_url as string,
+    }));
+  }
+
+  /**
+   * Verified businesses that are hiring now: partners first, in staff's
+   * order, then those with the most offers.
+   */
   async companies() {
     const open = await this.prisma.jobOffer.groupBy({
       by: ['employer_id'],
@@ -149,15 +195,21 @@ export class CareersService {
       },
       select: COMPANY_SELECT,
     });
+    const rank = (b: { is_partner: boolean; partner_rank: number | null }) =>
+      b.is_partner
+        ? (b.partner_rank ?? Number.MAX_SAFE_INTEGER - 1)
+        : Number.MAX_SAFE_INTEGER;
     return businesses
+      .sort(
+        (a, b) =>
+          rank(a) - rank(b) ||
+          (counts.get(b.profile_id) ?? 0) - (counts.get(a.profile_id) ?? 0) ||
+          a.name.localeCompare(b.name, 'fr'),
+      )
       .map((b) => ({
         ...this.companyView(b),
         openOffers: counts.get(b.profile_id) ?? 0,
       }))
-      .sort(
-        (a, b) =>
-          b.openOffers - a.openOffers || a.name.localeCompare(b.name, 'fr'),
-      )
       .slice(0, MAX_COMPANIES);
   }
 
@@ -1069,6 +1121,7 @@ export class CareersService {
     cover_url: string | null;
     photos: string[];
     benefits: string[];
+    is_partner: boolean;
     profile: { avatar_url: string | null };
   }) {
     return {
@@ -1084,6 +1137,7 @@ export class CareersService {
       coverUrl: b.cover_url,
       photos: b.photos,
       benefits: b.benefits,
+      partner: b.is_partner,
     };
   }
 

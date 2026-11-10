@@ -75,6 +75,8 @@ export const LATERAL_ACCESS: Record<LateralRole, Record<string, AreaAccess>> = {
     'admin/agents': 'full',
     // Paying agents is finance's job: the queue, and paying or rejecting.
     'admin/agent-withdrawals': 'full',
+    // « Demander une démo » requests from the business site.
+    'admin/demo-requests': 'full',
     log: 'full',
     // NOT PRESENT, deliberately: `user` (team management), and
     // `admin/oauth-apps` ("Login with Rabotka" partner applications). Anything
@@ -131,6 +133,9 @@ export const LATERAL_ACCESS: Record<LateralRole, Record<string, AreaAccess>> = {
     // Read only: creating an agent and changing their status are decisions
     // about who represents Rabotka, which stay with MANAGER and above.
     'admin/agents': 'read',
+    // Calling back the companies that asked for a demo is day-to-day work:
+    // reading them and logging the follow-up (status, notes).
+    'admin/demo-requests': 'full',
   },
 };
 
