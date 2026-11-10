@@ -1466,6 +1466,10 @@ model Application {
   rejection_source RejectionSource?
 
   viewed_at DateTime?
+  /// « Présélectionnée » in the business space, while still waiting: a step
+  /// only the business sees (the candidate is never told). Cleared with
+  /// « Retirer de la présélection ».
+  shortlisted_at DateTime? @db.Timestamptz
 
   job_offer              JobOffer              @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
   worker                 Profile               @relation(fields: [worker_id], references: [id], onDelete: Cascade)
@@ -4216,6 +4220,8 @@ model ExternalApplication {
   source          String?
   consented_at    DateTime                  @db.Timestamptz
   viewed_at       DateTime?                 @db.Timestamptz
+  /// « Présélectionnée », while PENDING: seen by the business only.
+  shortlisted_at  DateTime?                 @db.Timestamptz
   retained_at     DateTime?                 @db.Timestamptz
   refused_at      DateTime?                 @db.Timestamptz
   refusal_message String?                   @db.Text

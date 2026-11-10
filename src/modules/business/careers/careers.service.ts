@@ -553,6 +553,7 @@ export class CareersService {
       cvMimeType: a.cv_mime_type,
       createdAt: a.created_at.toISOString(),
       viewedAt: a.viewed_at?.toISOString() ?? null,
+      shortlistedAt: a.shortlisted_at?.toISOString() ?? null,
       offer: a.job_offer,
       analysis: a.cv_resume && {
         resumeId: a.cv_resume.id,

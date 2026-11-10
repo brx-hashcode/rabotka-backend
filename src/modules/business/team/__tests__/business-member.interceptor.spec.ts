@@ -106,6 +106,26 @@ describe('BusinessMemberInterceptor', () => {
     );
   });
 
+  it('targets the candidature, not its kind, on an applications/:kind/:id route', async () => {
+    prisma.businessMember.findUnique.mockResolvedValue(
+      member({ role: 'RECRUITER' }),
+    );
+    const id = '2b7c8f4e-3d1a-4c5b-9e6f-7a8b9c0d1e2f';
+    await run({
+      method: 'POST',
+      route: { path: '/api/v1/business/me/applications/:kind/:id/shortlist' },
+      params: { kind: 'external', id },
+      user: { type: 'profile', profileId: 'p-1', memberId: 'm-1' },
+    });
+    await new Promise((r) => setImmediate(r));
+    expect(team.record).toHaveBeenCalledWith(
+      'b-1',
+      'm-1',
+      'POST /business/me/applications/:kind/:id/shortlist',
+      id,
+    );
+  });
+
   it("logs the holder's change, and nothing for someone who is not a business", async () => {
     prisma.business.findUnique.mockResolvedValueOnce({
       id: 'b-1',
