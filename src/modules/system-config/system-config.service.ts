@@ -185,7 +185,9 @@ export class SystemConfigService implements OnModuleInit {
     entries: { key: string; fallback?: string }[],
   ): Promise<(string | null)[]> {
     const cacheKeys = entries.map((e) => `${CACHE_PREFIX}${e.key}`);
-    const cached = await this.redis.mget(...cacheKeys);
+    // A copy: misses are filled in below, and the response is not ours to
+    // mutate (two reads running at once must not share it).
+    const cached = [...(await this.redis.mget(...cacheKeys))];
 
     // Bounded by `entries`, not by what Redis returned. ioredis mirrors the key
     // count, but indexing `entries[i]` off a longer response throws — and the
@@ -817,24 +819,45 @@ export class SystemConfigService implements OnModuleInit {
   }
 
   /**
-   * What the foot of every email says: who Rabotka is (legal name, RCCM,
-   * address, contact) and where to follow it. Social links that are not an
-   * http(s) URL are left out, so a typo never becomes a broken icon.
+   * Where to follow Rabotka (Settings → Contact), in SOCIAL_NETWORKS order.
+   * Links that are not an http(s) URL are left out, so a typo never becomes
+   * a broken icon.
    */
-  async getEmailFooterInfo(): Promise<FooterInfo> {
-    const [email, address, phone, legalName, rccm, ...links] =
-      await this.mgetBatch([
-        { key: 'contact.email', fallback: 'contact@rabotka.com' },
-        { key: 'contact.address', fallback: '' },
-        { key: 'contact.phone', fallback: '' },
-        { key: 'company.legal_name', fallback: 'Rabotka' },
-        { key: 'company.rccm', fallback: '' },
-        ...SOCIAL_NETWORKS.map((n) => ({ key: `social.${n}`, fallback: '' })),
-      ]);
-    const socials = SOCIAL_NETWORKS.flatMap((network, i) => {
+  async getSocialLinks(): Promise<FooterInfo['socials']> {
+    const links = await this.mgetBatch(
+      SOCIAL_NETWORKS.map((n) => ({ key: `social.${n}`, fallback: '' })),
+    );
+    return SOCIAL_NETWORKS.flatMap((network, i) => {
       const url = links[i]?.trim() ?? '';
       return /^https?:\/\/\S+$/i.test(url) ? [{ network, url }] : [];
     });
+  }
+
+  /** `GET public/config/contact`: the contact, and where to follow Rabotka. */
+  async getPublicContact() {
+    const [contact, socials] = await Promise.all([
+      this.getContactInfo(),
+      this.getSocialLinks(),
+    ]);
+    return { ...contact, socials };
+  }
+
+  /**
+   * What the foot of every email says: who Rabotka is (legal name, RCCM,
+   * address, contact) and where to follow it (getSocialLinks).
+   */
+  async getEmailFooterInfo(): Promise<FooterInfo> {
+    const [[email, address, phone, legalName, rccm], socials] =
+      await Promise.all([
+        this.mgetBatch([
+          { key: 'contact.email', fallback: 'contact@rabotka.com' },
+          { key: 'contact.address', fallback: '' },
+          { key: 'contact.phone', fallback: '' },
+          { key: 'company.legal_name', fallback: 'Rabotka' },
+          { key: 'company.rccm', fallback: '' },
+        ]),
+        this.getSocialLinks(),
+      ]);
     return { email, address, phone, legalName, rccm, socials };
   }
 
