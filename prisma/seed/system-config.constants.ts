@@ -222,7 +222,7 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
   {
     key: 'business.talent_pool_months',
     value: '12',
-    category: ConfigCategory.GENERAL,
+    category: ConfigCategory.FEES,
     label:
       "Entreprises – Durée de conservation d'une candidature gardée avec l'accord du candidat (mois, 1 à 36)",
     isSecret: false,
