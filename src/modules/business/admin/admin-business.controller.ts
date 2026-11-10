@@ -21,6 +21,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -54,6 +55,18 @@ class AdminNoteDto {
 class DistributionDto {
   @IsBoolean()
   distributeOffers!: boolean;
+}
+
+class AdminPartnerDto {
+  @IsBoolean()
+  partner!: boolean;
+
+  /** Its place among partners, 1 first; none puts it after the numbered ones. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(999)
+  rank?: number | null;
 }
 
 /**
@@ -255,6 +268,28 @@ export class AdminBusinessController {
       id,
     );
     return result;
+  }
+
+  @Patch('careers/partner')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({
+    summary:
+      'Partner or not: « Ils recrutent avec Rabotka » and first on the careers site',
+  })
+  async setPartner(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AdminPartnerDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
+    const page = await this.business.setPartner(id, {
+      partner: dto.partner,
+      rank: dto.rank,
+    });
+    await this.log(req, 'BUSINESS_PARTNER_SET', 'Business', id, id, {
+      partner: dto.partner,
+      rank: page.partnerRank,
+    });
+    return page;
   }
 
   @Delete('careers/photos/:index')

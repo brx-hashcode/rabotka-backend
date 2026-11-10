@@ -77,6 +77,8 @@ export class AdminBusinessService {
         photos: true,
         benefits: true,
         verification_status: true,
+        is_partner: true,
+        partner_rank: true,
       },
     });
     if (!b) throw new NotFoundException('Not a business profile.');
@@ -100,7 +102,30 @@ export class AdminBusinessService {
       photos: b.photos,
       benefits: b.benefits,
       openOffers,
+      /** Shown in « Ils recrutent avec Rabotka »; staff's call only. */
+      partner: b.is_partner,
+      partnerRank: b.partner_rank,
     };
+  }
+
+  /** Makes it a partner or not, and its place among partners. */
+  async setPartner(
+    profileId: string,
+    input: { partner: boolean; rank?: number | null },
+  ) {
+    const b = await this.prisma.business.findUnique({
+      where: { profile_id: profileId },
+      select: { id: true },
+    });
+    if (!b) throw new NotFoundException('Not a business profile.');
+    await this.prisma.business.update({
+      where: { id: b.id },
+      data: {
+        is_partner: input.partner,
+        partner_rank: input.partner ? (input.rank ?? null) : null,
+      },
+    });
+    return this.careersOf(profileId);
   }
 
   async mailboxesOf(profileId: string) {
