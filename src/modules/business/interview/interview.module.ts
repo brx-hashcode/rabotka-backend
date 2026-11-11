@@ -10,6 +10,7 @@ import {
 import { InterviewCalendarService } from './interview-calendar.service';
 import { InterviewScheduler } from './interview.scheduler';
 import { InterviewService } from './interview.service';
+import { InterviewVisioService } from './interview-visio.service';
 
 /** « Entretiens »: interviews a business proposes, and the candidate's answer. */
 @Module({
@@ -20,6 +21,11 @@ import { InterviewService } from './interview.service';
     PublicInterviewController,
     PublicCalendarController,
   ],
-  providers: [InterviewService, InterviewScheduler, InterviewCalendarService],
+  providers: [
+    InterviewService,
+    InterviewScheduler,
+    InterviewCalendarService,
+    InterviewVisioService,
+  ],
 })
 export class InterviewModule {}

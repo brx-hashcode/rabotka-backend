@@ -20,6 +20,7 @@ import type { ProfileAuthenticatedRequest } from '../../auth/guards/jwt-auth.gua
 import { Public } from '../../auth/decorators/public.decorator';
 import { InterviewService } from './interview.service';
 import { InterviewCalendarService } from './interview-calendar.service';
+import { InterviewVisioService } from './interview-visio.service';
 import {
   CreateInterviewDto,
   InterviewAnswerDto,
@@ -35,7 +36,18 @@ export class InterviewController {
   constructor(
     private readonly interviews: InterviewService,
     private readonly calendar: InterviewCalendarService,
+    private readonly visio: InterviewVisioService,
   ) {}
+
+  @Get('visio/:room')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Join an interview video call, as its host' })
+  joinVisio(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('room') room: string,
+  ) {
+    return this.visio.asHost(req.user.profileId, req.user.memberId, room);
+  }
 
   @Get('calendar')
   @ApiOperation({
@@ -110,7 +122,18 @@ export class InterviewController {
 @ApiTags('Public')
 @Controller('public/interviews')
 export class PublicInterviewController {
-  constructor(private readonly interviews: InterviewService) {}
+  constructor(
+    private readonly interviews: InterviewService,
+    private readonly visio: InterviewVisioService,
+  ) {}
+
+  @Public()
+  @Get('visio/:room')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Join an interview video call, by its link' })
+  joinVisio(@Param('room') room: string) {
+    return this.visio.asGuest(room);
+  }
 
   @Public()
   @Get(':token')

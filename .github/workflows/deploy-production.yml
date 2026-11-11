@@ -221,6 +221,12 @@ jobs:
           OIDC_KEY_ID=$(echo "$VAULT_SECRET" | jq -r '.OIDC_KEY_ID')
           OIDC_PAIRWISE_SALT=$(echo "$VAULT_SECRET" | jq -r '.OIDC_PAIRWISE_SALT')
           ARCJET_KEY=$(echo "$VAULT_SECRET" | jq -r '.ARCJET_KEY')
+          # Interview video calls inside the app (8x8 JaaS). Optional: without
+          # them the visio page falls back to the public meet.jit.si room.
+          # JAAS_PRIVATE_KEY is base64 of the PKCS#8 PEM, like OIDC_PRIVATE_KEY.
+          JAAS_APP_ID=$(echo "$VAULT_SECRET" | jq -r '.JAAS_APP_ID // ""')
+          JAAS_KEY_ID=$(echo "$VAULT_SECRET" | jq -r '.JAAS_KEY_ID // ""')
+          JAAS_PRIVATE_KEY=$(echo "$VAULT_SECRET" | jq -r '.JAAS_PRIVATE_KEY // ""')
           SMTP_HOST=$(echo "$VAULT_SECRET" | jq -r '.SMTP_HOST')
           SMTP_PORT=$(echo "$VAULT_SECRET" | jq -r '.SMTP_PORT')
           SMTP_SECURE=$(echo "$VAULT_SECRET" | jq -r '.SMTP_SECURE')
