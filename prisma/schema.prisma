@@ -3491,6 +3491,7 @@ model Business {
   custom_plans  BusinessPlan[]
   cv_screenings CvScreening[]
   interviews    Interview[]
+  interview_reports InterviewReport[]
   mailboxes     BusinessMailbox[]
   linkedin_accounts BusinessLinkedinAccount[]
   members       BusinessMember[]
@@ -3864,6 +3865,8 @@ model Interview {
   /// The times offered when the business proposed several: the candidate
   /// picks one, `starts_at` becomes it and these go. Empty for one time.
   slots     InterviewSlot[]
+  /// « Compte rendu »: the team's notes, and the report written from them.
+  report    InterviewReport?
 
   @@index([business_id, starts_at], name: "idx_interview_business_starts")
   @@index([status, starts_at], name: "idx_interview_status_starts")
@@ -3871,6 +3874,30 @@ model Interview {
   @@index([application_id], name: "idx_interview_application")
   @@index([external_application_id], name: "idx_interview_external_application")
   @@map("interviews")
+}
+
+/// An interview's « Compte rendu »: the team's notes (typed or dictated),
+/// and the report the AI wrote from them, edited by the team. One per
+/// interview. Nothing of the candidate is recorded: only what the team wrote.
+model InterviewReport {
+  id                   String    @id @default(uuid()) @db.Uuid
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
+  interview_id         String    @unique @db.Uuid
+  business_id          String    @db.Uuid
+  notes                String    @default("") @db.Text
+  /// The sections (summary, strengths, points to check…); null until written.
+  report               Json?
+  generated_at         DateTime? @db.Timestamptz
+  sent_at              DateTime? @db.Timestamptz
+  /// Who last changed it; null for the account holder.
+  updated_by_member_id String?   @db.Uuid
+
+  interview Interview @relation(fields: [interview_id], references: [id], onDelete: Cascade)
+  business  Business  @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@index([business_id], name: "idx_interview_report_business")
+  @@map("interview_reports")
 }
 
 /// Someone a business keeps for later — its talent pool, « Mes profils ».

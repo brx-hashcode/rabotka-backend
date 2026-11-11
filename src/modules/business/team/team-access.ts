@@ -40,6 +40,8 @@ const ADMIN_CHANGES: RegExp[] = [
 /** The changes an Évaluateur may make. */
 const REVIEWER_CHANGES: RegExp[] = [
   /^\/business\/me\/applications\/[^/]+\/[^/]+\/(notes|opinion)(\/|$)/,
+  // The « Compte rendu » of an interview: an Évaluateur sits in them too.
+  /^\/business\/me\/interviews\/[^/]+\/report(\/|$)/,
   /^\/business\/me\/member$/,
   /^\/profile\/notifications(\/|$)/,
   /^\/profile\/claims(\/|$)/,
