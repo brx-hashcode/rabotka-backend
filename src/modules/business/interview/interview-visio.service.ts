@@ -33,6 +33,8 @@ export type VisioJoin = {
   /** Shown in the call; the visitor may change it before joining. */
   displayName: string;
   host: boolean;
+  /** The host only: for the « Compte rendu » beside the call. */
+  interviewId?: string;
 } & (
   | { provider: 'jaas'; appId: string; roomName: string; jwt: string }
   /** No JaaS keys (local, or before they are set): the public Jitsi room. */
@@ -159,6 +161,8 @@ export class InterviewVisioService {
       durationMinutes: interview.duration_minutes,
       displayName: user.name,
       host: user.host,
+      // The host's page keeps the « Compte rendu » notes beside the call.
+      ...(user.host ? { interviewId: interview.id } : {}),
     };
     const appId = this.config.get<string>('JAAS_APP_ID')?.trim();
     const key = appId ? await this.privateKey() : null;
