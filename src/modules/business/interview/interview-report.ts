@@ -184,3 +184,137 @@ export function interviewReportEmail(
     <p>L’équipe Rabotka Business</p>
   `;
 }
+
+// ── The PDF: in the style of the other Rabotka documents ─────────────────
+
+const INK = '#0F1713';
+const GREEN = '#0FA84C';
+const RULE = '#E6EAE7';
+const MUTED = '#7A857F';
+const BODY = '#2B342F';
+const SUBTLE = '#5A655F';
+const DISPLAY = "font-family:'Space Grotesk',sans-serif;";
+
+function sectionHeader(index: string, title: string): string {
+  return `
+  <div class="section-head" style="margin-top:26px; display:flex; align-items:baseline; gap:14px;">
+    <div style="${DISPLAY} font-size:10px; font-weight:700; letter-spacing:0.06em; color:${GREEN};">${index}</div>
+    <div style="${DISPLAY} font-size:11px; font-weight:600; letter-spacing:0.28em; text-transform:uppercase; color:${INK};">${title}</div>
+    <div style="flex:1; height:1px; background:${RULE};"></div>
+  </div>`;
+}
+
+function bullets(items: string[]): string {
+  return `<ul style="margin:10px 0 0; padding-left:18px; font-size:12.5px; line-height:1.6; color:${BODY};">${items
+    .map((x) => `<li style="margin:3px 0;">${escapeHtml(x)}</li>`)
+    .join('')}</ul>`;
+}
+
+export type ReportPdfInput = {
+  report: InterviewReportBody;
+  businessName: string;
+  candidateName: string;
+  jobTitle: string;
+  when: string;
+  mode: string;
+  durationMinutes: number;
+  generatedAt: string;
+  logo: string | null;
+};
+
+/** « Compte rendu d'entretien » as an A4 document, sections numbered as they come. */
+export function buildInterviewReportHtml(i: ReportPdfInput): string {
+  const r = i.report;
+  const practical = [
+    ['Disponibilité', r.infosPratiques.disponibilite],
+    ['Prétentions', r.infosPratiques.pretentions],
+    ['Mobilité', r.infosPratiques.mobilite],
+  ].filter(([, v]) => v);
+  const sections: [string, string][] = [];
+  sections.push([
+    'Résumé',
+    `<p style="margin:10px 0 0; font-size:13px; line-height:1.65; color:${BODY};">${escapeHtml(r.resume)}</p>`,
+  ]);
+  if (r.pointsForts.length || r.pointsDeVigilance.length) {
+    const col = (title: string, items: string[], color: string) =>
+      `<div style="flex:1; min-width:0;"><div style="${DISPLAY} font-size:9.5px; font-weight:600; letter-spacing:0.18em; text-transform:uppercase; color:${color};">${title}</div>${
+        items.length
+          ? bullets(items)
+          : `<p style="margin:10px 0 0; font-size:12px; color:${MUTED}; font-style:italic;">Rien de noté.</p>`
+      }</div>`;
+    sections.push([
+      'Points forts et de vigilance',
+      `<div class="keep" style="display:flex; gap:28px; margin-top:12px;">${col('Points forts', r.pointsForts, GREEN)}${col('Points de vigilance', r.pointsDeVigilance, '#B45309')}</div>`,
+    ]);
+  }
+  if (r.reponsesCles.length) {
+    sections.push([
+      'Réponses clés',
+      `<table style="width:100%; border-collapse:collapse; margin-top:10px;">${r.reponsesCles
+        .map(
+          (x) =>
+            `<tr><td style="padding:9px 12px 9px 0; border-bottom:1px solid ${RULE}; width:36%; vertical-align:top; font-size:11.5px; color:${SUBTLE};">${escapeHtml(x.question)}</td><td style="padding:9px 0; border-bottom:1px solid ${RULE}; font-size:12.5px; color:${BODY};">${escapeHtml(x.reponse)}</td></tr>`,
+        )
+        .join('')}</table>`,
+    ]);
+  }
+  if (practical.length) {
+    sections.push([
+      'Infos pratiques',
+      `<div class="keep" style="display:grid; grid-template-columns:repeat(${practical.length},1fr); margin-top:12px; border:1px solid ${RULE};">${practical
+        .map(
+          ([k, v], n) =>
+            `<div style="padding:12px 14px; ${n ? `border-left:1px solid ${RULE};` : ''}"><div style="${DISPLAY} font-size:9px; font-weight:600; letter-spacing:0.16em; text-transform:uppercase; color:${MUTED};">${k}</div><div style="margin-top:6px; font-size:12.5px; color:${INK};">${escapeHtml(v)}</div></div>`,
+        )
+        .join('')}</div>`,
+    ]);
+  }
+  if (r.avisRecruteur) {
+    sections.push([
+      'Avis du recruteur',
+      `<div class="keep" style="margin-top:12px; padding:12px 16px; border-left:3px solid ${GREEN}; background:#F4F8F5; font-size:12.5px; line-height:1.6; color:${BODY};">${escapeHtml(r.avisRecruteur)}</div>`,
+    ]);
+  }
+  if (r.prochainesEtapes.length) {
+    sections.push(['Prochaines étapes', bullets(r.prochainesEtapes)]);
+  }
+
+  return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Compte rendu d’entretien — ${escapeHtml(i.candidateName)}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+  * { box-sizing: border-box; }
+  @page { size: A4; margin: 16mm 15mm 18mm; }
+  body { margin: 0; background: #fff; color: ${INK}; line-height: 1.5; font-family: 'Hanken Grotesk', -apple-system, sans-serif; }
+  tr, li { break-inside: avoid; }
+  .section-head { break-after: avoid; }
+  .keep { break-inside: avoid; }
+</style>
+</head>
+<body>
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:24px;">
+    <div style="flex:1; min-width:0;">
+      <div style="${DISPLAY} font-size:10.5px; font-weight:600; letter-spacing:0.34em; text-transform:uppercase; color:${GREEN};">COMPTE RENDU D’ENTRETIEN&nbsp;&nbsp;·&nbsp;&nbsp;RABOTKA</div>
+      <h1 style="${DISPLAY} font-size:28px; font-weight:700; letter-spacing:-0.015em; text-transform:uppercase; line-height:1.15; margin:14px 0 0;">${escapeHtml(i.candidateName)}</h1>
+      <div style="margin-top:6px; font-size:14px; color:${BODY};">${escapeHtml(i.jobTitle)} · ${escapeHtml(i.businessName)}</div>
+      <div style="margin-top:12px; display:flex; flex-wrap:wrap; gap:14px; font-size:12px; color:${SUBTLE};">
+        <span>● ${escapeHtml(i.when)}</span>
+        <span>● ${escapeHtml(i.mode)}, ${i.durationMinutes} min</span>
+        <span>● Rédigé le ${escapeHtml(i.generatedAt)}</span>
+      </div>
+    </div>
+    ${i.logo ? `<img src="${i.logo}" alt="Rabotka" style="width:56px; height:56px; object-fit:contain;">` : ''}
+  </div>
+  <div style="height:3px; background:${INK}; margin-top:18px;"></div>
+
+  ${sections.map(([title, body], n) => `${sectionHeader(String(n + 1).padStart(2, '0'), title)}${body}`).join('\n')}
+
+  <div style="margin-top:30px; padding-top:12px; border-top:1px solid ${RULE}; font-size:10.5px; line-height:1.6; color:${MUTED};">
+    Rédigé par IA à partir des notes de l’équipe de ${escapeHtml(i.businessName)}, puis relu par elle. Seules ces notes décrivent l’entretien ; le CV et l’offre ont servi de contexte. Document interne, à ne pas transmettre au candidat.
+  </div>
+</body>
+</html>`;
+}

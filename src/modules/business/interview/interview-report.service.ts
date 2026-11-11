@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
   ServiceUnavailableException,
@@ -17,11 +18,14 @@ import { MailService } from '../../mail/mail.service';
 import { LayoutService } from '../../mail/layout.service';
 import { businessDashboardUrl } from '../../mail/audience';
 import { LlmService } from '../../rag/llm/llm.service';
+import { htmlToPdf } from '../../../common/utils/puppeteer';
+import { rabotkaLogoDataUri } from '../../../common/utils/rabotka-logo';
 import { answerSnippet } from '../cv-screening/lenient-answer';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
 import { businessEmailRecipients } from '../team/business-recipients';
 import { frWhen } from './interview-emails';
 import {
+  buildInterviewReportHtml,
   cleanReport,
   interviewReportEmail,
   MAX_NOTES,
@@ -221,6 +225,48 @@ export class InterviewReportService {
     return { ...view(saved), sentTo: sent };
   }
 
+  /** The report as a Rabotka A4 document, to read, download or print. */
+  async pdf(actor: Actor, interviewId: string) {
+    const { interview } = await this.owned(actor, interviewId);
+    const report = interview.report?.report
+      ? cleanReport(interview.report.report)
+      : null;
+    if (!report)
+      throw new BadRequestException('Rédigez d’abord le compte rendu.');
+    const html = buildInterviewReportHtml({
+      report,
+      businessName: interview.business.name,
+      candidateName: interview.candidate_name,
+      jobTitle: interview.job_title,
+      when: frWhen(interview.starts_at),
+      mode: MODES[interview.mode].replace(/^./, (c) => c.toUpperCase()),
+      durationMinutes: interview.duration_minutes,
+      generatedAt: (
+        interview.report?.generated_at ?? new Date()
+      ).toLocaleDateString('fr-FR', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        timeZone: 'Africa/Brazzaville',
+      }),
+      logo: rabotkaLogoDataUri(),
+    });
+    try {
+      return {
+        buffer: await htmlToPdf(html, 'Compte rendu d’entretien'),
+        filename: `compte-rendu-${slug(interview.candidate_name)}.pdf`,
+      };
+    } catch (err) {
+      this.logger.error(
+        'Interview report PDF failed',
+        err instanceof Error ? err.stack : String(err),
+      );
+      throw new InternalServerErrorException(
+        'Le document n’a pas pu être créé. Réessayez dans un instant.',
+      );
+    }
+  }
+
   // ── Inside ───────────────────────────────────────────────────────────
 
   private async owned(actor: Actor, interviewId: string) {
@@ -332,6 +378,18 @@ function view(
     sentAt: r?.sent_at?.toISOString() ?? null,
     updatedAt: r?.updated_at.toISOString() ?? null,
   };
+}
+
+function slug(name: string): string {
+  return (
+    name
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 60) || 'candidat'
+  );
 }
 
 function contentText(content: unknown): string {

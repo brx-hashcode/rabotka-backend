@@ -58,6 +58,21 @@ export class InterviewController {
     return this.reports.get(req.user, id);
   }
 
+  @Get(':id/report.pdf')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({ summary: 'The « Compte rendu » as a PDF' })
+  async reportPdf(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const { buffer, filename } = await this.reports.pdf(req.user, id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.send(buffer);
+  }
+
   @Put(':id/report/notes')
   @Throttle({ default: { limit: 120, ttl: 60_000 } })
   @ApiOperation({ summary: 'Save the team’s notes on an interview (autosave)' })

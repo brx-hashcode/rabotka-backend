@@ -1,5 +1,9 @@
 import { InterviewReportService } from './interview-report.service';
-import { interviewReportEmail, parseReport } from './interview-report';
+import {
+  buildInterviewReportHtml,
+  interviewReportEmail,
+  parseReport,
+} from './interview-report';
 
 const GOOD = JSON.stringify({
   resume: 'Candidate motivée, deux ans en salle, disponible en juin.',
@@ -246,5 +250,28 @@ describe('interviewReportEmail', () => {
     );
     expect(html).not.toContain('<script>');
     expect(html).toContain('Points de vigilance');
+  });
+});
+
+describe('buildInterviewReportHtml', () => {
+  it('numbers only the sections with content, and escapes the text', () => {
+    const r = parseReport(GOOD)!;
+    const html = buildInterviewReportHtml({
+      report: { ...r, avisRecruteur: '', resume: '<b>x</b>' },
+      businessName: 'ZuaFood',
+      candidateName: 'Awa <Diop>',
+      jobTitle: 'Serveur',
+      when: 'jeudi',
+      mode: 'En visio',
+      durationMinutes: 30,
+      generatedAt: '11 novembre 2026',
+      logo: null,
+    });
+    expect(html).not.toContain('<b>x</b>');
+    expect(html).toContain('Awa &lt;Diop&gt;');
+    expect(html).not.toContain('Avis du recruteur');
+    // Résumé, points, réponses, infos, prochaines étapes: 05 is the last one.
+    expect(html).toContain('>05<');
+    expect(html).not.toContain('>06<');
   });
 });
