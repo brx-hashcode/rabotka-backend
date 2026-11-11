@@ -35,6 +35,7 @@ import {
   type InterviewMail,
 } from './interview-emails';
 import { interviewIcs } from './interview-ics';
+import { visioUrl } from './interview-visio.service';
 
 export const INTERVIEW_DURATIONS = [15, 30, 45, 60, 90, 120];
 /** An interview is proposed at least this far ahead. */
@@ -122,6 +123,7 @@ export class InterviewService {
       );
     }
     const slot = this.slot(input);
+    await this.ownRoom(businessId, slot.fields.location);
     const externalId = input.externalApplicationId ?? null;
     // A CV analysed for a Rabotka applicant is their application: invited as
     // one (profile e-mail, in-app notice), never through the CV's masked
@@ -200,6 +202,7 @@ export class InterviewService {
       // oldest came back and recent interviews went missing from the cards.
       orderBy: { starts_at: filter.scope === 'upcoming' ? 'asc' : 'desc' },
       take: 200,
+      include: { report: { select: { notes: true, generated_at: true } } },
     });
     return rows.map(view);
   }
@@ -219,6 +222,7 @@ export class InterviewService {
     }
     const token = randomBytes(24).toString('base64url');
     const slot = this.slot(input);
+    await this.ownRoom(interview.business_id, slot.fields.location);
     const updated = await this.prisma.interview.update({
       where: { id: interview.id },
       data: {
@@ -548,6 +552,20 @@ export class InterviewService {
     };
   }
 
+  /** A Rabotka visio room is its business's: another one's link is refused. */
+  private async ownRoom(businessId: string, location: string | null) {
+    if (!location || !location.startsWith(visioUrl(''))) return;
+    const taken = await this.prisma.interview.findFirst({
+      where: { location, business_id: { not: businessId } },
+      select: { id: true },
+    });
+    if (taken) {
+      throw new BadRequestException(
+        'Ce lien de visio appartient à un autre entretien : créez-en un nouveau.',
+      );
+    }
+  }
+
   /** The Rabotka application a CV of this business was analysed for, if any. */
   private async applicationOfResume(
     businessId: string,
@@ -824,8 +842,15 @@ function soon(startsAt: Date): boolean {
   return startsAt.getTime() - Date.now() < DAY_MS;
 }
 
-function view(i: Interview & { slots?: { id: string; starts_at: Date }[] }) {
+function view(
+  i: Interview & {
+    slots?: { id: string; starts_at: Date }[];
+    report?: { notes: string; generated_at: Date | null } | null;
+  },
+) {
   return {
+    /** « Compte rendu »: notes taken or a report written. */
+    hasReport: !!(i.report && (i.report.generated_at || i.report.notes.trim())),
     /** Times still to choose from (several offered); empty once chosen. */
     options: slotsOf(i).map((x) => ({
       id: x.id,

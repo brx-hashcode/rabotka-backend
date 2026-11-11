@@ -202,6 +202,7 @@ export class CandidateNotesService {
           starts_at: true,
           status: true,
           responded_at: true,
+          report: { select: { generated_at: true } },
         },
       }),
       this.prisma.candidateNote.findMany({
@@ -233,6 +234,7 @@ export class CandidateNotesService {
         | 'REFUSED'
         | 'WITHDRAWN'
         | 'INTERVIEW'
+        | 'REPORT'
         | 'NOTE'
         | 'OPINION';
       member?: { id: string; name: string; role: string } | null;
@@ -266,6 +268,11 @@ export class CandidateNotesService {
     for (const i of interviews) {
       push(i.created_at, {
         kind: 'INTERVIEW',
+        interview: { startsAt: i.starts_at.toISOString(), status: i.status },
+      });
+      // « Compte rendu rédigé »: the team wrote one up after the interview.
+      push(i.report?.generated_at, {
+        kind: 'REPORT',
         interview: { startsAt: i.starts_at.toISOString(), status: i.status },
       });
     }
