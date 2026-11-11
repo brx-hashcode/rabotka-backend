@@ -69,6 +69,7 @@ describe('InterviewVisioService', () => {
     );
     if (join.provider !== 'jaas') throw new Error('expected jaas');
     expect(join.roomName).toBe(ROOM);
+    expect(join.interviewId).toBe('i1');
     expect(decodeProtectedHeader(join.jwt)).toMatchObject({
       alg: 'RS256',
       kid: 'vpaas-magic-cookie-123/key1',
@@ -99,6 +100,7 @@ describe('InterviewVisioService', () => {
       moderator: 'false',
     });
     expect(join.host).toBe(false);
+    expect(join).not.toHaveProperty('interviewId');
   });
 
   it('falls back to the public Jitsi room without JaaS keys', async () => {

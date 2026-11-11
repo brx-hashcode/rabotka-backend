@@ -6,6 +6,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   Res,
@@ -21,6 +22,12 @@ import { Public } from '../../auth/decorators/public.decorator';
 import { InterviewService } from './interview.service';
 import { InterviewCalendarService } from './interview-calendar.service';
 import { InterviewVisioService } from './interview-visio.service';
+import { InterviewReportService } from './interview-report.service';
+import {
+  EditInterviewReportDto,
+  InterviewNotesDto,
+  SendInterviewReportDto,
+} from './dto/interview-report.dto';
 import {
   CreateInterviewDto,
   InterviewAnswerDto,
@@ -37,7 +44,76 @@ export class InterviewController {
     private readonly interviews: InterviewService,
     private readonly calendar: InterviewCalendarService,
     private readonly visio: InterviewVisioService,
+    private readonly reports: InterviewReportService,
   ) {}
+
+  @Get(':id/report')
+  @ApiOperation({
+    summary: 'An interview’s « Compte rendu »: notes and report',
+  })
+  report(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.reports.get(req.user, id);
+  }
+
+  @Get(':id/report.pdf')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({ summary: 'The « Compte rendu » as a PDF' })
+  async reportPdf(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const { buffer, filename } = await this.reports.pdf(req.user, id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.send(buffer);
+  }
+
+  @Put(':id/report/notes')
+  @Throttle({ default: { limit: 120, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Save the team’s notes on an interview (autosave)' })
+  saveReportNotes(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: InterviewNotesDto,
+  ) {
+    return this.reports.saveNotes(req.user, id, dto.notes);
+  }
+
+  @Post(':id/report/write')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Write the report from the notes (AI)' })
+  writeReport(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.reports.write(req.user, id);
+  }
+
+  @Patch(':id/report')
+  @ApiOperation({ summary: 'The team’s changes to the report' })
+  editReport(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: EditInterviewReportDto,
+  ) {
+    return this.reports.edit(req.user, id, dto.report);
+  }
+
+  @Post(':id/report/send')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({ summary: 'E-mail the report to the team' })
+  sendReport(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SendInterviewReportDto,
+  ) {
+    return this.reports.send(req.user, id, dto.memberIds);
+  }
 
   @Get('visio/:room')
   @Throttle({ default: { limit: 30, ttl: 60_000 } })

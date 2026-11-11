@@ -202,6 +202,7 @@ export class InterviewService {
       // oldest came back and recent interviews went missing from the cards.
       orderBy: { starts_at: filter.scope === 'upcoming' ? 'asc' : 'desc' },
       take: 200,
+      include: { report: { select: { notes: true, generated_at: true } } },
     });
     return rows.map(view);
   }
@@ -841,8 +842,15 @@ function soon(startsAt: Date): boolean {
   return startsAt.getTime() - Date.now() < DAY_MS;
 }
 
-function view(i: Interview & { slots?: { id: string; starts_at: Date }[] }) {
+function view(
+  i: Interview & {
+    slots?: { id: string; starts_at: Date }[];
+    report?: { notes: string; generated_at: Date | null } | null;
+  },
+) {
   return {
+    /** « Compte rendu »: notes taken or a report written. */
+    hasReport: !!(i.report && (i.report.generated_at || i.report.notes.trim())),
     /** Times still to choose from (several offered); empty once chosen. */
     options: slotsOf(i).map((x) => ({
       id: x.id,
