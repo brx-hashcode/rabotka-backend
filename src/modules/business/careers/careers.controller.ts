@@ -68,6 +68,19 @@ export class CareersController {
     return this.careers.sitemap();
   }
 
+  // Before `:slug`: « pool » is a reserved slug.
+  @Public()
+  @Post('pool/withdraw/:token')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: '« Retirer ma candidature de la liste », from the e-mail link',
+    description:
+      'Ends the consent to be kept for other posts: the business no longer keeps or finds the candidate; the CV goes back to the usual retention.',
+  })
+  withdrawFromPool(@Param('token') token: string) {
+    return this.careers.withdrawFromPool(token);
+  }
+
   // Before `:slug` too; « partners » is a reserved slug.
   @Public()
   @Get('partners')

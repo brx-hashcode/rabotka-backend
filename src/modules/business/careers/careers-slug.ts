@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client';
 
 const MAX_LENGTH = 60;
 /** Paths of the careers API that a slug would shadow. */
-const RESERVED = new Set(['sitemap', 'feed', 'offers', 'partners']);
+const RESERVED = new Set(['sitemap', 'feed', 'offers', 'partners', 'pool', 'retrait']);
 
 /** « Café du Port & Fils » becomes `cafe-du-port-fils`. */
 export function slugBase(name: string): string {

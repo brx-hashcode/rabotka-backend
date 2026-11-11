@@ -3,12 +3,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ApplicationStatus } from '@prisma/client';
+import { ApplicationStatus, ExternalApplicationStatus } from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import {
   ApplicationService,
   refusalMessage,
 } from '../../application/application.service';
+import { CareersService } from '../careers/careers.service';
 import type { BulkRefuseDto } from './dto/bulk-refuse.dto';
 
 const WAITING: ApplicationStatus[] = [
@@ -26,6 +27,7 @@ export class BulkRefuseService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly applications: ApplicationService,
+    private readonly careers: CareersService,
   ) {}
 
   async refuse(profileId: string, offerId: string, dto: BulkRefuseDto) {
@@ -34,21 +36,41 @@ export class BulkRefuseService {
       select: { id: true },
     });
     if (!offer) throw new NotFoundException('Offre introuvable.');
-    if (!dto.remaining && !dto.applicationIds?.length) {
+    if (
+      !dto.remaining &&
+      !dto.applicationIds?.length &&
+      !dto.externalIds?.length
+    ) {
       throw new BadRequestException('Choisissez les candidatures à refuser.');
     }
     // Checked once, before anyone is refused: a message with contact details
     // must not leave half the candidates refused.
     const message = refusalMessage(dto.message);
 
-    const targets = await this.prisma.application.findMany({
-      where: {
-        job_offer_id: offer.id,
-        status: { in: WAITING },
-        ...(dto.remaining ? {} : { id: { in: dto.applicationIds } }),
-      },
-      select: { id: true },
-    });
+    const picked = dto.applicationIds ?? [];
+    const pickedExternal = dto.externalIds ?? [];
+    const [targets, externalTargets] = await Promise.all([
+      dto.remaining || picked.length
+        ? this.prisma.application.findMany({
+            where: {
+              job_offer_id: offer.id,
+              status: { in: WAITING },
+              ...(dto.remaining ? {} : { id: { in: picked } }),
+            },
+            select: { id: true },
+          })
+        : [],
+      dto.remaining || pickedExternal.length
+        ? this.prisma.externalApplication.findMany({
+            where: {
+              job_offer_id: offer.id,
+              status: ExternalApplicationStatus.PENDING,
+              ...(dto.remaining ? {} : { id: { in: pickedExternal } }),
+            },
+            select: { id: true },
+          })
+        : [],
+    ]);
     let refused = 0;
     for (const { id } of targets) {
       try {
@@ -58,7 +80,24 @@ export class BulkRefuseService {
         // Answered meanwhile (retained, withdrawn): left as it is.
       }
     }
-    const asked = dto.remaining ? targets.length : dto.applicationIds!.length;
+    // Careers-page candidates: the same refusal as from their card (an
+    // e-mail with the message), one after the other on the server rather
+    // than one request each from the browser.
+    for (const { id } of externalTargets) {
+      try {
+        const done = await this.careers.refuse(
+          profileId,
+          id,
+          message ?? undefined,
+        );
+        if (done.refused) refused++;
+      } catch {
+        // Retained meanwhile: left as it is.
+      }
+    }
+    const asked = dto.remaining
+      ? targets.length + externalTargets.length
+      : picked.length + pickedExternal.length;
     return { refused, skipped: asked - refused };
   }
 }

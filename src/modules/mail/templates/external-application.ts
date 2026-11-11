@@ -5,7 +5,15 @@ export function applicationReceivedEmail(
   firstName: string,
   businessName: string,
   jobTitle: string,
+  /** They agreed to be kept for other posts: until when, and how to take it back. */
+  pool: { until: Date; withdrawUrl: string } | null = null,
 ): string {
+  const until = pool?.until.toLocaleDateString('fr-FR', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'Africa/Brazzaville',
+  });
   return `
     <p>Bonjour ${escapeHtml(firstName)},</p>
     <p>
@@ -13,6 +21,15 @@ export function applicationReceivedEmail(
       été envoyée à <strong>${escapeHtml(businessName)}</strong>.
     </p>
     <p>Le recruteur revient vers vous directement si votre profil est retenu.</p>
+    ${
+      pool
+        ? `<p style="color:#6b7570;font-size:14px;">
+      Comme vous l’avez accepté, ${escapeHtml(businessName)} garde votre candidature
+      jusqu’au ${escapeHtml(until ?? '')} pour vous proposer d’autres postes.
+      <a href="${escapeHtml(pool.withdrawUrl)}">Retirer ma candidature de sa liste</a>.
+    </p>`
+        : ''
+    }
   `;
 }
 
@@ -98,5 +115,58 @@ export function newExternalApplicationEmail(
       Merci de votre confiance,<br />
       <strong>L'équipe Rabotka Business</strong>
     </p>
+  `;
+}
+
+/**
+ * A business writes to someone who applied on its careers page (« Envoyer
+ * un message »): its words as they are, and how to answer it.
+ */
+export function businessMessageEmail(args: {
+  firstName: string;
+  businessName: string;
+  jobTitle: string;
+  body: string;
+  /** Where the candidate answers: the member who wrote, or the business. */
+  replyTo: string | null;
+}): string {
+  const paragraphs = escapeHtml(args.body)
+    .split(/\n{2,}/)
+    .map((p) => `<p>${p.replace(/\n/g, '<br />')}</p>`)
+    .join('');
+  return `
+    <p>Bonjour ${escapeHtml(args.firstName)},</p>
+    <p>
+      ${escapeHtml(args.businessName)} vous écrit à propos de votre candidature pour
+      <strong>${escapeHtml(args.jobTitle)}</strong> :
+    </p>
+    <div style="margin:20px 0;padding:16px 20px;border-radius:12px;background:#f1f4f8;">${paragraphs}</div>
+    ${
+      args.replyTo
+        ? `${emailButton(`mailto:${args.replyTo}`, `Répondre à ${args.businessName}`)}
+    <p style="color:#6b7570;font-size:14px;">Ou écrivez à ${escapeHtml(args.replyTo)}.</p>`
+        : ''
+    }
+  `;
+}
+
+/**
+ * A business invites someone it kept (a careers-page candidate who agreed,
+ * or a CV it analysed) to apply to another of its offers.
+ */
+export function poolInviteEmail(args: {
+  firstName: string;
+  businessName: string;
+  jobTitle: string;
+  url: string;
+}): string {
+  return `
+    <p>Bonjour ${escapeHtml(args.firstName)},</p>
+    <p>
+      ${escapeHtml(args.businessName)} a pensé à vous pour son offre
+      <strong>${escapeHtml(args.jobTitle)}</strong> et vous invite à postuler.
+    </p>
+    ${emailButton(args.url, 'Voir l’offre et postuler')}
+    <p style="color:#6b7570;font-size:14px;">Postuler ne prend que quelques minutes, sans créer de compte.</p>
   `;
 }

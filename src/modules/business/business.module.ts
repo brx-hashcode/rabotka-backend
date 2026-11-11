@@ -11,11 +11,14 @@ import { BusinessCheckoutService } from './subscription/business-checkout.servic
 import { BusinessStatsService } from './business-stats.service';
 import { BusinessContactsService } from './business-contacts.service';
 import { BusinessTalentService } from './business-talent.service';
+import { PoolCandidatesService } from './pool-candidates.service';
 import { AdminBusinessSubscriptionController } from './subscription/admin-business-subscription.controller';
 import { CvScreeningModule } from './cv-screening/cv-screening.module';
 import { InterviewModule } from './interview/interview.module';
 import { OfferWriterModule } from './offer-writer/offer-writer.module';
 import { RefusalsModule } from './refusals/refusals.module';
+import { ShortlistModule } from './shortlist/shortlist.module';
+import { BusinessMessagesModule } from './messages/business-messages.module';
 import { ApplicantScoreModule } from './applicant-score/applicant-score.module';
 import { BusinessContractModule } from './contract/business-contract.module';
 import { BusinessReportController } from './report/business-report.controller';
@@ -44,6 +47,8 @@ import { DemoRequestModule } from './demo-request/demo-request.module';
     InterviewModule,
     OfferWriterModule,
     RefusalsModule,
+    ShortlistModule,
+    BusinessMessagesModule,
     ApplicantScoreModule,
     BusinessContractModule,
     CareersModule,
@@ -66,6 +71,7 @@ import { DemoRequestModule } from './demo-request/demo-request.module';
     BusinessStatsService,
     BusinessContactsService,
     BusinessTalentService,
+    PoolCandidatesService,
     BusinessReportService,
     AdminBusinessService,
   ],

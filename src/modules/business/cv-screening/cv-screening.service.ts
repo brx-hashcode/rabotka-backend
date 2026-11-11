@@ -887,7 +887,12 @@ export class CvScreeningService {
       now.getTime() - EXTERNAL_CV_RETENTION_DAYS * 24 * 3600 * 1000,
     );
     const due = await this.prisma.externalApplication.findMany({
-      where: { created_at: { lt: before }, cv_storage_key: { not: null } },
+      where: {
+        created_at: { lt: before },
+        cv_storage_key: { not: null },
+        // A candidate who agreed to be kept keeps their CV that long.
+        OR: [{ pool_expires_at: null }, { pool_expires_at: { lte: now } }],
+      },
       select: { id: true, cv_storage_key: true, cv_storage_bucket: true },
       take: 200,
     });
@@ -904,6 +909,39 @@ export class CvScreeningService {
         where: { id: a.id },
         data: { cv_storage_key: null, cv_storage_bucket: null },
       });
+    }
+  }
+
+  /**
+   * « Garder ma candidature » ran out: the consent ends and the business no
+   * longer keeps them. Their CV, kept until that same day, is purged below
+   * like any CV past its retention.
+   */
+  private async endExpiredPool(now: Date): Promise<void> {
+    const due = await this.prisma.externalApplication.findMany({
+      where: { pool_consent_at: { not: null }, pool_expires_at: { lte: now } },
+      select: { id: true, cv_resume_id: true },
+      take: 300,
+    });
+    for (const a of due) {
+      await this.prisma.$transaction([
+        this.prisma.externalApplication.update({
+          where: { id: a.id },
+          data: {
+            pool_consent_at: null,
+            pool_expires_at: null,
+            pool_token_hash: null,
+          },
+        }),
+        this.prisma.businessTalent.deleteMany({
+          where: {
+            OR: [
+              { external_application_id: a.id },
+              ...(a.cv_resume_id ? [{ cv_resume_id: a.cv_resume_id }] : []),
+            ],
+          },
+        }),
+      ]);
     }
   }
 
@@ -924,6 +962,7 @@ export class CvScreeningService {
     }
 
     await this.purgeExternalCvs(now);
+    await this.endExpiredPool(now);
 
     // Each CV past its own retention loses its file, text and contact
     // details; its conversations go with it (they quote the CV). A file the

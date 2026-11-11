@@ -29,6 +29,7 @@ import {
   frWhen,
   interviewAnsweredEmail,
   interviewCancelledEmail,
+  interviewChosenEmail,
   interviewInviteEmail,
   interviewReminderEmail,
   type InterviewMail,
@@ -44,7 +45,9 @@ export type InterviewInput = {
   cvResumeId?: string;
   applicationId?: string;
   externalApplicationId?: string;
-  startsAt: string;
+  /** One time; or `options`, 2 or 3 times the candidate chooses from. */
+  startsAt?: string;
+  options?: string[];
   durationMinutes: number;
   mode: InterviewMode;
   location?: string | null;
@@ -56,6 +59,8 @@ export type InterviewInput = {
 export type InterviewAnswer = 'CONFIRMED' | 'DECLINED' | 'RESCHEDULE_REQUESTED';
 
 type Loaded = Interview & {
+  /** Loaded with LOAD; absent on a row read without it. */
+  slots?: { id: string; starts_at: Date }[];
   business: {
     name: string;
     profile_id: string;
@@ -75,7 +80,14 @@ const LOAD = {
     },
   },
   application: { select: { worker: { select: { id: true, email: true } } } },
+  slots: {
+    select: { id: true, starts_at: true },
+    orderBy: { starts_at: 'asc' as const },
+  },
 } as const;
+
+/** Times a business may offer for one interview. */
+export const MAX_INTERVIEW_OPTIONS = 3;
 
 /**
  * Interviews a business proposes to a candidate: one whose CV it analysed or
@@ -140,11 +152,14 @@ export class InterviewService {
         job_title: who.jobTitle,
         candidate_name: who.name,
         candidate_email: who.email,
-        ...slot,
+        ...slot.fields,
         token_hash: hashToken(token),
         // Within a day the invitation itself is the reminder: « demain »
         // would be wrong, and it came a few minutes after it.
-        reminded_at: soon(slot.starts_at) ? new Date() : null,
+        reminded_at: soon(slot.fields.starts_at) ? new Date() : null,
+        ...(slot.options.length > 1
+          ? { slots: { create: slot.options.map((d) => ({ starts_at: d })) } }
+          : {}),
       },
       include: LOAD,
     });
@@ -203,14 +218,22 @@ export class InterviewService {
       throw new BadRequestException('Cet entretien est annulé.');
     }
     const token = randomBytes(24).toString('base64url');
+    const slot = this.slot(input);
     const updated = await this.prisma.interview.update({
       where: { id: interview.id },
       data: {
-        ...this.slot(input),
+        ...slot.fields,
+        // The times offered before go; the new ones, if several, replace them.
+        slots: {
+          deleteMany: {},
+          ...(slot.options.length > 1
+            ? { create: slot.options.map((d) => ({ starts_at: d })) }
+            : {}),
+        },
         status: InterviewStatus.PENDING,
         response_note: null,
         responded_at: null,
-        reminded_at: soon(this.slot(input).starts_at) ? new Date() : null,
+        reminded_at: soon(slot.fields.starts_at) ? new Date() : null,
         // A new link: the old e-mail's answers would be about the old time.
         token_hash: hashToken(token),
       },
@@ -312,7 +335,12 @@ export class InterviewService {
     return publicView(interview);
   }
 
-  async respond(token: string, answer: InterviewAnswer, note?: string | null) {
+  async respond(
+    token: string,
+    answer: InterviewAnswer,
+    note?: string | null,
+    slotId?: string | null,
+  ) {
     const interview = await this.prisma.interview.findUnique({
       where: { token_hash: hashToken(token) },
       include: LOAD,
@@ -324,10 +352,28 @@ export class InterviewService {
     if (interview.status === InterviewStatus.CANCELLED) {
       throw new BadRequestException('Cet entretien a été annulé.');
     }
-    if (interview.starts_at.getTime() < Date.now()) {
+    // With times to choose from, it is past only once the last one is.
+    const lastTime =
+      slotsOf(interview).at(-1)?.starts_at ?? interview.starts_at;
+    if (lastTime.getTime() < Date.now()) {
       throw new BadRequestException('Cet entretien est passé.');
     }
     const clean = note?.trim().slice(0, 1000) || null;
+    // Several times offered: confirming is choosing one of them.
+    const chosen =
+      answer === 'CONFIRMED' && slotsOf(interview).length > 0
+        ? slotsOf(interview).find((x) => x.id === slotId)
+        : undefined;
+    if (answer === 'CONFIRMED' && slotsOf(interview).length > 0) {
+      if (!chosen) {
+        throw new BadRequestException('Choisissez l’un des créneaux proposés.');
+      }
+      if (chosen.starts_at.getTime() < Date.now()) {
+        throw new BadRequestException(
+          'Ce créneau est passé : choisissez-en un autre.',
+        );
+      }
+    }
     if (answer === 'RESCHEDULE_REQUESTED' && !clean) {
       throw new BadRequestException(
         'Indiquez les moments qui vous conviennent.',
@@ -349,9 +395,33 @@ export class InterviewService {
     }
     const updated = await this.prisma.interview.update({
       where: { id: interview.id },
-      data: { status: answer, response_note: clean, responded_at: new Date() },
+      data: {
+        status: answer,
+        response_note: clean,
+        responded_at: new Date(),
+        // The time chosen becomes the interview's; the others go.
+        ...(chosen
+          ? {
+              starts_at: chosen.starts_at,
+              slots: { deleteMany: {} },
+              reminded_at: soon(chosen.starts_at) ? new Date() : null,
+            }
+          : {}),
+      },
       include: LOAD,
     });
+    // The chosen time, now settled, goes into the candidate's agenda.
+    if (chosen) {
+      const to = this.candidateEmail(updated);
+      if (to) {
+        await this.send(
+          to,
+          `Entretien confirmé — ${updated.job_title}`,
+          interviewChosenEmail(this.mailOf(updated)),
+          [this.icsAttachment(updated, false)],
+        );
+      }
+    }
 
     const when = frWhen(updated.starts_at);
     notifyProfile(this.events, {
@@ -382,6 +452,8 @@ export class InterviewService {
         status: { in: [InterviewStatus.PENDING, InterviewStatus.CONFIRMED] },
         reminded_at: null,
         starts_at: { gt: now, lte: new Date(now.getTime() + DAY_MS) },
+        // No reminder of a time the candidate has not chosen yet.
+        slots: { none: {} },
       },
       include: LOAD,
       take: 200,
@@ -417,16 +489,38 @@ export class InterviewService {
   private slot(
     input: Pick<
       InterviewInput,
-      'startsAt' | 'durationMinutes' | 'mode' | 'location' | 'message'
+      | 'startsAt'
+      | 'options'
+      | 'durationMinutes'
+      | 'mode'
+      | 'location'
+      | 'message'
     >,
   ) {
-    const startsAt = new Date(input.startsAt);
+    // One time, or 2 to 3 to choose from (sorted, without twins).
+    const raw = input.options?.length
+      ? input.options
+      : input.startsAt
+        ? [input.startsAt]
+        : [];
+    if (raw.length > MAX_INTERVIEW_OPTIONS) {
+      throw new BadRequestException(
+        `${MAX_INTERVIEW_OPTIONS} créneaux au plus.`,
+      );
+    }
+    const times = [...new Set(raw)]
+      .map((t) => new Date(t))
+      .sort((a, b) => a.getTime() - b.getTime());
     if (
-      Number.isNaN(startsAt.getTime()) ||
-      startsAt.getTime() < Date.now() + MIN_LEAD_MS
+      times.length === 0 ||
+      times.some(
+        (t) =>
+          Number.isNaN(t.getTime()) || t.getTime() < Date.now() + MIN_LEAD_MS,
+      )
     ) {
       throw new BadRequestException('Choisissez une date à venir.');
     }
+    const startsAt = times[0];
     if (!INTERVIEW_DURATIONS.includes(input.durationMinutes)) {
       throw new BadRequestException('Durée non prise en charge.');
     }
@@ -443,11 +537,14 @@ export class InterviewService {
       );
     }
     return {
-      starts_at: startsAt,
-      duration_minutes: input.durationMinutes,
-      mode: input.mode,
-      location: location?.slice(0, 500) ?? null,
-      message: input.message?.trim().slice(0, 2000) || null,
+      fields: {
+        starts_at: startsAt,
+        duration_minutes: input.durationMinutes,
+        mode: input.mode,
+        location: location?.slice(0, 500) ?? null,
+        message: input.message?.trim().slice(0, 2000) || null,
+      },
+      options: times,
     };
   }
 
@@ -571,12 +668,14 @@ export class InterviewService {
   private async invite(interview: Loaded, token: string, changed: boolean) {
     const mail = this.mailOf(interview);
     const to = this.candidateEmail(interview);
+    const options = slotsOf(interview).map((x) => x.starts_at);
     if (to) {
       await this.send(
         to,
         `${changed ? 'Entretien modifié' : 'Invitation à un entretien'} — ${interview.job_title}`,
-        interviewInviteEmail(mail, answerUrl(token), changed),
-        [this.icsAttachment(interview, false)],
+        interviewInviteEmail(mail, answerUrl(token), changed, options),
+        // No agenda file while the time is to choose: it comes once chosen.
+        options.length > 0 ? [] : [this.icsAttachment(interview, false)],
       );
     }
     if (interview.application) {
@@ -587,7 +686,10 @@ export class InterviewService {
           applicationId: interview.application_id!,
           businessName: interview.business.name,
           jobTitle: interview.job_title,
-          when: frWhen(interview.starts_at),
+          when:
+            options.length > 0
+              ? `${options.length} créneaux au choix`
+              : frWhen(interview.starts_at),
           changed,
         },
       });
@@ -710,13 +812,25 @@ function answerUrl(token: string): string {
 /** One change of answer per candidate in this time: each e-mails the business. */
 const ANSWER_COOLDOWN_MS = 10 * 60 * 1000;
 
+/** The times still offered, sorted; none when the row was read without them. */
+function slotsOf(i: { slots?: unknown }): { id: string; starts_at: Date }[] {
+  return Array.isArray(i.slots)
+    ? (i.slots as { id: string; starts_at: Date }[])
+    : [];
+}
+
 /** Under a day away: the invitation already serves as the reminder. */
 function soon(startsAt: Date): boolean {
   return startsAt.getTime() - Date.now() < DAY_MS;
 }
 
-function view(i: Interview) {
+function view(i: Interview & { slots?: { id: string; starts_at: Date }[] }) {
   return {
+    /** Times still to choose from (several offered); empty once chosen. */
+    options: slotsOf(i).map((x) => ({
+      id: x.id,
+      startsAt: x.starts_at.toISOString(),
+    })),
     id: i.id,
     cvResumeId: i.cv_resume_id,
     externalApplicationId: i.external_application_id,
@@ -751,6 +865,10 @@ function publicView(i: Loaded) {
     message: i.message,
     status: i.status,
     responseNote: i.response_note,
-    past: i.starts_at.getTime() < Date.now(),
+    /** Times to choose from; empty for one time, or once chosen. */
+    options: slotsOf(i)
+      .filter((x) => x.starts_at.getTime() >= Date.now())
+      .map((x) => ({ id: x.id, startsAt: x.starts_at.toISOString() })),
+    past: (slotsOf(i).at(-1)?.starts_at ?? i.starts_at).getTime() < Date.now(),
   };
 }

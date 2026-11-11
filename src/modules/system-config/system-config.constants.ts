@@ -234,6 +234,16 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: "Entreprises – Formule offerte pendant l'essai (code)",
     isSecret: false,
   },
+  // « Garder ma candidature pour d'autres postes » (careers form, opt-in):
+  // how long the business may keep and search that candidate and their CV.
+  {
+    key: 'business.talent_pool_months',
+    value: '12',
+    category: ConfigCategory.FEES,
+    label:
+      "Entreprises – Durée de conservation d'une candidature gardée avec l'accord du candidat (mois, 1 à 36)",
+    isSecret: false,
+  },
   // The AI features the trial includes ('true' / 'false'); off by default: they
   // cost a model call each, and come with a paid plan.
   {

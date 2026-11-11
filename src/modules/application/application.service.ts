@@ -244,6 +244,8 @@ export type ApplicationWithOffer = ApplicationListItem & {
    * rating leaves the screen looking exactly as it did before.
    */
   ratedByEmployer?: boolean;
+  /** « Présélectionnée » (business space only); set by `findByJobOffer`. */
+  shortlistedAt?: string | null;
 };
 
 const WORKER_MISSION_SELECT = {
@@ -923,6 +925,8 @@ export class ApplicationService {
       ratedByEmployer: a.assignment
         ? ratedAssignmentIds.has(a.assignment.id)
         : false,
+      // « Présélectionnée »: the business's own step, never shown to the candidate.
+      shortlistedAt: a.shortlisted_at?.toISOString() ?? null,
       // « Questions aux candidats »: what this candidate answered, and
       // whether an « éliminatoire » answer set them aside.
       knockedOut: a.knocked_out,

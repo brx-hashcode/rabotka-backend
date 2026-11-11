@@ -13,6 +13,8 @@ import type { AuthenticatedRequest } from '../../auth/guards/jwt-auth.guard';
 import { memberMayCall, refusalFor, routePattern } from './team-access';
 import { TeamService } from './team.service';
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const READS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const SEEN_EVERY_MS = 5 * 60_000;
 
@@ -141,7 +143,10 @@ export class BusinessMemberInterceptor implements NestInterceptor {
         const holder = await this.team.holder(business.id);
         who = { businessId: business.id, memberId: holder.id };
       }
-      const target = Object.values(params ?? {})[0] ?? null;
+      // The first id in the route: `applications/:kind/:id/…` names the
+      // candidature second, after its kind (« rabotka », « external »).
+      const values = Object.values(params ?? {});
+      const target = values.find((v) => UUID.test(v)) ?? values[0] ?? null;
       await this.team.record(
         who.businessId,
         who.memberId,

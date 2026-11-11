@@ -1466,6 +1466,10 @@ model Application {
   rejection_source RejectionSource?
 
   viewed_at DateTime?
+  /// « Présélectionnée » in the business space, while still waiting: a step
+  /// only the business sees (the candidate is never told). Cleared with
+  /// « Retirer de la présélection ».
+  shortlisted_at DateTime? @db.Timestamptz
 
   job_offer              JobOffer              @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
   worker                 Profile               @relation(fields: [worker_id], references: [id], onDelete: Cascade)
@@ -3490,6 +3494,7 @@ model Business {
   mailboxes     BusinessMailbox[]
   linkedin_accounts BusinessLinkedinAccount[]
   members       BusinessMember[]
+  message_templates BusinessMessageTemplate[]
   activities    BusinessActivity[]
   credits            BusinessCredit[]
   candidate_notes    CandidateNote[]
@@ -3744,6 +3749,7 @@ model CvScreeningResume {
 
   @@index([screening_id], name: "idx_cv_screening_resume_screening")
   @@map("cv_screening_resumes")
+  kept_by BusinessTalent[]
 }
 
 enum CvChatRole {
@@ -3855,6 +3861,9 @@ model Interview {
   application Application?     @relation(fields: [application_id], references: [id], onDelete: SetNull)
   external_application ExternalApplication? @relation(fields: [external_application_id], references: [id], onDelete: SetNull)
   offer     JobOffer?          @relation(fields: [offer_id], references: [id], onDelete: SetNull)
+  /// The times offered when the business proposed several: the candidate
+  /// picks one, `starts_at` becomes it and these go. Empty for one time.
+  slots     InterviewSlot[]
 
   @@index([business_id, starts_at], name: "idx_interview_business_starts")
   @@index([status, starts_at], name: "idx_interview_status_starts")
@@ -3864,21 +3873,29 @@ model Interview {
   @@map("interviews")
 }
 
-/// A worker a business keeps for later — its talent pool. Private to the
-/// business: a note and tags only it reads. One row per business and worker.
+/// Someone a business keeps for later — its talent pool, « Mes profils ».
+/// Private to the business: a note and tags only it reads. Exactly one of:
+/// a Rabotka worker, a careers-page candidature (with the candidate's
+/// consent, until it ends), or a CV it analysed (while the plan keeps it).
 model BusinessTalent {
   id          String   @id @default(uuid()) @db.Uuid
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
   /// The business's profile (the employer side), as on every offer.
   employer_id String   @db.Uuid
-  worker_id   String   @db.Uuid
+  worker_id   String?  @db.Uuid
+  external_application_id String? @db.Uuid
+  cv_resume_id String?  @db.Uuid
   note        String?  @db.Text
   tags        String[] @default([])
 
   employer Profile @relation("BusinessTalentEmployer", fields: [employer_id], references: [id], onDelete: Cascade)
-  worker   Profile @relation("BusinessTalentWorker", fields: [worker_id], references: [id], onDelete: Cascade)
+  worker   Profile? @relation("BusinessTalentWorker", fields: [worker_id], references: [id], onDelete: Cascade)
+  external_application ExternalApplication? @relation(fields: [external_application_id], references: [id], onDelete: Cascade)
+  cv_resume CvScreeningResume? @relation(fields: [cv_resume_id], references: [id], onDelete: Cascade)
 
+  @@unique([employer_id, external_application_id])
+  @@unique([employer_id, cv_resume_id])
   @@unique([employer_id, worker_id])
   @@index([employer_id], name: "idx_business_talent_employer")
   @@map("business_talents")
@@ -4111,6 +4128,7 @@ model BusinessMember {
   activities BusinessActivity[]
   notes      CandidateNote[]
   opinions   CandidateOpinion[]
+  message_templates BusinessMessageTemplate[]
 
   @@unique([business_id, email])
   @@index([email, status], name: "idx_business_member_email_status")
@@ -4215,7 +4233,16 @@ model ExternalApplication {
   /// Where they came from: google, jooble, qr, whatsapp… Null before tracking.
   source          String?
   consented_at    DateTime                  @db.Timestamptz
+  /// « Garder ma candidature pour d'autres postes »: an opt-in on the form.
+  /// Until pool_expires_at the business may keep and search the candidate
+  /// in « Mes profils », and the CV is kept that long.
+  pool_consent_at DateTime?                 @db.Timestamptz
+  pool_expires_at DateTime?                 @db.Timestamptz
+  /// The candidate's own « retirer ma candidature » link (its hash).
+  pool_token_hash String?                   @unique
   viewed_at       DateTime?                 @db.Timestamptz
+  /// « Présélectionnée », while PENDING: seen by the business only.
+  shortlisted_at  DateTime?                 @db.Timestamptz
   retained_at     DateTime?                 @db.Timestamptz
   refused_at      DateTime?                 @db.Timestamptz
   refusal_message String?                   @db.Text
@@ -4245,6 +4272,7 @@ model ExternalApplication {
   // Per offer and status: the offer page, the sweeps every few minutes.
   @@index([job_offer_id, status], name: "idx_external_application_offer_status")
   @@map("external_applications")
+  kept_by BusinessTalent[]
 }
 
 enum OfferQuestionKind {
@@ -4390,3 +4418,48 @@ model DemoRequest {
   @@index([email, created_at])
   @@map("demo_requests")
 }
+
+enum BusinessMessageKind {
+  /// « Invitation » : à un entretien, à passer, à rappeler.
+  INVITATION
+  /// « Refus » : the words sent with a refusal.
+  REFUSAL
+  /// « Demande d'information » : a document, an availability, a detail.
+  INFORMATION
+  OTHER
+}
+
+/// A message a business writes once and sends again (« Modèles de
+/// messages »): with a refusal, or to several candidates at once. `{prenom}`,
+/// `{poste}` and `{entreprise}` are filled in at send time.
+model BusinessMessageTemplate {
+  id          String              @id @default(uuid()) @db.Uuid
+  created_at  DateTime            @default(now()) @db.Timestamptz
+  updated_at  DateTime            @updatedAt @db.Timestamptz
+  business_id String              @db.Uuid
+  kind        BusinessMessageKind
+  title       String
+  body        String              @db.Text
+  /// Who wrote it; null once that member is gone.
+  member_id   String?             @db.Uuid
+
+  business Business        @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  member   BusinessMember? @relation(fields: [member_id], references: [id], onDelete: SetNull)
+
+  @@index([business_id, kind], name: "idx_business_message_template_business_kind")
+  @@map("business_message_templates")
+}
+
+/// One of the (2 or 3) times a business offered for an interview, until the
+/// candidate picks one; meanwhile the interview's `starts_at` is the earliest.
+model InterviewSlot {
+  id           String    @id @default(uuid()) @db.Uuid
+  interview_id String    @db.Uuid
+  starts_at    DateTime  @db.Timestamptz
+
+  interview Interview @relation(fields: [interview_id], references: [id], onDelete: Cascade)
+
+  @@index([interview_id], name: "idx_interview_slot_interview")
+  @@map("interview_slots")
+}
+

@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsDateString,
   IsEmail,
   IsEnum,
@@ -10,6 +12,7 @@ import {
   IsString,
   IsUUID,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
 import { InterviewMode } from '@prisma/client';
 import { INTERVIEW_DURATIONS } from '../interview.service';
@@ -19,9 +22,23 @@ const trim = ({ value }: { value: unknown }) =>
 
 /** When, how long, how and where. */
 export class InterviewSlotDto {
-  @ApiProperty({ example: '2026-11-03T09:00:00.000Z' })
+  @ApiPropertyOptional({
+    example: '2026-11-03T09:00:00.000Z',
+    description: 'One time; or `options` for 2 or 3 to choose from',
+  })
+  @ValidateIf((o: InterviewSlotDto) => !o.options?.length)
   @IsDateString()
-  startsAt: string;
+  startsAt?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: '2 or 3 times; the candidate picks one through their link',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @IsDateString({}, { each: true })
+  options?: string[];
 
   @ApiProperty({ enum: INTERVIEW_DURATIONS })
   @Type(() => Number)
@@ -90,4 +107,11 @@ export class InterviewAnswerDto {
   @IsString()
   @MaxLength(1000)
   note?: string;
+
+  @ApiPropertyOptional({
+    description: 'With CONFIRMED: the time chosen, when several were offered',
+  })
+  @IsOptional()
+  @IsUUID('all')
+  slotId?: string;
 }

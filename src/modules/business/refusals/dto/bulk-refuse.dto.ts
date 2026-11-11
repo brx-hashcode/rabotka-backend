@@ -19,7 +19,18 @@ export class BulkRefuseDto {
   applicationIds?: string[];
 
   @ApiPropertyOptional({
-    description: 'Every application still waiting on the offer',
+    type: [String],
+    description: 'Careers-page applications of the offer',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsUUID('4', { each: true })
+  externalIds?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Every application still waiting on the offer, careers-page ones included',
   })
   @IsOptional()
   @IsBoolean()
