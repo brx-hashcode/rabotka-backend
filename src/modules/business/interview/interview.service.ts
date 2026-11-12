@@ -463,6 +463,7 @@ export class InterviewService {
       input: {
         type: 'INTERVIEW_ANSWERED',
         applicationId: updated.application_id,
+        interviewId: updated.id,
         candidateName: updated.candidate_name,
         jobTitle: updated.job_title,
         when,
