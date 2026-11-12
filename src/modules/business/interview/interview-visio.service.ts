@@ -34,6 +34,7 @@ export type VisioJoin = {
   /** Shown in the call; the visitor may change it before joining. */
   displayName: string;
   host: boolean;
+  endedAt: string | null;
   /** The host only: for the « Compte rendu » beside the call. */
   interviewId?: string;
 } & (
@@ -152,6 +153,10 @@ export class InterviewVisioService {
     if (this.endOf(interview) + LATE_MS < Date.now()) {
       throw new BadRequestException('Cet entretien est terminé.');
     }
+    // Ended by the business: the guests' link closes; the host still sees the page.
+    if (interview.ended_at && !businessId) {
+      throw new BadRequestException('Cet entretien est terminé.');
+    }
     return interview;
   }
 
@@ -167,6 +172,7 @@ export class InterviewVisioService {
       starts_at: Date;
       duration_minutes: number;
       business: { name: string };
+      ended_at?: Date | null;
     },
     room: string,
     user: {
@@ -185,6 +191,8 @@ export class InterviewVisioService {
       durationMinutes: interview.duration_minutes,
       displayName: user.name,
       host: user.host,
+      /** Ended by the business: the page shows it over, not the call. */
+      endedAt: interview.ended_at?.toISOString() ?? null,
       // The host's page keeps the « Compte rendu » notes beside the call.
       ...(user.host ? { interviewId: interview.id } : {}),
     };

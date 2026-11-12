@@ -95,13 +95,16 @@ export type ReportContext = {
   answers: { label: string; value: string }[];
   cv: { summary: string | null; strengths: string[]; gaps: string[] } | null;
   notes: string;
+  /** Both sides' recognised speech, merged by time; "" when not transcribed. */
+  transcript?: string;
 };
 
 const SYSTEM = [
-  'Tu rédiges le compte rendu d’un entretien d’embauche pour une entreprise, à partir des NOTES de son équipe.',
+  'Tu rédiges le compte rendu d’un entretien d’embauche pour une entreprise, à partir des NOTES de son équipe et, s’il y en a une, de la TRANSCRIPTION de l’entretien.',
   'Règles :',
-  '- Seules les notes décrivent l’entretien. Le poste, l’analyse du CV et les réponses au formulaire sont du contexte : ne les présente jamais comme dits pendant l’entretien.',
-  '- N’invente rien. Une rubrique sans information dans les notes reste vide ("" ou []).',
+  '- Seules les notes et la transcription décrivent l’entretien. Le poste, l’analyse du CV et les réponses au formulaire sont du contexte : ne les présente jamais comme dits pendant l’entretien.',
+  '- La transcription est faite automatiquement par le navigateur de chacun : elle contient des fautes de reconnaissance et des phrases coupées. Retiens le sens, ne cite pas de phrases mal reconnues. Si les notes et la transcription se contredisent, suis les notes.',
+  '- N’invente rien. Une rubrique sans information dans les notes ou la transcription reste vide ("" ou []).',
   '- Pas de note chiffrée, pas de verdict d’embauche. « avisRecruteur » reprend seulement l’avis écrit dans les notes, sinon "".',
   '- Ne mentionne jamais l’origine, la religion, la santé, la situation familiale, l’âge ou l’apparence du candidat, même si les notes en parlent.',
   '- Français clair et professionnel, phrases courtes, sans formules creuses.',
@@ -142,7 +145,11 @@ export function reportMessages(c: ReportContext) {
   return [
     new SystemMessage(SYSTEM),
     new HumanMessage(
-      `CONTEXTE\n${context}\n\nNOTES DE L’ÉQUIPE SUR L’ENTRETIEN\n${c.notes.slice(0, MAX_NOTES)}`,
+      `CONTEXTE\n${context}\n\nNOTES DE L’ÉQUIPE SUR L’ENTRETIEN\n${c.notes.slice(0, MAX_NOTES) || '(aucune)'}${
+        c.transcript
+          ? `\n\nTRANSCRIPTION DE L’ENTRETIEN (automatique)\n${c.transcript}`
+          : ''
+      }`,
     ),
   ];
 }

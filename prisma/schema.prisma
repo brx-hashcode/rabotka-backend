@@ -3869,6 +3869,16 @@ model Interview {
   report    InterviewReport?
   /// Others the business invited into the call (a colleague, a manager…).
   guests    InterviewGuest[]
+  /// « Transcrire l'entretien »: each side's browser turns its own voice
+  /// into text during the visio, kept for the « Compte rendu ».
+  transcribe         Boolean   @default(false)
+  /// The candidate's answer to the transcription: ACCEPTED or DECLINED;
+  /// null until asked. Their voice is never transcribed without ACCEPTED.
+  transcript_consent String?
+  transcript         InterviewTranscriptLine[]
+  /// « Terminer l'entretien »: the call is over; its link no longer opens it
+  /// and the interview counts as past, whatever its time.
+  ended_at           DateTime? @db.Timestamptz
 
   @@index([business_id, starts_at], name: "idx_interview_business_starts")
   @@index([status, starts_at], name: "idx_interview_status_starts")
@@ -3894,6 +3904,25 @@ model InterviewGuest {
 
   @@unique([interview_id, email], name: "interview_guest_email")
   @@map("interview_guests")
+}
+
+/// One sentence of an interview's transcription, as the speaker's own
+/// browser recognised it. Merged by `spoken_at` into one transcript.
+model InterviewTranscriptLine {
+  id           String   @id @default(uuid()) @db.Uuid
+  created_at   DateTime @default(now())
+  interview_id String   @db.Uuid
+  spoken_at    DateTime @db.Timestamptz
+  /// The name shown in the transcript, as in the call.
+  speaker      String
+  /// HOST (the business), CANDIDATE or GUEST (someone invited).
+  role         String
+  text         String   @db.Text
+
+  interview Interview @relation(fields: [interview_id], references: [id], onDelete: Cascade)
+
+  @@index([interview_id, spoken_at], name: "idx_interview_transcript_time")
+  @@map("interview_transcript_lines")
 }
 
 /// An interview's « Compte rendu »: the team's notes (typed or dictated),

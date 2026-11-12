@@ -162,6 +162,15 @@ describe('InterviewVisioService', () => {
     ).rejects.toThrow('terminé');
   });
 
+  it('once ended, closes to guests and tells the host', async () => {
+    const ended = interview({ ended_at: new Date() });
+    await expect(setup(JAAS, ended).service.asGuest(ROOM)).rejects.toThrow(
+      'terminé',
+    );
+    const host = await setup(JAAS, ended).service.asHost('p1', 'm1', ROOM);
+    expect(host.endedAt).toEqual(expect.any(String));
+  });
+
   it('opens to guests only from the day before', async () => {
     const { service } = setup(
       JAAS,

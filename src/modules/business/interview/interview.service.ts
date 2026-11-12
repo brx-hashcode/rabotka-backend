@@ -190,11 +190,22 @@ export class InterviewService {
         ...(filter.externalApplicationId
           ? { external_application_id: filter.externalApplicationId }
           : {}),
+        // Ended by the business (« Terminer l'entretien »): past, whatever its time.
         ...(filter.scope === 'upcoming'
-          ? { starts_at: { gte: new Date(now.getTime() - 2 * 60 * 60 * 1000) } }
+          ? {
+              starts_at: { gte: new Date(now.getTime() - 2 * 60 * 60 * 1000) },
+              ended_at: null,
+            }
           : filter.scope === 'past'
             ? {
-                starts_at: { lt: new Date(now.getTime() - 2 * 60 * 60 * 1000) },
+                OR: [
+                  {
+                    starts_at: {
+                      lt: new Date(now.getTime() - 2 * 60 * 60 * 1000),
+                    },
+                  },
+                  { ended_at: { not: null } },
+                ],
               }
             : {}),
       },
@@ -245,6 +256,25 @@ export class InterviewService {
     });
     await this.invite(updated, token, true);
     return view(updated);
+  }
+
+  /**
+   * « Terminer l'entretien »: the call is over. Its link stops opening it,
+   * the transcription stops, and it counts as past. Nobody is told: the
+   * candidate was in the call.
+   */
+  async end(profileId: string, id: string) {
+    const interview = await this.owned(profileId, id);
+    if (interview.status === InterviewStatus.CANCELLED) {
+      throw new BadRequestException('Cet entretien est annulé.');
+    }
+    if (interview.ended_at) return view(interview);
+    return view(
+      await this.prisma.interview.update({
+        where: { id: interview.id },
+        data: { ended_at: new Date() },
+      }),
+    );
   }
 
   async cancel(profileId: string, id: string) {
@@ -872,6 +902,7 @@ function view(
     status: i.status,
     responseNote: i.response_note,
     respondedAt: i.responded_at?.toISOString() ?? null,
+    endedAt: i.ended_at?.toISOString() ?? null,
     createdAt: i.created_at.toISOString(),
   };
 }
