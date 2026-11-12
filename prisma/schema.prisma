@@ -3867,6 +3867,8 @@ model Interview {
   slots     InterviewSlot[]
   /// « Compte rendu »: the team's notes, and the report written from them.
   report    InterviewReport?
+  /// Others the business invited into the call (a colleague, a manager…).
+  guests    InterviewGuest[]
 
   @@index([business_id, starts_at], name: "idx_interview_business_starts")
   @@index([status, starts_at], name: "idx_interview_status_starts")
@@ -3874,6 +3876,24 @@ model Interview {
   @@index([application_id], name: "idx_interview_application")
   @@index([external_application_id], name: "idx_interview_external_application")
   @@map("interviews")
+}
+
+/// Someone the business invited into an interview's visio, without an
+/// account: joins under their own name by the personal link e-mailed to them.
+model InterviewGuest {
+  id                   String   @id @default(uuid()) @db.Uuid
+  created_at           DateTime @default(now())
+  interview_id         String   @db.Uuid
+  name                 String
+  email                String
+  token_hash           String   @unique
+  /// Who invited them; null for the account holder.
+  invited_by_member_id String?  @db.Uuid
+
+  interview Interview @relation(fields: [interview_id], references: [id], onDelete: Cascade)
+
+  @@unique([interview_id, email], name: "interview_guest_email")
+  @@map("interview_guests")
 }
 
 /// An interview's « Compte rendu »: the team's notes (typed or dictated),

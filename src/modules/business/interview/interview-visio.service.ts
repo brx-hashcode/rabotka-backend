@@ -11,6 +11,7 @@ import { importPKCS8, SignJWT, type KeyObject } from 'jose';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { businessDashboardUrl } from '../../mail/audience';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
+import { hashToken } from './interview.service';
 
 /** « Créer un lien de visio » makes these: the room is the random part. */
 const ROOM = /^Rabotka-[A-Za-z0-9]{6,32}$/;
@@ -85,13 +86,36 @@ export class InterviewVisioService {
     });
   }
 
-  /** Whoever holds the link: the candidate, as a guest. */
-  async asGuest(room: string): Promise<VisioJoin> {
+  /**
+   * Whoever holds the link, as a guest: the candidate by the room's link,
+   * someone the business invited by their personal one (`guestToken`).
+   */
+  async asGuest(room: string, guestToken?: string): Promise<VisioJoin> {
     const interview = await this.find(room);
     if (interview.starts_at.getTime() - EARLY_MS > Date.now()) {
       throw new BadRequestException(
         'La visio ouvre la veille de l’entretien : revenez plus tard.',
       );
+    }
+    if (guestToken) {
+      const guest = await this.prisma.interviewGuest.findFirst({
+        where: {
+          token_hash: hashToken(guestToken),
+          interview_id: interview.id,
+        },
+        select: { id: true, name: true, email: true },
+      });
+      if (!guest) {
+        throw new NotFoundException(
+          'Cette invitation n’est plus valable : demandez un nouveau lien à l’entreprise.',
+        );
+      }
+      return this.join(interview, room, {
+        id: `invite-${guest.id}`,
+        name: guest.name,
+        email: guest.email,
+        host: false,
+      });
     }
     return this.join(interview, room, {
       id: `guest-${interview.id}`,

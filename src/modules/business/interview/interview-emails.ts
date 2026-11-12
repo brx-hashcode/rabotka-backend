@@ -173,3 +173,26 @@ export function interviewChosenEmail(i: InterviewMail): string {
     <p>Cordialement,<br /><strong>${escapeHtml(i.businessName)}</strong>, via Rabotka</p>
   `;
 }
+
+/** To someone the business invited into the call: their own link, no account. */
+export function interviewGuestEmail(
+  i: InterviewMail,
+  guestName: string,
+  url: string,
+  invitedBy: string,
+): string {
+  return `
+    <p>Bonjour ${escapeHtml(guestName)},</p>
+    <p>${escapeHtml(invitedBy)} vous invite à rejoindre l’entretien en visio avec <strong>${escapeHtml(i.candidateName)}</strong>, pour le poste suivant.</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:16px 0;width:100%;border-radius:16px;background:#f3f5f7;">
+      <tr><td style="padding:16px 20px;font-size:15px;line-height:1.6;">
+        <strong>${escapeHtml(i.jobTitle)}</strong><br />
+        ${escapeHtml(frWhen(i.startsAt))} · ${i.durationMinutes} min
+      </td></tr>
+    </table>
+    <p style="margin:24px 0;">
+      <a href="${escapeHtml(url)}" style="display:inline-block;padding:12px 22px;border-radius:999px;background:#16a34a;color:#ffffff;font-weight:600;text-decoration:none;">Rejoindre la visio</a>
+    </p>
+    <p style="color:#6b7280;font-size:13px;">Ce lien est personnel : vous entrez sous votre nom, sans compte. Il s’ouvre la veille de l’entretien.</p>
+    `;
+}

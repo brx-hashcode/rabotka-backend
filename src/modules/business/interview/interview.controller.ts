@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -22,6 +23,7 @@ import { Public } from '../../auth/decorators/public.decorator';
 import { InterviewService } from './interview.service';
 import { InterviewCalendarService } from './interview-calendar.service';
 import { InterviewVisioService } from './interview-visio.service';
+import { InterviewGuestService } from './interview-guest.service';
 import { InterviewReportService } from './interview-report.service';
 import {
   EditInterviewReportDto,
@@ -31,6 +33,7 @@ import {
 import {
   CreateInterviewDto,
   InterviewAnswerDto,
+  InterviewGuestDto,
   InterviewSlotDto,
 } from './dto/interview.dto';
 
@@ -45,7 +48,41 @@ export class InterviewController {
     private readonly calendar: InterviewCalendarService,
     private readonly visio: InterviewVisioService,
     private readonly reports: InterviewReportService,
+    private readonly guests: InterviewGuestService,
   ) {}
+
+  @Get(':id/guests')
+  @ApiOperation({ summary: 'Who was invited into the interview’s visio' })
+  listGuests(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.guests.list(req.user.profileId, id);
+  }
+
+  @Post(':id/guests')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary:
+      'Invite someone into the visio: a personal link by e-mail, no account',
+  })
+  inviteGuest(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: InterviewGuestDto,
+  ) {
+    return this.guests.invite(req.user.profileId, req.user.memberId, id, dto);
+  }
+
+  @Delete(':id/guests/:guestId')
+  @ApiOperation({ summary: 'Withdraw an invitation: its link stops working' })
+  removeGuest(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('guestId', ParseUUIDPipe) guestId: string,
+  ) {
+    return this.guests.remove(req.user.profileId, id, guestId);
+  }
 
   @Get(':id/report')
   @ApiOperation({
@@ -207,8 +244,8 @@ export class PublicInterviewController {
   @Get('visio/:room')
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @ApiOperation({ summary: 'Join an interview video call, by its link' })
-  joinVisio(@Param('room') room: string) {
-    return this.visio.asGuest(room);
+  joinVisio(@Param('room') room: string, @Query('g') guestToken?: string) {
+    return this.visio.asGuest(room, guestToken?.slice(0, 100) || undefined);
   }
 
   @Public()
