@@ -12,6 +12,7 @@ import { InterviewCalendarService } from './interview-calendar.service';
 import { InterviewScheduler } from './interview.scheduler';
 import { InterviewService } from './interview.service';
 import { InterviewVisioService } from './interview-visio.service';
+import { InterviewGuestService } from './interview-guest.service';
 import { InterviewReportService } from './interview-report.service';
 
 /** « Entretiens »: interviews a business proposes, and the candidate's answer. */
@@ -28,6 +29,7 @@ import { InterviewReportService } from './interview-report.service';
     InterviewScheduler,
     InterviewCalendarService,
     InterviewVisioService,
+    InterviewGuestService,
     InterviewReportService,
   ],
 })

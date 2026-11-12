@@ -32,6 +32,13 @@ function setup(
 ) {
   const prisma = {
     interview: { findFirst: jest.fn().mockResolvedValue(row) },
+    interviewGuest: {
+      findFirst: jest.fn().mockResolvedValue({
+        id: 'g1',
+        name: 'Marie Ngoma',
+        email: 'marie@example.com',
+      }),
+    },
     businessMember: {
       findFirst: jest.fn().mockResolvedValue({
         name: 'Marie Recruteuse',
@@ -101,6 +108,29 @@ describe('InterviewVisioService', () => {
     });
     expect(join.host).toBe(false);
     expect(join).not.toHaveProperty('interviewId');
+  });
+
+  it('lets an invited person in under their own name, never the candidate’s', async () => {
+    const { service, prisma } = setup(JAAS);
+    const join = await service.asGuest(ROOM, 'tok');
+    if (join.provider !== 'jaas') throw new Error('expected jaas');
+    const claims = decodeJwt(join.jwt) as Record<string, any>;
+    expect(claims.context.user).toMatchObject({
+      id: 'invite-g1',
+      name: 'Marie Ngoma',
+      moderator: 'false',
+    });
+    expect(prisma.interviewGuest.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ interview_id: 'i1' }),
+      }),
+    );
+  });
+
+  it('refuses a withdrawn invitation', async () => {
+    const { service, prisma } = setup(JAAS);
+    prisma.interviewGuest.findFirst.mockResolvedValue(null);
+    await expect(service.asGuest(ROOM, 'old')).rejects.toThrow('plus valable');
   });
 
   it('falls back to the public Jitsi room without JaaS keys', async () => {

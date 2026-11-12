@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -22,6 +23,7 @@ import { Public } from '../../auth/decorators/public.decorator';
 import { InterviewService } from './interview.service';
 import { InterviewCalendarService } from './interview-calendar.service';
 import { InterviewVisioService } from './interview-visio.service';
+import { InterviewGuestService } from './interview-guest.service';
 import { InterviewReportService } from './interview-report.service';
 import {
   EditInterviewReportDto,
@@ -31,6 +33,7 @@ import {
 import {
   CreateInterviewDto,
   InterviewAnswerDto,
+  InterviewGuestDto,
   InterviewSlotDto,
 } from './dto/interview.dto';
 
@@ -207,8 +210,8 @@ export class PublicInterviewController {
   @Get('visio/:room')
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @ApiOperation({ summary: 'Join an interview video call, by its link' })
-  joinVisio(@Param('room') room: string) {
-    return this.visio.asGuest(room);
+  joinVisio(@Param('room') room: string, @Query('g') guestToken?: string) {
+    return this.visio.asGuest(room, guestToken?.slice(0, 100) || undefined);
   }
 
   @Public()
