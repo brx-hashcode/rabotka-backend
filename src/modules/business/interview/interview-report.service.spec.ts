@@ -34,7 +34,7 @@ function interview(over: Record<string, unknown> = {}) {
     application_id: null,
     external_application_id: 'e1',
     cv_resume_id: null,
-    business: { name: 'ZuaFood' },
+    business: { name: 'ZuaFood', profile_id: 'bp1' },
     report: {
       notes: NOTES,
       report: null,
@@ -52,7 +52,10 @@ function setup(
 ) {
   const transcripts = { merged: jest.fn().mockResolvedValue('') };
   const prisma = {
-    interview: { findFirst: jest.fn().mockResolvedValue(row) },
+    interview: {
+      findFirst: jest.fn().mockResolvedValue(row),
+      findUnique: jest.fn().mockResolvedValue(row),
+    },
     interviewReport: {
       upsert: jest.fn().mockImplementation(({ create }) => ({
         notes: NOTES,
@@ -110,6 +113,8 @@ function setup(
   const mail = { sendMail: jest.fn().mockResolvedValue(undefined) };
   const layout = { wrap: jest.fn((html: string) => Promise.resolve(html)) };
   const subscriptions = { businessOf: jest.fn().mockResolvedValue('b1') };
+  const queue = { addJob: jest.fn().mockResolvedValue('job1') };
+  const events = { emit: jest.fn() };
   const service = new InterviewReportService(
     prisma as never,
     subscriptions as never,
@@ -117,8 +122,10 @@ function setup(
     mail as never,
     layout as never,
     transcripts as never,
+    queue as never,
+    events as never,
   );
-  return { service, prisma, llm, mail, transcripts };
+  return { service, prisma, llm, mail, transcripts, queue, events };
 }
 
 const actor = { profileId: 'p1', memberId: 'm1' };
@@ -172,10 +179,45 @@ describe('InterviewReportService', () => {
     expect(llm.invoke).not.toHaveBeenCalled();
   });
 
-  it('writes from the notes, with the offer, the form and the CV as context', async () => {
-    const { service, llm, prisma } = setup([GOOD]);
+  it('queues the writing and answers at once, without the model', async () => {
+    const { service, llm, queue, prisma } = setup([GOOD]);
     const out = await service.write(actor, 'i1');
-    expect(out.report?.resume).toContain('Candidate motivée');
+    expect(queue.addJob).toHaveBeenCalledWith('interview-report-queue', {
+      interviewId: 'i1',
+      memberId: 'm1',
+    });
+    expect(llm.invoke).not.toHaveBeenCalled();
+    expect(prisma.interviewReport.upsert.mock.calls[0][0].update).toMatchObject(
+      {
+        writing_started_at: expect.any(Date),
+        writing_error: null,
+      },
+    );
+    expect(out.writing).toBe(true);
+  });
+
+  it('asked again while it is written: nothing more is queued', async () => {
+    const { service, queue } = setup(
+      [],
+      interview({
+        report: {
+          notes: NOTES,
+          report: null,
+          generated_at: null,
+          sent_at: null,
+          updated_at: new Date(),
+          writing_started_at: new Date(),
+        },
+      }),
+    );
+    const out = await service.write(actor, 'i1');
+    expect(queue.addJob).not.toHaveBeenCalled();
+    expect(out.writing).toBe(true);
+  });
+
+  it('writes from the notes, with the offer, the form and the CV as context, then tells the team', async () => {
+    const { service, llm, prisma, events } = setup([GOOD]);
+    await service.generate({ interviewId: 'i1', memberId: 'm1' });
     const [messages, options] = llm.invoke.mock.calls[0] as unknown as [
       { content: string }[],
       { tier: string },
@@ -189,10 +231,26 @@ describe('InterviewReportService', () => {
     expect(prisma.cvScreeningResume.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'r1' } }),
     );
+    const saved = prisma.interviewReport.upsert.mock.calls[0][0].update;
+    expect(saved.report.resume).toContain('Candidate motivée');
+    expect(saved).toMatchObject({
+      writing_started_at: null,
+      writing_error: null,
+    });
+    expect(events.emit).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        recipientId: 'bp1',
+        input: expect.objectContaining({
+          type: 'INTERVIEW_REPORT_READY',
+          ok: true,
+        }),
+      }),
+    );
   });
 
   it('writes from the transcript alone, merged by time, with no notes typed', async () => {
-    const { service, llm, prisma, transcripts } = setup(
+    const { service, llm, transcripts } = setup(
       [GOOD],
       interview({ report: null }),
     );
@@ -200,22 +258,32 @@ describe('InterviewReportService', () => {
       '[10:03] Awa Diop : J’ai fait deux ans de service en salle.\n[10:04] Paul : Et vos disponibilités ?',
     );
     await expect(service.write(actor, 'i1')).resolves.toBeTruthy();
+    await service.generate({ interviewId: 'i1', memberId: null });
     const human = (llm.invoke.mock.calls[0][0] as { content: string }[])[1]
       .content;
     expect(human).toContain('TRANSCRIPTION DE L’ENTRETIEN');
     expect(human).toContain('[10:03] Awa Diop');
     expect(transcripts.merged).toHaveBeenCalledWith('i1');
-    expect(prisma.interviewReport.upsert).toHaveBeenCalled();
   });
 
-  it('asks once more when the first answer is not JSON, then gives up', async () => {
+  it('asks once more when the first answer is not JSON, then tells the team it failed', async () => {
     const retried = setup(['Bien sûr !', GOOD]);
-    await expect(retried.service.write(actor, 'i1')).resolves.toBeTruthy();
+    await retried.service.generate({ interviewId: 'i1', memberId: 'm1' });
     expect(retried.llm.invoke).toHaveBeenCalledTimes(2);
 
     const failed = setup(['non', 'toujours pas']);
-    await expect(failed.service.write(actor, 'i1')).rejects.toThrow(
-      'réessayez',
+    await failed.service.generate({ interviewId: 'i1', memberId: 'm1' });
+    expect(
+      failed.prisma.interviewReport.upsert.mock.calls[0][0].update,
+    ).toMatchObject({
+      writing_started_at: null,
+      writing_error: expect.stringContaining('réessayez'),
+    });
+    expect(failed.events.emit).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        input: expect.objectContaining({ ok: false }),
+      }),
     );
   });
 

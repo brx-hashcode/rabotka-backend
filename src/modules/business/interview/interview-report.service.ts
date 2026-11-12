@@ -19,6 +19,10 @@ import { LayoutService } from '../../mail/layout.service';
 import { businessDashboardUrl } from '../../mail/audience';
 import { LlmService } from '../../rag/llm/llm.service';
 import { InterviewTranscriptService } from './interview-transcript.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { QueueService } from '../../../common/services/queue/queue.service';
+import { INTERVIEW_REPORT_QUEUE } from '../../../common/services/queue/queue.module';
+import { notifyProfile } from '../../profile-notification/profile-notification.events';
 import { htmlToPdf } from '../../../common/utils/puppeteer';
 import { rabotkaLogoDataUri } from '../../../common/utils/rabotka-logo';
 import { answerSnippet } from '../cv-screening/lenient-answer';
@@ -44,6 +48,13 @@ const MODES = {
   VIDEO: 'en visio',
 } as const;
 const LLM_TIMEOUT_MS = 45_000;
+/** Two model calls at most: past this, a writing still marked is a lost job. */
+const WRITING_STALE_MS = 3 * 60_000;
+
+export type InterviewReportJob = {
+  interviewId: string;
+  memberId: string | null;
+};
 
 type Actor = { profileId: string; memberId?: string };
 
@@ -62,6 +73,8 @@ export class InterviewReportService {
     private readonly mail: MailService,
     private readonly layout: LayoutService,
     private readonly transcripts: InterviewTranscriptService,
+    private readonly queue: QueueService,
+    private readonly events: EventEmitter2,
   ) {}
 
   async get(actor: Actor, interviewId: string) {
@@ -85,32 +98,79 @@ export class InterviewReportService {
     return view(saved);
   }
 
-  /** Writes (or writes again) the report from the notes saved. */
+  /**
+   * « Rédiger le compte rendu »: checked here, written in the background
+   * (generate, by the report queue), a notification when it is ready. Asked
+   * again while it is being written: nothing more is queued.
+   */
   async write(actor: Actor, interviewId: string) {
     const { interview } = await this.owned(actor, interviewId);
     const notes = interview.report?.notes.trim() ?? '';
-    // Both sides' recognised speech, merged by time, when it was transcribed.
     const transcript = await this.transcripts.merged(interview.id);
     if (notes.length < MIN_NOTES && transcript.length < MIN_NOTES) {
       throw new BadRequestException(
         'Prenez d’abord quelques notes sur l’entretien, ou transcrivez-le : le compte rendu est rédigé à partir d’elles.',
       );
     }
-    const messages: BaseMessage[] = reportMessages({
-      ...(await this.context(interview, notes)),
-      transcript,
+    if (interview.report && writing(interview.report)) {
+      return view(interview.report);
+    }
+    const saved = await this.prisma.interviewReport.upsert({
+      where: { interview_id: interview.id },
+      create: {
+        interview_id: interview.id,
+        business_id: interview.business_id,
+        writing_started_at: new Date(),
+        writing_error: null,
+      },
+      update: { writing_started_at: new Date(), writing_error: null },
     });
-    const correlationId = `interview-report:${interview.id}`;
-    const ask = async (input: BaseMessage[]) => {
-      const { output } = await this.llm.invoke(input, {
-        tier: 'writing',
-        timeoutMs: LLM_TIMEOUT_MS,
-        correlationId,
+    try {
+      await this.queue.addJob<InterviewReportJob>(INTERVIEW_REPORT_QUEUE, {
+        interviewId: interview.id,
+        memberId: actor.memberId ?? null,
       });
-      return contentText(output.content);
-    };
+    } catch (err) {
+      await this.prisma.interviewReport.update({
+        where: { interview_id: interview.id },
+        data: { writing_started_at: null },
+      });
+      this.logger.error(`Interview report ${interview.id} not queued`, err);
+      throw new ServiceUnavailableException(
+        'Le compte rendu n’a pas pu être lancé : réessayez dans un instant.',
+      );
+    }
+    return view(saved);
+  }
+
+  /** The report queue's job: writes it from the notes and the transcript, then tells the team. */
+  async generate(job: InterviewReportJob): Promise<void> {
+    const interview = await this.prisma.interview.findUnique({
+      where: { id: job.interviewId },
+      include: {
+        report: true,
+        business: { select: { name: true, profile_id: true } },
+      },
+    });
+    if (!interview) return;
+    const notes = interview.report?.notes.trim() ?? '';
+    // Both sides' recognised speech, merged by time, when it was transcribed.
+    const transcript = await this.transcripts.merged(interview.id);
     let report: InterviewReportBody | null = null;
     try {
+      const messages: BaseMessage[] = reportMessages({
+        ...(await this.context(interview, notes)),
+        transcript,
+      });
+      const correlationId = `interview-report:${interview.id}`;
+      const ask = async (input: BaseMessage[]) => {
+        const { output } = await this.llm.invoke(input, {
+          tier: 'writing',
+          timeoutMs: LLM_TIMEOUT_MS,
+          correlationId,
+        });
+        return contentText(output.content);
+      };
       const first = await ask(messages);
       report = parseReport(first);
       if (!report) {
@@ -131,28 +191,37 @@ export class InterviewReportService {
         `Interview report ${interview.id} failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
-    if (!report) {
-      throw new ServiceUnavailableException(
-        'Le compte rendu n’a pas pu être rédigé : réessayez dans un instant.',
-      );
-    }
-    // Upserted: written from the transcript alone, no notes row exists yet.
-    const saved = await this.prisma.interviewReport.upsert({
+    await this.prisma.interviewReport.upsert({
       where: { interview_id: interview.id },
       create: {
         interview_id: interview.id,
         business_id: interview.business_id,
-        report: report,
-        generated_at: new Date(),
-        updated_by_member_id: actor.memberId ?? null,
+        ...(report ? { report, generated_at: new Date() } : {}),
+        writing_started_at: null,
+        writing_error: report
+          ? null
+          : 'Le compte rendu n’a pas pu être rédigé : réessayez dans un instant.',
+        updated_by_member_id: job.memberId,
       },
       update: {
-        report: report,
-        generated_at: new Date(),
-        updated_by_member_id: actor.memberId ?? null,
+        ...(report ? { report, generated_at: new Date() } : {}),
+        writing_started_at: null,
+        writing_error: report
+          ? null
+          : 'Le compte rendu n’a pas pu être rédigé : réessayez dans un instant.',
+        updated_by_member_id: job.memberId,
       },
     });
-    return view(saved);
+    notifyProfile(this.events, {
+      recipientId: interview.business.profile_id,
+      input: {
+        type: 'INTERVIEW_REPORT_READY',
+        interviewId: interview.id,
+        candidateName: interview.candidate_name,
+        jobTitle: interview.job_title,
+        ok: Boolean(report),
+      },
+    });
   }
 
   /** The team's own changes to the sections. */
@@ -375,6 +444,14 @@ export class InterviewReportService {
   }
 }
 
+/** Being written, unless it was asked so long ago that the job is lost. */
+function writing(r: { writing_started_at?: Date | null }): boolean {
+  return (
+    !!r.writing_started_at &&
+    Date.now() - r.writing_started_at.getTime() < WRITING_STALE_MS
+  );
+}
+
 function view(
   r: {
     notes: string;
@@ -382,11 +459,16 @@ function view(
     generated_at: Date | null;
     sent_at: Date | null;
     updated_at: Date;
+    writing_started_at?: Date | null;
+    writing_error?: string | null;
   } | null,
 ) {
   return {
     notes: r?.notes ?? '',
     report: r?.report ? cleanReport(r.report) : null,
+    /** Written in the background right now: the page waits, a notification follows. */
+    writing: r ? writing(r) : false,
+    writingError: r?.writing_error ?? null,
     generatedAt: r?.generated_at?.toISOString() ?? null,
     sentAt: r?.sent_at?.toISOString() ?? null,
     updatedAt: r?.updated_at.toISOString() ?? null,

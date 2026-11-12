@@ -2288,6 +2288,8 @@ enum ProfileNotificationType {
   INTERVIEW_INVITED
   INTERVIEW_CANCELLED
   INTERVIEW_ANSWERED
+  /// The « Compte rendu » written in the background is ready (or failed).
+  INTERVIEW_REPORT_READY
   /// An offer posted on LinkedIn from Rabotka, or the post that failed.
   LINKEDIN_POST
   /// A pack bought: its credits are there to use.
@@ -3938,6 +3940,11 @@ model InterviewReport {
   /// The sections (summary, strengths, points to check…); null until written.
   report               Json?
   generated_at         DateTime? @db.Timestamptz
+  /// « Rédiger le compte rendu » asked: written in the background, a
+  /// notification when done. Cleared when it ends; stale after a few minutes.
+  writing_started_at   DateTime? @db.Timestamptz
+  /// Why the last background writing failed, shown until the next one.
+  writing_error        String?
   sent_at              DateTime? @db.Timestamptz
   /// Who last changed it; null for the account holder.
   updated_by_member_id String?   @db.Uuid

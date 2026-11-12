@@ -15,6 +15,7 @@ import { InterviewVisioService } from './interview-visio.service';
 import { InterviewGuestService } from './interview-guest.service';
 import { InterviewTranscriptService } from './interview-transcript.service';
 import { InterviewReportService } from './interview-report.service';
+import { InterviewReportScheduler } from './interview-report.scheduler';
 
 /** « Entretiens »: interviews a business proposes, and the candidate's answer. */
 @Module({
@@ -33,6 +34,7 @@ import { InterviewReportService } from './interview-report.service';
     InterviewGuestService,
     InterviewTranscriptService,
     InterviewReportService,
+    InterviewReportScheduler,
   ],
 })
 export class InterviewModule {}

@@ -280,6 +280,14 @@ export type NotificationInput =
       answer: 'CONFIRMED' | 'DECLINED' | 'RESCHEDULE_REQUESTED';
     }
   | {
+      /** The « Compte rendu » written in the background: ready, or not written. */
+      type: 'INTERVIEW_REPORT_READY';
+      interviewId: string;
+      candidateName: string;
+      jobTitle: string;
+      ok: boolean;
+    }
+  | {
       type: 'CV_SCREENING_DONE';
       screeningId: string;
       jobTitle: string;
@@ -756,6 +764,19 @@ export function renderNotification(
           ? candidatureLink(input.applicationId)
           : '/espace/entretiens',
       };
+
+    case 'INTERVIEW_REPORT_READY':
+      return input.ok
+        ? {
+            title: 'Compte rendu prêt',
+            body: `Le compte rendu de l’entretien avec ${input.candidateName} pour${quoted(input.jobTitle)} est rédigé : relisez-le avant de l’envoyer.`,
+            link: '/espace/entretiens',
+          }
+        : {
+            title: 'Compte rendu non rédigé',
+            body: `Le compte rendu de l’entretien avec ${input.candidateName} n’a pas pu être rédigé : réessayez depuis l’entretien.`,
+            link: '/espace/entretiens',
+          };
 
     case 'CV_SCREENING_DONE':
       return {
