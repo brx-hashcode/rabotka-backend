@@ -10,6 +10,7 @@ import { BusinessSubscriptionService } from '../subscription/business-subscripti
 import { frWhen } from './interview-emails';
 import { hashToken } from './interview.service';
 import { visioUrl } from './interview-visio.service';
+import { businessPersonName } from './interview-people';
 
 /** A sentence, as one recognition result: never a speech. */
 export const MAX_LINE_CHARS = 500;
@@ -90,18 +91,13 @@ export class InterviewTranscriptService {
   async addHostLines(actor: Actor, interviewId: string, lines: LineInput[]) {
     const interview = await this.owned(actor, interviewId);
     this.open(interview);
-    const who = actor.memberId
-      ? await this.prisma.businessMember.findFirst({
-          where: { id: actor.memberId, business_id: interview.business_id },
-          select: { name: true },
-        })
-      : null;
-    return this.store(
-      interview.id,
-      who?.name || interview.business.name,
-      'HOST',
-      lines,
+    const who = await businessPersonName(
+      this.prisma,
+      interview.business_id,
+      actor.memberId,
+      interview.business.name,
     );
+    return this.store(interview.id, who.name, 'HOST', lines);
   }
 
   // ── The guests, by their link ─────────────────────────────────────────

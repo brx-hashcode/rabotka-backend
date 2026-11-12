@@ -12,6 +12,7 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { businessDashboardUrl } from '../../mail/audience';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
 import { hashToken } from './interview.service';
+import { businessPersonName } from './interview-people';
 
 /** « Créer un lien de visio » makes these: the room is the random part. */
 const ROOM = /^Rabotka-[A-Za-z0-9]{6,32}$/;
@@ -83,18 +84,18 @@ export class InterviewVisioService {
     if (!businessId)
       throw new ForbiddenException('Espace réservé aux comptes entreprise.');
     const interview = await this.find(room, businessId);
-    const who = memberId
-      ? await this.prisma.businessMember.findFirst({
-          where: { id: memberId, business_id: businessId },
-          select: { name: true, email: true },
-        })
-      : null;
-    const name = who?.name || interview.business.name;
+    // The person, by name (the holder's own row too), prefilled in the call.
+    const who = await businessPersonName(
+      this.prisma,
+      businessId,
+      memberId,
+      interview.business.name,
+    );
     return this.join(interview, room, {
       id: memberId ?? profileId,
-      name,
-      email: who?.email ?? interview.business.profile.email ?? undefined,
-      avatar: who
+      name: who.name,
+      email: who.email ?? interview.business.profile.email ?? undefined,
+      avatar: memberId
         ? undefined
         : (interview.business.profile.avatar_url ?? undefined),
       host: true,

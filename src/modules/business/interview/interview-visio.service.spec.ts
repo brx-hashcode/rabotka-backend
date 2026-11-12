@@ -94,6 +94,21 @@ describe('InterviewVisioService', () => {
     });
   });
 
+  it('names the account holder by their own row, not the company', async () => {
+    const { service, prisma } = setup(JAAS);
+    prisma.businessMember.findFirst.mockResolvedValue({
+      name: 'Fariol Blondeau',
+      email: 'owner@example.com',
+    });
+    const join = await service.asHost('p1', undefined, ROOM);
+    expect(prisma.businessMember.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { business_id: 'b1', is_owner: true },
+      }),
+    );
+    expect(join.displayName).toBe('Fariol Blondeau');
+  });
+
   it('gives the link holder a guest token under the candidate name', async () => {
     const { service } = setup({ ...JAAS, JAAS_KEY_ID: 'key1' });
     const join = await service.asGuest(ROOM);
