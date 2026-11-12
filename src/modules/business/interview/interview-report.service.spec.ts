@@ -50,15 +50,17 @@ function setup(
   answers: string[],
   row: Record<string, unknown> | null = interview(),
 ) {
+  const transcripts = { merged: jest.fn().mockResolvedValue('') };
   const prisma = {
     interview: { findFirst: jest.fn().mockResolvedValue(row) },
     interviewReport: {
       upsert: jest.fn().mockImplementation(({ create }) => ({
-        ...create,
+        notes: NOTES,
         report: null,
         generated_at: null,
         sent_at: null,
         updated_at: new Date(),
+        ...create,
       })),
       update: jest.fn().mockImplementation(({ data }) => ({
         notes: NOTES,
@@ -114,8 +116,9 @@ function setup(
     llm as never,
     mail as never,
     layout as never,
+    transcripts as never,
   );
-  return { service, prisma, llm, mail };
+  return { service, prisma, llm, mail, transcripts };
 }
 
 const actor = { profileId: 'p1', memberId: 'm1' };
@@ -186,6 +189,23 @@ describe('InterviewReportService', () => {
     expect(prisma.cvScreeningResume.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'r1' } }),
     );
+  });
+
+  it('writes from the transcript alone, merged by time, with no notes typed', async () => {
+    const { service, llm, prisma, transcripts } = setup(
+      [GOOD],
+      interview({ report: null }),
+    );
+    transcripts.merged.mockResolvedValue(
+      '[10:03] Awa Diop : J’ai fait deux ans de service en salle.\n[10:04] Paul : Et vos disponibilités ?',
+    );
+    await expect(service.write(actor, 'i1')).resolves.toBeTruthy();
+    const human = (llm.invoke.mock.calls[0][0] as { content: string }[])[1]
+      .content;
+    expect(human).toContain('TRANSCRIPTION DE L’ENTRETIEN');
+    expect(human).toContain('[10:03] Awa Diop');
+    expect(transcripts.merged).toHaveBeenCalledWith('i1');
+    expect(prisma.interviewReport.upsert).toHaveBeenCalled();
   });
 
   it('asks once more when the first answer is not JSON, then gives up', async () => {

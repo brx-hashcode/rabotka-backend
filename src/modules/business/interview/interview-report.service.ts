@@ -18,6 +18,7 @@ import { MailService } from '../../mail/mail.service';
 import { LayoutService } from '../../mail/layout.service';
 import { businessDashboardUrl } from '../../mail/audience';
 import { LlmService } from '../../rag/llm/llm.service';
+import { InterviewTranscriptService } from './interview-transcript.service';
 import { htmlToPdf } from '../../../common/utils/puppeteer';
 import { rabotkaLogoDataUri } from '../../../common/utils/rabotka-logo';
 import { answerSnippet } from '../cv-screening/lenient-answer';
@@ -60,6 +61,7 @@ export class InterviewReportService {
     private readonly llm: LlmService,
     private readonly mail: MailService,
     private readonly layout: LayoutService,
+    private readonly transcripts: InterviewTranscriptService,
   ) {}
 
   async get(actor: Actor, interviewId: string) {
@@ -87,14 +89,17 @@ export class InterviewReportService {
   async write(actor: Actor, interviewId: string) {
     const { interview } = await this.owned(actor, interviewId);
     const notes = interview.report?.notes.trim() ?? '';
-    if (notes.length < MIN_NOTES) {
+    // Both sides' recognised speech, merged by time, when it was transcribed.
+    const transcript = await this.transcripts.merged(interview.id);
+    if (notes.length < MIN_NOTES && transcript.length < MIN_NOTES) {
       throw new BadRequestException(
-        'Prenez d’abord quelques notes sur l’entretien : le compte rendu est rédigé à partir d’elles.',
+        'Prenez d’abord quelques notes sur l’entretien, ou transcrivez-le : le compte rendu est rédigé à partir d’elles.',
       );
     }
-    const messages: BaseMessage[] = reportMessages(
-      await this.context(interview, notes),
-    );
+    const messages: BaseMessage[] = reportMessages({
+      ...(await this.context(interview, notes)),
+      transcript,
+    });
     const correlationId = `interview-report:${interview.id}`;
     const ask = async (input: BaseMessage[]) => {
       const { output } = await this.llm.invoke(input, {
@@ -131,9 +136,17 @@ export class InterviewReportService {
         'Le compte rendu n’a pas pu être rédigé : réessayez dans un instant.',
       );
     }
-    const saved = await this.prisma.interviewReport.update({
+    // Upserted: written from the transcript alone, no notes row exists yet.
+    const saved = await this.prisma.interviewReport.upsert({
       where: { interview_id: interview.id },
-      data: {
+      create: {
+        interview_id: interview.id,
+        business_id: interview.business_id,
+        report: report,
+        generated_at: new Date(),
+        updated_by_member_id: actor.memberId ?? null,
+      },
+      update: {
         report: report,
         generated_at: new Date(),
         updated_by_member_id: actor.memberId ?? null,

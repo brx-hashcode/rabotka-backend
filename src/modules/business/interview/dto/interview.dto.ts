@@ -3,6 +3,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEmail,
   IsEnum,
@@ -13,6 +14,7 @@ import {
   IsUUID,
   MaxLength,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
 import { InterviewMode } from '@prisma/client';
 import { INTERVIEW_DURATIONS } from '../interview.service';
@@ -127,4 +129,40 @@ export class InterviewGuestDto {
   @IsEmail()
   @MaxLength(200)
   email!: string;
+}
+
+/** « Transcrire l'entretien »: on or off. */
+export class TranscriptionSwitchDto {
+  @ApiProperty()
+  @IsBoolean()
+  on!: boolean;
+}
+
+/** The candidate's answer to the transcription. */
+export class TranscriptionAnswerDto {
+  @ApiProperty()
+  @IsBoolean()
+  accepted!: boolean;
+}
+
+/** One sentence the speaker's browser recognised, with its time. */
+export class TranscriptLineDto {
+  @ApiProperty({ example: 'J’ai travaillé trois ans en restauration.' })
+  @IsString()
+  @MaxLength(2000)
+  text!: string;
+
+  @ApiPropertyOptional({ example: '2026-11-12T10:03:12.000Z' })
+  @IsOptional()
+  @IsDateString()
+  at?: string;
+}
+
+export class TranscriptLinesDto {
+  @ApiProperty({ type: [TranscriptLineDto] })
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => TranscriptLineDto)
+  lines!: TranscriptLineDto[];
 }
