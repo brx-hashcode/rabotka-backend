@@ -24,6 +24,7 @@ import { InterviewService } from './interview.service';
 import { InterviewCalendarService } from './interview-calendar.service';
 import { InterviewVisioService } from './interview-visio.service';
 import { InterviewGuestService } from './interview-guest.service';
+import { InterviewTranscriptService } from './interview-transcript.service';
 import { InterviewReportService } from './interview-report.service';
 import {
   EditInterviewReportDto,
@@ -35,6 +36,9 @@ import {
   InterviewAnswerDto,
   InterviewGuestDto,
   InterviewSlotDto,
+  TranscriptionAnswerDto,
+  TranscriptionSwitchDto,
+  TranscriptLinesDto,
 } from './dto/interview.dto';
 
 /** « Entretiens »: the business's interviews with candidates. */
@@ -49,7 +53,42 @@ export class InterviewController {
     private readonly visio: InterviewVisioService,
     private readonly reports: InterviewReportService,
     private readonly guests: InterviewGuestService,
+    private readonly transcripts: InterviewTranscriptService,
   ) {}
+
+  @Get(':id/report/transcript')
+  @ApiOperation({
+    summary: 'The interview’s transcription: both sides merged by time',
+  })
+  transcript(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.transcripts.get(req.user, id);
+  }
+
+  @Patch(':id/report/transcription')
+  @ApiOperation({ summary: '« Transcrire l’entretien »: on or off' })
+  setTranscription(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: TranscriptionSwitchDto,
+  ) {
+    return this.transcripts.setTranscribe(req.user, id, dto.on);
+  }
+
+  @Post(':id/report/transcript')
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'The organiser’s sentences, as their browser recognised them',
+  })
+  addTranscript(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: TranscriptLinesDto,
+  ) {
+    return this.transcripts.addHostLines(req.user, id, dto.lines);
+  }
 
   @Get(':id/guests')
   @ApiOperation({ summary: 'Who was invited into the interview’s visio' })
@@ -238,7 +277,52 @@ export class PublicInterviewController {
   constructor(
     private readonly interviews: InterviewService,
     private readonly visio: InterviewVisioService,
+    private readonly transcripts: InterviewTranscriptService,
   ) {}
+
+  @Public()
+  @Get('visio/:room/transcription')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Whether the call is transcribed' })
+  transcription(@Param('room') room: string) {
+    return this.transcripts.status(room);
+  }
+
+  @Public()
+  @Post('visio/:room/transcription')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'The candidate accepts or refuses the transcription',
+  })
+  answerTranscription(
+    @Param('room') room: string,
+    @Body() dto: TranscriptionAnswerDto,
+    @Query('g') guestToken?: string,
+  ) {
+    return this.transcripts.answer(
+      room,
+      dto.accepted,
+      guestToken?.slice(0, 100) || undefined,
+    );
+  }
+
+  @Public()
+  @Post('visio/:room/transcript')
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'A guest’s sentences, as their own browser recognised them',
+  })
+  addTranscript(
+    @Param('room') room: string,
+    @Body() dto: TranscriptLinesDto,
+    @Query('g') guestToken?: string,
+  ) {
+    return this.transcripts.addGuestLines(
+      room,
+      dto.lines,
+      guestToken?.slice(0, 100) || undefined,
+    );
+  }
 
   @Public()
   @Get('visio/:room')
