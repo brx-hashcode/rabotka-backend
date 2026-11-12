@@ -109,6 +109,7 @@ const OFFER_SELECT = {
   scheduled_at: true,
   is_remote: true,
   city: true,
+  country_code: true,
   country_name: true,
   quantity: true,
   created_at: true,
@@ -1246,6 +1247,7 @@ export class CareersService {
     scheduled_at: Date | null;
     is_remote: boolean;
     city: string | null;
+    country_code: string | null;
     country_name: string | null;
     quantity: number;
     created_at: Date;
@@ -1258,6 +1260,8 @@ export class CareersService {
       closesAt: o.scheduled_at?.toISOString() ?? null,
       isRemote: o.is_remote,
       city: o.city,
+      /** ISO 3166-1, as Google for Jobs wants the country of a job. */
+      countryCode: o.country_code,
       countryName: o.country_name,
       quantity: o.quantity,
     };
