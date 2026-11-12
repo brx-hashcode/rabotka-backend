@@ -13,6 +13,7 @@ import { LayoutService } from '../../mail/layout.service';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
 import { interviewGuestEmail } from './interview-emails';
 import { hashToken } from './interview.service';
+import { businessPersonName } from './interview-people';
 
 /** Colleagues and managers in one call: more than this is a meeting, not an interview. */
 export const MAX_INTERVIEW_GUESTS = 5;
@@ -120,15 +121,16 @@ export class InterviewGuestService {
           },
         });
 
-    const inviter = memberId
-      ? await this.prisma.businessMember.findFirst({
-          where: { id: memberId, business_id: interview.business_id },
-          select: { name: true },
-        })
-      : null;
-    const invitedBy = inviter?.name
-      ? `${inviter.name} (${interview.business.name})`
-      : interview.business.name;
+    const inviter = await businessPersonName(
+      this.prisma,
+      interview.business_id,
+      memberId,
+      interview.business.name,
+    );
+    const invitedBy =
+      inviter.name !== interview.business.name
+        ? `${inviter.name} (${interview.business.name})`
+        : interview.business.name;
     const url = `${interview.location}?g=${encodeURIComponent(token)}`;
     try {
       await this.mail.sendMail({

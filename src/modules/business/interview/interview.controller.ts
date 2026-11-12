@@ -160,6 +160,18 @@ export class InterviewController {
     return this.reports.saveNotes(req.user, id, dto.notes);
   }
 
+  @Post(':id/report/call-started')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'The business joined the call: its real start, for the report',
+  })
+  callStarted(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.reports.markStarted(req.user, id);
+  }
+
   @Post(':id/report/write')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({ summary: 'Write the report from the notes (AI)' })

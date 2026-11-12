@@ -274,10 +274,20 @@ export type NotificationInput =
       type: 'INTERVIEW_ANSWERED';
       /** The candidature the interview is for; null for an imported CV. */
       applicationId?: string | null;
+      /** The interview, brought into view on « Entretiens » when there is no candidature. */
+      interviewId?: string;
       candidateName: string;
       jobTitle: string;
       when: string;
       answer: 'CONFIRMED' | 'DECLINED' | 'RESCHEDULE_REQUESTED';
+    }
+  | {
+      /** The « Compte rendu » written in the background: ready, or not written. */
+      type: 'INTERVIEW_REPORT_READY';
+      interviewId: string;
+      candidateName: string;
+      jobTitle: string;
+      ok: boolean;
     }
   | {
       type: 'CV_SCREENING_DONE';
@@ -754,8 +764,21 @@ export function renderNotification(
               : `${input.candidateName} propose un autre moment que le ${input.when}.`,
         link: input.applicationId
           ? candidatureLink(input.applicationId)
-          : '/espace/entretiens',
+          : interviewLink(input.interviewId),
       };
+
+    case 'INTERVIEW_REPORT_READY':
+      return input.ok
+        ? {
+            title: 'Compte rendu prêt',
+            body: `Le compte rendu de l’entretien avec ${input.candidateName} pour${quoted(input.jobTitle)} est rédigé : relisez-le avant de l’envoyer.`,
+            link: interviewLink(input.interviewId),
+          }
+        : {
+            title: 'Compte rendu non rédigé',
+            body: `Le compte rendu de l’entretien avec ${input.candidateName} n’a pas pu être rédigé : réessayez depuis l’entretien.`,
+            link: interviewLink(input.interviewId),
+          };
 
     case 'CV_SCREENING_DONE':
       return {
@@ -794,4 +817,11 @@ export function renderNotification(
         link: '/portefeuille',
       };
   }
+}
+
+/** « Entretiens », with that interview brought into view and highlighted. */
+function interviewLink(interviewId?: string): string {
+  return interviewId
+    ? `/espace/entretiens?entretien=${encodeURIComponent(interviewId)}`
+    : '/espace/entretiens';
 }
