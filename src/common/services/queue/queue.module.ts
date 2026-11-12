@@ -47,6 +47,8 @@ export const CV_ANALYSIS_QUEUE = 'cv-analysis-queue';
 export const APPLICANT_SCORE_QUEUE = 'applicant-score-queue';
 /** Interview reminders, the day before. */
 export const INTERVIEW_QUEUE = 'interview-queue';
+/** An interview's « Compte rendu », written in the background from its notes and transcript. */
+export const INTERVIEW_REPORT_QUEUE = 'interview-report-queue';
 /** An offer posted on a team member's LinkedIn (linkedin.service.ts). */
 export const LINKEDIN_POST_QUEUE = 'linkedin-post-queue';
 

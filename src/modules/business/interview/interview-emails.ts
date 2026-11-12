@@ -196,3 +196,51 @@ export function interviewGuestEmail(
     <p style="color:#6b7280;font-size:13px;">Ce lien est personnel : vous entrez sous votre nom, sans compte. Il s’ouvre la veille de l’entretien.</p>
     `;
 }
+
+const hm = (d: Date) =>
+  d.toLocaleTimeString('fr-FR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: TZ,
+  });
+const dayOf = (d: Date) =>
+  d.toLocaleDateString('fr-FR', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    timeZone: TZ,
+  });
+
+/**
+ * When an interview really took place, as the compte rendu tells it: « le
+ * dimanche 15 novembre de 15:42 à 16:08 (prévu à 15:20) », from the moment the
+ * business joined (or the first sentence) to « Terminer » (or the last one).
+ * The planned time alone when nothing says otherwise.
+ */
+export function heldWhen(
+  planned: Date,
+  start: Date | null,
+  end: Date | null,
+): { when: string; minutes: number | null } {
+  if (!start) return { when: frWhen(planned), minutes: null };
+  const sameTime = Math.abs(start.getTime() - planned.getTime()) < 5 * 60_000;
+  const plannedNote = sameTime
+    ? ''
+    : dayOf(planned) === dayOf(start)
+      ? ` (prévu à ${hm(planned)})`
+      : ` (prévu le ${frWhen(planned)})`;
+  if (end && end.getTime() > start.getTime()) {
+    const minutes = Math.max(
+      1,
+      Math.round((end.getTime() - start.getTime()) / 60_000),
+    );
+    return {
+      when: `${dayOf(start)} de ${hm(start)} à ${hm(end)}${plannedNote}`,
+      minutes,
+    };
+  }
+  return {
+    when: `${dayOf(start)}, commencé à ${hm(start)}${plannedNote}`,
+    minutes: null,
+  };
+}

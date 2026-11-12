@@ -94,6 +94,21 @@ describe('InterviewVisioService', () => {
     });
   });
 
+  it('names the account holder by their own row, not the company', async () => {
+    const { service, prisma } = setup(JAAS);
+    prisma.businessMember.findFirst.mockResolvedValue({
+      name: 'Fariol Blondeau',
+      email: 'owner@example.com',
+    });
+    const join = await service.asHost('p1', undefined, ROOM);
+    expect(prisma.businessMember.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { business_id: 'b1', is_owner: true },
+      }),
+    );
+    expect(join.displayName).toBe('Fariol Blondeau');
+  });
+
   it('gives the link holder a guest token under the candidate name', async () => {
     const { service } = setup({ ...JAAS, JAAS_KEY_ID: 'key1' });
     const join = await service.asGuest(ROOM);
@@ -171,12 +186,26 @@ describe('InterviewVisioService', () => {
     expect(host.endedAt).toEqual(expect.any(String));
   });
 
-  it('opens to guests only from the day before', async () => {
-    const { service } = setup(
+  it('before the day before, says when it opens, with no token', async () => {
+    const starts = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    const { service } = setup(JAAS, interview({ starts_at: starts }));
+    const join = await service.asGuest(ROOM);
+    expect(join).toMatchObject({
+      provider: 'waiting',
+      jobTitle: 'Assistant RH',
+      businessName: 'The Yellow Team',
+      opensAt: new Date(starts.getTime() - 24 * 60 * 60 * 1000).toISOString(),
+    });
+    expect(join).not.toHaveProperty('jwt');
+  });
+
+  it('still refuses a withdrawn invitation before it opens', async () => {
+    const { service, prisma } = setup(
       JAAS,
       interview({ starts_at: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000) }),
     );
-    await expect(service.asGuest(ROOM)).rejects.toThrow('veille');
+    prisma.interviewGuest.findFirst.mockResolvedValue(null);
+    await expect(service.asGuest(ROOM, 'old')).rejects.toThrow('plus valable');
   });
 
   it('is not found for another business', async () => {
