@@ -3881,6 +3881,9 @@ model Interview {
   /// « Terminer l'entretien »: the call is over; its link no longer opens it
   /// and the interview counts as past, whatever its time.
   ended_at           DateTime? @db.Timestamptz
+  /// When the call really began: the business joined it (the visio page
+  /// says so). The compte rendu tells the times held, not only those planned.
+  call_started_at    DateTime? @db.Timestamptz
 
   @@index([business_id, starts_at], name: "idx_interview_business_starts")
   @@index([status, starts_at], name: "idx_interview_status_starts")

@@ -28,7 +28,7 @@ import { rabotkaLogoDataUri } from '../../../common/utils/rabotka-logo';
 import { answerSnippet } from '../cv-screening/lenient-answer';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
 import { businessEmailRecipients } from '../team/business-recipients';
-import { frWhen } from './interview-emails';
+import { heldWhen } from './interview-emails';
 import {
   buildInterviewReportHtml,
   cleanReport,
@@ -272,7 +272,7 @@ export class InterviewReportService {
       interviewReportEmail(report, {
         candidateName: interview.candidate_name,
         jobTitle: interview.job_title,
-        when: frWhen(interview.starts_at),
+        when: (await this.held(interview)).when,
         url: `${businessDashboardUrl()}/entretiens?onglet=passes`,
       }),
       {
@@ -320,9 +320,11 @@ export class InterviewReportService {
       businessName: interview.business.name,
       candidateName: interview.candidate_name,
       jobTitle: interview.job_title,
-      when: frWhen(interview.starts_at),
+      ...(await this.held(interview).then((h) => ({
+        when: h.when,
+        durationMinutes: h.minutes ?? interview.duration_minutes,
+      }))),
       mode: MODES[interview.mode].replace(/^./, (c) => c.toUpperCase()),
-      durationMinutes: interview.duration_minutes,
       generatedAt: (
         interview.report?.generated_at ?? new Date()
       ).toLocaleDateString('fr-FR', {
@@ -363,9 +365,44 @@ export class InterviewReportService {
     return { interview, businessId };
   }
 
+  /**
+   * The times the interview really ran: from the business joining the call
+   * (or the first sentence) to « Terminer » (or the last sentence).
+   */
+  private async held(i: {
+    id: string;
+    starts_at: Date;
+    call_started_at?: Date | null;
+    ended_at?: Date | null;
+  }) {
+    const span = await this.transcripts.span(i.id);
+    const starts = [i.call_started_at, span.first].filter(
+      (d): d is Date => !!d,
+    );
+    const start = starts.length
+      ? new Date(Math.min(...starts.map((d) => d.getTime())))
+      : null;
+    return heldWhen(i.starts_at, start, i.ended_at ?? span.last);
+  }
+
+  /** The business joined the call: its real start, kept once. */
+  async markStarted(actor: Actor, interviewId: string) {
+    const { interview } = await this.owned(actor, interviewId);
+    if (!interview.call_started_at && !interview.ended_at) {
+      await this.prisma.interview.update({
+        where: { id: interview.id },
+        data: { call_started_at: new Date() },
+      });
+    }
+    return { started: true };
+  }
+
   /** What the AI may know beside the notes: the offer, the form, the CV. */
   private async context(
     i: {
+      id: string;
+      call_started_at?: Date | null;
+      ended_at?: Date | null;
       job_title: string;
       candidate_name: string;
       starts_at: Date;
@@ -423,13 +460,14 @@ export class InterviewReportService {
             )
             .map(({ label, value }) => ({ label, value }))
         : [];
+    const held = await this.held(i);
     return {
       jobTitle: i.job_title,
       businessName: i.business.name,
       candidateName: i.candidate_name,
-      when: frWhen(i.starts_at),
+      when: held.when,
       mode: MODES[i.mode],
-      durationMinutes: i.duration_minutes,
+      durationMinutes: held.minutes ?? i.duration_minutes,
       offerDescription: offer?.description ?? null,
       answers,
       cv: resume

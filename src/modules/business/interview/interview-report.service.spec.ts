@@ -50,11 +50,15 @@ function setup(
   answers: string[],
   row: Record<string, unknown> | null = interview(),
 ) {
-  const transcripts = { merged: jest.fn().mockResolvedValue('') };
+  const transcripts = {
+    merged: jest.fn().mockResolvedValue(''),
+    span: jest.fn().mockResolvedValue({ first: null, last: null }),
+  };
   const prisma = {
     interview: {
       findFirst: jest.fn().mockResolvedValue(row),
       findUnique: jest.fn().mockResolvedValue(row),
+      update: jest.fn().mockResolvedValue(row),
     },
     interviewReport: {
       upsert: jest.fn().mockImplementation(({ create }) => ({
@@ -264,6 +268,39 @@ describe('InterviewReportService', () => {
     expect(human).toContain('TRANSCRIPTION DE L’ENTRETIEN');
     expect(human).toContain('[10:03] Awa Diop');
     expect(transcripts.merged).toHaveBeenCalledWith('i1');
+  });
+
+  it('tells the model the times really held, not only the planned ones', async () => {
+    const { service, llm, transcripts } = setup(
+      [GOOD],
+      interview({
+        call_started_at: new Date('2026-11-12T09:12:00Z'),
+        ended_at: new Date('2026-11-12T09:40:00Z'),
+      }),
+    );
+    transcripts.span.mockResolvedValue({
+      first: new Date('2026-11-12T09:13:00Z'),
+      last: new Date('2026-11-12T09:39:00Z'),
+    });
+    await service.generate({ interviewId: 'i1', memberId: 'm1' });
+    const human = (llm.invoke.mock.calls[0][0] as { content: string }[])[1]
+      .content;
+    expect(human).toContain('de 10:12 à 10:40 (prévu à 10:00)');
+    expect(human).toContain('28 min');
+  });
+
+  it('keeps the first moment the business joined the call', async () => {
+    const { service, prisma } = setup([]);
+    await service.markStarted(actor, 'i1');
+    expect(prisma.interview.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { call_started_at: expect.any(Date) } }),
+    );
+    const again = setup(
+      [],
+      interview({ call_started_at: new Date('2026-11-12T09:12:00Z') }),
+    );
+    await again.service.markStarted(actor, 'i1');
+    expect(again.prisma.interview.update).not.toHaveBeenCalled();
   });
 
   it('asks once more when the first answer is not JSON, then tells the team it failed', async () => {

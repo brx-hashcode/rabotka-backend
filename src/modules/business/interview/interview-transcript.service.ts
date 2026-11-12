@@ -156,6 +156,18 @@ export class InterviewTranscriptService {
 
   // ── For the « Compte rendu » ──────────────────────────────────────────
 
+  /** The first and last sentence spoken: when the conversation really ran. */
+  async span(
+    interviewId: string,
+  ): Promise<{ first: Date | null; last: Date | null }> {
+    const r = await this.prisma.interviewTranscriptLine.aggregate({
+      where: { interview_id: interviewId },
+      _min: { spoken_at: true },
+      _max: { spoken_at: true },
+    });
+    return { first: r._min.spoken_at ?? null, last: r._max.spoken_at ?? null };
+  }
+
   /** Both sides merged by time, as the report reads them; "" when none. */
   async merged(interviewId: string): Promise<string> {
     const lines = await this.prisma.interviewTranscriptLine.findMany({
