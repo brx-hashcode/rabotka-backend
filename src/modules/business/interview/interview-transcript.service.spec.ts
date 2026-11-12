@@ -23,6 +23,7 @@ function interview(over: Record<string, unknown> = {}) {
     status: InterviewStatus.CONFIRMED,
     transcribe: true,
     transcript_consent: 'ACCEPTED',
+    ended_at: null,
     business: { name: 'KAMOA' },
     ...over,
   };
@@ -119,6 +120,13 @@ describe('InterviewTranscriptService', () => {
         interview({ starts_at: new Date(Date.now() - 5 * 60 * 60 * 1000) }),
       ).service.addGuestLines(ROOM, [{ text: 'x' }]),
     ).rejects.toThrow('pendant l’entretien');
+  });
+
+  it('stops once the interview is ended', async () => {
+    const { service } = setup(interview({ ended_at: new Date() }));
+    await expect(
+      service.addHostLines(actor, 'i1', [{ text: 'encore' }]),
+    ).rejects.toThrow('terminé');
   });
 
   it('cuts long sentences and stops at the interview’s limit', async () => {

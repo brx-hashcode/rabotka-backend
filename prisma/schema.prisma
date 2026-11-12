@@ -3876,6 +3876,9 @@ model Interview {
   /// null until asked. Their voice is never transcribed without ACCEPTED.
   transcript_consent String?
   transcript         InterviewTranscriptLine[]
+  /// « Terminer l'entretien »: the call is over; its link no longer opens it
+  /// and the interview counts as past, whatever its time.
+  ended_at           DateTime? @db.Timestamptz
 
   @@index([business_id, starts_at], name: "idx_interview_business_starts")
   @@index([status, starts_at], name: "idx_interview_status_starts")

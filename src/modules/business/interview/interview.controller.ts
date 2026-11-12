@@ -260,6 +260,17 @@ export class InterviewController {
     return this.interviews.reschedule(req.user.profileId, id, dto);
   }
 
+  @Post(':id/end')
+  @ApiOperation({
+    summary: '« Terminer l’entretien »: its link stops opening the call',
+  })
+  end(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.interviews.end(req.user.profileId, id);
+  }
+
   @Post(':id/cancel')
   @ApiOperation({ summary: 'Cancel an interview; the candidate is told' })
   cancel(

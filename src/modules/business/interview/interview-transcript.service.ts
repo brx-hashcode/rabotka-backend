@@ -211,6 +211,7 @@ export class InterviewTranscriptService {
   /** Transcribed only when switched on, and around the interview's time. */
   private open(i: {
     transcribe: boolean;
+    ended_at: Date | null;
     status: InterviewStatus;
     starts_at: Date;
     duration_minutes: number;
@@ -225,6 +226,9 @@ export class InterviewTranscriptService {
       i.status === InterviewStatus.DECLINED
     ) {
       throw new BadRequestException('Cet entretien n’a plus lieu.');
+    }
+    if (i.ended_at) {
+      throw new BadRequestException('Cet entretien est terminé.');
     }
     const now = Date.now();
     const end = i.starts_at.getTime() + i.duration_minutes * 60_000;
