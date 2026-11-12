@@ -48,7 +48,41 @@ export class InterviewController {
     private readonly calendar: InterviewCalendarService,
     private readonly visio: InterviewVisioService,
     private readonly reports: InterviewReportService,
+    private readonly guests: InterviewGuestService,
   ) {}
+
+  @Get(':id/guests')
+  @ApiOperation({ summary: 'Who was invited into the interview’s visio' })
+  listGuests(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.guests.list(req.user.profileId, id);
+  }
+
+  @Post(':id/guests')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary:
+      'Invite someone into the visio: a personal link by e-mail, no account',
+  })
+  inviteGuest(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: InterviewGuestDto,
+  ) {
+    return this.guests.invite(req.user.profileId, req.user.memberId, id, dto);
+  }
+
+  @Delete(':id/guests/:guestId')
+  @ApiOperation({ summary: 'Withdraw an invitation: its link stops working' })
+  removeGuest(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('guestId', ParseUUIDPipe) guestId: string,
+  ) {
+    return this.guests.remove(req.user.profileId, id, guestId);
+  }
 
   @Get(':id/report')
   @ApiOperation({
