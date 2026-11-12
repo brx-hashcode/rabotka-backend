@@ -115,3 +115,16 @@ export class InterviewAnswerDto {
   @IsUUID('all')
   slotId?: string;
 }
+
+/** « Inviter quelqu'un » into the visio. */
+export class InterviewGuestDto {
+  @ApiProperty({ example: 'Marie Ngoma' })
+  @IsString()
+  @MaxLength(80)
+  name!: string;
+
+  @ApiProperty({ example: 'marie@example.com' })
+  @IsEmail()
+  @MaxLength(200)
+  email!: string;
+}
