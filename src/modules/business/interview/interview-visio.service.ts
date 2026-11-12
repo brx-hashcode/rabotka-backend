@@ -25,6 +25,17 @@ export function visioUrl(room: string): string {
   return `${businessDashboardUrl().replace(/\/espace$/, '')}/visio/${room}`;
 }
 
+/** The interview as the visio pages read it. */
+type VisioInterview = {
+  id: string;
+  job_title: string;
+  candidate_name: string;
+  starts_at: Date;
+  duration_minutes: number;
+  ended_at?: Date | null;
+  business: { name: string; profile?: { avatar_url: string | null } | null };
+};
+
 export type VisioJoin = {
   jobTitle: string;
   businessName: string;
@@ -34,11 +45,14 @@ export type VisioJoin = {
   /** Shown in the call; the visitor may change it before joining. */
   displayName: string;
   host: boolean;
+  businessLogoUrl: string | null;
   endedAt: string | null;
   /** The host only: for the « Compte rendu » beside the call. */
   interviewId?: string;
 } & (
   | { provider: 'jaas'; appId: string; roomName: string; jwt: string }
+  /** Too early (a guest, before the day before): when it opens, no token yet. */
+  | { provider: 'waiting'; opensAt: string }
   /** No JaaS keys (local, or before they are set): the public Jitsi room. */
   | { provider: 'jitsi'; url: string }
 );
@@ -93,11 +107,24 @@ export class InterviewVisioService {
    */
   async asGuest(room: string, guestToken?: string): Promise<VisioJoin> {
     const interview = await this.find(room);
-    if (interview.starts_at.getTime() - EARLY_MS > Date.now()) {
-      throw new BadRequestException(
-        'La visio ouvre la veille de l’entretien : revenez plus tard.',
-      );
+    const user = await this.guestOf(interview, guestToken);
+    // Too early: what the page needs to say when, and to get ready; no token yet.
+    const opensAt = interview.starts_at.getTime() - EARLY_MS;
+    if (opensAt > Date.now()) {
+      return {
+        ...this.baseOf(interview, user),
+        provider: 'waiting',
+        opensAt: new Date(opensAt).toISOString(),
+      };
     }
+    return this.join(interview, room, user);
+  }
+
+  /** The candidate by the room's link, or an invited person by their own. */
+  private async guestOf(
+    interview: { id: string; candidate_name: string },
+    guestToken?: string,
+  ) {
     if (guestToken) {
       const guest = await this.prisma.interviewGuest.findFirst({
         where: {
@@ -111,18 +138,18 @@ export class InterviewVisioService {
           'Cette invitation n’est plus valable : demandez un nouveau lien à l’entreprise.',
         );
       }
-      return this.join(interview, room, {
+      return {
         id: `invite-${guest.id}`,
         name: guest.name,
         email: guest.email,
         host: false,
-      });
+      };
     }
-    return this.join(interview, room, {
+    return {
       id: `guest-${interview.id}`,
       name: interview.candidate_name,
       host: false,
-    });
+    };
   }
 
   private async find(room: string, businessId?: string) {
@@ -164,28 +191,15 @@ export class InterviewVisioService {
     return i.starts_at.getTime() + i.duration_minutes * 60_000;
   }
 
-  private async join(
-    interview: {
-      id: string;
-      job_title: string;
-      candidate_name: string;
-      starts_at: Date;
-      duration_minutes: number;
-      business: { name: string };
-      ended_at?: Date | null;
-    },
-    room: string,
-    user: {
-      id: string;
-      name: string;
-      email?: string;
-      avatar?: string;
-      host: boolean;
-    },
-  ): Promise<VisioJoin> {
-    const base = {
+  /** What every visio page shows: who invites, for what, when. */
+  private baseOf(
+    interview: VisioInterview,
+    user: { name: string; host: boolean },
+  ) {
+    return {
       jobTitle: interview.job_title,
       businessName: interview.business.name,
+      businessLogoUrl: interview.business.profile?.avatar_url ?? null,
       candidateName: interview.candidate_name,
       startsAt: interview.starts_at.toISOString(),
       durationMinutes: interview.duration_minutes,
@@ -196,6 +210,20 @@ export class InterviewVisioService {
       // The host's page keeps the « Compte rendu » notes beside the call.
       ...(user.host ? { interviewId: interview.id } : {}),
     };
+  }
+
+  private async join(
+    interview: VisioInterview,
+    room: string,
+    user: {
+      id: string;
+      name: string;
+      email?: string;
+      avatar?: string;
+      host: boolean;
+    },
+  ): Promise<VisioJoin> {
+    const base = this.baseOf(interview, user);
     const appId = this.config.get<string>('JAAS_APP_ID')?.trim();
     const key = appId ? await this.privateKey() : null;
     if (!appId || !key) {
