@@ -11,6 +11,7 @@ import { frWhen } from './interview-emails';
 import { hashToken } from './interview.service';
 import { visioUrl } from './interview-visio.service';
 import { businessPersonName } from './interview-people';
+import { assertVideoPlan } from './interview-plan';
 
 /** A sentence, as one recognition result: never a speech. */
 export const MAX_LINE_CHARS = 500;
@@ -75,6 +76,7 @@ export class InterviewTranscriptService {
   /** Switched on or off by the business, before or during the call. */
   async setTranscribe(actor: Actor, interviewId: string, on: boolean) {
     const interview = await this.owned(actor, interviewId);
+    if (on) await assertVideoPlan(this.subscriptions, interview.business_id);
     if (on && !isRabotkaVisio(interview)) {
       throw new BadRequestException(
         'La transcription se fait dans une visio Rabotka : créez un lien de visio pour cet entretien.',

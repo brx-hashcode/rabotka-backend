@@ -13,6 +13,7 @@ import { LayoutService } from '../../mail/layout.service';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
 import { interviewGuestEmail } from './interview-emails';
 import { hashToken } from './interview.service';
+import { assertVideoPlan } from './interview-plan';
 import { businessPersonName } from './interview-people';
 
 /** Colleagues and managers in one call: more than this is a meeting, not an interview. */
@@ -62,6 +63,7 @@ export class InterviewGuestService {
     input: { name: string; email: string },
   ): Promise<GuestView> {
     const interview = await this.owned(profileId, interviewId);
+    await assertVideoPlan(this.subscriptions, interview.business_id);
     const room = interview.location?.match(ROOM_OF)?.[1];
     if (
       interview.mode !== InterviewMode.VIDEO ||

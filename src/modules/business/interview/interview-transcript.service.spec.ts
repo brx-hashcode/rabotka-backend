@@ -47,12 +47,15 @@ function setup(row: Record<string, unknown> | null = interview(), count = 0) {
       findFirst: jest.fn().mockResolvedValue({ name: 'Paul Recruteur' }),
     },
   };
-  const subscriptions = { businessOf: jest.fn().mockResolvedValue('b1') };
+  const subscriptions = {
+    businessOf: jest.fn().mockResolvedValue('b1'),
+    entitlements: jest.fn().mockResolvedValue({ videoInterviews: true }),
+  };
   const service = new InterviewTranscriptService(
     prisma as never,
     subscriptions as never,
   );
-  return { service, prisma };
+  return { service, prisma, subscriptions };
 }
 
 const written = (prisma: ReturnType<typeof setup>['prisma']) =>
@@ -141,6 +144,18 @@ describe('InterviewTranscriptService', () => {
     expect(
       full.prisma.interviewTranscriptLine.createMany,
     ).not.toHaveBeenCalled();
+  });
+
+  it('switches on only with the plan’s « Visio dans Rabotka »; off always', async () => {
+    const { service, prisma, subscriptions } = setup();
+    subscriptions.entitlements.mockResolvedValue({ videoInterviews: false });
+    await expect(service.setTranscribe(actor, 'i1', true)).rejects.toThrow(
+      'formules supérieures',
+    );
+    await service.setTranscribe(actor, 'i1', false);
+    expect(prisma.interview.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { transcribe: false } }),
+    );
   });
 
   it('switches on only in a Rabotka visio', async () => {
