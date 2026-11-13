@@ -13,6 +13,7 @@ import { businessDashboardUrl } from '../../mail/audience';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
 import { hashToken } from './interview.service';
 import { businessPersonName } from './interview-people';
+import { assertVideoPlan, VIDEO_GUEST_REFUSAL } from './interview-plan';
 
 /** « Créer un lien de visio » makes these: the room is the random part. */
 const ROOM = /^Rabotka-[A-Za-z0-9]{6,32}$/;
@@ -83,6 +84,8 @@ export class InterviewVisioService {
     const businessId = await this.subscriptions.businessOf(profileId);
     if (!businessId)
       throw new ForbiddenException('Espace réservé aux comptes entreprise.');
+    // A room already booked closes too when the plan lacks the visio.
+    await assertVideoPlan(this.subscriptions, businessId);
     const interview = await this.find(room, businessId);
     // The person, by name (the holder's own row too), prefilled in the call.
     const who = await businessPersonName(
@@ -108,6 +111,9 @@ export class InterviewVisioService {
    */
   async asGuest(room: string, guestToken?: string): Promise<VisioJoin> {
     const interview = await this.find(room);
+    // The business's plan lacks the visio: no one joins, without the plan's words.
+    const plan = await this.subscriptions.entitlements(interview.business_id);
+    if (!plan.videoInterviews) throw new ForbiddenException(VIDEO_GUEST_REFUSAL);
     const user = await this.guestOf(interview, guestToken);
     // Too early: what the page needs to say when, and to get ready; no token yet.
     const opensAt = interview.starts_at.getTime() - EARLY_MS;
