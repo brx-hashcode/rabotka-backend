@@ -29,6 +29,7 @@ import { answerSnippet } from '../cv-screening/lenient-answer';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
 import { businessEmailRecipients } from '../team/business-recipients';
 import { heldWhen } from './interview-emails';
+import { assertVideoPlan, REPORT_PLAN_REFUSAL } from './interview-plan';
 import {
   buildInterviewReportHtml,
   cleanReport,
@@ -104,7 +105,9 @@ export class InterviewReportService {
    * again while it is being written: nothing more is queued.
    */
   async write(actor: Actor, interviewId: string) {
-    const { interview } = await this.owned(actor, interviewId);
+    const { interview, businessId } = await this.owned(actor, interviewId);
+    // Written by AI: the visio service's; typing and dictating notes stay free.
+    await assertVideoPlan(this.subscriptions, businessId, REPORT_PLAN_REFUSAL);
     const notes = interview.report?.notes.trim() ?? '';
     const transcript = await this.transcripts.merged(interview.id);
     if (notes.length < MIN_NOTES && transcript.length < MIN_NOTES) {
