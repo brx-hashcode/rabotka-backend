@@ -169,6 +169,14 @@ export class CreateBusinessPlanDto {
   @IsBoolean()
   hrExports?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      '« Visio dans Rabotka »: link made in Rabotka, guests, transcription',
+  })
+  @IsOptional()
+  @IsBoolean()
+  videoInterviews?: boolean;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()

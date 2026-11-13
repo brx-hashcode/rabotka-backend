@@ -40,6 +40,7 @@ export function planView(
     priorityVisibility: p.priority_visibility,
     linkedinPosting: p.linkedin_posting,
     hrExports: p.hr_exports,
+    videoInterviews: p.video_interviews,
     isActive: p.is_active,
     sortOrder: p.sort_order,
   };
@@ -66,6 +67,7 @@ export function planData(dto: {
   priorityVisibility?: boolean;
   linkedinPosting?: boolean;
   hrExports?: boolean;
+  videoInterviews?: boolean;
   isActive?: boolean;
   sortOrder?: number;
   businessId?: string | null;
@@ -90,6 +92,7 @@ export function planData(dto: {
     priority_visibility: dto.priorityVisibility,
     linkedin_posting: dto.linkedinPosting,
     hr_exports: dto.hrExports,
+    video_interviews: dto.videoInterviews,
     is_active: dto.isActive,
     sort_order: dto.sortOrder,
     business_id: dto.businessId,

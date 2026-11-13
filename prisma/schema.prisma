@@ -3574,6 +3574,9 @@ model BusinessPlan {
   linkedin_posting      Boolean  @default(false)
   /// « Exports RH »: an offer's candidates, the staff register, the ACPE file.
   hr_exports            Boolean  @default(false)
+  /// « Visio dans Rabotka »: a link made in Rabotka, guests, transcription.
+  /// A Meet or Zoom link pasted by hand stays open to every plan.
+  video_interviews      Boolean  @default(false)
   /// CVs the AI screening reads per period. Null: unlimited; 0: not included.
   cv_screenings_per_period Int?  @default(0)
   /// CVs in one screening, 100 at most: sent in several requests when many.
