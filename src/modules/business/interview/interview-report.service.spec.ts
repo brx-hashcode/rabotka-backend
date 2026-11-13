@@ -116,7 +116,10 @@ function setup(
   };
   const mail = { sendMail: jest.fn().mockResolvedValue(undefined) };
   const layout = { wrap: jest.fn((html: string) => Promise.resolve(html)) };
-  const subscriptions = { businessOf: jest.fn().mockResolvedValue('b1') };
+  const subscriptions = {
+    businessOf: jest.fn().mockResolvedValue('b1'),
+    entitlements: jest.fn().mockResolvedValue({ videoInterviews: true }),
+  };
   const queue = { addJob: jest.fn().mockResolvedValue('job1') };
   const events = { emit: jest.fn() };
   const service = new InterviewReportService(
@@ -129,7 +132,16 @@ function setup(
     queue as never,
     events as never,
   );
-  return { service, prisma, llm, mail, transcripts, queue, events };
+  return {
+    service,
+    prisma,
+    llm,
+    mail,
+    transcripts,
+    queue,
+    events,
+    subscriptions,
+  };
 }
 
 const actor = { profileId: 'p1', memberId: 'm1' };
@@ -181,6 +193,15 @@ describe('InterviewReportService', () => {
     );
     await expect(service.write(actor, 'i1')).rejects.toThrow('notes');
     expect(llm.invoke).not.toHaveBeenCalled();
+  });
+
+  it('refuses the AI report when the plan lacks the visio, notes kept', async () => {
+    const { service, queue, subscriptions } = setup([], interview());
+    subscriptions.entitlements.mockResolvedValue({ videoInterviews: false });
+    await expect(service.write(actor, 'i1')).rejects.toThrow(
+      'formules supérieures',
+    );
+    expect(queue.addJob).not.toHaveBeenCalled();
   });
 
   it('queues the writing and answers at once, without the model', async () => {
