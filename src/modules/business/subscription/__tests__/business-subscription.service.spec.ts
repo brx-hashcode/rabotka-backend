@@ -444,6 +444,32 @@ describe('BusinessSubscriptionService', () => {
       });
     });
 
+    it('pauses a plan Rabotka granted: its days left come back after the started one', async () => {
+      const next = queuedPeriod('next', 28, 28);
+      const { service, prisma } = setup([next]);
+      prisma.businessSubscription.findFirst.mockResolvedValue({
+        id: 'gift',
+        plan_id: 'pro',
+        billing_period: 'ANNUAL',
+        granted_by: 'admin-1',
+        payment_request_id: null,
+        ends_at: new Date('2026-11-07T12:00:00Z'), // 10 days left
+      });
+      prisma.businessSubscription.create = jest.fn().mockResolvedValue({});
+      await service.startQueuedNow('b1', 'next', now);
+      expect(prisma.businessSubscription.create).toHaveBeenCalledWith({
+        data: {
+          business_id: 'b1',
+          plan_id: 'pro',
+          status: 'ACTIVE',
+          billing_period: 'ANNUAL',
+          granted_by: 'admin-1',
+          starts_at: new Date('2026-11-28T12:00:00Z'),
+          ends_at: new Date('2026-12-08T12:00:00Z'),
+        },
+      });
+    });
+
     it('starts only the very next period', async () => {
       const next = queuedPeriod('next', 28, 28);
       const later = queuedPeriod('later', 28, 28);

@@ -36,6 +36,7 @@ import {
 } from './interview-emails';
 import { interviewIcs } from './interview-ics';
 import { visioUrl } from './interview-visio.service';
+import { assertVideoPlan } from './interview-plan';
 
 export const INTERVIEW_DURATIONS = [15, 30, 45, 60, 90, 120];
 /** An interview is proposed at least this far ahead. */
@@ -233,7 +234,11 @@ export class InterviewService {
     }
     const token = randomBytes(24).toString('base64url');
     const slot = this.slot(input);
-    await this.ownRoom(interview.business_id, slot.fields.location);
+    await this.ownRoom(
+      interview.business_id,
+      slot.fields.location,
+      interview.location,
+    );
     const updated = await this.prisma.interview.update({
       where: { id: interview.id },
       data: {
@@ -583,9 +588,20 @@ export class InterviewService {
     };
   }
 
-  /** A Rabotka visio room is its business's: another one's link is refused. */
-  private async ownRoom(businessId: string, location: string | null) {
+  /**
+   * A Rabotka visio room is its business's: another one's link is refused.
+   * A new room needs the plan's « Visio dans Rabotka »; the room an
+   * interview already has (`current`) stays its own.
+   */
+  private async ownRoom(
+    businessId: string,
+    location: string | null,
+    current: string | null = null,
+  ) {
     if (!location || !location.startsWith(visioUrl(''))) return;
+    if (location !== current) {
+      await assertVideoPlan(this.subscriptions, businessId);
+    }
     const taken = await this.prisma.interview.findFirst({
       where: { location, business_id: { not: businessId } },
       select: { id: true },

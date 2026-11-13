@@ -67,7 +67,10 @@ function make() {
       findMany: jest.fn().mockResolvedValue([]),
     },
   };
-  const subscriptions: any = { businessOf: jest.fn().mockResolvedValue('b1') };
+  const subscriptions: any = {
+    businessOf: jest.fn().mockResolvedValue('b1'),
+    entitlements: jest.fn().mockResolvedValue({ videoInterviews: false }),
+  };
   const mail: any = { sendMail: jest.fn().mockResolvedValue({ jobId: 'j' }) };
   const layout: any = {
     wrap: jest.fn((html: string) => Promise.resolve(html)),
@@ -78,6 +81,7 @@ function make() {
     prisma,
     mail,
     events,
+    subscriptions,
   };
 }
 
@@ -411,6 +415,38 @@ describe('InterviewService', () => {
       expect(mail.sendMail.mock.calls[0][0].subject).toContain(
         'Entretien modifié',
       );
+    });
+
+    it('a new Rabotka visio link needs the plan; Meet, or the room it has, does not', async () => {
+      const room = `${process.env.BUSINESS_DASHBOARD_URL ?? 'https://business.rabotka.work'}/visio/Rabotka-abcdef1234`;
+      const video = { ...slot, mode: 'VIDEO' as const };
+      const { service, prisma, subscriptions } = make();
+      await expect(
+        service.create('p1', { ...video, cvResumeId: 'r1', location: room }),
+      ).rejects.toThrow('formules supérieures');
+      await expect(
+        service.create('p1', {
+          ...video,
+          cvResumeId: 'r1',
+          location: 'https://meet.google.com/abc-defg-hij',
+        }),
+      ).resolves.toBeTruthy();
+      // The interview with its room, then « no other business has it ».
+      const booked = {
+        ...(await prisma.interview.findFirst()),
+        location: room,
+      };
+      prisma.interview.findFirst
+        .mockResolvedValueOnce(booked)
+        .mockResolvedValueOnce(null);
+      await expect(
+        service.reschedule('p1', 'i1', { ...video, location: room }),
+      ).resolves.toBeTruthy();
+      subscriptions.entitlements.mockResolvedValue({ videoInterviews: true });
+      prisma.interview.findFirst.mockResolvedValue(null);
+      await expect(
+        service.create('p1', { ...video, cvResumeId: 'r1', location: room }),
+      ).resolves.toBeTruthy();
     });
 
     it('cancelling tells the candidate, with a calendar cancellation', async () => {

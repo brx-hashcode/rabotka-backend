@@ -52,14 +52,17 @@ function setup(row: Record<string, unknown> | null = interview(), count = 0) {
   };
   const mail = { sendMail: jest.fn().mockResolvedValue(undefined) };
   const layout = { wrap: jest.fn((html: string) => Promise.resolve(html)) };
-  const subscriptions = { businessOf: jest.fn().mockResolvedValue('b1') };
+  const subscriptions = {
+    businessOf: jest.fn().mockResolvedValue('b1'),
+    entitlements: jest.fn().mockResolvedValue({ videoInterviews: true }),
+  };
   const service = new InterviewGuestService(
     prisma as never,
     mail as never,
     layout as never,
     subscriptions as never,
   );
-  return { service, prisma, mail, created };
+  return { service, prisma, mail, created, subscriptions };
 }
 
 describe('InterviewGuestService', () => {
@@ -132,6 +135,18 @@ describe('InterviewGuestService', () => {
         email: 'marie@example.com',
       }),
     ).rejects.toThrow('passé');
+  });
+
+  it('needs the plan’s « Visio dans Rabotka »', async () => {
+    const { service, subscriptions, mail } = setup();
+    subscriptions.entitlements.mockResolvedValue({ videoInterviews: false });
+    await expect(
+      service.invite('p1', undefined, 'i1', {
+        name: 'Marie',
+        email: 'marie@example.com',
+      }),
+    ).rejects.toThrow('formules supérieures');
+    expect(mail.sendMail).not.toHaveBeenCalled();
   });
 
   it('is not found for another business', async () => {
