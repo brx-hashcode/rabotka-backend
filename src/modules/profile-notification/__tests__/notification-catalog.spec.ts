@@ -325,13 +325,15 @@ describe('admin subscription notices', () => {
   it('says when a granted plan only takes over later', () => {
     const out = renderNotification({
       type: 'BUSINESS_SUBSCRIPTION_GRANTED',
+      subscriptionId: 's-42',
       planName: 'Pro',
       startsAt: later,
       endsAt: end,
     });
     expect(out.title).toBe('Formule attribuée');
     expect(out.body).toContain('prendra le relais');
-    expect(out.link).toBe('/espace/abonnement');
+    // Brought into view on « Abonnement ».
+    expect(out.link).toBe('/espace/abonnement?periode=s-42');
   });
 
   it('says a plan granted to start now is active', () => {

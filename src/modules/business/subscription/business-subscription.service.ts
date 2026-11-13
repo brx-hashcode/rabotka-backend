@@ -846,6 +846,7 @@ export class BusinessSubscriptionService {
       businessId,
       {
         type: 'BUSINESS_SUBSCRIPTION_GRANTED',
+        subscriptionId: created.id,
         planName: created.plan.name,
         startsAt: created.starts_at.toISOString(),
         endsAt: created.ends_at.toISOString(),
@@ -951,6 +952,9 @@ export class BusinessSubscriptionService {
    * left is lost; the next one runs its full length from now, with fresh
    * counters, and anything queued behind it moves up by the same amount.
    * Only the very next period can be started.
+   *
+   * A running period granted by Rabotka (no payment) is paused, not lost:
+   * its remaining days come back right after the started one.
    */
   async startQueuedNow(
     businessId: string,
@@ -976,6 +980,19 @@ export class BusinessSubscriptionService {
         );
       }
 
+      // A plan Rabotka granted, running now: its days left are kept for later.
+      const granted = await tx.businessSubscription.findFirst({
+        where: {
+          business_id: businessId,
+          status: BusinessSubscriptionStatus.ACTIVE,
+          starts_at: { lte: now },
+          ends_at: { gt: now },
+          granted_by: { not: null },
+          payment_request_id: null,
+        },
+      });
+      const keptMs = granted ? granted.ends_at.getTime() - now.getTime() : 0;
+
       await tx.businessSubscription.updateMany({
         where: {
           business_id: businessId,
@@ -991,7 +1008,21 @@ export class BusinessSubscriptionService {
       });
 
       const ends = periodEnd(now, next.billing_period);
-      const shift = ends.getTime() - next.ends_at.getTime();
+      if (granted && keptMs > 0) {
+        await tx.businessSubscription.create({
+          data: {
+            business_id: businessId,
+            plan_id: granted.plan_id,
+            status: BusinessSubscriptionStatus.ACTIVE,
+            billing_period: granted.billing_period,
+            granted_by: granted.granted_by,
+            starts_at: ends,
+            ends_at: new Date(ends.getTime() + keptMs),
+          },
+        });
+      }
+      // Later periods follow the started one, and the paused one when there is one.
+      const shift = ends.getTime() - next.ends_at.getTime() + keptMs;
       for (const later of queued.slice(1)) {
         await tx.businessSubscription.update({
           where: { id: later.id },
