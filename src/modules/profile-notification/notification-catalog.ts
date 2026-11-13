@@ -240,6 +240,8 @@ export type NotificationInput =
   | { type: 'BUSINESS_SUBSCRIPTION_EXPIRED'; planName: string; trial: boolean }
   | {
       type: 'BUSINESS_SUBSCRIPTION_GRANTED';
+      /** The period granted, brought into view on « Abonnement ». */
+      subscriptionId?: string;
       planName: string;
       startsAt: string;
       endsAt: string;
@@ -663,14 +665,14 @@ export function renderNotification(
       return {
         title: 'Essai gratuit activé',
         body: `Votre essai de la formule ${input.planName} est actif jusqu’au ${shortDate(input.endsAt)}.`,
-        link: '/espace/abonnement',
+        link: subscriptionLink('actuelle'),
       };
 
     case 'BUSINESS_SUBSCRIPTION_ACTIVE':
       return {
         title: 'Abonnement confirmé',
         body: `Votre abonnement ${input.planName} est actif jusqu’au ${shortDate(input.endsAt)}.`,
-        link: '/espace/abonnement',
+        link: subscriptionLink('actuelle'),
       };
 
     case 'BUSINESS_CREDITS_ADDED':
@@ -688,7 +690,7 @@ export function renderNotification(
         body: input.trial
           ? `Votre essai gratuit se termine le ${shortDate(input.endsAt)}. Choisissez une formule pour continuer.`
           : `Votre abonnement ${input.planName} se termine le ${shortDate(input.endsAt)}. Renouvelez-le pour garder vos avantages.`,
-        link: '/espace/abonnement',
+        link: subscriptionLink('actuelle'),
       };
 
     case 'BUSINESS_SUBSCRIPTION_GRANTED': {
@@ -699,7 +701,7 @@ export function renderNotification(
         body: later
           ? `L’équipe Rabotka vous a attribué la formule ${input.planName}, qui prendra le relais le ${shortDate(input.startsAt)}, jusqu’au ${shortDate(input.endsAt)}.`
           : `L’équipe Rabotka vous a attribué la formule ${input.planName}, active jusqu’au ${shortDate(input.endsAt)}.`,
-        link: '/espace/abonnement',
+        link: subscriptionLink(input.subscriptionId ?? 'actuelle'),
       };
     }
 
@@ -722,7 +724,7 @@ export function renderNotification(
         body: input.trial
           ? 'Votre essai gratuit est terminé. Choisissez une formule pour continuer à publier.'
           : `Votre abonnement ${input.planName} est terminé. Renouvelez-le pour retrouver vos avantages.`,
-        link: '/espace/abonnement',
+        link: subscriptionLink('formules'),
       };
 
     case 'JOB_INVITATION':
@@ -824,4 +826,12 @@ function interviewLink(interviewId?: string): string {
   return interviewId
     ? `/espace/entretiens?entretien=${encodeURIComponent(interviewId)}`
     : '/espace/entretiens';
+}
+
+/**
+ * « Abonnement », with what the notice is about brought into view: a period
+ * (its id), the running plan (« actuelle ») or the plans to choose (« formules »).
+ */
+function subscriptionLink(focus: string): string {
+  return `/espace/abonnement?periode=${encodeURIComponent(focus)}`;
 }

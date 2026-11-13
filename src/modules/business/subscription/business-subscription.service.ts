@@ -842,6 +842,7 @@ export class BusinessSubscriptionService {
       businessId,
       {
         type: 'BUSINESS_SUBSCRIPTION_GRANTED',
+        subscriptionId: created.id,
         planName: created.plan.name,
         startsAt: created.starts_at.toISOString(),
         endsAt: created.ends_at.toISOString(),
