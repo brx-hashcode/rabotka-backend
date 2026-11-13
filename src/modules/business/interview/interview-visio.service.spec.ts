@@ -47,7 +47,10 @@ function setup(
     },
   };
   const config = { get: (k: string) => env[k] };
-  const subscriptions = { businessOf: jest.fn().mockResolvedValue('b1') };
+  const subscriptions = {
+    businessOf: jest.fn().mockResolvedValue('b1'),
+    entitlements: jest.fn().mockResolvedValue({ videoInterviews: true }),
+  };
   const service = new InterviewVisioService(
     prisma as never,
     config as never,
@@ -212,6 +215,18 @@ describe('InterviewVisioService', () => {
     const { service } = setup(JAAS, null);
     await expect(service.asHost('p2', undefined, ROOM)).rejects.toThrow(
       'introuvable',
+    );
+  });
+
+  it('closes a booked room to everyone when the plan lacks the visio', async () => {
+    const { service, subscriptions } = setup(JAAS);
+    subscriptions.entitlements.mockResolvedValue({ videoInterviews: false });
+    await expect(service.asHost('p1', undefined, ROOM)).rejects.toThrow(
+      'formules supérieures',
+    );
+    await expect(service.asGuest(ROOM)).rejects.toThrow('pas disponible');
+    await expect(service.asGuest(ROOM, 'tok')).rejects.toThrow(
+      'pas disponible',
     );
   });
 });
