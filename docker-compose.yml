@@ -132,28 +132,22 @@ services:
   # ── Visio: our own Jitsi, for local development only (deployed develop and
   # production use visio.hashcode.digital). The four docker-jitsi-meet
   # services, JWT on: a room opens only with a token the API signs
-  # (JITSI_DOMAIN=localhost:8000, JITSI_APP_ID=rabotka and
-  # JITSI_APP_SECRET=rabotka-local-jitsi-secret in .env.local). Plain HTTP on
-  # localhost: browsers count localhost as secure, so the camera works in the
-  # embedded call. Start them with:
+  # (JITSI_DOMAIN=localhost:8443, JITSI_APP_ID=rabotka and
+  # JITSI_APP_SECRET=rabotka-local-jitsi-secret in .env.local). HTTPS, as the
+  # Jitsi SDK only loads https:// (a self-signed certificate: open
+  # https://localhost:8443 once and accept it). Start them with:
   #   docker compose up -d jitsi-web jitsi-prosody jitsi-jicofo jitsi-jvb
   # The passwords and the secret below are for this machine only.
   jitsi-web:
     image: jitsi/web:stable-11031
     container_name: rabotka_jitsi_web
     ports:
-      - "8000:80"
+      - "8443:443"
     volumes:
       - jitsi_web_config:/config
     environment: &jitsi_env
       TZ: UTC
-      PUBLIC_URL: http://localhost:8000
-      DISABLE_HTTPS: "1"
-      ENABLE_HTTP_REDIRECT: "0"
-      # The image builds https:// and wss:// URLs from PUBLIC_URL: over plain
-      # HTTP the browser talks to Prosody by the relative BOSH path instead.
-      BOSH_RELATIVE: "1"
-      ENABLE_XMPP_WEBSOCKET: "0"
+      PUBLIC_URL: https://localhost:8443
       ENABLE_AUTH: "1"
       AUTH_TYPE: jwt
       ENABLE_GUESTS: "0"
