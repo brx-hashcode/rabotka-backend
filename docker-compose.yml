@@ -136,7 +136,7 @@ services:
   # JITSI_APP_SECRET=rabotka-local-jitsi-secret in .env.local). HTTPS, as the
   # Jitsi SDK only loads https:// (a self-signed certificate: open
   # https://localhost:8443 once and accept it). Start them with:
-  #   docker compose up -d jitsi-web jitsi-prosody jitsi-jicofo jitsi-jvb
+  #   docker compose up -d jitsi-web jitsi-prosody jitsi-jicofo jitsi-jvb jitsi-whiteboard jitsi-etherpad
   # The passwords and the secret below are for this machine only.
   jitsi-web:
     image: jitsi/web:stable-11031
@@ -160,8 +160,14 @@ services:
       XMPP_SERVER: xmpp.meet.jitsi
       XMPP_BOSH_URL_BASE: http://xmpp.meet.jitsi:5280
       JVB_ADVERTISE_IPS: 127.0.0.1
+      # The whiteboard (Excalidraw) and shared notes (Etherpad), proxied by
+      # jitsi-web under the same https://localhost:8443.
+      WHITEBOARD_COLLAB_SERVER_URL_BASE: http://whiteboard.meet.jitsi
+      ETHERPAD_URL_BASE: http://etherpad.meet.jitsi:9001
     depends_on:
       - jitsi-jvb
+      - jitsi-whiteboard
+      - jitsi-etherpad
     networks:
       rabotka_network:
         aliases:
@@ -206,6 +212,29 @@ services:
       - jitsi-prosody
     networks:
       - rabotka_network
+
+  jitsi-whiteboard:
+    image: jitsi/excalidraw-backend:2026.10.0
+    container_name: rabotka_jitsi_whiteboard
+    networks:
+      rabotka_network:
+        aliases:
+          - whiteboard.meet.jitsi
+
+  jitsi-etherpad:
+    image: etherpad/etherpad:3.3.7
+    container_name: rabotka_jitsi_etherpad
+    volumes:
+      # Etherpad's skin stylesheet, plus one rule hiding its « deletion token » box.
+      - ./docker/jitsi/etherpad-pad.css:/opt/etherpad-lite/src/static/skins/colibris/pad.css:ro
+    environment:
+      TITLE: Notes partagées
+      DEFAULT_PAD_TEXT: " "
+      SUPPRESS_ERRORS_IN_PAD_TEXT: "true"
+    networks:
+      rabotka_network:
+        aliases:
+          - etherpad.meet.jitsi
 
 volumes:
   postgres_data:
