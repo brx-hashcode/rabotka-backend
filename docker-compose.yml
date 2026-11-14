@@ -145,7 +145,7 @@ services:
       - "8443:443"
     volumes:
       - jitsi_web_config:/config
-      # Rabotka's logo in the call, not « jitsi » (appended at start).
+      # HashCode's logo in the call, not « jitsi » (appended at start).
       - ./docker/jitsi/custom-interface_config.js:/config/custom-interface_config.js:ro
     environment: &jitsi_env
       TZ: UTC
