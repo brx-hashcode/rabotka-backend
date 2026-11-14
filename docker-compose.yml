@@ -129,10 +129,97 @@ services:
     networks:
       - rabotka_network
 
+  # ── Visio: our own Jitsi, for local development only (deployed develop and
+  # production use visio.hashcode.digital). The four docker-jitsi-meet
+  # services, JWT on: a room opens only with a token the API signs
+  # (JITSI_DOMAIN=localhost:8000, JITSI_APP_ID=rabotka and
+  # JITSI_APP_SECRET=rabotka-local-jitsi-secret in .env.local). Plain HTTP on
+  # localhost: browsers count localhost as secure, so the camera works in the
+  # embedded call. Start them with:
+  #   docker compose up -d jitsi-web jitsi-prosody jitsi-jicofo jitsi-jvb
+  # The passwords and the secret below are for this machine only.
+  jitsi-web:
+    image: jitsi/web:stable-11031
+    container_name: rabotka_jitsi_web
+    ports:
+      - "8000:80"
+    volumes:
+      - jitsi_web_config:/config
+    environment: &jitsi_env
+      TZ: UTC
+      PUBLIC_URL: http://localhost:8000
+      DISABLE_HTTPS: "1"
+      ENABLE_HTTP_REDIRECT: "0"
+      # The image builds https:// and wss:// URLs from PUBLIC_URL: over plain
+      # HTTP the browser talks to Prosody by the relative BOSH path instead.
+      BOSH_RELATIVE: "1"
+      ENABLE_XMPP_WEBSOCKET: "0"
+      ENABLE_AUTH: "1"
+      AUTH_TYPE: jwt
+      ENABLE_GUESTS: "0"
+      JWT_APP_ID: rabotka
+      JWT_APP_SECRET: rabotka-local-jitsi-secret
+      JICOFO_AUTH_PASSWORD: rabotka-local-jicofo
+      JVB_AUTH_PASSWORD: rabotka-local-jvb
+      XMPP_SERVER: xmpp.meet.jitsi
+      XMPP_BOSH_URL_BASE: http://xmpp.meet.jitsi:5280
+      JVB_ADVERTISE_IPS: 127.0.0.1
+    depends_on:
+      - jitsi-jvb
+    networks:
+      rabotka_network:
+        aliases:
+          - meet.jitsi
+
+  jitsi-prosody:
+    image: jitsi/prosody:stable-11031
+    container_name: rabotka_jitsi_prosody
+    expose:
+      - "5222"
+      - "5280"
+      - "5347"
+    volumes:
+      - jitsi_prosody_config:/config
+      - jitsi_prosody_plugins:/prosody-plugins-custom
+    environment: *jitsi_env
+    networks:
+      rabotka_network:
+        aliases:
+          - xmpp.meet.jitsi
+
+  jitsi-jicofo:
+    image: jitsi/jicofo:stable-11031
+    container_name: rabotka_jitsi_jicofo
+    volumes:
+      - jitsi_jicofo_config:/config
+    environment: *jitsi_env
+    depends_on:
+      - jitsi-prosody
+    networks:
+      - rabotka_network
+
+  jitsi-jvb:
+    image: jitsi/jvb:stable-11031
+    container_name: rabotka_jitsi_jvb
+    ports:
+      - "10000:10000/udp"
+    volumes:
+      - jitsi_jvb_config:/config
+    environment: *jitsi_env
+    depends_on:
+      - jitsi-prosody
+    networks:
+      - rabotka_network
+
 volumes:
   postgres_data:
   pgadmin_data:
   qdrant_data:
+  jitsi_web_config:
+  jitsi_prosody_config:
+  jitsi_prosody_plugins:
+  jitsi_jicofo_config:
+  jitsi_jvb_config:
 
 networks:
   rabotka_network:

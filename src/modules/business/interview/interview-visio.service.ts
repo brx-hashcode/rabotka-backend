@@ -2,12 +2,11 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InterviewMode, InterviewStatus } from '@prisma/client';
-import { importPKCS8, SignJWT, type KeyObject } from 'jose';
+import { SignJWT } from 'jose';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { businessDashboardUrl } from '../../mail/audience';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
@@ -51,24 +50,24 @@ export type VisioJoin = {
   endedAt: string | null;
   /** The host only: for the « Compte rendu » beside the call. */
   interviewId?: string;
-} & (
-  | { provider: 'jaas'; appId: string; roomName: string; jwt: string }
-  /** Too early (a guest, before the day before): when it opens, no token yet. */
-  | { provider: 'waiting'; opensAt: string }
-  /** No JaaS keys (local, or before they are set): the public Jitsi room. */
-  | { provider: 'jitsi'; url: string }
-);
+} &
+  /** Our own Jitsi (visio.hashcode.digital; localhost:8000 in development). */
+  (
+    | { provider: 'hosted'; domain: string; roomName: string; jwt: string }
+    /** Too early (a guest, before the day before): when it opens, no token yet. */
+    | { provider: 'waiting'; opensAt: string }
+    /** No Jitsi secret (before it is set): the public Jitsi room. */
+    | { provider: 'jitsi'; url: string }
+  );
 
 /**
- * The video call of an interview, inside the app (8x8 JaaS). JaaS rooms
- * need a token we sign: the business joins as host, whoever holds the
- * room's link as a guest, and only around the interview's time.
+ * The video call of an interview, inside the app, on our own Jitsi server.
+ * Its rooms need a token we sign (JWT, HS256): the business joins as host,
+ * whoever holds the room's link as a guest, and only around the interview's
+ * time, each token for its own room.
  */
 @Injectable()
 export class InterviewVisioService {
-  private readonly logger = new Logger(InterviewVisioService.name);
-  private key: Promise<KeyObject | CryptoKey | null> | null = null;
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
@@ -113,7 +112,8 @@ export class InterviewVisioService {
     const interview = await this.find(room);
     // The business's plan lacks the visio: no one joins, without the plan's words.
     const plan = await this.subscriptions.entitlements(interview.business_id);
-    if (!plan.videoInterviews) throw new ForbiddenException(VIDEO_GUEST_REFUSAL);
+    if (!plan.videoInterviews)
+      throw new ForbiddenException(VIDEO_GUEST_REFUSAL);
     const user = await this.guestOf(interview, guestToken);
     // Too early: what the page needs to say when, and to get ready; no token yet.
     const opensAt = interview.starts_at.getTime() - EARLY_MS;
@@ -231,17 +231,22 @@ export class InterviewVisioService {
     },
   ): Promise<VisioJoin> {
     const base = this.baseOf(interview, user);
-    const appId = this.config.get<string>('JAAS_APP_ID')?.trim();
-    const key = appId ? await this.privateKey() : null;
-    if (!appId || !key) {
+    const secret = this.config.get<string>('JITSI_APP_SECRET')?.trim();
+    if (!secret) {
       return { ...base, provider: 'jitsi', url: `https://meet.jit.si/${room}` };
     }
+    const domain =
+      this.config.get<string>('JITSI_DOMAIN')?.trim() ||
+      'visio.hashcode.digital';
+    const appId = this.config.get<string>('JITSI_APP_ID')?.trim() || 'rabotka';
     const now = Math.floor(Date.now() / 1000);
     const exp = Math.floor((this.endOf(interview) + LATE_MS) / 1000);
+    // The server checks iss (its JWT_APP_ID), aud and sub; `room` keeps the
+    // token to this interview's room only.
     const jwt = await new SignJWT({
       aud: 'jitsi',
-      iss: 'chat',
-      sub: appId,
+      iss: appId,
+      sub: domain,
       room,
       context: {
         user: {
@@ -249,57 +254,14 @@ export class InterviewVisioService {
           name: user.name,
           ...(user.email ? { email: user.email } : {}),
           ...(user.avatar ? { avatar: user.avatar } : {}),
-          moderator: user.host ? 'true' : 'false',
-        },
-        features: {
-          livestreaming: 'false',
-          recording: 'false',
-          transcription: 'false',
-          'outbound-call': 'false',
-          'sip-outbound-call': 'false',
+          moderator: user.host,
         },
       },
     })
-      .setProtectedHeader({ alg: 'RS256', kid: this.keyId(appId), typ: 'JWT' })
+      .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
       .setNotBefore(now - 60)
       .setExpirationTime(Math.max(exp, now + 15 * 60))
-      .sign(key);
-    return { ...base, provider: 'jaas', appId, roomName: room, jwt };
-  }
-
-  /** The console shows « vpaas-magic-cookie-…/abc123 »; the bare id works too. */
-  private keyId(appId: string): string {
-    const raw = this.config.get<string>('JAAS_KEY_ID')?.trim() ?? '';
-    return raw.includes('/') ? raw : `${appId}/${raw}`;
-  }
-
-  /** Read once; a key that does not load leaves the public Jitsi fallback. */
-  private privateKey(): Promise<KeyObject | CryptoKey | null> {
-    this.key ??= (async () => {
-      const pem = decodePem(this.config.get<string>('JAAS_PRIVATE_KEY'));
-      if (!pem || !this.config.get<string>('JAAS_KEY_ID')?.trim()) return null;
-      try {
-        return await importPKCS8(pem, 'RS256');
-      } catch (err) {
-        this.logger.error(
-          `JAAS_PRIVATE_KEY is not a usable PKCS#8 RSA key: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        return null;
-      }
-    })();
-    return this.key;
-  }
-}
-
-/** A PEM, literally or base64-encoded (multi-line values break the deploy env). */
-function decodePem(raw: string | undefined): string | null {
-  if (!raw) return null;
-  const trimmed = raw.trim().replace(/\\n/g, '\n');
-  if (trimmed.includes('-----BEGIN')) return trimmed;
-  try {
-    const decoded = Buffer.from(trimmed, 'base64').toString('utf8');
-    return decoded.includes('-----BEGIN') ? decoded : null;
-  } catch {
-    return null;
+      .sign(new TextEncoder().encode(secret));
+    return { ...base, provider: 'hosted', domain, roomName: room, jwt };
   }
 }
