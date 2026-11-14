@@ -136,7 +136,7 @@ services:
   # JITSI_APP_SECRET=rabotka-local-jitsi-secret in .env.local). HTTPS, as the
   # Jitsi SDK only loads https:// (a self-signed certificate: open
   # https://localhost:8443 once and accept it). Start them with:
-  #   docker compose up -d jitsi-web jitsi-prosody jitsi-jicofo jitsi-jvb jitsi-whiteboard jitsi-etherpad
+  #   docker compose up -d jitsi-web jitsi-prosody jitsi-jicofo jitsi-jvb jitsi-whiteboard jitsi-etherpad jitsi-turn
   # The passwords and the secret below are for this machine only.
   jitsi-web:
     image: jitsi/web:stable-11031
@@ -145,7 +145,6 @@ services:
       - "8443:443"
     volumes:
       - jitsi_web_config:/config
-      # HashCode's logo in the call, not « jitsi » (appended at start).
       - ./docker/jitsi/custom-interface_config.js:/config/custom-interface_config.js:ro
     environment: &jitsi_env
       TZ: UTC
@@ -160,9 +159,16 @@ services:
       XMPP_SERVER: xmpp.meet.jitsi
       XMPP_BOSH_URL_BASE: http://xmpp.meet.jitsi:5280
       JVB_ADVERTISE_IPS: 127.0.0.1
-      # The whiteboard (Excalidraw) and shared notes (Etherpad), proxied by
-      # jitsi-web under the same https://localhost:8443.
       WHITEBOARD_COLLAB_SERVER_URL_BASE: http://whiteboard.meet.jitsi
+      # STUN/TURN (coturn below): the client always asks Prosody for them, and
+      # TURN gets candidates on strict networks through. The secret is shared
+      # with coturn (--static-auth-secret).
+      STUN_HOST: localhost
+      STUN_PORT: "3478"
+      TURN_HOST: localhost
+      TURN_PORT: "3478"
+      TURN_TRANSPORT: udp,tcp
+      TURN_CREDENTIALS: rabotka-local-turn-secret
       ETHERPAD_URL_BASE: http://etherpad.meet.jitsi:9001
     depends_on:
       - jitsi-jvb
@@ -210,6 +216,27 @@ services:
     environment: *jitsi_env
     depends_on:
       - jitsi-prosody
+    networks:
+      - rabotka_network
+
+  jitsi-turn:
+    image: coturn/coturn:4.18.0
+    container_name: rabotka_jitsi_turn
+    command:
+      - --listening-port=3478
+      - --fingerprint
+      - --use-auth-secret
+      - --static-auth-secret=rabotka-local-turn-secret
+      - --realm=localhost
+      - --no-tls
+      - --no-dtls
+      - --no-cli
+      - --min-port=49160
+      - --max-port=49200
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "49160-49200:49160-49200/udp"
     networks:
       - rabotka_network
 
