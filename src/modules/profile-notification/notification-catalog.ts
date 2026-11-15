@@ -772,7 +772,7 @@ export function renderNotification(
     case 'INTERVIEW_REPORT_READY':
       return input.ok
         ? {
-            title: 'Compte rendu prêt',
+            title: 'Votre compte rendu est prêt',
             body: `Le compte rendu de l’entretien avec ${input.candidateName} pour${quoted(input.jobTitle)} est rédigé : relisez-le avant de l’envoyer.`,
             link: interviewLink(input.interviewId),
           }

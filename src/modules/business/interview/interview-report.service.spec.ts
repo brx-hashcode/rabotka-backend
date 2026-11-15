@@ -324,6 +324,54 @@ describe('InterviewReportService', () => {
     expect(again.prisma.interview.update).not.toHaveBeenCalled();
   });
 
+  it('e-mails « Votre compte rendu est prêt » to the member who ran it', async () => {
+    const { service, mail, prisma } = setup([GOOD]);
+    prisma.businessMember.findFirst.mockResolvedValue({
+      email: 'Paul@Example.com',
+    });
+    await service.generate({ interviewId: 'i1', memberId: 'm1' });
+    expect(prisma.businessMember.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: 'm1', business_id: 'b1' }),
+      }),
+    );
+    expect(mail.sendMail).toHaveBeenCalledTimes(1);
+    const sent = mail.sendMail.mock.calls[0][0] as {
+      to: string;
+      subject: string;
+      html: string;
+    };
+    expect(sent.to).toBe('paul@example.com');
+    expect(sent.subject).toContain('Votre compte rendu est prêt');
+    expect(sent.html).toContain('Candidate motivée');
+    expect(sent.html).toContain('entretiens?entretien=i1');
+  });
+
+  it('e-mails the recruiting contacts when no member ran it, never when it failed', async () => {
+    const owner = setup([GOOD]);
+    owner.prisma.businessMember.findMany.mockResolvedValue([
+      { email: 'rh@example.com', name: 'Léa RH', is_owner: false },
+    ]);
+    await owner.service.generate({ interviewId: 'i1', memberId: null });
+    expect(
+      owner.mail.sendMail.mock.calls.map((c) => (c[0] as { to: string }).to),
+    ).toEqual(['owner@example.com', 'rh@example.com']);
+
+    const failed = setup(['non', 'toujours pas']);
+    await failed.service.generate({ interviewId: 'i1', memberId: 'm1' });
+    expect(failed.mail.sendMail).not.toHaveBeenCalled();
+  });
+
+  it('keeps the report when the e-mail fails', async () => {
+    const { service, mail, prisma, events } = setup([GOOD]);
+    mail.sendMail.mockRejectedValue(new Error('smtp down'));
+    await service.generate({ interviewId: 'i1', memberId: null });
+    expect(
+      prisma.interviewReport.upsert.mock.calls[0][0].update.report,
+    ).toBeTruthy();
+    expect(events.emit).toHaveBeenCalled();
+  });
+
   it('asks once more when the first answer is not JSON, then tells the team it failed', async () => {
     const retried = setup(['Bien sûr !', GOOD]);
     await retried.service.generate({ interviewId: 'i1', memberId: 'm1' });

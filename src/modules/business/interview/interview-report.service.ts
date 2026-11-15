@@ -34,6 +34,7 @@ import {
   buildInterviewReportHtml,
   cleanReport,
   interviewReportEmail,
+  interviewReportReadyEmail,
   MAX_NOTES,
   MIN_NOTES,
   parseReport,
@@ -215,6 +216,7 @@ export class InterviewReportService {
         updated_by_member_id: job.memberId,
       },
     });
+    if (report) await this.mailReady(interview, report, job.memberId);
     notifyProfile(this.events, {
       recipientId: interview.business.profile_id,
       input: {
@@ -225,6 +227,71 @@ export class InterviewReportService {
         ok: Boolean(report),
       },
     });
+  }
+
+  /**
+   * « Votre compte rendu est prêt », by e-mail: to the member who ran the
+   * interview, else to the business's recruiting contacts. A failed e-mail
+   * never fails the report: it is saved, and the notification still goes.
+   */
+  private async mailReady(
+    interview: {
+      id: string;
+      business_id: string;
+      candidate_name: string;
+      job_title: string;
+      starts_at: Date;
+      duration_minutes: number;
+      call_started_at: Date | null;
+      ended_at: Date | null;
+    },
+    report: InterviewReportBody,
+    memberId: string | null,
+  ) {
+    try {
+      const member = memberId
+        ? await this.prisma.businessMember.findFirst({
+            where: {
+              id: memberId,
+              business_id: interview.business_id,
+              status: 'ACTIVE',
+            },
+            select: { email: true },
+          })
+        : null;
+      const recipients = member
+        ? [member]
+        : await businessEmailRecipients(
+            this.prisma,
+            interview.business_id,
+            'recruiting',
+          );
+      const emails = [...new Set(recipients.map((r) => r.email.toLowerCase()))];
+      if (emails.length === 0) return;
+      const html = await this.layout.wrap(
+        interviewReportReadyEmail(report, {
+          candidateName: interview.candidate_name,
+          jobTitle: interview.job_title,
+          when: (await this.held(interview)).when,
+          url: `${businessDashboardUrl()}/entretiens?entretien=${encodeURIComponent(interview.id)}`,
+        }),
+        {
+          previewText: `Votre compte rendu est prêt — ${interview.candidate_name}`,
+          product: 'business',
+        },
+      );
+      for (const to of emails) {
+        await this.mail.sendMail({
+          to,
+          subject: `Votre compte rendu est prêt — ${interview.candidate_name} (${interview.job_title})`,
+          html,
+        });
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Interview report ${interview.id} ready mail failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   /** The team's own changes to the sections. */
