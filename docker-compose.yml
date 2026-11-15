@@ -136,7 +136,7 @@ services:
   # JITSI_APP_SECRET=rabotka-local-jitsi-secret in .env.local). HTTPS, as the
   # Jitsi SDK only loads https:// (a self-signed certificate: open
   # https://localhost:8443 once and accept it). Start them with:
-  #   docker compose up -d jitsi-web jitsi-prosody jitsi-jicofo jitsi-jvb jitsi-whiteboard jitsi-etherpad jitsi-turn
+  #   docker compose up -d jitsi-web jitsi-prosody jitsi-jicofo jitsi-jvb jitsi-whiteboard jitsi-etherpad jitsi-turn jitsi-transcriber jitsi-vosk
   # The passwords and the secret below are for this machine only.
   jitsi-web:
     image: jitsi/web:stable-11031
@@ -146,6 +146,7 @@ services:
     volumes:
       - jitsi_web_config:/config
       - ./docker/jitsi/custom-interface_config.js:/config/custom-interface_config.js:ro
+      - ./docker/jitsi/custom-config.js:/config/custom-config.js:ro
     environment: &jitsi_env
       TZ: UTC
       PUBLIC_URL: https://localhost:8443
@@ -170,6 +171,15 @@ services:
       TURN_TRANSPORT: udp,tcp
       TURN_CREDENTIALS: rabotka-local-turn-secret
       ETHERPAD_URL_BASE: http://etherpad.meet.jitsi:9001
+      # Captions (« Sous-titres »): Jigasi transcribes on Vosk, below. Nothing
+      # is saved; the text only reaches the people in the call.
+      ENABLE_TRANSCRIPTIONS: "1"
+      JIGASI_TRANSCRIBER_PASSWORD: rabotka-local-transcriber
+      # Jigasi refuses to start without it, even as a transcriber only.
+      JIGASI_XMPP_PASSWORD: rabotka-local-transcriber
+      JIGASI_TRANSCRIBER_CUSTOM_SERVICE: org.jitsi.jigasi.transcription.VoskTranscriptionService
+      JIGASI_TRANSCRIBER_VOSK_URL: ws://vosk.meet.jitsi:2700
+      JIGASI_TRANSCRIBER_ENABLE_SAVING: "0"
     depends_on:
       - jitsi-jvb
       - jitsi-whiteboard
@@ -263,6 +273,32 @@ services:
         aliases:
           - etherpad.meet.jitsi
 
+  # Captions: Jigasi joins the call as a hidden transcriber when the business
+  # turns « Sous-titres » on, and sends each voice to Vosk (French).
+  jitsi-transcriber:
+    image: jitsi/jigasi:stable-11031
+    container_name: rabotka_jitsi_transcriber
+    volumes:
+      - jitsi_transcriber_config:/config
+    environment:
+      <<: *jitsi_env
+      JIGASI_MODE: transcriber
+    depends_on:
+      - jitsi-prosody
+      - jitsi-vosk
+    networks:
+      - rabotka_network
+
+  jitsi-vosk:
+    # The Vosk server with the small French model (docker/jitsi/vosk/Dockerfile).
+    build: ./docker/jitsi/vosk
+    image: rabotka-jitsi-vosk:small-fr-0.22
+    container_name: rabotka_jitsi_vosk
+    networks:
+      rabotka_network:
+        aliases:
+          - vosk.meet.jitsi
+
 volumes:
   postgres_data:
   pgadmin_data:
@@ -272,6 +308,7 @@ volumes:
   jitsi_prosody_plugins:
   jitsi_jicofo_config:
   jitsi_jvb_config:
+  jitsi_transcriber_config:
 
 networks:
   rabotka_network:
