@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InterviewMode, InterviewStatus } from '@prisma/client';
-import { SignJWT } from 'jose';
+import { signJitsiJoin } from '../../../common/services/jitsi/jitsi-token';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { businessDashboardUrl } from '../../mail/audience';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
@@ -231,37 +231,11 @@ export class InterviewVisioService {
     },
   ): Promise<VisioJoin> {
     const base = this.baseOf(interview, user);
-    const secret = this.config.get<string>('JITSI_APP_SECRET')?.trim();
-    if (!secret) {
-      return { ...base, provider: 'jitsi', url: `https://meet.jit.si/${room}` };
-    }
-    const domain =
-      this.config.get<string>('JITSI_DOMAIN')?.trim() ||
-      'visio.hashcode.digital';
-    const appId = this.config.get<string>('JITSI_APP_ID')?.trim() || 'rabotka';
-    const now = Math.floor(Date.now() / 1000);
-    const exp = Math.floor((this.endOf(interview) + LATE_MS) / 1000);
-    // The server checks iss (its JWT_APP_ID), aud and sub; `room` keeps the
-    // token to this interview's room only.
-    const jwt = await new SignJWT({
-      aud: 'jitsi',
-      iss: appId,
-      sub: domain,
+    const join = await signJitsiJoin(this.config, {
       room,
-      context: {
-        user: {
-          id: user.id,
-          name: user.name,
-          ...(user.email ? { email: user.email } : {}),
-          ...(user.avatar ? { avatar: user.avatar } : {}),
-          moderator: user.host,
-        },
-      },
-    })
-      .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
-      .setNotBefore(now - 60)
-      .setExpirationTime(Math.max(exp, now + 15 * 60))
-      .sign(new TextEncoder().encode(secret));
-    return { ...base, provider: 'hosted', domain, roomName: room, jwt };
+      user: { ...user, moderator: user.host },
+      expiresAt: new Date(this.endOf(interview) + LATE_MS),
+    });
+    return { ...base, ...join };
   }
 }

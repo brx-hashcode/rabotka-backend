@@ -3,7 +3,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ChatConversationType, Prisma } from '@prisma/client';
+import {
+  ChatConversationType,
+  ChatMessageKind,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 
 export type ChatAttachment = {
@@ -14,11 +18,21 @@ export type ChatAttachment = {
   size: number;
 };
 
+/** A CALL message: the call's room, and how it went once over. */
+export type ChatCallInfo = {
+  room: string;
+  endedAt?: string;
+  durationSec?: number;
+};
+
 export type ChatMessageItem = {
   id: string;
   conversationId: string;
   senderId: string;
   senderName: string;
+  kind: ChatMessageKind;
+  /** CALL only. */
+  call: ChatCallInfo | null;
   body: string | null;
   attachments: ChatAttachment[];
   createdAt: string;
@@ -43,6 +57,8 @@ export type ChatConversationItem = {
   participants: ChatParticipantItem[];
   lastMessage: ChatMessageItem | null;
   unreadCount: number;
+  /** The call going on in it, if any. */
+  activeCall: { room: string; startedAt: string } | null;
 };
 
 const MESSAGE_PAGE_SIZE = 30;
@@ -210,6 +226,13 @@ export class ChatService {
         ? this.toMessageItem(last, fullName(last.sender))
         : null,
       unreadCount,
+      activeCall:
+        c.active_call_room && c.active_call_started_at
+          ? {
+              room: c.active_call_room,
+              startedAt: c.active_call_started_at.toISOString(),
+            }
+          : null,
     };
   }
 
@@ -580,11 +603,13 @@ export class ChatService {
 
   // ── Mapping ────────────────────────────────────────────────────────────────
 
-  private toMessageItem(
+  toMessageItem(
     m: {
       id: string;
       conversation_id: string;
       sender_id: string;
+      kind?: ChatMessageKind;
+      metadata?: Prisma.JsonValue | null;
       body: string | null;
       attachments: Prisma.JsonValue | null;
       created_at: Date;
@@ -598,6 +623,11 @@ export class ChatService {
       conversationId: m.conversation_id,
       senderId: m.sender_id,
       senderName,
+      kind: m.kind ?? ChatMessageKind.TEXT,
+      call:
+        m.kind === ChatMessageKind.CALL && m.metadata
+          ? (m.metadata as unknown as ChatCallInfo)
+          : null,
       body: m.body,
       attachments: Array.isArray(m.attachments)
         ? (m.attachments as unknown as ChatAttachment[])

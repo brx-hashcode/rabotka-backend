@@ -29,12 +29,14 @@ import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { FileService } from '../file/file.service';
 import { ChatService, type ChatAttachment } from './chat.service';
 import { ChatGateway } from './chat.gateway';
+import { ChatCallService } from './chat-call.service';
 import {
   CreateDirectDto,
   CreateGroupDto,
   SendMessageDto,
   EditMessageDto,
   AddMembersDto,
+  LeaveCallDto,
 } from './dto/chat.dto';
 import {
   ACCEPTED_UPLOAD_EXTENSIONS,
@@ -68,7 +70,76 @@ export class ChatController {
     private readonly chatService: ChatService,
     private readonly gateway: ChatGateway,
     private readonly fileService: FileService,
+    private readonly calls: ChatCallService,
   ) {}
+
+  // ── Calls ──────────────────────────────────────────────────────────────
+
+  @Post('conversations/:id/call')
+  @ApiOperation({
+    summary:
+      'Start a video call (or find the one going on), ringing the others',
+  })
+  async startCall(
+    @Req() req: AdminAuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
+    const result = await this.calls.start(this.userId(req), id);
+    if (result.started && result.message) {
+      this.gateway.emitNewMessage(result.message, result.recipientIds, {
+        id: result.conversation.id,
+        name: result.conversation.name,
+      });
+      this.gateway.emitRing(result.recipientIds, {
+        conversationId: id,
+        conversationName: result.conversation.name,
+        callerId: this.userId(req),
+        callerName: result.callerName,
+        direct: result.conversation.type === 'DIRECT',
+      });
+    }
+    return { room: result.room, started: result.started };
+  }
+
+  @Post('conversations/:id/call/join')
+  @ApiOperation({
+    summary: 'A token for the call going on in the conversation',
+  })
+  joinCall(@Req() req: AdminAuthenticatedRequest, @Param('id') id: string) {
+    return this.calls.join(this.userId(req), id);
+  }
+
+  @Post('conversations/:id/call/leave')
+  @ApiOperation({ summary: 'Left the call; the last one out ends it' })
+  async leaveCall(
+    @Req() req: AdminAuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() dto: LeaveCallDto,
+  ) {
+    const { ended, participantIds } = await this.calls.leave(
+      this.userId(req),
+      id,
+      dto.remaining,
+    );
+    if (ended) {
+      this.gateway.emitEditedMessage(ended);
+      this.gateway.emitCallEnded(id, participantIds);
+    }
+    return { ended: Boolean(ended) };
+  }
+
+  @Post('conversations/:id/call/decline')
+  @ApiOperation({ summary: 'Decline a ringing call' })
+  async declineCall(
+    @Req() req: AdminAuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
+    const { callerId, name } = await this.calls.callerOf(this.userId(req), id);
+    if (callerId && callerId !== this.userId(req)) {
+      this.gateway.emitDeclined(callerId, { conversationId: id, name });
+    }
+    return { success: true };
+  }
 
   private userId(req: AdminAuthenticatedRequest): string {
     return req.user.userId;

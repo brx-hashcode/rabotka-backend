@@ -31,7 +31,11 @@ export class WhatsAppEventSender {
     // series, so without it a weekly event looks like a single date.
     const repeats = recurrenceLabel(payload.recurrence);
     const repeatLine = repeats ? `\nRépétition : ${repeats}` : '';
-    const message = `${verb} : ${payload.title}\nDu ${payload.startDate} au ${payload.endDate}${repeatLine}${locationLine}`;
+    // Their own link: it opens the room under their name.
+    const visioLine = recipient.visioUrl
+      ? `\nVisio (lien personnel) : ${recipient.visioUrl}`
+      : '';
+    const message = `${verb} : ${payload.title}\nDu ${payload.startDate} au ${payload.endDate}${repeatLine}${locationLine}${visioLine}`;
 
     this.logger.log(
       `WhatsApp event notification to ${recipient.phone}: ${message.slice(0, 80)}`,

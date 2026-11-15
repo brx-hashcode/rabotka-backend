@@ -94,6 +94,7 @@ describe('InterviewVisioService', () => {
       name: 'Marie Recruteuse',
       moderator: true,
     });
+    expect(claims.context.features).toEqual({ transcription: true });
   });
 
   it('names the account holder by their own row, not the company', async () => {
@@ -122,6 +123,7 @@ describe('InterviewVisioService', () => {
       name: 'Awa Diop',
       moderator: false,
     });
+    expect(claims.context.features).toBeUndefined();
     expect(join.host).toBe(false);
     expect(join).not.toHaveProperty('interviewId');
   });

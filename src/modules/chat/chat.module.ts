@@ -6,11 +6,12 @@ import { FileModule } from '../file/file.module';
 import { ChatService } from './chat.service';
 import { ChatGateway } from './chat.gateway';
 import { ChatController } from './chat.controller';
+import { ChatCallService } from './chat-call.service';
 
 @Module({
   imports: [ConfigModule, PrismaModule, AuthModule, FileModule],
   controllers: [ChatController],
-  providers: [ChatService, ChatGateway],
+  providers: [ChatService, ChatGateway, ChatCallService],
   exports: [ChatService, ChatGateway],
 })
 export class ChatModule {}

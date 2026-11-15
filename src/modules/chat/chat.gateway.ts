@@ -207,6 +207,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       .to(`conv:${message.conversationId}`)
       .emit('message:new', message);
 
+    // A call card rings instead (call:ring): no second alert for it.
+    if (message.kind === 'CALL') return;
+
     const preview =
       message.body?.slice(0, 140) ??
       (message.attachments.length > 0 ? '📎 Attachment' : '');
@@ -240,6 +243,39 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server
       .to(`conv:${message.conversationId}`)
       .emit('message:edited', message);
+  }
+
+  // ── Calls ──────────────────────────────────────────────────────────────
+
+  /** A call started: each other member's screen rings. */
+  emitRing(
+    recipientIds: string[],
+    payload: {
+      conversationId: string;
+      conversationName: string | null;
+      callerId: string;
+      callerName: string;
+      direct: boolean;
+    },
+  ): void {
+    for (const id of recipientIds) {
+      this.server.to(`user:${id}`).emit('call:ring', payload);
+    }
+  }
+
+  /** The call is over: rings stop, and the « Join » buttons go. */
+  emitCallEnded(conversationId: string, participantIds: string[]): void {
+    for (const id of participantIds) {
+      this.server.to(`user:${id}`).emit('call:ended', { conversationId });
+    }
+  }
+
+  /** Someone declined: the caller sees it. */
+  emitDeclined(
+    callerId: string,
+    payload: { conversationId: string; name: string },
+  ): void {
+    this.server.to(`user:${callerId}`).emit('call:declined', payload);
   }
 
   emitDeletedMessage(conversationId: string, messageId: string): void {
