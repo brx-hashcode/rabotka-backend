@@ -40,6 +40,7 @@ import {
   TranscriptionAnswerDto,
   TranscriptionSwitchDto,
   TranscriptLinesDto,
+  CallTranscriptLinesDto,
 } from './dto/interview.dto';
 
 /** « Entretiens »: the business's interviews with candidates. */
@@ -89,6 +90,19 @@ export class InterviewController {
     @Body() dto: TranscriptLinesDto,
   ) {
     return this.transcripts.addHostLines(req.user, id, dto.lines);
+  }
+
+  @Post(':id/report/call-transcript')
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'The call’s captions, relayed by the business’s call page',
+  })
+  addCallTranscript(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CallTranscriptLinesDto,
+  ) {
+    return this.transcripts.addCallLines(req.user, id, dto.lines);
   }
 
   @Get(':id/guests')
