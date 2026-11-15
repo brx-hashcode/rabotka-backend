@@ -1,5 +1,6 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { InterviewService, hashToken } from '../interview.service';
+import { calendarRange, MAX_RANGE_DAYS } from '../interview.controller';
 
 const inHours = (h: number) =>
   new Date(Date.now() + h * 3_600_000).toISOString();
@@ -565,6 +566,57 @@ describe('InterviewService', () => {
       expect(prisma.interview.findMany.mock.calls[0][0].where.slots).toEqual({
         none: {},
       });
+    });
+  });
+
+  describe('the calendar', () => {
+    const from = new Date('2026-11-01T00:00:00Z');
+    const to = new Date('2026-12-08T00:00:00Z');
+
+    it('lists a range by its time or a time offered in it, cancelled ones included', async () => {
+      const { service, prisma } = make();
+      prisma.interview.findMany.mockResolvedValue([
+        loaded({
+          status: 'CANCELLED',
+          slots: [{ id: 's1', starts_at: new Date('2026-11-20T09:00:00Z') }],
+        }),
+      ]);
+      const list = await service.list('p1', { range: { from, to } });
+      const args = prisma.interview.findMany.mock.calls[0][0];
+      const within = { gte: from, lt: to };
+      expect(args.where.OR).toEqual([
+        { starts_at: within },
+        { slots: { some: { starts_at: within } } },
+      ]);
+      expect(args.where.status).toBeUndefined();
+      expect(args.orderBy).toEqual({ starts_at: 'asc' });
+      expect(args.take).toBe(500);
+      expect(list[0].options).toEqual([
+        { id: 's1', startsAt: '2026-11-20T09:00:00.000Z' },
+      ]);
+    });
+
+    it('takes both ends, in order, over six weeks at most', () => {
+      expect(calendarRange(undefined, undefined)).toBeUndefined();
+      expect(calendarRange(from.toISOString(), to.toISOString())).toEqual({
+        from,
+        to,
+      });
+      expect(() => calendarRange(from.toISOString(), undefined)).toThrow(
+        BadRequestException,
+      );
+      expect(() => calendarRange('nope', to.toISOString())).toThrow(
+        BadRequestException,
+      );
+      expect(() => calendarRange(to.toISOString(), from.toISOString())).toThrow(
+        BadRequestException,
+      );
+      const far = new Date(
+        from.getTime() + (MAX_RANGE_DAYS + 1) * 86_400_000,
+      ).toISOString();
+      expect(() => calendarRange(from.toISOString(), far)).toThrow(
+        BadRequestException,
+      );
     });
   });
 });
