@@ -158,6 +158,29 @@ export class TranscriptLineDto {
   at?: string;
 }
 
+/** One sentence of the call's captions, as Jitsi gave it to the business's page. */
+export class CallTranscriptLineDto extends TranscriptLineDto {
+  @ApiPropertyOptional({ example: 'Awa Diop' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  speaker?: string;
+
+  @ApiPropertyOptional({ description: 'Said by the business itself' })
+  @IsOptional()
+  @IsBoolean()
+  self?: boolean;
+}
+
+export class CallTranscriptLinesDto {
+  @ApiProperty({ type: [CallTranscriptLineDto] })
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => CallTranscriptLineDto)
+  lines!: CallTranscriptLineDto[];
+}
+
 export class TranscriptLinesDto {
   @ApiProperty({ type: [TranscriptLineDto] })
   @IsArray()
