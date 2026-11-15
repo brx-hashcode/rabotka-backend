@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { INTERVIEW_QUEUE } from '../../../common/services/queue/queue.module';
 import { QueueService } from '../../../common/services/queue/queue.service';
 import { InterviewService } from './interview.service';
+import { InterviewReportService } from './interview-report.service';
 
 /** Every 15 minutes: a reminder lands about a day ahead, not up to an hour off. */
 const SWEEP_INTERVAL_MS = 15 * 60 * 1000;
@@ -13,6 +14,7 @@ export class InterviewScheduler implements OnModuleInit {
   constructor(
     private readonly queueService: QueueService,
     private readonly interviews: InterviewService,
+    private readonly reports: InterviewReportService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -23,6 +25,10 @@ export class InterviewScheduler implements OnModuleInit {
         if (closed > 0) this.logger.log(`Interviews: ${closed} closed`);
         const sent = await this.interviews.remind();
         if (sent > 0) this.logger.log(`Interviews: ${sent} reminded`);
+        const forgotten = await this.reports.endForgotten();
+        if (forgotten > 0) {
+          this.logger.log(`Interviews: ${forgotten} ended after the call`);
+        }
       },
       { concurrency: 1 },
     );

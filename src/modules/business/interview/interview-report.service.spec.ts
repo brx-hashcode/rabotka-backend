@@ -1,4 +1,7 @@
-import { InterviewReportService } from './interview-report.service';
+import {
+  AFTER_CALL_DELAY_MS,
+  InterviewReportService,
+} from './interview-report.service';
 import {
   buildInterviewReportHtml,
   interviewReportEmail,
@@ -59,8 +62,11 @@ function setup(
       findFirst: jest.fn().mockResolvedValue(row),
       findUnique: jest.fn().mockResolvedValue(row),
       update: jest.fn().mockResolvedValue(row),
+      findMany: jest.fn().mockResolvedValue([]),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     interviewReport: {
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       upsert: jest.fn().mockImplementation(({ create }) => ({
         notes: NOTES,
         report: null,
@@ -120,7 +126,16 @@ function setup(
     businessOf: jest.fn().mockResolvedValue('b1'),
     entitlements: jest.fn().mockResolvedValue({ videoInterviews: true }),
   };
-  const queue = { addJob: jest.fn().mockResolvedValue('job1') };
+  const delayed = {
+    isDelayed: jest.fn().mockResolvedValue(true),
+    promote: jest.fn().mockResolvedValue(undefined),
+  };
+  const queue = {
+    addJob: jest.fn().mockResolvedValue('job1'),
+    getQueue: jest.fn(() => ({
+      getJob: jest.fn().mockResolvedValue(delayed),
+    })),
+  };
   const events = { emit: jest.fn() };
   const service = new InterviewReportService(
     prisma as never,
@@ -139,6 +154,7 @@ function setup(
     mail,
     transcripts,
     queue,
+    delayed,
     events,
     subscriptions,
   };
@@ -344,7 +360,7 @@ describe('InterviewReportService', () => {
     expect(sent.to).toBe('paul@example.com');
     expect(sent.subject).toContain('Votre compte rendu est prêt');
     expect(sent.html).toContain('Candidate motivée');
-    expect(sent.html).toContain('entretiens?entretien=i1');
+    expect(sent.html).toContain('entretiens?compte-rendu=i1');
   });
 
   it('e-mails the recruiting contacts when no member ran it, never when it failed', async () => {
@@ -427,6 +443,139 @@ describe('InterviewReportService', () => {
     const { service, mail } = setup([]);
     await expect(service.send(actor, 'i1')).rejects.toThrow('Rédigez');
     expect(mail.sendMail).not.toHaveBeenCalled();
+  });
+});
+
+describe('the report after the call', () => {
+  it('« Terminer »: written by itself two minutes later, once', async () => {
+    const { service, queue, prisma } = setup(
+      [GOOD],
+      interview({ report: null }),
+    );
+    await service.afterCall('i1', 'm1');
+    expect(queue.addJob).toHaveBeenCalledWith(
+      expect.any(String),
+      { interviewId: 'i1', memberId: 'm1', auto: true },
+      { delay: AFTER_CALL_DELAY_MS, jobId: 'interview-report-after-call-i1' },
+    );
+    const at = prisma.interviewReport.upsert.mock.calls[0][0].create
+      .writing_started_at as Date;
+    expect(at.getTime()).toBeGreaterThan(Date.now() + 60_000);
+  });
+
+  it('never over a report already written, nor without the plan', async () => {
+    const written = setup(
+      [],
+      interview({
+        report: {
+          notes: NOTES,
+          report: null,
+          generated_at: new Date(),
+          sent_at: null,
+          updated_at: new Date(),
+        },
+      }),
+    );
+    await written.service.afterCall('i1', 'm1');
+    expect(written.queue.addJob).not.toHaveBeenCalled();
+
+    const noPlan = setup([], interview({ report: null }));
+    noPlan.subscriptions.entitlements.mockResolvedValue({
+      videoInterviews: false,
+    });
+    await noPlan.service.afterCall('i1', 'm1');
+    expect(noPlan.queue.addJob).not.toHaveBeenCalled();
+  });
+
+  it('« Rédiger maintenant » runs the waiting job now, instead of queuing another', async () => {
+    const { service, queue, delayed } = setup(
+      [],
+      interview({
+        report: {
+          notes: NOTES,
+          report: null,
+          generated_at: null,
+          sent_at: null,
+          updated_at: new Date(),
+          writing_started_at: new Date(Date.now() + 90_000),
+        },
+      }),
+    );
+    const v = await service.write(actor, 'i1');
+    expect(delayed.promote).toHaveBeenCalled();
+    expect(queue.addJob).not.toHaveBeenCalled();
+    expect(v.writing).toBe(true);
+    expect(v.scheduledFor).toBeNull();
+  });
+
+  it('says when it will be written while it waits', async () => {
+    const { service } = setup(
+      [],
+      interview({
+        report: {
+          notes: NOTES,
+          report: null,
+          generated_at: null,
+          sent_at: null,
+          updated_at: new Date(),
+          writing_started_at: new Date(Date.now() + 90_000),
+        },
+      }),
+    );
+    const v = await service.get(actor, 'i1');
+    expect(v.writing).toBe(true);
+    expect(v.scheduledFor).toEqual(expect.any(String));
+  });
+
+  it('nothing said, nothing noted: no report and no « failed » notice', async () => {
+    const { service, llm, events, prisma } = setup(
+      [GOOD],
+      interview({
+        report: {
+          notes: '',
+          report: null,
+          generated_at: null,
+          sent_at: null,
+          updated_at: new Date(),
+        },
+      }),
+    );
+    await service.generate({ interviewId: 'i1', memberId: null, auto: true });
+    expect(llm.invoke).not.toHaveBeenCalled();
+    expect(events.emit).not.toHaveBeenCalled();
+    expect(prisma.interviewReport.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { writing_started_at: null } }),
+    );
+  });
+
+  it('ends a call nobody ended, half an hour after its planned end, and writes its report', async () => {
+    const now = new Date('2026-11-15T12:00:00Z');
+    const { service, prisma, queue } = setup([], interview({ report: null }));
+    prisma.interview.findMany.mockResolvedValue([
+      // Ended 10:30 + 30 min: past.
+      {
+        id: 'old',
+        starts_at: new Date('2026-11-15T10:00:00Z'),
+        duration_minutes: 30,
+      },
+      // A 2 h interview from 10:00: not over yet with its half hour.
+      {
+        id: 'long',
+        starts_at: new Date('2026-11-15T10:00:00Z'),
+        duration_minutes: 120,
+      },
+    ]);
+    await expect(service.endForgotten(now)).resolves.toBe(1);
+    expect(prisma.interview.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.interview.updateMany).toHaveBeenCalledWith({
+      where: { id: 'old', ended_at: null },
+      data: { ended_at: new Date('2026-11-15T10:30:00Z') },
+    });
+    expect(queue.addJob).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ auto: true, memberId: null }),
+      expect.objectContaining({ delay: 0 }),
+    );
   });
 });
 

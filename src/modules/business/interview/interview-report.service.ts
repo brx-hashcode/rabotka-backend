@@ -12,7 +12,7 @@ import {
   HumanMessage,
   type BaseMessage,
 } from '@langchain/core/messages';
-import { Prisma } from '@prisma/client';
+import { InterviewStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { MailService } from '../../mail/mail.service';
 import { LayoutService } from '../../mail/layout.service';
@@ -56,7 +56,18 @@ const WRITING_STALE_MS = 3 * 60_000;
 export type InterviewReportJob = {
   interviewId: string;
   memberId: string | null;
+  /** Started by the end of the call, not asked for: quiet when there is nothing to write from. */
+  auto?: boolean;
 };
+
+/** After « Terminer », the time left to add a note before the report is written. */
+export const AFTER_CALL_DELAY_MS = 2 * 60_000;
+/** An interview nobody ended is closed this long after its planned end. */
+export const FORGOTTEN_END_MS = 30 * 60_000;
+
+/** The one delayed job of an interview's report after its call. */
+const afterCallJobId = (interviewId: string) =>
+  `interview-report-after-call-${interviewId}`;
 
 type Actor = { profileId: string; memberId?: string };
 
@@ -116,6 +127,16 @@ export class InterviewReportService {
         'Prenez d’abord quelques notes sur l’entretien, ou transcrivez-le : le compte rendu est rédigé à partir d’elles.',
       );
     }
+    if (interview.report && scheduled(interview.report)) {
+      // Waiting after the call: « Rédiger maintenant » runs it now, once.
+      await this.runNow(interview.id);
+      return view(
+        await this.prisma.interviewReport.update({
+          where: { interview_id: interview.id },
+          data: { writing_started_at: new Date() },
+        }),
+      );
+    }
     if (interview.report && writing(interview.report)) {
       return view(interview.report);
     }
@@ -160,6 +181,14 @@ export class InterviewReportService {
     const notes = interview.report?.notes.trim() ?? '';
     // Both sides' recognised speech, merged by time, when it was transcribed.
     const transcript = await this.transcripts.merged(interview.id);
+    if (job.auto && notes.length < MIN_NOTES && transcript.length < MIN_NOTES) {
+      // Nothing said, nothing noted: no report, and nobody told it failed.
+      await this.prisma.interviewReport.updateMany({
+        where: { interview_id: interview.id },
+        data: { writing_started_at: null },
+      });
+      return;
+    }
     let report: InterviewReportBody | null = null;
     try {
       const messages: BaseMessage[] = reportMessages({
@@ -230,6 +259,103 @@ export class InterviewReportService {
   }
 
   /**
+   * After the call (« Terminer », or an interview nobody ended): the report
+   * is written by itself, `delayMs` later so a note can still go in, from
+   * the call's transcript and the notes. Only with the plan's « Visio dans
+   * Rabotka », and never over a report already written or on its way.
+   */
+  async afterCall(
+    interviewId: string,
+    memberId: string | null,
+    delayMs = AFTER_CALL_DELAY_MS,
+  ): Promise<void> {
+    const interview = await this.prisma.interview.findUnique({
+      where: { id: interviewId },
+      include: { report: true },
+    });
+    if (!interview) return;
+    const r = interview.report;
+    if (r && (r.generated_at || writing(r))) return;
+    const plan = await this.subscriptions.entitlements(interview.business_id);
+    if (!plan?.videoInterviews) return;
+    const startsAt = new Date(Date.now() + delayMs);
+    await this.prisma.interviewReport.upsert({
+      where: { interview_id: interview.id },
+      create: {
+        interview_id: interview.id,
+        business_id: interview.business_id,
+        writing_started_at: startsAt,
+        writing_error: null,
+      },
+      update: { writing_started_at: startsAt, writing_error: null },
+    });
+    try {
+      await this.queue.addJob<InterviewReportJob>(
+        INTERVIEW_REPORT_QUEUE,
+        { interviewId: interview.id, memberId, auto: true },
+        { delay: delayMs, jobId: afterCallJobId(interview.id) },
+      );
+    } catch (err) {
+      await this.prisma.interviewReport.update({
+        where: { interview_id: interview.id },
+        data: { writing_started_at: null },
+      });
+      this.logger.error(`Interview report ${interview.id} not scheduled`, err);
+    }
+  }
+
+  /**
+   * The sweep: an interview whose call the business joined but nobody ended
+   * (left by Jitsi's red button, tab closed) is ended half an hour after its
+   * planned end, and its report written.
+   */
+  async endForgotten(now = new Date()): Promise<number> {
+    const candidates = await this.prisma.interview.findMany({
+      where: {
+        ended_at: null,
+        call_started_at: { not: null },
+        status: {
+          notIn: [InterviewStatus.CANCELLED, InterviewStatus.DECLINED],
+        },
+        starts_at: { lt: new Date(now.getTime() - FORGOTTEN_END_MS) },
+      },
+      select: { id: true, starts_at: true, duration_minutes: true },
+      take: 200,
+    });
+    let ended = 0;
+    for (const i of candidates) {
+      const end = i.starts_at.getTime() + i.duration_minutes * 60_000;
+      if (end + FORGOTTEN_END_MS > now.getTime()) continue;
+      const done = await this.prisma.interview.updateMany({
+        where: { id: i.id, ended_at: null },
+        data: { ended_at: new Date(end) },
+      });
+      if (done.count === 0) continue;
+      ended++;
+      await this.afterCall(i.id, null, 0).catch((err: unknown) =>
+        this.logger.warn(
+          `Interview report ${i.id} after a forgotten end: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      );
+    }
+    return ended;
+  }
+
+  /** The delayed job after the call, run now (« Rédiger maintenant »). */
+  private async runNow(interviewId: string) {
+    try {
+      const job = await this.queue
+        .getQueue(INTERVIEW_REPORT_QUEUE)
+        .getJob(afterCallJobId(interviewId));
+      if (job && (await job.isDelayed())) await job.promote();
+    } catch (err) {
+      this.logger.warn(
+        `Interview report ${interviewId} not promoted: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
    * « Votre compte rendu est prêt », by e-mail: to the member who ran the
    * interview, else to the business's recruiting contacts. A failed e-mail
    * never fails the report: it is saved, and the notification still goes.
@@ -273,7 +399,7 @@ export class InterviewReportService {
           candidateName: interview.candidate_name,
           jobTitle: interview.job_title,
           when: (await this.held(interview)).when,
-          url: `${businessDashboardUrl()}/entretiens?entretien=${encodeURIComponent(interview.id)}`,
+          url: `${businessDashboardUrl()}/entretiens?compte-rendu=${encodeURIComponent(interview.id)}`,
         }),
         {
           previewText: `Votre compte rendu est prêt — ${interview.candidate_name}`,
@@ -553,6 +679,11 @@ export class InterviewReportService {
 }
 
 /** Being written, unless it was asked so long ago that the job is lost. */
+/** Waiting after the call, not started yet. */
+function scheduled(r: { writing_started_at?: Date | null }): boolean {
+  return !!r.writing_started_at && r.writing_started_at.getTime() > Date.now();
+}
+
 function writing(r: { writing_started_at?: Date | null }): boolean {
   return (
     !!r.writing_started_at &&
@@ -577,6 +708,9 @@ function view(
     /** Written in the background right now: the page waits, a notification follows. */
     writing: r ? writing(r) : false,
     writingError: r?.writing_error ?? null,
+    /** After the call: when it will be written by itself (« Rédiger maintenant » runs it now). */
+    scheduledFor:
+      r && scheduled(r) ? (r.writing_started_at?.toISOString() ?? null) : null,
     generatedAt: r?.generated_at?.toISOString() ?? null,
     sentAt: r?.sent_at?.toISOString() ?? null,
     updatedAt: r?.updated_at.toISOString() ?? null,
