@@ -294,11 +294,16 @@ export class InterviewController {
   @ApiOperation({
     summary: '« Terminer l’entretien »: its link stops opening the call',
   })
-  end(
+  async end(
     @Req() req: ProfileAuthenticatedRequest,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.interviews.end(req.user.profileId, id);
+    const ended = await this.interviews.end(req.user.profileId, id);
+    // The report writes itself a couple of minutes later: time for a note.
+    await this.reports
+      .afterCall(id, req.user.memberId ?? null)
+      .catch(() => undefined);
+    return ended;
   }
 
   @Post(':id/cancel')
