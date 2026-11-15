@@ -46,7 +46,11 @@ function setup(row: Record<string, unknown> | null = interview(), count = 0) {
     businessMember: {
       findFirst: jest.fn().mockResolvedValue({ name: 'Paul Recruteur' }),
     },
+    business: {
+      findUnique: jest.fn().mockResolvedValue({ profile_id: 'p-business' }),
+    },
   };
+  const events = { emit: jest.fn() };
   const subscriptions = {
     businessOf: jest.fn().mockResolvedValue('b1'),
     entitlements: jest.fn().mockResolvedValue({ videoInterviews: true }),
@@ -54,8 +58,9 @@ function setup(row: Record<string, unknown> | null = interview(), count = 0) {
   const service = new InterviewTranscriptService(
     prisma as never,
     subscriptions as never,
+    events as never,
   );
-  return { service, prisma, subscriptions };
+  return { service, prisma, subscriptions, events };
 }
 
 const written = (prisma: ReturnType<typeof setup>['prisma']) =>
@@ -79,6 +84,21 @@ describe('InterviewTranscriptService', () => {
         text: 'Et vos disponibilités ?',
       }),
     ]);
+  });
+
+  it('tells the business’s open pages the moment sentences are saved', async () => {
+    const { service, events } = setup();
+    await service.addHostLines(actor, 'i1', [{ text: 'Bonjour' }]);
+    expect(events.emit).toHaveBeenCalledWith('interview.transcript-lines', {
+      profileId: 'p-business',
+      interviewId: 'i1',
+    });
+  });
+
+  it('announces nothing when no sentence was kept', async () => {
+    const { service, events } = setup();
+    await service.addHostLines(actor, 'i1', [{ text: '   ' }]);
+    expect(events.emit).not.toHaveBeenCalled();
   });
 
   it('keeps the candidate’s sentences only once they accepted', async () => {

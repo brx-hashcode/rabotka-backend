@@ -1,11 +1,8 @@
-import { generateKeyPairSync } from 'node:crypto';
-import { decodeJwt, decodeProtectedHeader } from 'jose';
+import { decodeJwt, decodeProtectedHeader, jwtVerify } from 'jose';
 import { InterviewMode, InterviewStatus } from '@prisma/client';
 import { InterviewVisioService, visioUrl } from './interview-visio.service';
 
 const ROOM = 'Rabotka-abcDEF1234';
-const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
-const PEM = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
 
 function interview(over: Record<string, unknown> = {}) {
   return {
@@ -59,15 +56,18 @@ function setup(
   return { service, prisma, subscriptions };
 }
 
-const JAAS = {
-  JAAS_APP_ID: 'vpaas-magic-cookie-123',
-  JAAS_KEY_ID: 'vpaas-magic-cookie-123/key1',
-  JAAS_PRIVATE_KEY: Buffer.from(PEM).toString('base64'),
+const SECRET = 'a-long-random-secret-shared-with-the-jitsi-server';
+const JITSI = {
+  JITSI_DOMAIN: 'visio.hashcode.digital',
+  JITSI_APP_ID: 'rabotka',
+  JITSI_APP_SECRET: SECRET,
 };
+/** The secret alone: the domain and app id fall back to production's. */
+const GUEST_ONLY_SECRET = { JITSI_APP_SECRET: SECRET };
 
 describe('InterviewVisioService', () => {
   it('signs a host token for the business, scoped to its room', async () => {
-    const { service, prisma } = setup(JAAS);
+    const { service, prisma } = setup(JITSI);
     const join = await service.asHost('p1', 'm1', ROOM);
     expect(prisma.interview.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -77,28 +77,28 @@ describe('InterviewVisioService', () => {
         }),
       }),
     );
-    if (join.provider !== 'jaas') throw new Error('expected jaas');
+    if (join.provider !== 'hosted') throw new Error('expected hosted');
+    expect(join.domain).toBe('visio.hashcode.digital');
     expect(join.roomName).toBe(ROOM);
     expect(join.interviewId).toBe('i1');
-    expect(decodeProtectedHeader(join.jwt)).toMatchObject({
-      alg: 'RS256',
-      kid: 'vpaas-magic-cookie-123/key1',
-    });
-    const claims = decodeJwt(join.jwt) as Record<string, any>;
-    expect(claims).toMatchObject({
-      aud: 'jitsi',
-      iss: 'chat',
-      sub: 'vpaas-magic-cookie-123',
-      room: ROOM,
-    });
+    expect(decodeProtectedHeader(join.jwt).alg).toBe('HS256');
+    // The server's own check: the shared secret, its app id and audience.
+    const { payload } = await jwtVerify(
+      join.jwt,
+      new TextEncoder().encode(SECRET),
+      { issuer: 'rabotka', audience: 'jitsi' },
+    );
+    const claims = payload as Record<string, any>;
+    expect(claims).toMatchObject({ sub: 'visio.hashcode.digital', room: ROOM });
     expect(claims.context.user).toMatchObject({
       name: 'Marie Recruteuse',
-      moderator: 'true',
+      moderator: true,
     });
+    expect(claims.context.features).toEqual({ transcription: true });
   });
 
   it('names the account holder by their own row, not the company', async () => {
-    const { service, prisma } = setup(JAAS);
+    const { service, prisma } = setup(JITSI);
     prisma.businessMember.findFirst.mockResolvedValue({
       name: 'Fariol Blondeau',
       email: 'owner@example.com',
@@ -113,30 +113,30 @@ describe('InterviewVisioService', () => {
   });
 
   it('gives the link holder a guest token under the candidate name', async () => {
-    const { service } = setup({ ...JAAS, JAAS_KEY_ID: 'key1' });
+    const { service } = setup(GUEST_ONLY_SECRET);
     const join = await service.asGuest(ROOM);
-    if (join.provider !== 'jaas') throw new Error('expected jaas');
-    expect(decodeProtectedHeader(join.jwt).kid).toBe(
-      'vpaas-magic-cookie-123/key1',
-    );
+    if (join.provider !== 'hosted') throw new Error('expected hosted');
+    expect(join.domain).toBe('visio.hashcode.digital');
+    expect(decodeJwt(join.jwt).iss).toBe('rabotka');
     const claims = decodeJwt(join.jwt) as Record<string, any>;
     expect(claims.context.user).toMatchObject({
       name: 'Awa Diop',
-      moderator: 'false',
+      moderator: false,
     });
+    expect(claims.context.features).toBeUndefined();
     expect(join.host).toBe(false);
     expect(join).not.toHaveProperty('interviewId');
   });
 
   it('lets an invited person in under their own name, never the candidate’s', async () => {
-    const { service, prisma } = setup(JAAS);
+    const { service, prisma } = setup(JITSI);
     const join = await service.asGuest(ROOM, 'tok');
-    if (join.provider !== 'jaas') throw new Error('expected jaas');
+    if (join.provider !== 'hosted') throw new Error('expected hosted');
     const claims = decodeJwt(join.jwt) as Record<string, any>;
     expect(claims.context.user).toMatchObject({
       id: 'invite-g1',
       name: 'Marie Ngoma',
-      moderator: 'false',
+      moderator: false,
     });
     expect(prisma.interviewGuest.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -146,12 +146,12 @@ describe('InterviewVisioService', () => {
   });
 
   it('refuses a withdrawn invitation', async () => {
-    const { service, prisma } = setup(JAAS);
+    const { service, prisma } = setup(JITSI);
     prisma.interviewGuest.findFirst.mockResolvedValue(null);
     await expect(service.asGuest(ROOM, 'old')).rejects.toThrow('plus valable');
   });
 
-  it('falls back to the public Jitsi room without JaaS keys', async () => {
+  it('falls back to the public Jitsi room without the Jitsi secret', async () => {
     const { service } = setup({});
     await expect(service.asGuest(ROOM)).resolves.toMatchObject({
       provider: 'jitsi',
@@ -160,7 +160,7 @@ describe('InterviewVisioService', () => {
   });
 
   it('refuses a name that is not one of its rooms', async () => {
-    const { service, prisma } = setup(JAAS);
+    const { service, prisma } = setup(JITSI);
     await expect(service.asGuest('../../x')).rejects.toThrow('introuvable');
     expect(prisma.interview.findFirst).not.toHaveBeenCalled();
   });
@@ -168,13 +168,13 @@ describe('InterviewVisioService', () => {
   it('refuses a cancelled or finished interview', async () => {
     await expect(
       setup(
-        JAAS,
+        JITSI,
         interview({ status: InterviewStatus.CANCELLED }),
       ).service.asGuest(ROOM),
     ).rejects.toThrow('annulé');
     await expect(
       setup(
-        JAAS,
+        JITSI,
         interview({ starts_at: new Date(Date.now() - 5 * 60 * 60 * 1000) }),
       ).service.asHost('p1', undefined, ROOM),
     ).rejects.toThrow('terminé');
@@ -182,16 +182,16 @@ describe('InterviewVisioService', () => {
 
   it('once ended, closes to guests and tells the host', async () => {
     const ended = interview({ ended_at: new Date() });
-    await expect(setup(JAAS, ended).service.asGuest(ROOM)).rejects.toThrow(
+    await expect(setup(JITSI, ended).service.asGuest(ROOM)).rejects.toThrow(
       'terminé',
     );
-    const host = await setup(JAAS, ended).service.asHost('p1', 'm1', ROOM);
+    const host = await setup(JITSI, ended).service.asHost('p1', 'm1', ROOM);
     expect(host.endedAt).toEqual(expect.any(String));
   });
 
   it('before the day before, says when it opens, with no token', async () => {
     const starts = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
-    const { service } = setup(JAAS, interview({ starts_at: starts }));
+    const { service } = setup(JITSI, interview({ starts_at: starts }));
     const join = await service.asGuest(ROOM);
     expect(join).toMatchObject({
       provider: 'waiting',
@@ -204,7 +204,7 @@ describe('InterviewVisioService', () => {
 
   it('still refuses a withdrawn invitation before it opens', async () => {
     const { service, prisma } = setup(
-      JAAS,
+      JITSI,
       interview({ starts_at: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000) }),
     );
     prisma.interviewGuest.findFirst.mockResolvedValue(null);
@@ -212,14 +212,14 @@ describe('InterviewVisioService', () => {
   });
 
   it('is not found for another business', async () => {
-    const { service } = setup(JAAS, null);
+    const { service } = setup(JITSI, null);
     await expect(service.asHost('p2', undefined, ROOM)).rejects.toThrow(
       'introuvable',
     );
   });
 
   it('closes a booked room to everyone when the plan lacks the visio', async () => {
-    const { service, subscriptions } = setup(JAAS);
+    const { service, subscriptions } = setup(JITSI);
     subscriptions.entitlements.mockResolvedValue({ videoInterviews: false });
     await expect(service.asHost('p1', undefined, ROOM)).rejects.toThrow(
       'formules supérieures',

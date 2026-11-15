@@ -12,6 +12,15 @@ import {
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
+export class LeaveCallDto {
+  /** How many were still in the call as this one left (Jitsi's count). */
+  @ApiProperty()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  remaining!: number;
+}
+
 export class CreateDirectDto {
   @ApiProperty()
   @IsUUID()

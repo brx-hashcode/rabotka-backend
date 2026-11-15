@@ -2150,6 +2150,9 @@ model Event {
   color         String
   channel       DeliveryChannel @default(EMAIL)
   location      String?
+  /// Set when the event comes with a visio on our own Jitsi: the room
+  /// (`RabotkaEvt-…`). Every occurrence of a series shares it.
+  visio_room    String?
   created_by_id String          @db.Uuid
 
   /// Null for a one-off event, which is every event created before recurrence
@@ -2169,6 +2172,7 @@ model Event {
   @@index([start_date, end_date], name: "idx_event_start_end")
   // Every scoped operation is "this series, from this date on".
   @@index([series_id, start_date], name: "idx_event_series_start")
+  @@index([visio_room], name: "idx_event_visio_room")
   @@map("events")
 }
 
@@ -2611,6 +2615,13 @@ enum ChatConversationType {
   GROUP
 }
 
+/// TEXT: a message someone wrote. CALL: a video call started in the
+/// conversation, shown as a card (its room and outcome in `metadata`).
+enum ChatMessageKind {
+  TEXT
+  CALL
+}
+
 model ChatConversation {
   id         String               @id @default(uuid()) @db.Uuid
   created_at DateTime             @default(now())
@@ -2619,6 +2630,9 @@ model ChatConversation {
   name       String?
   is_team    Boolean              @default(false)
   created_by String?              @db.Uuid
+  /// The call going on in this conversation (`RabotkaTeam-…`), if any.
+  active_call_room       String?
+  active_call_started_at DateTime?
 
   creator      User?             @relation("ChatConversationCreatedBy", fields: [created_by], references: [id], onDelete: SetNull)
   participants ChatParticipant[]
@@ -2650,8 +2664,11 @@ model ChatMessage {
   id              String    @id @default(uuid()) @db.Uuid
   conversation_id String    @db.Uuid
   sender_id       String    @db.Uuid
+  kind            ChatMessageKind @default(TEXT)
   body            String?   @db.Text
   attachments     Json?
+  /// CALL: { room, endedAt?, durationSec? }.
+  metadata        Json?
   created_at      DateTime  @default(now())
   edited_at       DateTime?
   deleted_at      DateTime?

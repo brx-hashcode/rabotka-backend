@@ -17,6 +17,7 @@ import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { EventService } from './event.service';
+import { EventVisioService } from './services/event-visio.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { ListEventsDto } from './dto/list-events.dto';
@@ -34,7 +35,20 @@ export class EventController {
   constructor(
     private readonly eventService: EventService,
     private readonly logService: LogService,
+    private readonly visio: EventVisioService,
   ) {}
+
+  @Post('visio/:room/join')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({
+    summary: 'Join the visio of an event (our own Jitsi), as a moderator',
+  })
+  joinVisio(
+    @Req() req: AdminAuthenticatedRequest,
+    @Param('room') room: string,
+  ) {
+    return this.visio.joinAsAdmin(req.user.userId, room);
+  }
 
   @Get()
   @Roles(UserRole.MODERATOR)

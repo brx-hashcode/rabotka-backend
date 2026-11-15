@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsOptional,
@@ -42,6 +43,15 @@ export class UpdateEventDto {
   @IsOptional()
   @IsString()
   location?: string;
+
+  /** A visio on our own Jitsi: a room is made and each participant gets their link. */
+  @ApiPropertyOptional({
+    description:
+      'true adds a visio (our own Jitsi) to the event; false removes it.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  visio?: boolean;
 
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()

@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InterviewMode, InterviewStatus } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
 import { frWhen } from './interview-emails';
@@ -12,6 +13,10 @@ import { hashToken } from './interview.service';
 import { visioUrl } from './interview-visio.service';
 import { businessPersonName } from './interview-people';
 import { assertVideoPlan } from './interview-plan';
+import {
+  INTERVIEW_TRANSCRIPT_LINES,
+  type InterviewTranscriptLines,
+} from './interview-transcript.events';
 
 /** A sentence, as one recognition result: never a speech. */
 export const MAX_LINE_CHARS = 500;
@@ -50,6 +55,7 @@ export class InterviewTranscriptService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly subscriptions: BusinessSubscriptionService,
+    private readonly events: EventEmitter2,
   ) {}
 
   // ── The business ─────────────────────────────────────────────────────
@@ -99,7 +105,7 @@ export class InterviewTranscriptService {
       actor.memberId,
       interview.business.name,
     );
-    return this.store(interview.id, who.name, 'HOST', lines);
+    return this.store(interview, who.name, 'HOST', lines);
   }
 
   // ── The guests, by their link ─────────────────────────────────────────
@@ -141,19 +147,14 @@ export class InterviewTranscriptService {
         select: { name: true },
       });
       if (!guest) throw new NotFoundException('Invitation introuvable.');
-      return this.store(interview.id, guest.name, 'GUEST', lines);
+      return this.store(interview, guest.name, 'GUEST', lines);
     }
     if (interview.transcript_consent !== 'ACCEPTED') {
       throw new ForbiddenException(
         'Vous n’avez pas accepté la transcription de l’entretien.',
       );
     }
-    return this.store(
-      interview.id,
-      interview.candidate_name,
-      'CANDIDATE',
-      lines,
-    );
+    return this.store(interview, interview.candidate_name, 'CANDIDATE', lines);
   }
 
   // ── For the « Compte rendu » ──────────────────────────────────────────
@@ -183,11 +184,12 @@ export class InterviewTranscriptService {
   // ── Inside ───────────────────────────────────────────────────────────
 
   private async store(
-    interviewId: string,
+    interview: { id: string; business_id: string },
     speaker: string,
     role: TranscriptRole,
     input: LineInput[],
   ) {
+    const interviewId = interview.id;
     const now = Date.now();
     const rows = (Array.isArray(input) ? input : [])
       .slice(0, MAX_LINES_PER_POST)
@@ -215,7 +217,21 @@ export class InterviewTranscriptService {
         text: l.text,
       })),
     });
+    await this.announce(interview);
     return { added: kept.length };
+  }
+
+  /** The business's open « Compte rendu » picks the new sentences up at once. */
+  private async announce(interview: { id: string; business_id: string }) {
+    const business = await this.prisma.business.findUnique({
+      where: { id: interview.business_id },
+      select: { profile_id: true },
+    });
+    if (!business) return;
+    this.events.emit(INTERVIEW_TRANSCRIPT_LINES, {
+      profileId: business.profile_id,
+      interviewId: interview.id,
+    } satisfies InterviewTranscriptLines);
   }
 
   /** Transcribed only when switched on, and around the interview's time. */

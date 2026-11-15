@@ -46,6 +46,10 @@ export type EventMailParams = {
   eventId?: string;
   seriesId?: string | null;
   recurrence?: RecurrenceLabelInput | null;
+  /** A profile's own link to the event's visio. */
+  visioUrl?: string | null;
+  /** An admin: the visio opens from Rabotka Admin. */
+  visioInAdmin?: boolean;
 };
 
 @Injectable()
@@ -211,7 +215,7 @@ export class NotificationService {
         startDate: params.startDate,
         endDate: params.endDate,
         description: params.description,
-        location: params.location,
+        location: params.location || params.visioUrl,
       }),
     };
   }
@@ -224,7 +228,7 @@ export class NotificationService {
         startDate: params.startDate,
         endDate: params.endDate,
         description: params.description,
-        location: params.location,
+        location: params.location || params.visioUrl,
         recurrence: params.recurrence,
         // Stable identity, so the update mail revises the entry the invitation
         // created instead of adding a second one. Keyed on the series when
