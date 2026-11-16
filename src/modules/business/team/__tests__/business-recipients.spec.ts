@@ -28,8 +28,8 @@ describe('businessEmailRecipients', () => {
     await expect(
       businessEmailRecipients(d, 'b', 'recruiting'),
     ).resolves.toEqual([
-      { email: 'jean@zuafood.cg', name: 'Jean' },
-      { email: 'awa@e.cg', name: 'Awa' },
+      { email: 'jean@zuafood.cg', name: 'Jean', language: 'fr' },
+      { email: 'awa@e.cg', name: 'Awa', language: 'fr' },
     ]);
     expect(d.businessMember.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -54,6 +54,6 @@ describe('businessEmailRecipients', () => {
     ).resolves.toEqual([]);
     await expect(
       businessEmailRecipients(db(null, []), 'b', 'recruiting'),
-    ).resolves.toEqual([{ email: 'jean@zuafood.cg', name: 'Jean' }]);
+    ).resolves.toEqual([{ email: 'jean@zuafood.cg', name: 'Jean', language: 'fr' }]);
   });
 });
