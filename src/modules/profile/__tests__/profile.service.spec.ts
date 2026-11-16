@@ -1748,6 +1748,12 @@ describe('ProfileService', () => {
             key: 'kyc-documents/autorisation.pdf',
             fileName: 'autorisation.pdf',
           },
+          {
+            documentType: 'RECEPISSE' as any,
+            url: 'https://cdn.example.com/kyc-documents/recepisse.pdf',
+            key: 'kyc-documents/recepisse.pdf',
+            fileName: 'recepisse.pdf',
+          },
         ],
       },
     };
@@ -1793,6 +1799,10 @@ describe('ProfileService', () => {
                 storage_key: 'kyc-documents/autorisation.pdf',
                 mime_type: 'application/pdf',
               }),
+              expect.objectContaining({
+                document_type: 'RECEPISSE',
+                storage_key: 'kyc-documents/recepisse.pdf',
+              }),
             ],
           },
         }),
@@ -1801,17 +1811,13 @@ describe('ProfileService', () => {
       expect(tx.kycDocument.create).not.toHaveBeenCalled();
     });
 
-    it('creates a business online only: no document, no address', async () => {
+    it('creates a business online only: no address', async () => {
       const tx = txWithBusiness();
 
       await service.createProfile(
         {
           ...businessDto,
-          business: {
-            ...businessDto.business,
-            address: undefined,
-            documents: [],
-          },
+          business: { ...businessDto.business, address: undefined },
         } as any,
         'business',
       );
@@ -1820,9 +1826,28 @@ describe('ProfileService', () => {
         data: expect.objectContaining({
           address: null,
           country_code: 'CG',
-          documents: { create: [] },
         }),
       });
+    });
+
+    it('refuses a business without its required papers, before writing anything', async () => {
+      const tx = txWithBusiness();
+
+      await expect(
+        service.createProfile(
+          {
+            ...businessDto,
+            // A school run by an association: its licence, and its récépissé.
+            business: {
+              ...businessDto.business,
+              documents: businessDto.business.documents.slice(0, 1),
+            },
+          } as any,
+          'business',
+        ),
+      ).rejects.toThrow(/Ajoutez « Récépissé de déclaration »/);
+      expect(tx.business.create).not.toHaveBeenCalled();
+      expect(tx.profile.create).not.toHaveBeenCalled();
     });
 
     it('refuses a business without a country, or where it cannot pay (no pawaPay), before writing anything', async () => {
@@ -1966,9 +1991,13 @@ describe('ProfileService', () => {
         missingRecommended: [
           { type: 'AUTORISATION_OUVERTURE', label: expect.any(String) },
         ],
-        // The admin released before: one-paper groups.
+        // Its licence is there (the agrément); an association's legal paper
+        // is not.
         missingDocuments: [
-          [{ type: 'AUTORISATION_OUVERTURE', label: expect.any(String) }],
+          [
+            { type: 'RECEPISSE', label: expect.any(String) },
+            { type: 'ARRETE', label: expect.any(String) },
+          ],
         ],
       });
     });

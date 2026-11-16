@@ -61,9 +61,10 @@ export class BusinessDocumentInputDto {
 /**
  * The organisation, sent with POST /profile by a business sign-up (a signup
  * token proven by email) and refused from any other. Its country is the
- * profile's `countryCode`, one of the countries Rabotka Business is open in. Every document is optional;
- * which ones are recommended depends on the country and the category — see
- * business-catalog.ts.
+ * profile's `countryCode`, one of the countries Rabotka Business is open in.
+ * Which documents it must send depends on the country, the category and the
+ * legal form (`requiredDocumentsFor` in business-catalog.ts); a sign-up
+ * missing one is a 400 naming it.
  */
 export class BusinessSignupDto {
   @ApiProperty({
@@ -157,7 +158,8 @@ export class BusinessSignupDto {
 
   @ApiProperty({
     type: [BusinessDocumentInputDto],
-    description: 'May be empty.',
+    description:
+      'The papers uploaded at sign-up: at least the required ones for the category, country and legal form.',
   })
   @IsArray()
   @ArrayMaxSize(10)

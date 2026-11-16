@@ -17,6 +17,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { ProfileAuthGuard } from '../../auth/guards/profile-auth.guard';
 import { BusinessProfileGuard } from '../../auth/guards/business-profile.guard';
+import { KycVerifiedGuard } from '../../auth/guards/kyc-verified.guard';
 import type { ProfileAuthenticatedRequest } from '../../auth/guards/jwt-auth.guard';
 import { Public } from '../../auth/decorators/public.decorator';
 import { MailboxMailsQueryDto } from './dto/mailbox.dto';
@@ -50,6 +51,8 @@ export class MailboxController {
   }
 
   @Post(':provider/connect')
+  // Reaches candidates or uses the plan: only once the organisation is approved.
+  @UseGuards(KycVerifiedGuard)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({ summary: 'The consent screen to open (gmail)' })
   connect(

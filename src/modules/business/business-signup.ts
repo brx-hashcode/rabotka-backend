@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import {
   BusinessCategory,
+  BusinessDocumentType,
   BusinessLegalForm,
   ProfileType,
 } from '@prisma/client';
@@ -8,9 +9,12 @@ import type { SignupIdentity } from '../auth/signup-token';
 import {
   BUSINESS_CATEGORY_LABELS,
   BUSINESS_COUNTRIES_SENTENCE,
+  documentLabel,
   isBusinessCountry,
   legalFormFits,
   legalFormLabel,
+  identifiersFor,
+  missingRequiredDocuments,
 } from './business-catalog';
 import { assertBusinessIsEmployer } from './business-rules';
 
@@ -63,13 +67,23 @@ export function signupEntryFor(
 
 /**
  * Checks a business against the catalog before anything is written: a legal
- * form that does not fit the category is a 400 that says which. Every paper
- * is optional (the review asks for what is missing), but the country is not:
- * an organisation that works only online still has one, and it must be one
- * Rabotka Business is open in.
+ * form that does not fit the category is a 400 that says which; the country
+ * is required (an organisation that works only online still has one) and must
+ * be one Rabotka Business is open in; and the papers that prove the
+ * organisation exists there — its registration, declaration, licence or
+ * mandate, by category, country and legal form — must all be sent, with the
+ * numbers of those that carry one (N° RCCM, NIU…). A 400 names the ones still
+ * missing, in the country's words.
  */
 export function assertBusinessSignupComplete(
-  business: { category: BusinessCategory; legalForm?: BusinessLegalForm },
+  business: {
+    category: BusinessCategory;
+    legalForm?: BusinessLegalForm;
+    registrationNumber?: string | null;
+    taxId?: string | null;
+    statisticalId?: string | null;
+    documents: readonly { documentType: BusinessDocumentType }[];
+  },
   countryCode: string | null | undefined,
 ): void {
   if (
@@ -81,6 +95,36 @@ export function assertBusinessSignupComplete(
     );
   }
   assertBusinessCountry(countryCode);
+
+  const fields = identifiersFor(
+    countryCode,
+    business.category,
+    business.legalForm,
+  );
+  const unfilled = (['registrationNumber', 'taxId', 'statisticalId'] as const)
+    .map((key) => ({ key, field: fields[key] }))
+    .filter(({ key, field }) => field?.required && !business[key]?.trim());
+  if (unfilled.length > 0) {
+    throw new BadRequestException(
+      `Indiquez ${unfilled.map(({ field }) => `le ${field!.label}`).join(' et ')} de votre organisation.`,
+    );
+  }
+
+  const missing = missingRequiredDocuments(
+    countryCode,
+    business.category,
+    business.legalForm,
+    business.documents.map((d) => d.documentType),
+  );
+  if (missing.length > 0) {
+    throw new BadRequestException(
+      `Ajoutez ${missing
+        .map((group) =>
+          group.map((t) => `« ${documentLabel(countryCode, t)} »`).join(' ou '),
+        )
+        .join(' et ')} pour créer le compte de votre organisation.`,
+    );
+  }
 }
 
 /** The organisation's country: given, and one Rabotka Business is open in. */
