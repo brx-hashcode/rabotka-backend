@@ -3,7 +3,11 @@ import { ExternalApplicationStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { LayoutService } from '../../mail/layout.service';
 import { MailService } from '../../mail/mail.service';
-import { applicationClosedEmail } from '../../mail/templates/external-application';
+import {
+  applicationClosedEmail,
+  externalApplicationSubject,
+  offerLanguage,
+} from '../../mail/templates/external-application';
 
 /** Also how `apply` knows the candidate may try again on a republished offer. */
 export const CLOSED_OFFER_REFUSAL = 'Cette offre est maintenant fermée.';
@@ -29,6 +33,7 @@ export async function refuseOutsideCandidates(
       job_offer: {
         select: {
           title: true,
+          description: true,
           employer: { select: { business: { select: { name: true } } } },
         },
       },
@@ -53,7 +58,8 @@ export async function refuseOutsideCandidates(
 
     const name =
       application.job_offer.employer.business?.name ?? 'Le recruteur';
-    const subject = `Votre candidature chez ${name}`;
+    const language = offerLanguage(application.job_offer);
+    const subject = externalApplicationSubject.update(name, language);
     try {
       await deps.mail.sendMail({
         to: application.email,
@@ -63,8 +69,9 @@ export async function refuseOutsideCandidates(
             application.first_name,
             name,
             application.job_offer.title,
+            language,
           ),
-          { previewText: subject, product: 'business' },
+          { previewText: subject, product: 'business', language },
         ),
       });
     } catch (err) {

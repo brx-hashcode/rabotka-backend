@@ -11,6 +11,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { mailLanguage } from '../../mail/templates/layout';
 import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -96,7 +97,12 @@ export class TeamController {
   @Get('member')
   @ApiOperation({ summary: 'Who is signed in: name, role, holder or member' })
   async me(@Req() req: ProfileAuthenticatedRequest) {
-    return this.team.me(await this.actor(req));
+    // The app's proxy sends the language its pages are read in.
+    const header = req.headers['accept-language'];
+    return this.team.me(
+      await this.actor(req),
+      header ? mailLanguage(String(header)) : undefined,
+    );
   }
 
   @Patch('member')

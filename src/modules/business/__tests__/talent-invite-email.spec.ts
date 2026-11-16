@@ -61,4 +61,27 @@ describe('talent invite email', () => {
     });
     expect(startLine(m, NOW)).toBe('À partir du 1 décembre 2026');
   });
+
+  it('writes the invitation in English, dates in en-GB, no French left', () => {
+    const m = mail({
+      language: 'en',
+      scheduledAt: new Date('2026-11-24T08:00:00Z'),
+    });
+    const html = talentInviteEmail(m, NOW);
+    expect(html).toContain('Hello Awa,');
+    expect(html).toContain('invites you to apply for');
+    expect(html).toContain('Starts on Tuesday 24 November at 09:00');
+    expect(html).toContain('Reference:');
+    expect(html).not.toMatch(/Bonjour|vous|Référence/);
+    expect(talentInviteSubject(m, NOW)).toBe(
+      'Love Life invites you to apply — Serveuse',
+    );
+    expect(startLine({ ...m, employmentType: 'CDI' }, NOW)).toBe(
+      'From 24 November 2026',
+    );
+  });
+
+  it('stays French by default', () => {
+    expect(talentInviteEmail(mail(), NOW)).toContain('Bonjour Awa,');
+  });
 });

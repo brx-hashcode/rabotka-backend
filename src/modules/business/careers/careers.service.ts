@@ -34,13 +34,16 @@ import {
 } from '../../job-offer/offer-questions';
 import { businessSiteUrl, businessDashboardUrl } from '../../mail/audience';
 import { LayoutService } from '../../mail/layout.service';
+import type { MailLanguage } from '../../mail/templates/layout';
 import { MailService } from '../../mail/mail.service';
 import {
   applicationReceivedEmail,
   applicationRefusedEmail,
   applicationRetainCancelledEmail,
   applicationRetainedEmail,
+  externalApplicationSubject,
   newExternalApplicationEmail,
+  offerLanguage,
 } from '../../mail/templates/external-application';
 import {
   JOB_OFFER_CLOSED,
@@ -351,6 +354,7 @@ export class CareersService {
       select: {
         id: true,
         title: true,
+        description: true,
         questions: { orderBy: { position: 'asc' } },
       },
     });
@@ -472,9 +476,10 @@ export class CareersService {
         workerName: name,
       },
     });
+    const language = offerLanguage(offer);
     void this.send(
       email,
-      `Candidature envoyée à ${business.name}`,
+      externalApplicationSubject.received(business.name, language),
       applicationReceivedEmail(
         firstName,
         business.name,
@@ -482,7 +487,9 @@ export class CareersService {
         pool
           ? { until: pool.expiresAt, withdrawUrl: this.withdrawUrl(pool.token) }
           : null,
+        language,
       ),
+      language,
     );
     // To the team, as its other recruiting e-mails: the holder and every
     // member who left them on (not the organisation's contact address).
@@ -495,13 +502,18 @@ export class CareersService {
         for (const r of recipients) {
           await this.send(
             r.email,
-            `Nouvelle candidature : ${offer.title}`,
+            // To a member of the team: in the language they read the app in.
+            r.language === 'en'
+              ? `New application: ${offer.title}`
+              : `Nouvelle candidature : ${offer.title}`,
             newExternalApplicationEmail(
               name,
               offer.title,
               // The offer, where its candidates are, rather than every candidature.
               `${businessDashboardUrl()}/offres/${offer.id}`,
+              r.language,
             ),
+            r.language,
           );
         }
       })
@@ -942,14 +954,17 @@ export class CareersService {
       });
     });
     const name = await this.businessName(profileId);
+    const language = offerLanguage(application.job_offer);
     void this.send(
       application.email,
-      `Votre candidature chez ${name}`,
+      externalApplicationSubject.update(name, language),
       applicationRetainedEmail(
         application.first_name,
         name,
         application.job_offer.title,
+        language,
       ),
+      language,
     );
     return { retained: true };
   }
@@ -1000,14 +1015,17 @@ export class CareersService {
       });
     });
     const name = await this.businessName(profileId);
+    const language = offerLanguage(application.job_offer);
     void this.send(
       application.email,
-      `Votre candidature chez ${name}`,
+      externalApplicationSubject.update(name, language),
       applicationRetainCancelledEmail(
         application.first_name,
         name,
         application.job_offer.title,
+        language,
       ),
+      language,
     );
     return { retained: false };
   }
@@ -1045,15 +1063,18 @@ export class CareersService {
       },
     });
     const name = await this.businessName(profileId);
+    const language = offerLanguage(application.job_offer);
     void this.send(
       application.email,
-      `Votre candidature chez ${name}`,
+      externalApplicationSubject.update(name, language),
       applicationRefusedEmail(
         application.first_name,
         name,
         application.job_offer.title,
         refusalMessage,
+        language,
       ),
+      language,
     );
     return { refused: true };
   }
@@ -1134,7 +1155,9 @@ export class CareersService {
   private async owned(profileId: string, id: string) {
     const application = await this.prisma.externalApplication.findFirst({
       where: { id, job_offer: { employer_id: profileId } },
-      include: { job_offer: { select: { title: true } } },
+      include: {
+        job_offer: { select: { title: true, description: true } },
+      },
     });
     if (!application) throw new NotFoundException('Candidature introuvable.');
     return application;
@@ -1157,7 +1180,12 @@ export class CareersService {
   }
 
   /** Never fails the action behind it: the application is already saved. */
-  private async send(to: string | null, subject: string, content: string) {
+  private async send(
+    to: string | null,
+    subject: string,
+    content: string,
+    language: MailLanguage = 'fr',
+  ) {
     if (!to) return;
     try {
       await this.mail.sendMail({
@@ -1166,6 +1194,7 @@ export class CareersService {
         html: await this.layout.wrap(content, {
           previewText: subject,
           product: 'business',
+          language,
         }),
       });
     } catch (err) {

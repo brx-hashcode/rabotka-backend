@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
-import { escapeHtml } from '../../mail/templates/layout';
+import { escapeHtml, type MailLanguage } from '../../mail/templates/layout';
 import { lenientLines } from '../cv-screening/lenient-answer';
 import { promptIn, writtenIn, type OutputLanguage } from '../output-language';
 
@@ -180,7 +180,11 @@ export function reportMessages(c: ReportContext) {
 
 /** The report in an e-mail to the team. */
 /** The report's sections, as e-mail HTML. */
-function reportEmailSections(r: InterviewReportBody): string {
+function reportEmailSections(
+  r: InterviewReportBody,
+  language: MailLanguage = 'fr',
+): string {
+  if (language === 'en') return reportEmailSectionsEnglish(r);
   const list = (title: string, items: string[]) =>
     items.length
       ? `<p style="margin:16px 0 4px;"><strong>${title}</strong></p><ul style="margin:0;padding-left:20px;">${items
@@ -208,10 +212,59 @@ function reportEmailSections(r: InterviewReportBody): string {
   `;
 }
 
+/** The same sections with English headings: the text under them is the report's own. */
+function reportEmailSectionsEnglish(r: InterviewReportBody): string {
+  const list = (title: string, items: string[]) =>
+    items.length
+      ? `<p style="margin:16px 0 4px;"><strong>${title}</strong></p><ul style="margin:0;padding-left:20px;">${items
+          .map((x) => `<li>${escapeHtml(x)}</li>`)
+          .join('')}</ul>`
+      : '';
+  const practical = [
+    r.infosPratiques.disponibilite &&
+      `Availability: ${r.infosPratiques.disponibilite}`,
+    r.infosPratiques.pretentions &&
+      `Salary expectations: ${r.infosPratiques.pretentions}`,
+    r.infosPratiques.mobilite && `Mobility: ${r.infosPratiques.mobilite}`,
+  ].filter((x): x is string => Boolean(x));
+  return `
+    <p>${escapeHtml(r.resume)}</p>
+    ${list('Strengths', r.pointsForts)}
+    ${list('Points of attention', r.pointsDeVigilance)}
+    ${list(
+      'Key answers',
+      r.reponsesCles.map((x) => `${x.question} — ${x.reponse}`),
+    )}
+    ${list('Practical information', practical)}
+    ${r.avisRecruteur ? `<p style="margin:16px 0 4px;"><strong>Recruiter’s opinion</strong></p><p style="margin:0;">${escapeHtml(r.avisRecruteur)}</p>` : ''}
+    ${list('Next steps', r.prochainesEtapes)}
+  `;
+}
+
+type ReportEmailInfo = {
+  candidateName: string;
+  jobTitle: string;
+  when: string;
+  url: string;
+  /** The reader's language; French unless said. */
+  language?: MailLanguage;
+};
+
 export function interviewReportEmail(
   r: InterviewReportBody,
-  i: { candidateName: string; jobTitle: string; when: string; url: string },
+  i: ReportEmailInfo,
 ): string {
+  if (i.language === 'en') {
+    return `
+    <p>Hello,</p>
+    <p>Here is the report of the interview with <strong>${escapeHtml(i.candidateName)}</strong>
+      for the job <strong>${escapeHtml(i.jobTitle)}</strong> (${escapeHtml(i.when)}).</p>
+    ${reportEmailSections(r, 'en')}
+    <p style="margin-top:20px;"><a href="${escapeHtml(i.url)}">Open in Rabotka Business</a></p>
+    <p style="color:#6b7280;font-size:13px;">Written by AI from your team’s notes, then reviewed by them.</p>
+    <p>The Rabotka Business team</p>
+  `;
+  }
   return `
     <p>Bonjour,</p>
     <p>Voici le compte rendu de l’entretien avec <strong>${escapeHtml(i.candidateName)}</strong>
@@ -229,8 +282,19 @@ export function interviewReportEmail(
  */
 export function interviewReportReadyEmail(
   r: InterviewReportBody,
-  i: { candidateName: string; jobTitle: string; when: string; url: string },
+  i: ReportEmailInfo,
 ): string {
+  if (i.language === 'en') {
+    return `
+    <p>Hello,</p>
+    <p>Your report of the interview with <strong>${escapeHtml(i.candidateName)}</strong>
+      for the job <strong>${escapeHtml(i.jobTitle)}</strong> (${escapeHtml(i.when)}) is ready.</p>
+    ${reportEmailSections(r, 'en')}
+    <p style="margin-top:20px;"><a href="${escapeHtml(i.url)}">Review the report</a></p>
+    <p style="color:#6b7280;font-size:13px;">Written by AI from the video call transcript and your notes: review it before sending it to your team.</p>
+    <p>The Rabotka Business team</p>
+  `;
+  }
   return `
     <p>Bonjour,</p>
     <p>Votre compte rendu de l’entretien avec <strong>${escapeHtml(i.candidateName)}</strong>
@@ -241,6 +305,34 @@ export function interviewReportReadyEmail(
     <p>L’équipe Rabotka Business</p>
   `;
 }
+
+/** Subject and inbox preview of the two report emails, in the reader's language. */
+export const interviewReportSubject = {
+  report: (
+    candidateName: string,
+    jobTitle: string,
+    language: MailLanguage = 'fr',
+  ) =>
+    language === 'en'
+      ? `Interview report — ${candidateName} (${jobTitle})`
+      : `Compte rendu d’entretien — ${candidateName} (${jobTitle})`,
+  reportPreview: (candidateName: string, language: MailLanguage = 'fr') =>
+    language === 'en'
+      ? `Report — ${candidateName}`
+      : `Compte rendu — ${candidateName}`,
+  ready: (
+    candidateName: string,
+    jobTitle: string,
+    language: MailLanguage = 'fr',
+  ) =>
+    language === 'en'
+      ? `Your report is ready — ${candidateName} (${jobTitle})`
+      : `Votre compte rendu est prêt — ${candidateName} (${jobTitle})`,
+  readyPreview: (candidateName: string, language: MailLanguage = 'fr') =>
+    language === 'en'
+      ? `Your report is ready — ${candidateName}`
+      : `Votre compte rendu est prêt — ${candidateName}`,
+};
 
 // ── The PDF: in the style of the other Rabotka documents ─────────────────
 

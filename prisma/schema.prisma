@@ -4223,6 +4223,8 @@ model BusinessMember {
   is_owner             Boolean              @default(false)
   /// Receives the business's e-mails (new candidates, replies, expiring offers…).
   emails_on            Boolean              @default(true)
+  /// "fr" | "en": the language of its screens, followed by its e-mails.
+  language             String               @default("fr")
   invited_by_member_id String?              @db.Uuid
   invited_at           DateTime?
   joined_at            DateTime?
