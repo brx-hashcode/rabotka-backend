@@ -13,8 +13,15 @@ import {
  * mobile money: an organisation must be able to pay for its plan. Most are
  * OHADA countries, with the same legal forms everywhere and the papers' names
  * differing; the others (Kenya, Uganda, Rwanda, Zambia, Mozambique, Sierra
- * Leone) name their papers, numbers and company forms their own way. No paper
- * is required: an organisation sends what it has, the review asks for the rest.
+ * Leone) name their papers, numbers and company forms their own way.
+ *
+ * Each category has papers it must send to sign up (`required`: every group
+ * met, one paper of each group enough), then papers it is recommended or free
+ * to add. The required ones are what proves the organisation exists in its
+ * country: its registration and tax number for a company, its declaration for
+ * an association, its licence for a school or a clinic, a mandate for a public
+ * body or an embassy, which have neither. The sources, country by country, are
+ * in hashcode/docs/rabotka-backend/business-documents.md.
  */
 
 /** Headcount brackets offered at sign-up. */
@@ -220,6 +227,8 @@ type CountryRules = {
   identifiers: BusinessIdentifiers;
   /** Categories whose papers differ from the OHADA base. */
   documents: Partial<Record<BusinessCategory, DocumentList>>;
+  /** Categories whose required papers differ from the base. */
+  required?: Partial<Record<BusinessCategory, RequiredDocuments>>;
   /** Papers that do not exist there (no SCIEN / SCIET outside the Congo). */
   without: BusinessDocumentType[];
   /** Each legal form's local name, over the OHADA one. */
@@ -240,9 +249,14 @@ const DECLARED_DOCS: DocumentList = {
   recommended: ['RECEPISSE', 'STATUTS'],
   optional: ['AGREMENT', 'NIU', 'MANDATE'],
 };
+/** An NGO that also needs an agrément or a permit to operate. */
+const NGO_WITH_AGREMENT_DOCS: DocumentList = {
+  recommended: ['RECEPISSE', 'AGREMENT', 'STATUTS'],
+  optional: ['NIU', 'MANDATE'],
+};
 const AUTHORISED_DOCS: DocumentList = {
   recommended: ['AUTORISATION_OUVERTURE', 'AGREMENT'],
-  optional: ['RCCM', 'NIU', 'MANDATE'],
+  optional: ['RCCM', 'RECEPISSE', 'ARRETE', 'NIU', 'MANDATE'],
 };
 
 /**
@@ -264,7 +278,7 @@ const BASE_DOCUMENTS: Record<BusinessCategory, DocumentList> = {
   RELIGIOUS: { recommended: ['RECEPISSE', 'STATUTS'], optional: ['MANDATE'] },
   INTERNATIONAL_NGO: {
     recommended: ['AGREMENT'],
-    optional: ['NIU', 'MANDATE'],
+    optional: ['RECEPISSE', 'NIU', 'MANDATE'],
   },
   INTERNATIONAL_ORG: { recommended: ['AGREMENT'], optional: ['MANDATE'] },
   SCHOOL: AUTHORISED_DOCS,
@@ -297,11 +311,86 @@ const DECLARED: BusinessCategory[] = [
 ];
 
 /** One list of papers for several categories. */
-function sameFor(
+function sameFor<T>(
   categories: BusinessCategory[],
-  list: DocumentList,
-): Partial<Record<BusinessCategory, DocumentList>> {
+  list: T,
+): Partial<Record<BusinessCategory, T>> {
   return Object.fromEntries(categories.map((c) => [c, list]));
+}
+
+/**
+ * The papers a category must send: every group met, one paper of a group
+ * enough (`[['ARRETE', 'RECEPISSE'], ['STATUTS']]`: the arrêté or the
+ * récépissé, and the statuts).
+ */
+export type RequiredDocuments = BusinessDocumentType[][];
+
+const COMPANY_REQUIRED: RequiredDocuments = [['RCCM'], ['NIU']];
+const DECLARED_REQUIRED: RequiredDocuments = [['RECEPISSE'], ['STATUTS']];
+/** The licence of a school, a training centre or a clinic. */
+const LICENCE: BusinessDocumentType[] = ['AUTORISATION_OUVERTURE', 'AGREMENT'];
+
+/**
+ * The base: a company is registered (RCCM) with a tax number; a cooperative
+ * or a GIE registered with its statuts; an association declared (récépissé)
+ * with its statuts; an international NGO admitted to work in the country
+ * (agrément, or its registration outside OHADA) under a mandate; a school or
+ * a clinic licensed by its ministry — plus its legal paper, by legal form
+ * (`legalPaperFor`); a public body or an embassy, with no register,
+ * by a mandate or an official letter.
+ */
+const BASE_REQUIRED: Record<BusinessCategory, RequiredDocuments> = {
+  INDIVIDUAL_BUSINESS: COMPANY_REQUIRED,
+  TPE: COMPANY_REQUIRED,
+  PME: COMPANY_REQUIRED,
+  LARGE_COMPANY: COMPANY_REQUIRED,
+  STARTUP: COMPANY_REQUIRED,
+  COOPERATIVE: [['RCCM'], ['STATUTS']],
+  GIE: [['RCCM'], ['STATUTS']],
+  ASSOCIATION: DECLARED_REQUIRED,
+  NGO: DECLARED_REQUIRED,
+  FOUNDATION: DECLARED_REQUIRED,
+  RELIGIOUS: DECLARED_REQUIRED,
+  INTERNATIONAL_NGO: [['AGREMENT', 'RECEPISSE'], ['MANDATE']],
+  INTERNATIONAL_ORG: [['MANDATE']],
+  SCHOOL: [LICENCE],
+  HIGHER_EDUCATION: [LICENCE],
+  TRAINING_CENTER: [LICENCE],
+  HEALTH: [LICENCE],
+  PUBLIC_ADMINISTRATION: [['MANDATE']],
+  PUBLIC_ENTERPRISE: [['ARRETE', 'RCCM'], ['MANDATE']],
+  OTHER: [Object.values(BusinessDocumentType)],
+};
+
+/** Categories licensed by a ministry, run by a company, an association or the State. */
+const LICENSED = new Set<BusinessCategory>([
+  'SCHOOL',
+  'HIGHER_EDUCATION',
+  'TRAINING_CENTER',
+  'HEALTH',
+]);
+
+/**
+ * The legal paper a licensed category adds to its licence: the register for
+ * a company, the declaration for an association or a foundation, the act of
+ * creation for a public body; any of them when the form is not given.
+ */
+function legalPaperFor(
+  legalForm: BusinessLegalForm | null | undefined,
+): BusinessDocumentType[] {
+  switch (legalForm) {
+    case 'ASSOCIATION':
+    case 'FOUNDATION':
+      return ['RECEPISSE', 'ARRETE'];
+    case 'PUBLIC_ENTITY':
+      return ['ARRETE'];
+    case null:
+    case undefined:
+    case 'OTHER':
+      return ['RCCM', 'RECEPISSE', 'ARRETE'];
+    default:
+      return ['RCCM'];
+  }
 }
 
 /** The OHADA register number, in each country's usual shape. */
@@ -371,7 +460,7 @@ const COUNTRY_RULES: Record<BusinessCountry, CountryRules> = {
       NIU: 'Attestation NIF (numéro impôt)',
       SCIEN_SCIET: 'Identification nationale (Id. Nat.)',
       CNSS: "Attestation d'affiliation CNSS",
-      RECEPISSE: 'Récépissé de dépôt (demande de personnalité juridique)',
+      RECEPISSE: 'Récépissé F92 / autorisation provisoire de fonctionnement',
       ARRETE: 'Arrêté ministériel (personnalité juridique ou création)',
     },
     identifiers: {
@@ -389,6 +478,10 @@ const COUNTRY_RULES: Record<BusinessCountry, CountryRules> = {
         optional: ['RECEPISSE', 'AGREMENT', 'NIU', 'MANDATE'],
       }),
     },
+    // Legal personality is granted by arrêté (loi 004/2001), long after the
+    // request: until then the F92 receipt and the sector minister's provisional
+    // authorisation are what an association holds.
+    required: sameFor(DECLARED, [['ARRETE', 'RECEPISSE'], ['STATUTS']]),
     without: [],
   },
   CM: {
@@ -408,12 +501,14 @@ const COUNTRY_RULES: Record<BusinessCountry, CountryRules> = {
         optional: ['NIU', 'MANDATE'],
       },
     },
+    required: { NGO: [['RECEPISSE'], ['AGREMENT'], ['STATUTS']] },
     without: ['SCIEN_SCIET'],
   },
   GA: {
     documentLabels: {
       NIU: 'Attestation NIF',
       CNSS: "Attestation d'immatriculation CNSS",
+      RECEPISSE: 'Récépissé définitif de déclaration',
     },
     identifiers: {
       registrationNumber: rccm('GA-LBV-01-2024-B12-00123'),
@@ -438,7 +533,7 @@ const COUNTRY_RULES: Record<BusinessCountry, CountryRules> = {
   },
   CI: {
     documentLabels: {
-      NIU: 'Attestation de compte contribuable (NCC)',
+      NIU: "Déclaration fiscale d'existence (DFE, compte contribuable)",
       CNSS: "Attestation d'immatriculation CNPS",
     },
     identifiers: {
@@ -459,11 +554,16 @@ const COUNTRY_RULES: Record<BusinessCountry, CountryRules> = {
       taxId: { label: 'NINEA', placeholder: '012345678 2G3' },
       statisticalId: null,
     },
-    documents: {},
+    documents: { NGO: NGO_WITH_AGREMENT_DOCS },
+    // An NGO is an association declared, then approved by arrêté.
+    required: { NGO: [['RECEPISSE'], ['AGREMENT'], ['STATUTS']] },
     without: ['SCIEN_SCIET'],
   },
   SL: {
-    documentLabels: nonOhadaLabels('CAC', 'TIN, NRA', 'NASSIT'),
+    documentLabels: {
+      ...nonOhadaLabels('CAC', 'TIN, NRA', 'NASSIT'),
+      RECEPISSE: "Certificat d'enregistrement (MoPED pour une ONG)",
+    },
     identifiers: {
       registrationNumber: { label: "N° d'immatriculation (CAC)" },
       taxId: { label: 'TIN (NRA)' },
@@ -474,7 +574,11 @@ const COUNTRY_RULES: Record<BusinessCountry, CountryRules> = {
     ...NON_OHADA_FORMS,
   },
   KE: {
-    documentLabels: nonOhadaLabels('BRS', 'KRA PIN', 'NSSF'),
+    documentLabels: {
+      ...nonOhadaLabels('BRS', 'KRA PIN', 'NSSF'),
+      RECEPISSE:
+        "Certificat d'enregistrement (Registrar of Societies, ou PBO Authority pour une ONG)",
+    },
     identifiers: {
       registrationNumber: {
         label: "N° d'immatriculation (BRS)",
@@ -488,29 +592,49 @@ const COUNTRY_RULES: Record<BusinessCountry, CountryRules> = {
     ...NON_OHADA_FORMS,
   },
   UG: {
-    documentLabels: nonOhadaLabels('URSB', 'TIN, URA', 'NSSF'),
+    documentLabels: {
+      ...nonOhadaLabels('URSB', 'TIN, URA', 'NSSF'),
+      RECEPISSE: "Certificat d'enregistrement (NGO Bureau)",
+      AGREMENT: "Permis d'opérer (NGO permit) / licence",
+    },
     identifiers: {
       registrationNumber: { label: "N° d'immatriculation (URSB)" },
       taxId: { label: 'TIN (URA)', placeholder: '1001234567' },
       statisticalId: null,
     },
-    documents: {},
+    documents: { NGO: NGO_WITH_AGREMENT_DOCS },
+    // An NGO needs both the NGO Bureau's certificate and its permit to operate.
+    required: { NGO: [['RECEPISSE'], ['AGREMENT'], ['STATUTS']] },
     without: ['SCIEN_SCIET'],
     ...NON_OHADA_FORMS,
   },
   RW: {
-    documentLabels: nonOhadaLabels('RDB', 'TIN, RRA', 'RSSB'),
+    documentLabels: {
+      ...nonOhadaLabels('RDB', 'TIN, RRA', 'RSSB'),
+      RCCM: "Certificat d'immatriculation (RDB, avec le TIN)",
+      RECEPISSE: 'Certificat RGB (personnalité juridique ou enregistrement)',
+    },
     identifiers: {
       registrationNumber: { label: "N° d'entreprise (RDB)" },
       taxId: { label: 'TIN (RRA)', placeholder: '101234567' },
       statisticalId: null,
     },
-    documents: {},
+    // The RDB certificate carries the company code, which is the TIN: the
+    // RRA has issued no separate TIN certificate since 2015.
+    documents: sameFor(COMPANIES, {
+      recommended: ['RCCM'],
+      optional: ['NIU', 'STATUTS', 'PATENTE', 'CNSS', 'MANDATE'],
+    }),
+    required: sameFor(COMPANIES, [['RCCM']]),
     without: ['SCIEN_SCIET'],
     ...NON_OHADA_FORMS,
   },
   ZM: {
-    documentLabels: nonOhadaLabels('PACRA', 'TPIN, ZRA', 'NAPSA'),
+    documentLabels: {
+      ...nonOhadaLabels('PACRA', 'TPIN, ZRA', 'NAPSA'),
+      RECEPISSE:
+        "Certificat d'enregistrement (Registrar of Societies, ou of NGOs)",
+    },
     identifiers: {
       registrationNumber: { label: 'N° PACRA' },
       taxId: { label: 'TPIN (ZRA)', placeholder: '1001234567' },
@@ -525,6 +649,7 @@ const COUNTRY_RULES: Record<BusinessCountry, CountryRules> = {
       ...nonOhadaLabels('Conservatória', 'NUIT', 'INSS'),
       RCCM: 'Certidão de registo comercial',
       PATENTE: 'Alvará',
+      RECEPISSE: 'Despacho de reconhecimento (Boletim da República)',
     },
     identifiers: {
       registrationNumber: { label: 'N° de registo comercial' },
@@ -559,6 +684,7 @@ const COUNTRY_RULES: Record<BusinessCountry, CountryRules> = {
       recommended: ['RECEPISSE', 'AGREMENT', 'STATUTS'],
       optional: ['NIU', 'MANDATE'],
     }),
+    required: sameFor(DECLARED, [['RECEPISSE'], ['AGREMENT'], ['STATUTS']]),
     without: ['SCIEN_SCIET'],
   },
   CF: {
@@ -618,10 +744,55 @@ export function documentsFor(
   const rules = rulesFor(country);
   const list = rules.documents[category] ?? BASE_DOCUMENTS[category];
   const exists = (t: BusinessDocumentType) => !rules.without.includes(t);
+  const recommended = list.recommended.filter(exists);
+  const optional = list.optional.filter(exists);
+  // A paper some legal form requires is always one the category may send.
+  const listed = new Set([...recommended, ...optional]);
+  const requiredElsewhere = requiredDocumentsFor(country, category, 'OTHER')
+    .flat()
+    .filter((t) => !listed.has(t));
   return {
-    recommended: list.recommended.filter(exists),
-    optional: list.optional.filter(exists),
+    recommended,
+    optional: [...optional, ...new Set(requiredElsewhere)],
   };
+}
+
+/**
+ * The papers a category must send in a country, as groups: every group met,
+ * one paper of a group enough. A school, a training centre or a clinic adds
+ * the legal paper of its form to its licence (any of them when no form is
+ * given). Papers that do not exist in the country are left out, and a group
+ * left empty with them.
+ */
+export function requiredDocumentsFor(
+  country: string | null | undefined,
+  category: BusinessCategory,
+  legalForm?: BusinessLegalForm | null,
+): RequiredDocuments {
+  const rules = rulesFor(country);
+  const groups = [
+    ...(rules.required?.[category] ?? BASE_REQUIRED[category]),
+    ...(LICENSED.has(category) ? [legalPaperFor(legalForm)] : []),
+  ];
+  return groups
+    .map((group) => group.filter((t) => !rules.without.includes(t)))
+    .filter((group) => group.length > 0);
+}
+
+/**
+ * The required groups a set of provided papers does not meet — each one
+ * still to send (one paper of it).
+ */
+export function missingRequiredDocuments(
+  country: string | null | undefined,
+  category: BusinessCategory,
+  legalForm: BusinessLegalForm | null | undefined,
+  provided: readonly BusinessDocumentType[],
+): RequiredDocuments {
+  const have = new Set(provided);
+  return requiredDocumentsFor(country, category, legalForm).filter(
+    (group) => !group.some((t) => have.has(t)),
+  );
 }
 
 /** Every paper an organisation may send (a dashboard upload is checked against it). */
@@ -691,10 +862,17 @@ export type BusinessCatalog = {
     label: string;
     legalForms: BusinessLegalForm[];
     /**
-     * `required` stays for the forms released before every paper became
-     * optional: always empty.
+     * `required`: the groups to send to sign up (every group, one paper of
+     * each) when no legal form is chosen; `requiredByLegalForm` overrides it
+     * for a category whose papers depend on its form (a school run by a
+     * company, an association or the State).
      */
-    documents: DocumentList & { required: BusinessDocumentType[][] };
+    documents: DocumentList & {
+      required: RequiredDocuments;
+      requiredByLegalForm?: Partial<
+        Record<BusinessLegalForm, RequiredDocuments>
+      >;
+    };
   }[];
   legalForms: { value: BusinessLegalForm; label: string }[];
   documentTypes: { value: BusinessDocumentType; label: string }[];
@@ -705,7 +883,7 @@ export type BusinessCatalog = {
 /**
  * Everything a sign-up form needs for one country, in one answer
  * (GET /public/business/catalog?country=CG): the categories in display order,
- * with the legal forms and the papers each one is recommended to send, the
+ * with the legal forms and the papers each one must and may send, the
  * papers' and identifiers' local names, and the countries to choose from.
  */
 export function businessCatalog(
@@ -721,7 +899,18 @@ export function businessCatalog(
       value,
       label: BUSINESS_CATEGORY_LABELS[value],
       legalForms: legalFormsFor(country, value),
-      documents: { required: [], ...documentsFor(country, value) },
+      documents: {
+        ...documentsFor(country, value),
+        required: requiredDocumentsFor(country, value),
+        ...(LICENSED.has(value) && {
+          requiredByLegalForm: Object.fromEntries(
+            legalFormsFor(country, value).map((form) => [
+              form,
+              requiredDocumentsFor(country, value, form),
+            ]),
+          ),
+        }),
+      },
     })),
     legalForms: Object.values(BusinessLegalForm).map((value) => ({
       value,

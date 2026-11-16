@@ -16,7 +16,10 @@ import {
   isKnownBusinessCountry,
   LEGAL_FORMS_BY_CATEGORY,
   legalFormFits,
+  legalFormsFor,
   missingRecommendedDocuments,
+  missingRequiredDocuments,
+  requiredDocumentsFor,
 } from '../business-catalog';
 
 /**
@@ -155,19 +158,29 @@ describe('business catalog', () => {
 });
 
 describe('businessCatalog', () => {
-  it('lists every category with its forms and its papers, none required', () => {
+  it('lists every category with its forms, its papers and those it must send', () => {
     const catalog = businessCatalog();
     expect(catalog.country).toBe('CG');
     expect(catalog.categories.map((c) => c.value)).toEqual(
       Object.values(BusinessCategory),
     );
     const school = catalog.categories.find((c) => c.value === 'SCHOOL')!;
-    expect(school.documents.required).toEqual([]);
+    expect(school.documents.required).toEqual([
+      ['AUTORISATION_OUVERTURE', 'AGREMENT'],
+      ['RCCM', 'RECEPISSE', 'ARRETE'],
+    ]);
+    expect(school.documents.requiredByLegalForm?.ASSOCIATION).toEqual([
+      ['AUTORISATION_OUVERTURE', 'AGREMENT'],
+      ['RECEPISSE', 'ARRETE'],
+    ]);
     expect(school.documents.recommended).toEqual([
       'AUTORISATION_OUVERTURE',
       'AGREMENT',
     ]);
     expect(school.legalForms).toContain('ASSOCIATION');
+    const pme = catalog.categories.find((c) => c.value === 'PME')!;
+    expect(pme.documents.required).toEqual([['RCCM'], ['NIU']]);
+    expect(pme.documents.requiredByLegalForm).toBeUndefined();
   });
 
   it('speaks the country: its papers, its identifiers, the seven countries', () => {
@@ -190,5 +203,143 @@ describe('businessCatalog', () => {
     );
     expect(catalog.documentTypes.every((d) => d.label.length > 0)).toBe(true);
     expect(catalog.sizes).toEqual(['1-5', '6-20', '21-100', '100+']);
+  });
+});
+
+/**
+ * What each open country asks, the sources in
+ * hashcode/docs/rabotka-backend/business-documents.md.
+ */
+describe('required documents', () => {
+  const OPEN = [...BUSINESS_COUNTRIES];
+
+  it('covers all 13 open countries', () => {
+    expect(OPEN).toHaveLength(13);
+  });
+
+  it('asks every category in every country for something it can send', () => {
+    for (const country of OPEN) {
+      for (const category of Object.values(BusinessCategory)) {
+        const accepted = new Set(acceptedDocuments(country, category));
+        for (const form of [undefined, ...legalFormsFor(country, category)]) {
+          const required = requiredDocumentsFor(country, category, form);
+          expect(required.length).toBeGreaterThan(0);
+          for (const group of required) {
+            expect(group.length).toBeGreaterThan(0);
+            for (const t of group) {
+              // Sendable at sign-up and from the dashboard, and exists there.
+              expect([country, category, form, t, accepted.has(t)]).toEqual([
+                country,
+                category,
+                form,
+                t,
+                true,
+              ]);
+            }
+          }
+          // Sending one paper of each group is enough.
+          expect(
+            missingRequiredDocuments(
+              country,
+              category,
+              form,
+              required.map((g) => g[0]),
+            ),
+          ).toEqual([]);
+        }
+      }
+    }
+  });
+
+  it('asks a company for its registration and its tax number', () => {
+    for (const country of OPEN.filter((c) => c !== 'RW')) {
+      expect(requiredDocumentsFor(country, 'PME')).toEqual([['RCCM'], ['NIU']]);
+    }
+    // The RDB certificate carries the company code, which is the TIN.
+    expect(requiredDocumentsFor('RW', 'PME')).toEqual([['RCCM']]);
+    expect(documentsFor('RW', 'PME').optional).toContain('NIU');
+  });
+
+  it('asks an association for its declaration and its statuts', () => {
+    for (const country of OPEN.filter((c) => c !== 'CD')) {
+      expect(requiredDocumentsFor(country, 'ASSOCIATION')).toEqual([
+        ['RECEPISSE'],
+        ['STATUTS'],
+      ]);
+    }
+    expect(requiredDocumentsFor('CD', 'ASSOCIATION')).toEqual([
+      ['ARRETE', 'RECEPISSE'],
+      ['STATUTS'],
+    ]);
+  });
+
+  it('asks an NGO for its agrément or permit where the law does', () => {
+    for (const country of ['CM', 'SN', 'UG'] as const) {
+      expect(requiredDocumentsFor(country, 'NGO')).toEqual([
+        ['RECEPISSE'],
+        ['AGREMENT'],
+        ['STATUTS'],
+      ]);
+      expect(documentsFor(country, 'NGO').recommended).toContain('AGREMENT');
+    }
+    expect(requiredDocumentsFor('CG', 'NGO')).toEqual([
+      ['RECEPISSE'],
+      ['STATUTS'],
+    ]);
+  });
+
+  it('asks public bodies and embassies for a mandate', () => {
+    for (const country of OPEN) {
+      expect(requiredDocumentsFor(country, 'INTERNATIONAL_ORG')).toEqual([
+        ['MANDATE'],
+      ]);
+      expect(requiredDocumentsFor(country, 'PUBLIC_ADMINISTRATION')).toEqual([
+        ['MANDATE'],
+      ]);
+      expect(requiredDocumentsFor(country, 'PUBLIC_ENTERPRISE')).toEqual([
+        ['ARRETE', 'RCCM'],
+        ['MANDATE'],
+      ]);
+      expect(requiredDocumentsFor(country, 'INTERNATIONAL_NGO')).toEqual([
+        ['AGREMENT', 'RECEPISSE'],
+        ['MANDATE'],
+      ]);
+    }
+  });
+
+  it('asks a school or a clinic for its licence and its legal paper', () => {
+    expect(requiredDocumentsFor('KE', 'HEALTH', 'SARL')).toEqual([
+      ['AUTORISATION_OUVERTURE', 'AGREMENT'],
+      ['RCCM'],
+    ]);
+    expect(requiredDocumentsFor('SN', 'SCHOOL', 'PUBLIC_ENTITY')).toEqual([
+      ['AUTORISATION_OUVERTURE', 'AGREMENT'],
+      ['ARRETE'],
+    ]);
+  });
+
+  it('accepts any paper from « Autre organisation »', () => {
+    expect(missingRequiredDocuments('ZM', 'OTHER', null, ['OTHER'])).toEqual(
+      [],
+    );
+    expect(missingRequiredDocuments('ZM', 'OTHER', null, [])).toHaveLength(1);
+  });
+
+  it("names each paper in the country's words", () => {
+    expect(documentLabel('CI', 'NIU')).toMatch(/DFE/);
+    expect(documentLabel('GA', 'RECEPISSE')).toMatch(/définitif/);
+    expect(documentLabel('UG', 'AGREMENT')).toMatch(/NGO permit/);
+    expect(documentLabel('RW', 'RCCM')).toMatch(/RDB, avec le TIN/);
+    expect(documentLabel('MZ', 'RECEPISSE')).toMatch(/Boletim da República/);
+    expect(documentLabel('KE', 'RECEPISSE')).toMatch(/PBO Authority/);
+    expect(documentLabel('SL', 'RECEPISSE')).toMatch(/MoPED/);
+  });
+
+  it("keeps the closed countries' rules for those registered there", () => {
+    expect(requiredDocumentsFor('TD', 'ASSOCIATION')).toEqual([
+      ['RECEPISSE'],
+      ['AGREMENT'],
+      ['STATUTS'],
+    ]);
   });
 });

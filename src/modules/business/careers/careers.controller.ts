@@ -25,6 +25,7 @@ import type { Response } from 'express';
 import { sendPrivateFile } from '../../profile/send-private-file';
 import { Public } from '../../auth/decorators/public.decorator';
 import { BusinessProfileGuard } from '../../auth/guards/business-profile.guard';
+import { KycVerifiedGuard } from '../../auth/guards/kyc-verified.guard';
 import { ProfileAuthGuard } from '../../auth/guards/profile-auth.guard';
 import { CareersService } from './careers.service';
 import {
@@ -154,6 +155,8 @@ export class ExternalApplicationsController {
   }
 
   @Post('analyse')
+  // Reaches candidates or uses the plan: only once the organisation is approved.
+  @UseGuards(KycVerifiedGuard)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({
     summary: 'Score these CVs; each uses one of the plan’s « CV inclus »',

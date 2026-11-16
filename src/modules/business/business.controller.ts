@@ -32,6 +32,7 @@ import { ALLOWED_IMAGE_MIME_TYPES } from '../../common/constants/image-upload';
 import { sniffFileType } from '../../common/utils/file-signature.util';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { BusinessProfileGuard } from '../auth/guards/business-profile.guard';
+import { KycVerifiedGuard } from '../auth/guards/kyc-verified.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { ProfileService } from '../profile/profile.service';
 import { sendPrivateFile } from '../profile/send-private-file';
@@ -180,6 +181,8 @@ export class BusinessController {
   }
 
   @Post('me/contacts/:workerId')
+  // Reaches candidates or uses the plan: only once the organisation is approved.
+  @UseGuards(KycVerifiedGuard)
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
     summary: 'Reveal a worker from the search, on the plan quota',
@@ -244,6 +247,8 @@ export class BusinessController {
   }
 
   @Post('me/talents/candidates/:kind/:id/invite')
+  // Reaches candidates or uses the plan: only once the organisation is approved.
+  @UseGuards(KycVerifiedGuard)
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
     summary:
@@ -278,6 +283,8 @@ export class BusinessController {
   }
 
   @Post('me/talents/:workerId/invite')
+  // Reaches candidates or uses the plan: only once the organisation is approved.
+  @UseGuards(KycVerifiedGuard)
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
     summary: 'Invite a worker to apply to one of its open offers',
