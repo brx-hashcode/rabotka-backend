@@ -9,6 +9,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { mailLanguage, type MailLanguage } from '../../mail/templates/layout';
 import {
   Prisma,
   type BusinessMember,
@@ -156,7 +157,16 @@ export class TeamService {
 
   // ── Me ───────────────────────────────────────────────────────────────
 
-  async me(actor: TeamActor) {
+  /**
+   * `language`: the language the app is read in right now (the request's
+   * Accept-Language). Kept on the member, so their e-mails follow it.
+   */
+  async me(actor: TeamActor, language?: MailLanguage) {
+    if (language && actor.member.language !== language) {
+      await this.prisma.businessMember
+        .update({ where: { id: actor.member.id }, data: { language } })
+        .catch(() => undefined);
+    }
     const business = await this.prisma.business.findUniqueOrThrow({
       where: { id: actor.businessId },
       select: { name: true },
@@ -260,6 +270,8 @@ export class TeamService {
       role: dto.role,
       status: 'INVITED' as const,
       emails_on: dto.role !== 'REVIEWER',
+      // Until they open the app themselves: the language of who invites them.
+      language: mailLanguage(actor.member.language),
       invited_by_member_id: actor.member.id,
       invited_at: now,
       joined_at: null,
@@ -547,10 +559,11 @@ export class TeamService {
     });
     const origin = businessDashboardUrl().replace(/\/espace$/, '');
     const signInUrl = `${origin}/auth/sign-in?email=${encodeURIComponent(member.email)}`;
+    const language = mailLanguage(member.language);
     try {
       await this.mail.sendMail({
         to: member.email,
-        subject: businessTeamInviteSubject(business.name),
+        subject: businessTeamInviteSubject(business.name, language),
         html: await this.layout.wrap(
           businessTeamInviteEmail({
             name: member.name,
@@ -558,10 +571,12 @@ export class TeamService {
             businessName: business.name,
             role: member.role,
             signInUrl,
+            language,
           }),
           {
-            previewText: businessTeamInviteSubject(business.name),
+            previewText: businessTeamInviteSubject(business.name, language),
             product: 'business',
+            language,
           },
         ),
       });
