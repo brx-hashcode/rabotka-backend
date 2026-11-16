@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { escapeHtml } from '../../mail/templates/layout';
 import { lenientLines } from '../cv-screening/lenient-answer';
+import { promptIn, writtenIn, type OutputLanguage } from '../output-language';
 
 /**
  * « Compte rendu d'entretien »: what the AI writes from the team's notes.
@@ -116,6 +117,29 @@ const SYSTEM = [
 export const REPORT_JSON_REMINDER =
   'Ta réponse n’était pas l’objet JSON demandé. Réponds uniquement par cet objet JSON, sans texte autour.';
 
+/** The report in the job's language. */
+export function reportPrompt(language: OutputLanguage): string {
+  return promptIn(SYSTEM, language, {
+    replace: [
+      [
+        '- Français clair et professionnel, phrases courtes, sans formules creuses.',
+        '- Clear, professional English, short sentences, no empty phrases.',
+      ],
+    ],
+    directive:
+      'LANGUAGE: the job is in English, so write every text value of the report ENTIRELY IN ENGLISH, even where the notes or the transcript are in French. Keep the JSON keys exactly as shown (resume, pointsForts…).',
+  });
+}
+
+/** The language a report is written in: the job's, else the team's notes'. */
+export function reportLanguage(c: ReportContext): OutputLanguage {
+  return writtenIn(
+    c.offerDescription ? `${c.jobTitle}\n${c.offerDescription}` : null,
+    c.notes,
+    c.jobTitle,
+  );
+}
+
 export function reportMessages(c: ReportContext) {
   const context = [
     `Poste : ${c.jobTitle} (${c.businessName})`,
@@ -143,7 +167,7 @@ export function reportMessages(c: ReportContext) {
     .filter(Boolean)
     .join('\n\n');
   return [
-    new SystemMessage(SYSTEM),
+    new SystemMessage(reportPrompt(reportLanguage(c))),
     new HumanMessage(
       `CONTEXTE\n${context}\n\nNOTES DE L’ÉQUIPE SUR L’ENTRETIEN\n${c.notes.slice(0, MAX_NOTES) || '(aucune)'}${
         c.transcript
