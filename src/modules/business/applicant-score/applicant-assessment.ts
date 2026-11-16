@@ -1,4 +1,5 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { promptIn, writtenIn, type OutputLanguage } from '../output-language';
 import { z } from 'zod';
 import { numberish } from '../cv-screening/lenient-answer';
 
@@ -76,6 +77,20 @@ const SYSTEM_PROMPT = [
   'strengths et gaps : au plus trois chacun, courts, concrets et liés à l’offre.',
 ].join('\n');
 
+/** The assessment in the offer's language: summary, strengths and gaps. */
+export function applicantPrompt(language: OutputLanguage): string {
+  return promptIn(SYSTEM_PROMPT, language, {
+    replace: [
+      [
+        'Réponds UNIQUEMENT par un objet JSON, en français :',
+        'Réponds UNIQUEMENT par un objet JSON :',
+      ],
+    ],
+    directive:
+      'LANGUAGE: the job offer is in English, so write summary, strengths and gaps ENTIRELY IN ENGLISH. Keep the JSON keys exactly as shown.',
+  });
+}
+
 const day = (d: Date) => d.toISOString().slice(0, 10);
 
 export function applicantMessages(offer: OfferFacts, a: ApplicantFacts) {
@@ -122,8 +137,9 @@ export function applicantMessages(offer: OfferFacts, a: ApplicantFacts) {
   ]
     .filter(Boolean)
     .join('\n');
+  const language = writtenIn(`${offer.title}\n${offer.description}`);
   return [
-    new SystemMessage(SYSTEM_PROMPT),
+    new SystemMessage(applicantPrompt(language)),
     new HumanMessage(`${offerText}\n\n---\nProfil du candidat :\n${profile}`),
   ];
 }

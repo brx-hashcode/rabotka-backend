@@ -1,5 +1,6 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { z } from 'zod';
+import { promptIn, writtenIn, type OutputLanguage } from '../output-language';
 import { booleanish, numberish } from './lenient-answer';
 import {
   experienceMonths,
@@ -244,6 +245,20 @@ const SYSTEM_PROMPT = [
   'strengths et gaps : au plus trois chacun, concrets et liés à l’offre. Mets null pour une information du candidat absente du CV.',
 ].join('\n');
 
+/** The analysis in the job's language: summary, strengths and gaps. */
+export function assessmentPrompt(language: OutputLanguage): string {
+  return promptIn(SYSTEM_PROMPT, language, {
+    replace: [
+      [
+        'Réponds UNIQUEMENT par un objet JSON, en français, de cette forme :',
+        'Réponds UNIQUEMENT par un objet JSON de cette forme :',
+      ],
+    ],
+    directive:
+      'LANGUAGE: the job offer is in English, so write summary, strengths and gaps ENTIRELY IN ENGLISH. Keep the JSON keys and the codes (FULL_TIME, HIGH…) exactly as shown, and copy names, job titles and employers as the CV writes them.',
+  });
+}
+
 /** A candidate's answer to one of the offer's questions, as the AI reads it. */
 export type ApplicationAnswerNote = {
   question: string;
@@ -304,7 +319,11 @@ export function assessmentMessages(
                 data: cv.base64,
               },
         ];
-  return [new SystemMessage(SYSTEM_PROMPT), new HumanMessage({ content })];
+  const language = writtenIn(`${job.title}\n${job.text}`);
+  return [
+    new SystemMessage(assessmentPrompt(language)),
+    new HumanMessage({ content }),
+  ];
 }
 
 /** The follow-up when the first answer was not the JSON asked for. */

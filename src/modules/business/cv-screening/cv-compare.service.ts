@@ -25,11 +25,15 @@ import {
   ANSWER_STYLE,
   CHAT_RULES,
   CvChatService,
+  READY,
+  chatLanguage,
+  chatPrompt,
   HISTORY_TURNS,
   careerOf,
   reportCandidate,
   view,
 } from './cv-chat.service';
+import type { OutputLanguage } from '../output-language';
 import { answersBlock, readApplicationAnswers } from './cv-assessment';
 import type { ChatReportInput } from './cv-chat-report';
 
@@ -52,6 +56,7 @@ const SYSTEM_PROMPT = [
 ].join('\n');
 
 export type CvCompareTurn = {
+  language: OutputLanguage;
   comparisonId: string;
   messages: BaseMessage[];
   remaining: number;
@@ -229,12 +234,23 @@ export class CvCompareService {
           ? new HumanMessage(m.content)
           : new AIMessage(m.content),
       );
+    const language = chatLanguage(
+      text,
+      comparison.messages
+        .filter((m) => m.role === CvChatRole.USER)
+        .map((m) => m.content),
+      {
+        title: comparison.screening.job_title,
+        text: comparison.screening.job_text,
+      },
+    );
     return {
+      language,
       comparisonId: comparison.id,
       questionId: saved.id,
       remaining: limit - before - 1,
       messages: [
-        new SystemMessage(SYSTEM_PROMPT),
+        new SystemMessage(chatPrompt(SYSTEM_PROMPT, language)),
         new HumanMessage(
           contextText(
             {
@@ -247,7 +263,7 @@ export class CvCompareService {
             resumes.map((r, i) => ({ resume: r, text: texts[i] })),
           ),
         ),
-        new AIMessage('Bien noté. Quelle est votre question ?'),
+        new AIMessage(READY[language]),
         ...history,
         new HumanMessage(text),
       ],
@@ -257,6 +273,7 @@ export class CvCompareService {
   answer(turn: CvCompareTurn, signal: AbortSignal): AsyncGenerator<string> {
     const comparisonId = turn.comparisonId;
     return this.chat.streamReply(turn.messages, comparisonId, signal, {
+      language: turn.language,
       save: async (content) => {
         await this.prisma.cvComparisonMessage.create({
           data: {

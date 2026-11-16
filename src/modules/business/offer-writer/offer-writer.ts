@@ -1,6 +1,7 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { z } from 'zod';
 import { lenientLines } from '../cv-screening/lenient-answer';
+import { promptIn, writtenIn, type OutputLanguage } from '../output-language';
 
 /**
  * « Rédiger avec l'IA »: an offer written from a few words, in the shape the
@@ -102,6 +103,23 @@ const SYSTEM_PROMPT = [
   '{"title": "…", "description": "Qui sommes-nous\\n…", "categoryName": "…", "employmentType": "MISSION", "removed": [], "toConfirm": ["la rémunération"]}',
 ].join('\n');
 
+/** The offer in the language the organisation wrote its request in. */
+export function draftPrompt(language: OutputLanguage): string {
+  return promptIn(SYSTEM_PROMPT, language, {
+    replace: [
+      [
+        'rédige une offre complète, concrète et engageante, en français simple, au vouvoiement, avec des phrases courtes.',
+        'rédige une offre complète, concrète et engageante, en anglais simple, avec des phrases courtes.',
+      ],
+    ],
+    directive: [
+      'LANGUAGE: the organisation wrote its request in English, so write the title, the description, removed and toConfirm ENTIRELY IN ENGLISH. Address the candidate as "you".',
+      'Same structure, with these headings in this order: « About us », « The role », « Your responsibilities », « Who we are looking for » (with « Education: », « Experience: », « Skills: », « Qualities: »), « Conditions », « How to apply » — whose line is exactly « Apply directly online on Rabotka. ».',
+      'toConfirm items in English too (for example « the pay », « the hours », « the start date »). categoryName stays exactly a name from the list given, and employmentType one of the codes.',
+    ].join('\n'),
+  });
+}
+
 export function draftMessages(input: OfferBrief, trades: string[]) {
   const facts = [
     input.title ? `Intitulé saisi : ${input.title}` : null,
@@ -118,7 +136,9 @@ export function draftMessages(input: OfferBrief, trades: string[]) {
     input.countryName ? `Pays : ${input.countryName}` : null,
   ].filter(Boolean);
   return [
-    new SystemMessage(SYSTEM_PROMPT),
+    new SystemMessage(
+      draftPrompt(writtenIn(`${input.title ?? ''}\n${input.brief}`)),
+    ),
     new HumanMessage(
       `Métiers possibles :\n${trades.join(' ; ')}\n\n---\n${facts.join('\n')}\n\nDemande de l'organisation :\n${input.brief}`,
     ),

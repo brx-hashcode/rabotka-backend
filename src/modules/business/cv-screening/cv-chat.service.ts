@@ -30,6 +30,12 @@ import {
 import { CvScreeningService } from './cv-screening.service';
 import type { ChatReportCandidate, ChatReportInput } from './cv-chat-report';
 import { experiencesText, type CvExperience } from './cv-experience';
+import {
+  languageOf,
+  promptIn,
+  writtenIn,
+  type OutputLanguage,
+} from '../output-language';
 
 /** The turns sent back with each question: enough to follow up, not a whole afternoon. */
 export const HISTORY_TURNS = 12;
@@ -41,12 +47,52 @@ export const OFF_TOPIC = 'HORS_SUJET';
 
 /** A question outside the scope: refused, and not counted. */
 export class OffTopicError extends Error {
-  constructor() {
+  constructor(language: OutputLanguage = 'fr') {
     super(
-      'Cette question sort du cadre de ce recrutement : je réponds uniquement sur ces candidats et ce poste (parcours, compétences, adéquation au poste, entretien). Elle n’est pas décomptée.',
+      language === 'en'
+        ? 'This question is outside this recruitment: I only answer about these candidates and this job (background, skills, fit for the job, interview). It does not count.'
+        : 'Cette question sort du cadre de ce recrutement : je réponds uniquement sur ces candidats et ce poste (parcours, compétences, adéquation au poste, entretien). Elle n’est pas décomptée.',
     );
   }
 }
+
+/**
+ * The language of an answer: the question's, else the last earlier question
+ * that shows one, else the job's. A recruiter who asks in English is answered
+ * in English, about a French job or not.
+ */
+export function chatLanguage(
+  question: string,
+  pastQuestions: string[],
+  job: { title: string; text: string },
+): OutputLanguage {
+  const asked = languageOf(question);
+  if (asked) return asked;
+  for (let i = pastQuestions.length - 1; i >= 0; i--) {
+    const before = languageOf(pastQuestions[i]);
+    if (before) return before;
+  }
+  return writtenIn(`${job.title}\n${job.text}`);
+}
+
+/** A chat prompt in the answer's language. */
+export function chatPrompt(prompt: string, language: OutputLanguage): string {
+  return promptIn(prompt, language, {
+    replace: [
+      [
+        'Réponds toujours en français, même si la question est posée dans une autre langue.',
+        'Réponds toujours en anglais.',
+      ],
+    ],
+    directive: `LANGUAGE: ANSWER ENTIRELY IN ENGLISH, including the short bold headings (**Strengths**, **Gaps**, **To check in the interview**) and « A good answer shows: … ». The marker ${OFF_TOPIC} stays exactly as written.`,
+  });
+}
+
+/** The assistant's first line, before the history. */
+export const READY = {
+  fr: 'Bien noté. Quelle est votre question ?',
+  en: 'Noted. What is your question?',
+} as const;
 
 /** The rules every conversation about CVs keeps, whatever it is about. */
 export const CHAT_RULES = [
@@ -99,6 +145,7 @@ export type CvChatMessage = {
 
 export type CvChatTurn = {
   resume: CvScreeningResume;
+  language: OutputLanguage;
   messages: BaseMessage[];
   remaining: number;
   /** The question saved for this turn: the one taken back if nothing came. */
@@ -265,12 +312,18 @@ export class CvChatService {
           ? new HumanMessage(m.content)
           : new AIMessage(m.content),
       );
+    const language = chatLanguage(
+      text,
+      past.filter((m) => m.role === CvChatRole.USER).map((m) => m.content),
+      { title: screening.job_title, text: screening.job_text },
+    );
     return {
       resume,
+      language,
       questionId: saved.id,
       remaining: limit - before - 1,
       messages: [
-        new SystemMessage(SYSTEM_PROMPT),
+        new SystemMessage(chatPrompt(SYSTEM_PROMPT, language)),
         contextMessage(
           {
             title: screening.job_title,
@@ -280,7 +333,7 @@ export class CvChatService {
           resume,
           cvText,
         ),
-        new AIMessage('Bien noté. Quelle est votre question ?'),
+        new AIMessage(READY[language]),
         ...history,
         new HumanMessage(text),
       ],
@@ -295,6 +348,7 @@ export class CvChatService {
   answer(turn: CvChatTurn, signal: AbortSignal): AsyncGenerator<string> {
     const resumeId = turn.resume.id;
     return this.streamReply(turn.messages, resumeId, signal, {
+      language: turn.language,
       save: async (content) => {
         await this.prisma.cvResumeMessage.create({
           data: { resume_id: resumeId, role: CvChatRole.ASSISTANT, content },
@@ -320,6 +374,8 @@ export class CvChatService {
     correlationId: string,
     signal: AbortSignal,
     store: {
+      /** The refusal's language, when the question is off topic. */
+      language?: OutputLanguage;
       save: (text: string) => Promise<void>;
       takeBack: () => Promise<void>;
     },
@@ -369,7 +425,7 @@ export class CvChatService {
         await store.save(text.replaceAll(OFF_TOPIC, '').trim() || text.trim());
       } else if (signal.aborted) await store.takeBack();
     }
-    if (offTopic) throw new OffTopicError();
+    if (offTopic) throw new OffTopicError(store.language);
   }
 
   /**
