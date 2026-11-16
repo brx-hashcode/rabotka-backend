@@ -41,6 +41,12 @@ import {
 export const HISTORY_TURNS = 12;
 /** Longest wait for the next piece of the answer before the next model gets its turn. */
 const IDLE_MS = 30_000;
+/**
+ * Longest wait for an answer to START before the next model gets its turn. A
+ * busy provider that accepts the question and then says nothing held the
+ * reader for the whole idle wait, once per provider.
+ */
+const FIRST_MS = 8_000;
 
 /** What the model answers, alone, to a question outside the conversation's scope. */
 export const OFF_TOPIC = 'HORS_SUJET';
@@ -389,6 +395,7 @@ export class CvChatService {
       for await (const chunk of this.llm.stream(messages, {
         tier: 'writing',
         idleMs: IDLE_MS,
+        firstMs: FIRST_MS,
         signal,
         correlationId,
       })) {
