@@ -17,6 +17,7 @@ export class JobCategoryService {
       select: {
         id: true,
         name: true,
+        name_en: true,
         slug: true,
         description: true,
         icon: true,
@@ -44,6 +45,7 @@ export class JobCategoryService {
         select: {
           id: true,
           name: true,
+          name_en: true,
           slug: true,
           description: true,
           icon: true,
@@ -96,6 +98,7 @@ export class JobCategoryService {
     return this.prisma.jobCategory.create({
       data: {
         name: dto.name,
+        name_en: dto.name_en || null,
         slug: dto.slug,
         description: dto.description ?? null,
         icon: dto.icon ?? null,
@@ -103,6 +106,7 @@ export class JobCategoryService {
       select: {
         id: true,
         name: true,
+        name_en: true,
         slug: true,
         description: true,
         icon: true,
@@ -126,10 +130,12 @@ export class JobCategoryService {
 
     return this.prisma.jobCategory.update({
       where: { id },
-      data: dto,
+      // An English name cleared in the form: back to the French one.
+      data: { ...dto, ...(dto.name_en === '' ? { name_en: null } : {}) },
       select: {
         id: true,
         name: true,
+        name_en: true,
         slug: true,
         description: true,
         icon: true,

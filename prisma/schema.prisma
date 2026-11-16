@@ -1214,6 +1214,8 @@ model JobCategory {
   id          String   @id @default(uuid()) @db.Uuid
   created_at  DateTime @default(now())
   name        String   @unique
+  /// Shown to businesses reading in English; null: the French name.
+  name_en     String?
   slug        String   @unique
   description String?
   icon        String?
