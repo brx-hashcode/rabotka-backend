@@ -9,9 +9,11 @@ import { RecurrenceDto } from './dto/recurrence.dto';
 import { EventEditScope } from './enums/event-edit-scope.enum';
 import { EventSeriesService } from './services/event-series.service';
 import { resolveEventWindow } from './utils/event-window.util';
+import { visioRoomFor } from './utils/event-visio.util';
 import { DeliveryChannel, Prisma } from '@prisma/client';
 import { NotificationService } from '../notification/notification.service';
 import { EventNotificationDispatcher } from './services/event-notification.dispatcher';
+import { EventVisioService } from './services/event-visio.service';
 import type { EventNotificationRecipient } from './interfaces/event-notification.interfaces';
 
 const eventInclude = {
@@ -48,6 +50,8 @@ function mapEvent(event: any) {
     color: event.color,
     channel: event.channel,
     location: event.location ?? null,
+    // The room only: each person joins it their own way (see EventVisioService).
+    visioRoom: event.visio_room ?? null,
     createdAt: event.created_at.toISOString(),
     updatedAt: event.updated_at.toISOString(),
     // Null on every event that predates recurrence, and on every one-off since.
@@ -86,6 +90,7 @@ export class EventService {
     private readonly dispatcher: EventNotificationDispatcher,
     private readonly eventEmitter: EventEmitter2,
     private readonly series: EventSeriesService,
+    private readonly visio: EventVisioService,
   ) {}
 
   async list(dto: ListEventsDto) {
@@ -154,6 +159,7 @@ export class EventService {
             color: dto.color,
             channel: dto.channel ?? DeliveryChannel.EMAIL,
             location: dto.location ?? null,
+            visio_room: visioRoomFor(dto.visio, null),
             created_by_id: createdById,
             profiles: dto.profileIds?.length
               ? { connect: dto.profileIds.map((id) => ({ id })) }
@@ -176,17 +182,7 @@ export class EventService {
       timestamp: new Date().toISOString(),
     });
 
-    const recipients: EventNotificationRecipient[] = [
-      ...event.profiles.map((p: any) => ({
-        email: p.email,
-        phone: p.phone,
-        name: `${p.first_name} ${p.last_name}`.trim(),
-      })),
-      ...event.assigned_users.map((u: any) => ({
-        email: u.email,
-        name: `${u.first_name} ${u.last_name}`.trim(),
-      })),
-    ];
+    const recipients = this.recipientsOf(event);
 
     // One dispatch, whether this created 1 row or 120. It sits here rather than
     // inside the series writer precisely so it cannot end up inside the loop.
@@ -248,7 +244,9 @@ export class EventService {
 
       const mapped = mapEvent(pivot);
       this.emitUpdated(mapped);
-      if (datesChanged) this.dispatchUpdated(pivot, mapped, dto);
+      // New dates, or a visio just added: everyone gets the new details (and their link).
+      if (datesChanged || (!existing.visioRoom && mapped.visioRoom))
+        this.dispatchUpdated(pivot, mapped, dto);
       return mapped;
     }
 
@@ -267,6 +265,9 @@ export class EventService {
         ...(dto.color !== undefined && { color: dto.color }),
         ...(dto.channel !== undefined && { channel: dto.channel }),
         ...(dto.location !== undefined && { location: dto.location }),
+        ...(dto.visio !== undefined && {
+          visio_room: visioRoomFor(dto.visio, existing.visioRoom),
+        }),
         ...(dto.profileIds !== undefined && {
           profiles: { set: dto.profileIds.map((pid) => ({ id: pid })) },
         }),
@@ -280,7 +281,8 @@ export class EventService {
     const mapped = mapEvent(event);
 
     this.emitUpdated(mapped);
-    if (datesChanged) this.dispatchUpdated(event, mapped, dto);
+    if (datesChanged || (!existing.visioRoom && mapped.visioRoom))
+      this.dispatchUpdated(event, mapped, dto);
 
     return mapped;
   }
@@ -310,6 +312,27 @@ export class EventService {
     );
   }
 
+  /**
+   * Who is told about the event. With a visio, each profile gets their own
+   * link (it only opens this room, as them); admins open it from the admin.
+   */
+  private recipientsOf(event: any): EventNotificationRecipient[] {
+    const room: string | null = event.visio_room ?? null;
+    return [
+      ...event.profiles.map((p: any) => ({
+        email: p.email,
+        phone: p.phone,
+        name: `${p.first_name} ${p.last_name}`.trim(),
+        ...(room ? { visioUrl: this.visio.profileLink(room, p.id) } : {}),
+      })),
+      ...event.assigned_users.map((u: any) => ({
+        email: u.email,
+        name: `${u.first_name} ${u.last_name}`.trim(),
+        ...(room ? { visioInAdmin: true } : {}),
+      })),
+    ];
+  }
+
   private emitUpdated(mapped: ReturnType<typeof mapEvent>) {
     this.eventEmitter.emit(AdminNotificationEvent.EVENT_UPDATED, {
       event: AdminNotificationEvent.EVENT_UPDATED,
@@ -335,17 +358,7 @@ export class EventService {
     mapped: ReturnType<typeof mapEvent>,
     dto: UpdateEventDto,
   ) {
-    const recipients: EventNotificationRecipient[] = [
-      ...event.profiles.map((p: any) => ({
-        email: p.email,
-        phone: p.phone,
-        name: `${p.first_name} ${p.last_name}`.trim(),
-      })),
-      ...event.assigned_users.map((u: any) => ({
-        email: u.email,
-        name: `${u.first_name} ${u.last_name}`.trim(),
-      })),
-    ];
+    const recipients = this.recipientsOf(event);
 
     void this.dispatcher.dispatchEventUpdated(
       recipients,

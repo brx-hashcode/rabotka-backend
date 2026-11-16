@@ -46,7 +46,11 @@ function setup(row: Record<string, unknown> | null = interview(), count = 0) {
     businessMember: {
       findFirst: jest.fn().mockResolvedValue({ name: 'Paul Recruteur' }),
     },
+    business: {
+      findUnique: jest.fn().mockResolvedValue({ profile_id: 'p-business' }),
+    },
   };
+  const events = { emit: jest.fn() };
   const subscriptions = {
     businessOf: jest.fn().mockResolvedValue('b1'),
     entitlements: jest.fn().mockResolvedValue({ videoInterviews: true }),
@@ -54,8 +58,9 @@ function setup(row: Record<string, unknown> | null = interview(), count = 0) {
   const service = new InterviewTranscriptService(
     prisma as never,
     subscriptions as never,
+    events as never,
   );
-  return { service, prisma, subscriptions };
+  return { service, prisma, subscriptions, events };
 }
 
 const written = (prisma: ReturnType<typeof setup>['prisma']) =>
@@ -79,6 +84,21 @@ describe('InterviewTranscriptService', () => {
         text: 'Et vos disponibilités ?',
       }),
     ]);
+  });
+
+  it('tells the business’s open pages the moment sentences are saved', async () => {
+    const { service, events } = setup();
+    await service.addHostLines(actor, 'i1', [{ text: 'Bonjour' }]);
+    expect(events.emit).toHaveBeenCalledWith('interview.transcript-lines', {
+      profileId: 'p-business',
+      interviewId: 'i1',
+    });
+  });
+
+  it('announces nothing when no sentence was kept', async () => {
+    const { service, events } = setup();
+    await service.addHostLines(actor, 'i1', [{ text: '   ' }]);
+    expect(events.emit).not.toHaveBeenCalled();
   });
 
   it('keeps the candidate’s sentences only once they accepted', async () => {
@@ -176,6 +196,52 @@ describe('InterviewTranscriptService', () => {
     prisma.interview.update.mockClear();
     await service.answer(ROOM, true, 'tok');
     expect(prisma.interview.update).not.toHaveBeenCalled();
+  });
+
+  describe('the call’s captions, from our Jitsi', () => {
+    it('names the business, the candidate and anyone else', async () => {
+      const { service, prisma } = setup(
+        interview({ transcribe: false, transcript_consent: null }),
+      );
+      await service.addCallLines(actor, 'i1', [
+        { text: 'Bonjour Awa', self: true },
+        { text: 'Bonjour', speaker: 'awa  DIOP' },
+        { text: 'Moi aussi', speaker: 'Marie Ngoma' },
+        { text: 'Sans nom' },
+      ]);
+      expect(written(prisma).map((l) => [l.speaker, l.role, l.text])).toEqual([
+        ['Paul Recruteur', 'HOST', 'Bonjour Awa'],
+        ['awa DIOP', 'CANDIDATE', 'Bonjour'],
+        ['Marie Ngoma', 'GUEST', 'Moi aussi'],
+        ['Awa Diop', 'CANDIDATE', 'Sans nom'],
+      ]);
+      // No « Transcrire » to switch on, no consent to wait for: marked as transcribed.
+      expect(prisma.interview.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { transcribe: true } }),
+      );
+    });
+
+    it('needs the plan, a Rabotka visio, and the interview still on', async () => {
+      const noPlan = setup();
+      noPlan.subscriptions.entitlements.mockResolvedValue({
+        videoInterviews: false,
+      });
+      await expect(
+        noPlan.service.addCallLines(actor, 'i1', [{ text: 'x', self: true }]),
+      ).rejects.toThrow('formules supérieures');
+      await expect(
+        setup(
+          interview({ location: 'https://meet.google.com/abc-defg-hij' }),
+        ).service.addCallLines(actor, 'i1', [{ text: 'x' }]),
+      ).rejects.toThrow('visio Rabotka');
+      await expect(
+        setup(interview({ ended_at: new Date() })).service.addCallLines(
+          actor,
+          'i1',
+          [{ text: 'x' }],
+        ),
+      ).rejects.toThrow('terminé');
+    });
   });
 });
 

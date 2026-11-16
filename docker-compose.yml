@@ -129,10 +129,186 @@ services:
     networks:
       - rabotka_network
 
+  # ── Visio: our own Jitsi, for local development only (deployed develop and
+  # production use visio.hashcode.digital). The four docker-jitsi-meet
+  # services, JWT on: a room opens only with a token the API signs
+  # (JITSI_DOMAIN=localhost:8443, JITSI_APP_ID=rabotka and
+  # JITSI_APP_SECRET=rabotka-local-jitsi-secret in .env.local). HTTPS, as the
+  # Jitsi SDK only loads https:// (a self-signed certificate: open
+  # https://localhost:8443 once and accept it). Start them with:
+  #   docker compose up -d jitsi-web jitsi-prosody jitsi-jicofo jitsi-jvb jitsi-whiteboard jitsi-etherpad jitsi-turn jitsi-transcriber jitsi-vosk
+  # The passwords and the secret below are for this machine only.
+  jitsi-web:
+    image: jitsi/web:stable-11031
+    container_name: rabotka_jitsi_web
+    ports:
+      - "8443:443"
+    volumes:
+      - jitsi_web_config:/config
+      - ./docker/jitsi/custom-interface_config.js:/config/custom-interface_config.js:ro
+      - ./docker/jitsi/custom-config.js:/config/custom-config.js:ro
+    environment: &jitsi_env
+      TZ: UTC
+      PUBLIC_URL: https://localhost:8443
+      ENABLE_AUTH: "1"
+      AUTH_TYPE: jwt
+      ENABLE_GUESTS: "0"
+      JWT_APP_ID: rabotka
+      JWT_APP_SECRET: rabotka-local-jitsi-secret
+      JICOFO_AUTH_PASSWORD: rabotka-local-jicofo
+      JVB_AUTH_PASSWORD: rabotka-local-jvb
+      XMPP_SERVER: xmpp.meet.jitsi
+      XMPP_BOSH_URL_BASE: http://xmpp.meet.jitsi:5280
+      JVB_ADVERTISE_IPS: 127.0.0.1
+      WHITEBOARD_COLLAB_SERVER_URL_BASE: http://whiteboard.meet.jitsi
+      # STUN/TURN (coturn below): the client always asks Prosody for them, and
+      # TURN gets candidates on strict networks through. The secret is shared
+      # with coturn (--static-auth-secret).
+      STUN_HOST: localhost
+      STUN_PORT: "3478"
+      TURN_HOST: localhost
+      TURN_PORT: "3478"
+      TURN_TRANSPORT: udp,tcp
+      TURN_CREDENTIALS: rabotka-local-turn-secret
+      ETHERPAD_URL_BASE: http://etherpad.meet.jitsi:9001
+      # Captions (« Sous-titres »): Jigasi transcribes on Vosk, below. Nothing
+      # is saved; the text only reaches the people in the call.
+      ENABLE_TRANSCRIPTIONS: "1"
+      JIGASI_TRANSCRIBER_PASSWORD: rabotka-local-transcriber
+      # Jigasi refuses to start without it, even as a transcriber only.
+      JIGASI_XMPP_PASSWORD: rabotka-local-transcriber
+      JIGASI_TRANSCRIBER_CUSTOM_SERVICE: org.jitsi.jigasi.transcription.VoskTranscriptionService
+      JIGASI_TRANSCRIBER_VOSK_URL: ws://vosk.meet.jitsi:2700
+      JIGASI_TRANSCRIBER_ENABLE_SAVING: "0"
+    depends_on:
+      - jitsi-jvb
+      - jitsi-whiteboard
+      - jitsi-etherpad
+    networks:
+      rabotka_network:
+        aliases:
+          - meet.jitsi
+
+  jitsi-prosody:
+    image: jitsi/prosody:stable-11031
+    container_name: rabotka_jitsi_prosody
+    expose:
+      - "5222"
+      - "5280"
+      - "5347"
+    volumes:
+      - jitsi_prosody_config:/config
+      - jitsi_prosody_plugins:/prosody-plugins-custom
+    environment: *jitsi_env
+    networks:
+      rabotka_network:
+        aliases:
+          - xmpp.meet.jitsi
+
+  jitsi-jicofo:
+    image: jitsi/jicofo:stable-11031
+    container_name: rabotka_jitsi_jicofo
+    volumes:
+      - jitsi_jicofo_config:/config
+    environment: *jitsi_env
+    depends_on:
+      - jitsi-prosody
+    networks:
+      - rabotka_network
+
+  jitsi-jvb:
+    image: jitsi/jvb:stable-11031
+    container_name: rabotka_jitsi_jvb
+    ports:
+      - "10000:10000/udp"
+    volumes:
+      - jitsi_jvb_config:/config
+    environment: *jitsi_env
+    depends_on:
+      - jitsi-prosody
+    networks:
+      - rabotka_network
+
+  jitsi-turn:
+    image: coturn/coturn:4.18.0
+    container_name: rabotka_jitsi_turn
+    command:
+      - --listening-port=3478
+      - --fingerprint
+      - --use-auth-secret
+      - --static-auth-secret=rabotka-local-turn-secret
+      - --realm=localhost
+      - --no-tls
+      - --no-dtls
+      - --no-cli
+      - --min-port=49160
+      - --max-port=49200
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "49160-49200:49160-49200/udp"
+    networks:
+      - rabotka_network
+
+  jitsi-whiteboard:
+    image: jitsi/excalidraw-backend:2026.10.0
+    container_name: rabotka_jitsi_whiteboard
+    networks:
+      rabotka_network:
+        aliases:
+          - whiteboard.meet.jitsi
+
+  jitsi-etherpad:
+    image: etherpad/etherpad:3.3.7
+    container_name: rabotka_jitsi_etherpad
+    volumes:
+      # Etherpad's skin stylesheet, plus one rule hiding its « deletion token » box.
+      - ./docker/jitsi/etherpad-pad.css:/opt/etherpad-lite/src/static/skins/colibris/pad.css:ro
+    environment:
+      TITLE: Notes partagées
+      DEFAULT_PAD_TEXT: " "
+      SUPPRESS_ERRORS_IN_PAD_TEXT: "true"
+    networks:
+      rabotka_network:
+        aliases:
+          - etherpad.meet.jitsi
+
+  # Captions: Jigasi joins the call as a hidden transcriber when the business
+  # turns « Sous-titres » on, and sends each voice to Vosk (French).
+  jitsi-transcriber:
+    image: jitsi/jigasi:stable-11031
+    container_name: rabotka_jitsi_transcriber
+    volumes:
+      - jitsi_transcriber_config:/config
+    environment:
+      <<: *jitsi_env
+      JIGASI_MODE: transcriber
+    depends_on:
+      - jitsi-prosody
+      - jitsi-vosk
+    networks:
+      - rabotka_network
+
+  jitsi-vosk:
+    # The Vosk server with the small French model (docker/jitsi/vosk/Dockerfile).
+    build: ./docker/jitsi/vosk
+    image: rabotka-jitsi-vosk:small-fr-0.22
+    container_name: rabotka_jitsi_vosk
+    networks:
+      rabotka_network:
+        aliases:
+          - vosk.meet.jitsi
+
 volumes:
   postgres_data:
   pgadmin_data:
   qdrant_data:
+  jitsi_web_config:
+  jitsi_prosody_config:
+  jitsi_prosody_plugins:
+  jitsi_jicofo_config:
+  jitsi_jvb_config:
+  jitsi_transcriber_config:
 
 networks:
   rabotka_network:

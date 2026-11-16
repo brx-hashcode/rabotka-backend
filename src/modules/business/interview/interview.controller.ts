@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -39,6 +40,7 @@ import {
   TranscriptionAnswerDto,
   TranscriptionSwitchDto,
   TranscriptLinesDto,
+  CallTranscriptLinesDto,
 } from './dto/interview.dto';
 
 /** « Entretiens »: the business's interviews with candidates. */
@@ -88,6 +90,19 @@ export class InterviewController {
     @Body() dto: TranscriptLinesDto,
   ) {
     return this.transcripts.addHostLines(req.user, id, dto.lines);
+  }
+
+  @Post(':id/report/call-transcript')
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'The call’s captions, relayed by the business’s call page',
+  })
+  addCallTranscript(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CallTranscriptLinesDto,
+  ) {
+    return this.transcripts.addCallLines(req.user, id, dto.lines);
   }
 
   @Get(':id/guests')
@@ -230,17 +245,20 @@ export class InterviewController {
 
   @Get()
   @ApiOperation({
-    summary: 'Its interviews: upcoming, past, or one candidate’s',
+    summary: 'Its interviews: upcoming, past, a date range, or one candidate’s',
   })
   list(
     @Req() req: ProfileAuthenticatedRequest,
     @Query('scope') scope?: 'upcoming' | 'past',
+    @Query('from') from?: string,
+    @Query('to') to?: string,
     @Query('cvResumeId') cvResumeId?: string,
     @Query('applicationId') applicationId?: string,
     @Query('externalApplicationId') externalApplicationId?: string,
   ) {
     return this.interviews.list(req.user.profileId, {
       scope: scope === 'upcoming' || scope === 'past' ? scope : undefined,
+      range: calendarRange(from, to),
       cvResumeId,
       applicationId,
       externalApplicationId,
@@ -276,11 +294,16 @@ export class InterviewController {
   @ApiOperation({
     summary: '« Terminer l’entretien »: its link stops opening the call',
   })
-  end(
+  async end(
     @Req() req: ProfileAuthenticatedRequest,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.interviews.end(req.user.profileId, id);
+    const ended = await this.interviews.end(req.user.profileId, id);
+    // The report writes itself a couple of minutes later: time for a note.
+    await this.reports
+      .afterCall(id, req.user.memberId ?? null)
+      .catch(() => undefined);
+    return ended;
   }
 
   @Post(':id/cancel')
@@ -390,4 +413,30 @@ export class PublicCalendarController {
     res.setHeader('Cache-Control', 'private, no-cache');
     res.send(ics);
   }
+}
+
+/** A calendar shows six weeks at most: a wider range is refused. */
+export const MAX_RANGE_DAYS = 45;
+
+/** `from`/`to` of the calendar view: both or neither, `to` after `from`. */
+export function calendarRange(
+  from: string | undefined,
+  to: string | undefined,
+): { from: Date; to: Date } | undefined {
+  if (!from && !to) return undefined;
+  const start = from ? new Date(from) : null;
+  const end = to ? new Date(to) : null;
+  if (
+    !start ||
+    !end ||
+    Number.isNaN(start.getTime()) ||
+    Number.isNaN(end.getTime()) ||
+    end <= start
+  ) {
+    throw new BadRequestException('Période invalide.');
+  }
+  if (end.getTime() - start.getTime() > MAX_RANGE_DAYS * 86_400_000) {
+    throw new BadRequestException('Période trop longue.');
+  }
+  return { from: start, to: end };
 }

@@ -4,6 +4,7 @@ import { EventService } from '../event.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { NotificationService } from '../../notification/notification.service';
 import { EventNotificationDispatcher } from '../services/event-notification.dispatcher';
+import { EventVisioService } from '../services/event-visio.service';
 import { EventSeriesService } from '../services/event-series.service';
 import { RecurrenceExpanderService } from '../services/recurrence-expander.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -85,6 +86,13 @@ describe('EventService', () => {
         { provide: NotificationService, useValue: mockNotification },
         { provide: EventNotificationDispatcher, useValue: mockDispatcher },
         { provide: EventEmitter2, useValue: mockEventEmitter },
+        {
+          provide: EventVisioService,
+          useValue: {
+            profileLink: (room: string, id: string) =>
+              `https://www.rabotka.work/reunion/${room}?t=${id}.sig`,
+          },
+        },
       ],
     }).compile();
     service = module.get<EventService>(EventService);

@@ -2,6 +2,10 @@ export interface EventNotificationRecipient {
   email: string | null;
   phone?: string;
   name: string;
+  /** A profile, on an event with a visio: their own link to it. */
+  visioUrl?: string;
+  /** An admin, on an event with a visio: they open it from the admin. */
+  visioInAdmin?: boolean;
 }
 
 export interface EventRecurrenceSummary {

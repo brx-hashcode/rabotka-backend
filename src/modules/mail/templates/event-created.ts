@@ -29,7 +29,26 @@ export type EventEmailParams = {
   googleCalendarUrl?: string;
   /** Set when the event repeats — see the note by `repeats` below. */
   recurrence?: RecurrenceLabelInput | null;
+  /** A profile's own link to the event's visio. */
+  visioUrl?: string | null;
+  /** An admin: the visio opens from Rabotka Admin. */
+  visioInAdmin?: boolean;
 };
+
+/** The visio line: a button for a profile, a pointer for an admin. */
+export function visioHtml(
+  visioUrl?: string | null,
+  visioInAdmin?: boolean,
+): string {
+  if (visioUrl) {
+    return `<p><strong>Visio :</strong> ce lien est personnel, il vous fait entrer dans la réunion sous votre nom (dès 15 minutes avant le début).</p>
+    <p><a href="${escapeHtml(visioUrl)}" style="display: inline-block; padding: 10px 20px; background-color: #00B32C; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">Rejoindre la visio</a></p>`;
+  }
+  if (visioInAdmin) {
+    return '<p><strong>Visio :</strong> à rejoindre depuis Rabotka Admin, page HR events.</p>';
+  }
+  return '';
+}
 
 export function eventCreatedEmail({
   name,
@@ -40,6 +59,8 @@ export function eventCreatedEmail({
   location,
   googleCalendarUrl,
   recurrence,
+  visioUrl,
+  visioInAdmin,
 }: EventEmailParams): string {
   const date = formatDate(startDate);
   const start = formatTime(startDate);
@@ -58,6 +79,7 @@ export function eventCreatedEmail({
     <p><strong>Horaire :</strong> ${escapeHtml(start)} – ${escapeHtml(end)}</p>
     ${repeats ? `<p><strong>Répétition :</strong> ${escapeHtml(repeats)}</p>` : ''}
     ${location ? `<p><strong>Lieu :</strong> ${escapeHtml(location)}</p>` : ''}
+    ${visioHtml(visioUrl, visioInAdmin)}
     ${description ? `<p><strong>Description :</strong> ${escapeHtml(description)}</p>` : ''}
 
     ${googleCalendarUrl ? `<p><a href="${escapeHtml(googleCalendarUrl)}" style="display: inline-block; padding: 10px 20px; background-color: #4285F4; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">📅 Ajouter à Google Calendar</a></p>` : ''}

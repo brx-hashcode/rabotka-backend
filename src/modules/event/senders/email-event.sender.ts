@@ -25,6 +25,8 @@ export class EmailEventSender {
       eventId: payload.eventId,
       seriesId: payload.seriesId,
       recurrence: payload.recurrence,
+      visioUrl: recipient.visioUrl,
+      visioInAdmin: recipient.visioInAdmin,
     };
 
     if (action === 'created') {

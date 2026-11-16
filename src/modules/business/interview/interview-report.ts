@@ -155,10 +155,8 @@ export function reportMessages(c: ReportContext) {
 }
 
 /** The report in an e-mail to the team. */
-export function interviewReportEmail(
-  r: InterviewReportBody,
-  i: { candidateName: string; jobTitle: string; when: string; url: string },
-): string {
+/** The report's sections, as e-mail HTML. */
+function reportEmailSections(r: InterviewReportBody): string {
   const list = (title: string, items: string[]) =>
     items.length
       ? `<p style="margin:16px 0 4px;"><strong>${title}</strong></p><ul style="margin:0;padding-left:20px;">${items
@@ -173,9 +171,6 @@ export function interviewReportEmail(
     r.infosPratiques.mobilite && `Mobilité : ${r.infosPratiques.mobilite}`,
   ].filter((x): x is string => Boolean(x));
   return `
-    <p>Bonjour,</p>
-    <p>Voici le compte rendu de l’entretien avec <strong>${escapeHtml(i.candidateName)}</strong>
-      pour le poste <strong>${escapeHtml(i.jobTitle)}</strong> (${escapeHtml(i.when)}).</p>
     <p>${escapeHtml(r.resume)}</p>
     ${list('Points forts', r.pointsForts)}
     ${list('Points de vigilance', r.pointsDeVigilance)}
@@ -186,8 +181,39 @@ export function interviewReportEmail(
     ${list('Infos pratiques', practical)}
     ${r.avisRecruteur ? `<p style="margin:16px 0 4px;"><strong>Avis du recruteur</strong></p><p style="margin:0;">${escapeHtml(r.avisRecruteur)}</p>` : ''}
     ${list('Prochaines étapes', r.prochainesEtapes)}
+  `;
+}
+
+export function interviewReportEmail(
+  r: InterviewReportBody,
+  i: { candidateName: string; jobTitle: string; when: string; url: string },
+): string {
+  return `
+    <p>Bonjour,</p>
+    <p>Voici le compte rendu de l’entretien avec <strong>${escapeHtml(i.candidateName)}</strong>
+      pour le poste <strong>${escapeHtml(i.jobTitle)}</strong> (${escapeHtml(i.when)}).</p>
+    ${reportEmailSections(r)}
     <p style="margin-top:20px;"><a href="${escapeHtml(i.url)}">Ouvrir dans Rabotka Business</a></p>
     <p style="color:#6b7280;font-size:13px;">Rédigé par IA à partir des notes de votre équipe, puis relu par elle.</p>
+    <p>L’équipe Rabotka Business</p>
+  `;
+}
+
+/**
+ * « Votre compte rendu est prêt »: written by the AI once the interview is
+ * over, to whoever ran it. Not reviewed yet, so it says so and links to it.
+ */
+export function interviewReportReadyEmail(
+  r: InterviewReportBody,
+  i: { candidateName: string; jobTitle: string; when: string; url: string },
+): string {
+  return `
+    <p>Bonjour,</p>
+    <p>Votre compte rendu de l’entretien avec <strong>${escapeHtml(i.candidateName)}</strong>
+      pour le poste <strong>${escapeHtml(i.jobTitle)}</strong> (${escapeHtml(i.when)}) est prêt.</p>
+    ${reportEmailSections(r)}
+    <p style="margin-top:20px;"><a href="${escapeHtml(i.url)}">Relire le compte rendu</a></p>
+    <p style="color:#6b7280;font-size:13px;">Rédigé par IA à partir de la transcription de la visio et de vos notes : relisez-le avant de l’envoyer à votre équipe.</p>
     <p>L’équipe Rabotka Business</p>
   `;
 }

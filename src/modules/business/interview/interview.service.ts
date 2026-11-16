@@ -174,6 +174,8 @@ export class InterviewService {
     profileId: string,
     filter: {
       scope?: 'upcoming' | 'past';
+      /** The calendar: everything in [from, to), cancelled ones included. */
+      range?: { from: Date; to: Date };
       cvResumeId?: string;
       applicationId?: string;
       externalApplicationId?: string;
@@ -181,6 +183,8 @@ export class InterviewService {
   ) {
     const businessId = await this.businessOf(profileId);
     const now = new Date();
+    const range = filter.range;
+    const within = range ? { gte: range.from, lt: range.to } : undefined;
     const rows = await this.prisma.interview.findMany({
       where: {
         business_id: businessId,
@@ -191,30 +195,46 @@ export class InterviewService {
         ...(filter.externalApplicationId
           ? { external_application_id: filter.externalApplicationId }
           : {}),
-        // Ended by the business (« Terminer l'entretien »): past, whatever its time.
-        ...(filter.scope === 'upcoming'
+        // A time offered in the range counts too: the business holds it.
+        ...(within
           ? {
-              starts_at: { gte: new Date(now.getTime() - 2 * 60 * 60 * 1000) },
-              ended_at: null,
+              OR: [
+                { starts_at: within },
+                { slots: { some: { starts_at: within } } },
+              ],
             }
-          : filter.scope === 'past'
+          : // Ended by the business (« Terminer l'entretien »): past, whatever its time.
+            filter.scope === 'upcoming'
             ? {
-                OR: [
-                  {
-                    starts_at: {
-                      lt: new Date(now.getTime() - 2 * 60 * 60 * 1000),
-                    },
-                  },
-                  { ended_at: { not: null } },
-                ],
+                starts_at: {
+                  gte: new Date(now.getTime() - 2 * 60 * 60 * 1000),
+                },
+                ended_at: null,
               }
-            : {}),
+            : filter.scope === 'past'
+              ? {
+                  OR: [
+                    {
+                      starts_at: {
+                        lt: new Date(now.getTime() - 2 * 60 * 60 * 1000),
+                      },
+                    },
+                    { ended_at: { not: null } },
+                  ],
+                }
+              : {}),
       },
       // Upcoming soonest first; otherwise the newest: unscoped, the 200
       // oldest came back and recent interviews went missing from the cards.
-      orderBy: { starts_at: filter.scope === 'upcoming' ? 'asc' : 'desc' },
-      take: 200,
-      include: { report: { select: { notes: true, generated_at: true } } },
+      orderBy: {
+        starts_at: range || filter.scope === 'upcoming' ? 'asc' : 'desc',
+      },
+      take: range ? 500 : 200,
+      // The times still offered: the card lists them, the calendar places them.
+      include: {
+        report: { select: { notes: true, generated_at: true } },
+        slots: LOAD.slots,
+      },
     });
     return rows.map(view);
   }

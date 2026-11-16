@@ -22,6 +22,10 @@ import {
   CV_SCREENING_PROGRESS,
   type CvScreeningProgress,
 } from '../business/cv-screening/cv-screening.events';
+import {
+  INTERVIEW_TRANSCRIPT_LINES,
+  type InterviewTranscriptLines,
+} from '../business/interview/interview-transcript.events';
 
 /**
  * Pushes a new notification to the recipient's open tabs, so the bell updates
@@ -79,6 +83,14 @@ export class ProfileNotificationsGateway implements OnGatewayConnection {
         done: event.done,
         total: event.total,
       });
+  }
+
+  /** New sentences in an interview's transcription: its open « Compte rendu » shows them. */
+  @OnEvent(INTERVIEW_TRANSCRIPT_LINES)
+  emitTranscriptLines(event: InterviewTranscriptLines): void {
+    this.server
+      ?.to(`profile:${event.profileId}`)
+      .emit('interview:transcript', { interviewId: event.interviewId });
   }
 
   private async resolveProfileId(client: Socket): Promise<string | null> {

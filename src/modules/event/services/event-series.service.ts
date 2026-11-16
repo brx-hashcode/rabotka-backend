@@ -14,6 +14,7 @@ import { RecurrenceDto } from '../dto/recurrence.dto';
 import { UpdateEventDto } from '../dto/update-event.dto';
 import { EventEditScope } from '../enums/event-edit-scope.enum';
 import { resolveEventWindow } from '../utils/event-window.util';
+import { visioRoomFor } from '../utils/event-visio.util';
 import {
   MAX_MATERIALISED_PER_REQUEST,
   RecurrenceExpanderService,
@@ -84,6 +85,9 @@ export class EventSeriesService {
       maxRows: MAX_MATERIALISED_PER_REQUEST,
     });
 
+    // One room for the whole series: a weekly meeting keeps one link.
+    const visioRoom = visioRoomFor(dto.visio, null);
+
     return this.prisma.$transaction(
       async (tx) => {
         const series = await tx.eventSeries.create({
@@ -105,6 +109,7 @@ export class EventSeriesService {
           const row = await tx.event.create({
             data: {
               ...this.occurrenceData(dto, createdById),
+              visio_room: visioRoom,
               start_date: occurrence.start,
               end_date: occurrence.end,
               series_id: series.id,
@@ -191,7 +196,7 @@ export class EventSeriesService {
     if (!reschedules) {
       // Dates untouched, so the existing rows stay where they are and only
       // their contents change.
-      await this.updateTailInPlace(series.id, from, dto);
+      await this.updateTailInPlace(series.id, from, dto, pivot.visio_room);
       return pivotId;
     }
 
@@ -209,6 +214,7 @@ export class EventSeriesService {
     seriesId: string,
     from: Date,
     dto: UpdateEventDto,
+    pivotRoom: string | null,
   ): Promise<void> {
     const where = { series_id: seriesId, start_date: { gte: from } };
 
@@ -223,6 +229,9 @@ export class EventSeriesService {
           ...(dto.color !== undefined && { color: dto.color }),
           ...(dto.channel !== undefined && { channel: dto.channel }),
           ...(dto.location !== undefined && { location: dto.location }),
+          ...(dto.visio !== undefined && {
+            visio_room: visioRoomFor(dto.visio, pivotRoom),
+          }),
         },
       });
 
@@ -373,6 +382,7 @@ export class EventSeriesService {
       color: dto.color ?? source.color,
       channel: dto.channel ?? source.channel,
       location: dto.location ?? source.location,
+      visio_room: visioRoomFor(dto.visio, source.visio_room),
       created_by_id: source.created_by_id,
       profiles: profileIds.length
         ? { connect: profileIds.map((id) => ({ id })) }
@@ -523,6 +533,7 @@ export class EventSeriesService {
               color: template.color,
               channel: template.channel,
               location: template.location,
+              visio_room: template.visio_room,
               created_by_id: template.created_by_id,
               start_date: occurrence.start,
               end_date: occurrence.end,

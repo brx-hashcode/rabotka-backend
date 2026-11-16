@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InterviewMode, InterviewStatus } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
 import { frWhen } from './interview-emails';
@@ -12,6 +13,10 @@ import { hashToken } from './interview.service';
 import { visioUrl } from './interview-visio.service';
 import { businessPersonName } from './interview-people';
 import { assertVideoPlan } from './interview-plan';
+import {
+  INTERVIEW_TRANSCRIPT_LINES,
+  type InterviewTranscriptLines,
+} from './interview-transcript.events';
 
 /** A sentence, as one recognition result: never a speech. */
 export const MAX_LINE_CHARS = 500;
@@ -29,6 +34,12 @@ const LATE_MS = 2 * 60 * 60 * 1000;
 export type TranscriptRole = 'HOST' | 'CANDIDATE' | 'GUEST';
 export type TranscriptConsent = 'ACCEPTED' | 'DECLINED';
 export type LineInput = { text: string; at?: string };
+/**
+ * A sentence of the call's captions (our Jitsi transcribes everyone on the
+ * server), relayed by the business's call page: who said it, and whether it
+ * was the business itself.
+ */
+export type CallLineInput = LineInput & { speaker?: string; self?: boolean };
 
 type Actor = { profileId: string; memberId?: string };
 
@@ -39,17 +50,22 @@ export type TranscriptView = {
 };
 
 /**
- * « Transcrire l'entretien »: during the visio, each person's own browser
- * turns their own voice into text (the browser hears no one else) and sends
- * the finished sentences here. Merged by time, they are the transcript the
- * « Compte rendu » is written from. Nothing of the sound is kept, and the
- * candidate's voice only once they accepted.
+ * The interview's transcript, the « Compte rendu » is written from.
+ *
+ * In a Rabotka visio our Jitsi transcribes the call on the server (the
+ * « Sous-titres » everyone sees), and the business's call page relays each
+ * finished sentence here (`addCallLines`). Nothing of the sound is kept.
+ *
+ * The older flow, each browser transcribing its own voice after the
+ * candidate's consent (`setTranscribe`, `addHostLines`, `addGuestLines`), is
+ * kept for pages still open on it.
  */
 @Injectable()
 export class InterviewTranscriptService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly subscriptions: BusinessSubscriptionService,
+    private readonly events: EventEmitter2,
   ) {}
 
   // ── The business ─────────────────────────────────────────────────────
@@ -99,7 +115,60 @@ export class InterviewTranscriptService {
       actor.memberId,
       interview.business.name,
     );
-    return this.store(interview.id, who.name, 'HOST', lines);
+    return this.store(interview, who.name, 'HOST', lines);
+  }
+
+  /**
+   * The call's captions, relayed by the business's call page: the business's
+   * own sentences (`self`) under its member's name, the candidate's under
+   * theirs, anyone else's as a guest. Available with the plan's « Visio dans
+   * Rabotka », in a Rabotka visio, around the interview's time.
+   */
+  async addCallLines(
+    actor: Actor,
+    interviewId: string,
+    lines: CallLineInput[],
+  ) {
+    const interview = await this.owned(actor, interviewId);
+    await assertVideoPlan(this.subscriptions, interview.business_id);
+    if (!isRabotkaVisio(interview)) {
+      throw new BadRequestException(
+        'La transcription se fait dans une visio Rabotka.',
+      );
+    }
+    this.during(interview);
+    // Marks the interview as transcribed: its « Compte rendu » follows live.
+    if (!interview.transcribe) {
+      await this.prisma.interview.update({
+        where: { id: interview.id },
+        data: { transcribe: true },
+      });
+    }
+    const host = await businessPersonName(
+      this.prisma,
+      interview.business_id,
+      actor.memberId,
+      interview.business.name,
+    );
+    const candidate = sameName(interview.candidate_name);
+    return this.storeRows(
+      interview,
+      (Array.isArray(lines) ? lines : []).map((l) => {
+        if (l?.self) return { ...l, speaker: host.name, role: 'HOST' as const };
+        const name =
+          String(l?.speaker ?? '')
+            .replace(/\s+/g, ' ')
+            .trim() || interview.candidate_name;
+        return {
+          ...l,
+          speaker: name,
+          role:
+            sameName(name) === candidate
+              ? ('CANDIDATE' as const)
+              : ('GUEST' as const),
+        };
+      }),
+    );
   }
 
   // ── The guests, by their link ─────────────────────────────────────────
@@ -141,19 +210,14 @@ export class InterviewTranscriptService {
         select: { name: true },
       });
       if (!guest) throw new NotFoundException('Invitation introuvable.');
-      return this.store(interview.id, guest.name, 'GUEST', lines);
+      return this.store(interview, guest.name, 'GUEST', lines);
     }
     if (interview.transcript_consent !== 'ACCEPTED') {
       throw new ForbiddenException(
         'Vous n’avez pas accepté la transcription de l’entretien.',
       );
     }
-    return this.store(
-      interview.id,
-      interview.candidate_name,
-      'CANDIDATE',
-      lines,
-    );
+    return this.store(interview, interview.candidate_name, 'CANDIDATE', lines);
   }
 
   // ── For the « Compte rendu » ──────────────────────────────────────────
@@ -182,14 +246,25 @@ export class InterviewTranscriptService {
 
   // ── Inside ───────────────────────────────────────────────────────────
 
-  private async store(
-    interviewId: string,
+  private store(
+    interview: { id: string; business_id: string },
     speaker: string,
     role: TranscriptRole,
     input: LineInput[],
   ) {
+    return this.storeRows(
+      interview,
+      (Array.isArray(input) ? input : []).map((l) => ({ ...l, speaker, role })),
+    );
+  }
+
+  private async storeRows(
+    interview: { id: string; business_id: string },
+    input: (LineInput & { speaker: string; role: TranscriptRole })[],
+  ) {
+    const interviewId = interview.id;
     const now = Date.now();
-    const rows = (Array.isArray(input) ? input : [])
+    const rows = input
       .slice(0, MAX_LINES_PER_POST)
       .map((l) => ({
         text: String(l?.text ?? '')
@@ -197,6 +272,8 @@ export class InterviewTranscriptService {
           .trim()
           .slice(0, MAX_LINE_CHARS),
         at: spokenAt(l?.at, now),
+        speaker: l.speaker,
+        role: l.role,
       }))
       .filter((l) => l.text.length > 0);
     if (rows.length === 0) return { added: 0 };
@@ -210,12 +287,26 @@ export class InterviewTranscriptService {
       data: kept.map((l) => ({
         interview_id: interviewId,
         spoken_at: l.at,
-        speaker: speaker.slice(0, 80),
-        role,
+        speaker: l.speaker.slice(0, 80),
+        role: l.role,
         text: l.text,
       })),
     });
+    await this.announce(interview);
     return { added: kept.length };
+  }
+
+  /** The business's open « Compte rendu » picks the new sentences up at once. */
+  private async announce(interview: { id: string; business_id: string }) {
+    const business = await this.prisma.business.findUnique({
+      where: { id: interview.business_id },
+      select: { profile_id: true },
+    });
+    if (!business) return;
+    this.events.emit(INTERVIEW_TRANSCRIPT_LINES, {
+      profileId: business.profile_id,
+      interviewId: interview.id,
+    } satisfies InterviewTranscriptLines);
   }
 
   /** Transcribed only when switched on, and around the interview's time. */
@@ -231,6 +322,16 @@ export class InterviewTranscriptService {
         'La transcription n’est pas activée pour cet entretien.',
       );
     }
+    this.during(i);
+  }
+
+  /** Still taking place, and around its time. */
+  private during(i: {
+    ended_at: Date | null;
+    status: InterviewStatus;
+    starts_at: Date;
+    duration_minutes: number;
+  }) {
     if (
       i.status === InterviewStatus.CANCELLED ||
       i.status === InterviewStatus.DECLINED
@@ -278,6 +379,16 @@ function isRabotkaVisio(i: { mode: InterviewMode; location: string | null }) {
     !!i.location &&
     /\/visio\/Rabotka-[A-Za-z0-9]{6,32}$/.test(i.location)
   );
+}
+
+/** Names compared as people write them: case, accents and spaces aside. */
+function sameName(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
 }
 
 function consentOf(v: string | null): TranscriptConsent | null {

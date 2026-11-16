@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventController } from '../event.controller';
 import { EventService } from '../event.service';
+import { EventVisioService } from '../services/event-visio.service';
 import { AdminAuthGuard } from '../../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { LogService } from '../../log/log.service';
@@ -32,6 +33,7 @@ describe('EventController', () => {
       providers: [
         { provide: EventService, useValue: mockEventService },
         { provide: LogService, useValue: { create: jest.fn() } },
+        { provide: EventVisioService, useValue: { joinAsAdmin: jest.fn() } },
       ],
     })
       .overrideGuard(AdminAuthGuard)

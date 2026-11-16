@@ -1,5 +1,5 @@
 import { recurrenceLabel } from '../../../common/utils/recurrence-label.util';
-import type { EventEmailParams } from './event-created';
+import { visioHtml, type EventEmailParams } from './event-created';
 import { escapeHtml } from './layout';
 
 function formatDate(iso: string): string {
@@ -26,6 +26,8 @@ export function eventUpdatedEmail({
   location,
   googleCalendarUrl,
   recurrence,
+  visioUrl,
+  visioInAdmin,
 }: EventEmailParams): string {
   const date = formatDate(startDate);
   const start = formatTime(startDate);
@@ -34,13 +36,14 @@ export function eventUpdatedEmail({
 
   return `
     <p>Bonjour <strong>${escapeHtml(name)}</strong>,</p>
-    <p>Les horaires de l'événement suivant ont été modifiés :</p>
+    <p>L'événement suivant a été mis à jour :</p>
 
     <p><strong>${escapeHtml(title)}</strong></p>
     <p><strong>Nouvelle date :</strong> ${escapeHtml(date)}</p>
     <p><strong>Nouvel horaire :</strong> ${escapeHtml(start)} – ${escapeHtml(end)}</p>
     ${repeats ? `<p><strong>Répétition :</strong> ${escapeHtml(repeats)}</p>` : ''}
     ${location ? `<p><strong>Lieu :</strong> ${escapeHtml(location)}</p>` : ''}
+    ${visioHtml(visioUrl, visioInAdmin)}
     ${description ? `<p><strong>Description :</strong> ${escapeHtml(description)}</p>` : ''}
 
     ${googleCalendarUrl ? `<p><a href="${escapeHtml(googleCalendarUrl)}" style="display: inline-block; padding: 10px 20px; background-color: #4285F4; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">📅 Mettre à jour dans Google Calendar</a></p>` : ''}
