@@ -54,6 +54,8 @@ describe('businessEmailRecipients', () => {
     ).resolves.toEqual([]);
     await expect(
       businessEmailRecipients(db(null, []), 'b', 'recruiting'),
-    ).resolves.toEqual([{ email: 'jean@zuafood.cg', name: 'Jean', language: 'fr' }]);
+    ).resolves.toEqual([
+      { email: 'jean@zuafood.cg', name: 'Jean', language: 'fr' },
+    ]);
   });
 });
