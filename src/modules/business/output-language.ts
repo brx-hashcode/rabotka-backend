@@ -44,12 +44,19 @@ export function languageOf(text: string): OutputLanguage | null {
 export function writtenIn(
   ...texts: (string | null | undefined)[]
 ): OutputLanguage {
+  return shownIn(...texts) ?? 'fr';
+}
+
+/** The same, or null when no text tells: the caller has a better fallback than French. */
+export function shownIn(
+  ...texts: (string | null | undefined)[]
+): OutputLanguage | null {
   for (const text of texts) {
     if (!text?.trim()) continue;
     const language = languageOf(text);
     if (language) return language;
   }
-  return 'fr';
+  return null;
 }
 
 /**
