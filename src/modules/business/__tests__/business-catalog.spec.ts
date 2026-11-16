@@ -16,6 +16,7 @@ import {
   isKnownBusinessCountry,
   LEGAL_FORMS_BY_CATEGORY,
   legalFormFits,
+  identifiersFor,
   legalFormsFor,
   missingRecommendedDocuments,
   missingRequiredDocuments,
@@ -341,5 +342,42 @@ describe('required documents', () => {
       ['AGREMENT'],
       ['STATUTS'],
     ]);
+  });
+});
+
+describe('identifiersFor', () => {
+  it("requires a company's numbers where its papers are required", () => {
+    const cg = identifiersFor('CG', 'PME', 'SARL');
+    expect(cg.registrationNumber).toMatchObject({
+      label: 'N° RCCM',
+      required: true,
+    });
+    expect(cg.taxId).toMatchObject({ label: 'NIU', required: true });
+    expect(cg.statisticalId).toMatchObject({ required: false });
+    // Rwanda: the TIN is the company code, on the RDB certificate.
+    expect(identifiersFor('RW', 'PME').taxId).toMatchObject({
+      required: false,
+    });
+    expect(identifiersFor('RW', 'PME').registrationNumber?.required).toBe(true);
+  });
+
+  it('asks no N° RCCM of an association or an embassy', () => {
+    expect(identifiersFor('CG', 'ASSOCIATION').registrationNumber).toBeNull();
+    expect(identifiersFor('CG', 'ASSOCIATION').taxId?.required).toBe(false);
+    expect(identifiersFor('SN', 'INTERNATIONAL_ORG')).toEqual({
+      registrationNumber: null,
+      taxId: null,
+      statisticalId: null,
+    });
+  });
+
+  it("follows a school's legal form", () => {
+    expect(
+      identifiersFor('CM', 'SCHOOL', 'SARL').registrationNumber?.required,
+    ).toBe(true);
+    expect(
+      identifiersFor('CM', 'SCHOOL', 'ASSOCIATION').registrationNumber
+        ?.required,
+    ).toBe(false);
   });
 });

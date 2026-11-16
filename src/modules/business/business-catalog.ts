@@ -795,6 +795,51 @@ export function missingRequiredDocuments(
   );
 }
 
+/** Which official identifier each paper carries. */
+const IDENTIFIER_PAPER: Record<
+  keyof BusinessIdentifiers,
+  BusinessDocumentType
+> = {
+  registrationNumber: 'RCCM',
+  taxId: 'NIU',
+  statisticalId: 'SCIEN_SCIET',
+};
+
+/**
+ * The official identifiers of a category in a country, as the papers go: a
+ * number is asked when its paper is one the category may send (no N° RCCM
+ * for an association or an embassy), and required when that paper is (an
+ * RCCM a company must send: its number too). Null: not asked.
+ */
+export function identifiersFor(
+  country: string | null | undefined,
+  category: BusinessCategory,
+  legalForm?: BusinessLegalForm | null,
+): Record<
+  keyof BusinessIdentifiers,
+  (NonNullable<IdentifierField> & { required: boolean }) | null
+> {
+  const fields = rulesFor(country).identifiers;
+  const accepted = new Set(acceptedDocuments(country, category));
+  const mustSend = new Set(
+    requiredDocumentsFor(country, category, legalForm)
+      .filter((group) => group.length === 1)
+      .map((group) => group[0]),
+  );
+  const field = (key: keyof BusinessIdentifiers) => {
+    const paper = IDENTIFIER_PAPER[key];
+    const base = fields[key];
+    return base && accepted.has(paper)
+      ? { ...base, required: mustSend.has(paper) }
+      : null;
+  };
+  return {
+    registrationNumber: field('registrationNumber'),
+    taxId: field('taxId'),
+    statisticalId: field('statisticalId'),
+  };
+}
+
 /** Every paper an organisation may send (a dashboard upload is checked against it). */
 export function acceptedDocuments(
   country: string | null | undefined,

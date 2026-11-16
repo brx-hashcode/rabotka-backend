@@ -13,6 +13,7 @@ import {
   isBusinessCountry,
   legalFormFits,
   legalFormLabel,
+  identifiersFor,
   missingRequiredDocuments,
 } from './business-catalog';
 import { assertBusinessIsEmployer } from './business-rules';
@@ -70,13 +71,17 @@ export function signupEntryFor(
  * is required (an organisation that works only online still has one) and must
  * be one Rabotka Business is open in; and the papers that prove the
  * organisation exists there — its registration, declaration, licence or
- * mandate, by category, country and legal form — must all be sent. A 400
- * names the ones still missing, in the country's words.
+ * mandate, by category, country and legal form — must all be sent, with the
+ * numbers of those that carry one (N° RCCM, NIU…). A 400 names the ones still
+ * missing, in the country's words.
  */
 export function assertBusinessSignupComplete(
   business: {
     category: BusinessCategory;
     legalForm?: BusinessLegalForm;
+    registrationNumber?: string | null;
+    taxId?: string | null;
+    statisticalId?: string | null;
     documents: readonly { documentType: BusinessDocumentType }[];
   },
   countryCode: string | null | undefined,
@@ -90,6 +95,20 @@ export function assertBusinessSignupComplete(
     );
   }
   assertBusinessCountry(countryCode);
+
+  const fields = identifiersFor(
+    countryCode,
+    business.category,
+    business.legalForm,
+  );
+  const unfilled = (['registrationNumber', 'taxId', 'statisticalId'] as const)
+    .map((key) => ({ key, field: fields[key] }))
+    .filter(({ key, field }) => field?.required && !business[key]?.trim());
+  if (unfilled.length > 0) {
+    throw new BadRequestException(
+      `Indiquez ${unfilled.map(({ field }) => `le ${field!.label}`).join(' et ')} de votre organisation.`,
+    );
+  }
 
   const missing = missingRequiredDocuments(
     countryCode,
