@@ -9,9 +9,12 @@ import {
 import { businessDashboardUrl } from '../../mail/audience';
 import { LayoutService } from '../../mail/layout.service';
 import { MailService } from '../../mail/mail.service';
+import type { MailLanguage } from '../../mail/templates/layout';
 import {
   businessNewApplicationEmail,
+  businessNewApplicationSubject,
   businessNewMessageEmail,
+  businessNewMessageSubject,
 } from '../../mail/templates/business-activity';
 import {
   PROFILE_NOTIFICATION_EVENT,
@@ -63,8 +66,9 @@ export class BusinessActivityMailListener {
           ? {
               pace: `app:${input.jobOfferId ?? input.applicationId}`,
               seconds: APPLICATION_MAIL_PACE_S,
-              subject: `Nouvelle candidature : ${input.jobTitle}`,
-              html: (name: string) =>
+              subject: (language: MailLanguage) =>
+                businessNewApplicationSubject(input.jobTitle, language),
+              html: (name: string, language: MailLanguage) =>
                 businessNewApplicationEmail(
                   name,
                   input.workerName,
@@ -72,18 +76,21 @@ export class BusinessActivityMailListener {
                   input.jobOfferId
                     ? `${businessDashboardUrl()}/offres/${input.jobOfferId}`
                     : `${businessDashboardUrl()}/candidatures`,
+                  language,
                 ),
             }
           : {
               pace: `msg:${input.conversationId}`,
               seconds: MESSAGE_MAIL_PACE_S,
-              subject: `Nouveau message de ${input.senderName}`,
-              html: (name: string) =>
+              subject: (language: MailLanguage) =>
+                businessNewMessageSubject(input.senderName, language),
+              html: (name: string, language: MailLanguage) =>
                 businessNewMessageEmail(
                   name,
                   input.senderName,
                   input.jobTitle,
                   `${businessDashboardUrl()}/discussions/${input.conversationId}`,
+                  language,
                 ),
             };
 
@@ -106,10 +113,11 @@ export class BusinessActivityMailListener {
       for (const r of recipients) {
         await this.mail.sendMail({
           to: r.email,
-          subject: mail.subject,
-          html: await this.layout.wrap(mail.html(r.name), {
-            previewText: mail.subject,
+          subject: mail.subject(r.language),
+          html: await this.layout.wrap(mail.html(r.name, r.language), {
+            previewText: mail.subject(r.language),
             product: 'business',
+            language: r.language,
           }),
         });
       }

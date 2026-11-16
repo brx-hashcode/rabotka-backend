@@ -1022,6 +1022,10 @@ describe('AdminProfileController business review', () => {
           email: 'awa@ecole.cg',
         }),
       },
+      // The holder's language: French, as before it existed.
+      businessMember: {
+        findFirst: jest.fn().mockResolvedValue({ language: 'fr' }),
+      },
     };
     const whatsApp = makeWhatsApp();
     const mail = makeMail();

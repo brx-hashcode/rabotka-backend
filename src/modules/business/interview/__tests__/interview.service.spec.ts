@@ -450,6 +450,25 @@ describe('InterviewService', () => {
       ).resolves.toBeTruthy();
     });
 
+    it('writes to the candidate in English when the offer is in English', async () => {
+      const { service, prisma, mail } = make();
+      prisma.interview.update.mockResolvedValue(
+        loaded({
+          offer_id: 'o1',
+          offer: {
+            description:
+              'We are looking for a cashier to join our team. You will welcome customers and handle payments.',
+          },
+        }),
+      );
+      await service.cancel('p1', 'i1');
+      const sent = mail.sendMail.mock.calls[0][0];
+      expect(sent.subject).toBe('Interview cancelled — Caissier');
+      expect(sent.html).toContain('has cancelled the interview');
+      expect(sent.attachments[0].filename).toBe('interview.ics');
+      expect(sent.attachments[0].content).toContain('SUMMARY:Interview');
+    });
+
     it('cancelling tells the candidate, with a calendar cancellation', async () => {
       const { service, mail } = make();
       await service.cancel('p1', 'i1');

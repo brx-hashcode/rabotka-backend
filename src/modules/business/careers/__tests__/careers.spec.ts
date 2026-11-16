@@ -61,6 +61,7 @@ const subscriptions = {
   entitlements: jest.fn().mockResolvedValue({ cvBatchMax: 2, cvFileMaxMb: 5 }),
 };
 const sendMail = jest.fn().mockResolvedValue(undefined);
+const wrap = jest.fn().mockResolvedValue('<html>');
 const emit = jest.fn();
 
 const serviceWith = (found: unknown, offers: unknown[] = [], one?: unknown) => {
@@ -94,7 +95,7 @@ const serviceWith = (found: unknown, offers: unknown[] = [], one?: unknown) => {
     { get: jest.fn().mockResolvedValue('kyc-bucket') } as never,
     { get: jest.fn() } as never,
     { sendMail } as never,
-    { wrap: jest.fn().mockResolvedValue('<html>') } as never,
+    { wrap } as never,
     { emit } as never,
     screenings as never,
     subscriptions as never,
@@ -487,6 +488,35 @@ describe('CareersService', () => {
       );
 
       expect(prisma.externalApplication.update).not.toHaveBeenCalled();
+    });
+
+    it('writes to an applicant in the language of the job, and French otherwise', async () => {
+      const english = owned('PENDING');
+      english.prisma.externalApplication.findFirst.mockResolvedValue({
+        ...application,
+        status: 'PENDING',
+        job_offer: {
+          title: 'Cashier',
+          description:
+            'We are looking for a cashier to join our team. You will welcome customers and handle payments.',
+        },
+      });
+      await english.service.refuse('p1', 'a1', 'Merci pour votre temps');
+      await new Promise((resolve) => setImmediate(resolve));
+      const sent = sendMail.mock.calls.at(-1)![0];
+      expect(sent.subject).toBe('Your application at KAMOA');
+      const [html, options] = wrap.mock.calls.at(-1)!;
+      expect(html).toContain('Hello');
+      expect(options.language).toBe('en');
+      // The recruiter's own words are never translated.
+      expect(html).toContain('Merci pour votre temps');
+
+      const french = owned('PENDING');
+      await french.service.refuse('p1', 'a1');
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(sendMail.mock.calls.at(-1)![0].subject).toBe(
+        'Votre candidature chez KAMOA',
+      );
     });
 
     describe('taking a retention back', () => {

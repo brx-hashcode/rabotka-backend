@@ -57,6 +57,12 @@ import {
   kycApprovedEmail,
   kycRejectedEmail,
 } from '../mail/templates';
+import {
+  businessApprovedSubject,
+  businessDocumentRejectedSubject,
+  businessRejectedSubject,
+} from '../mail/templates/business-review';
+import { mailLanguage, type MailLanguage } from '../mail/templates/layout';
 import { MessageDirection, BotPlatform } from '@prisma/client';
 import { KYC_REJECTED_CTA_PATH } from '../../common/constants/whatsapp-templates';
 import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
@@ -421,6 +427,18 @@ export class AdminProfileController {
     return business;
   }
 
+  /** The language the account holder reads the app in: its e-mails follow it. */
+  private async holderLanguage(profileId: string): Promise<MailLanguage> {
+    // Never what keeps the e-mail from leaving: French when it cannot be read.
+    const holder = await this.prisma.businessMember
+      .findFirst({
+        where: { business: { profile_id: profileId }, is_owner: true },
+        select: { language: true },
+      })
+      .catch(() => null);
+    return mailLanguage(holder?.language);
+  }
+
   private async notifyBusinessDocumentRejected(
     profileId: string,
     businessName: string,
@@ -441,10 +459,11 @@ export class AdminProfileController {
     });
     if (!person?.email) return;
     const name = `${person.first_name ?? ''} ${person.last_name ?? ''}`.trim();
+    const language = await this.holderLanguage(profileId);
     await this.mail
       .sendMail({
         to: person.email,
-        subject: `${documentLabel} : document à remplacer`,
+        subject: businessDocumentRejectedSubject(documentLabel, language),
         html: await this.layout.wrap(
           businessDocumentRejectedEmail(
             name,
@@ -452,8 +471,9 @@ export class AdminProfileController {
             documentLabel,
             reason,
             businessOrganisationUrl(),
+            language,
           ),
-          { product: 'business' },
+          { product: 'business', language },
         ),
       })
       .catch((err: unknown) =>
@@ -512,6 +532,7 @@ export class AdminProfileController {
       `${person?.first_name ?? ''} ${person?.last_name ?? ''}`.trim();
     const to = person?.email ?? result.email;
     const approved = dto.decision === VerifyDecision.VERIFIED;
+    const language = await this.holderLanguage(id);
 
     notifyProfile(this.events, {
       recipientId: id,
@@ -528,18 +549,24 @@ export class AdminProfileController {
         .sendMail({
           to,
           subject: approved
-            ? `${result.name} est vérifiée sur Rabotka Business`
-            : `Vérification de ${result.name} : dossier à corriger`,
+            ? businessApprovedSubject(result.name, language)
+            : businessRejectedSubject(result.name, language),
           html: await this.layout.wrap(
             approved
-              ? businessApprovedEmail(name, result.name, businessDashboardUrl())
+              ? businessApprovedEmail(
+                  name,
+                  result.name,
+                  businessDashboardUrl(),
+                  language,
+                )
               : businessRejectedEmail(
                   name,
                   result.name,
                   dto.reason,
                   businessOrganisationUrl(),
+                  language,
                 ),
-            { product: 'business' },
+            { product: 'business', language },
           ),
         })
         .catch((err: unknown) =>

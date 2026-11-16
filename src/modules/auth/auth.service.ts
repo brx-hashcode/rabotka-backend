@@ -42,6 +42,7 @@ import {
   sendOtpEmail,
   type OtpPurpose,
 } from '../mail/templates';
+import { mailLanguage, type MailLanguage } from '../mail/templates/layout';
 import {
   WhatsAppLoginLinkService,
   canMintLoginCode,
@@ -1289,14 +1290,28 @@ export class AuthService {
     first_name: string | undefined,
     purpose: OtpPurpose,
   ): Promise<void> {
+    // Only a business sign-in knows its reader: the member's own language.
+    // A sign-up has no member yet, and the other purposes stay French.
+    let language: MailLanguage = 'fr';
+    if (purpose === 'business-login') {
+      const member = await this.prisma.businessMember.findFirst({
+        where: {
+          email: email.trim().toLowerCase(),
+          status: { in: ['ACTIVE', 'INVITED'] },
+        },
+        select: { language: true },
+      });
+      language = mailLanguage(member?.language);
+    }
     await this.mailService.sendMail({
       to: email,
-      subject: otpEmailSubject(purpose),
+      subject: otpEmailSubject(purpose, language),
       html: await this.layoutService.wrap(
-        sendOtpEmail(otp, first_name, purpose),
+        sendOtpEmail(otp, first_name, purpose, language),
         {
-          previewText: otpEmailPreview(purpose, otp),
+          previewText: otpEmailPreview(purpose, otp, language),
           product: purpose.startsWith('business') ? 'business' : undefined,
+          language,
         },
       ),
     });

@@ -11,7 +11,11 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { MailService } from '../../mail/mail.service';
 import { LayoutService } from '../../mail/layout.service';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
-import { interviewGuestEmail } from './interview-emails';
+import {
+  interviewGuestEmail,
+  interviewLanguage,
+  interviewSubject,
+} from './interview-emails';
 import { hashToken } from './interview.service';
 import { assertVideoPlan } from './interview-plan';
 import { businessPersonName } from './interview-people';
@@ -134,10 +138,11 @@ export class InterviewGuestService {
         ? `${inviter.name} (${interview.business.name})`
         : interview.business.name;
     const url = `${interview.location}?g=${encodeURIComponent(token)}`;
+    const language = interviewLanguage(interview);
     try {
       await this.mail.sendMail({
         to: email,
-        subject: `Entretien en visio — ${interview.job_title}`,
+        subject: interviewSubject.guest(interview.job_title, language),
         html: await this.layout.wrap(
           interviewGuestEmail(
             {
@@ -149,14 +154,16 @@ export class InterviewGuestService {
               mode: interview.mode,
               location: interview.location,
               message: null,
+              language,
             },
             name,
             url,
             invitedBy,
           ),
           {
-            previewText: `${invitedBy} vous invite à un entretien en visio`,
+            previewText: interviewSubject.guestPreview(invitedBy, language),
             product: 'business',
+            language,
           },
         ),
       });
@@ -186,7 +193,10 @@ export class InterviewGuestService {
       throw new ForbiddenException('Espace réservé aux comptes entreprise.');
     const interview = await this.prisma.interview.findFirst({
       where: { id: interviewId, business_id: businessId },
-      include: { business: { select: { name: true } } },
+      include: {
+        business: { select: { name: true } },
+        offer: { select: { description: true } },
+      },
     });
     if (!interview) throw new NotFoundException('Entretien introuvable.');
     return interview;
