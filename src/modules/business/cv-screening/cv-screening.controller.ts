@@ -27,6 +27,7 @@ import {
 import type { Response } from 'express';
 import { ProfileAuthGuard } from '../../auth/guards/profile-auth.guard';
 import { BusinessProfileGuard } from '../../auth/guards/business-profile.guard';
+import { KycVerifiedGuard } from '../../auth/guards/kyc-verified.guard';
 import type { ProfileAuthenticatedRequest } from '../../auth/guards/jwt-auth.guard';
 import { htmlToPdf } from '../../../common/utils/puppeteer';
 import { sendPrivateFile } from '../../profile/send-private-file';
@@ -74,6 +75,8 @@ export class CvScreeningController {
   ) {}
 
   @Post()
+  // Reaches candidates or uses the plan: only once the organisation is approved.
+  @UseGuards(KycVerifiedGuard)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @UseInterceptors(
     FilesInterceptor('files', MAX_FILES, {
@@ -105,6 +108,8 @@ export class CvScreeningController {
   }
 
   @Post(':id/files')
+  // Reaches candidates or uses the plan: only once the organisation is approved.
+  @UseGuards(KycVerifiedGuard)
   // A large batch arrives in several requests.
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @UseInterceptors(

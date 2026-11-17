@@ -28,13 +28,15 @@ import { rabotkaLogoDataUri } from '../../../common/utils/rabotka-logo';
 import { answerSnippet } from '../cv-screening/lenient-answer';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
 import { businessEmailRecipients } from '../team/business-recipients';
-import { heldWhen } from './interview-emails';
+import { mailLanguage, type MailLanguage } from '../../mail/templates/layout';
+import { heldWhen, whenIn } from './interview-emails';
 import { assertVideoPlan, REPORT_PLAN_REFUSAL } from './interview-plan';
 import {
   buildInterviewReportHtml,
   cleanReport,
   interviewReportEmail,
   interviewReportReadyEmail,
+  interviewReportSubject,
   MAX_NOTES,
   MIN_NOTES,
   parseReport,
@@ -49,6 +51,62 @@ const MODES = {
   PHONE: 'par téléphone',
   VIDEO: 'en visio',
 } as const;
+const REPORT_TZ = 'Africa/Brazzaville';
+const hmEnglish = (d: Date) =>
+  d.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: REPORT_TZ,
+  });
+const dayOfEnglish = (d: Date) =>
+  d.toLocaleDateString('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    timeZone: REPORT_TZ,
+  });
+
+/** `heldWhen` for an English reader (en-GB): the same cases, the same facts. */
+function heldWhenEnglish(
+  planned: Date,
+  start: Date | null,
+  end: Date | null,
+): { when: string; minutes: number | null } {
+  if (!start) return { when: whenIn(planned, 'en'), minutes: null };
+  const sameTime = Math.abs(start.getTime() - planned.getTime()) < 5 * 60_000;
+  const plannedNote = sameTime
+    ? ''
+    : dayOfEnglish(planned) === dayOfEnglish(start)
+      ? ` (planned for ${hmEnglish(planned)})`
+      : ` (planned for ${whenIn(planned, 'en')})`;
+  if (end && end.getTime() > start.getTime()) {
+    const minutes = Math.max(
+      1,
+      Math.round((end.getTime() - start.getTime()) / 60_000),
+    );
+    return {
+      when: `${dayOfEnglish(start)} from ${hmEnglish(start)} to ${hmEnglish(end)}${plannedNote}`,
+      minutes,
+    };
+  }
+  return {
+    when: `${dayOfEnglish(start)}, started at ${hmEnglish(start)}${plannedNote}`,
+    minutes: null,
+  };
+}
+
+/** One address, one language: the first reader of an address wins. */
+function readersByEmail(
+  recipients: { email: string; language: MailLanguage }[],
+): Map<string, MailLanguage> {
+  const out = new Map<string, MailLanguage>();
+  for (const r of recipients) {
+    const email = r.email.toLowerCase();
+    if (!out.has(email)) out.set(email, r.language);
+  }
+  return out;
+}
+
 const LLM_TIMEOUT_MS = 45_000;
 /** Two model calls at most: past this, a writing still marked is a lost job. */
 const WRITING_STALE_MS = 3 * 60_000;
@@ -382,34 +440,43 @@ export class InterviewReportService {
               business_id: interview.business_id,
               status: 'ACTIVE',
             },
-            select: { email: true },
+            select: { email: true, language: true },
           })
         : null;
       const recipients = member
-        ? [member]
+        ? [{ email: member.email, language: mailLanguage(member.language) }]
         : await businessEmailRecipients(
             this.prisma,
             interview.business_id,
             'recruiting',
           );
-      const emails = [...new Set(recipients.map((r) => r.email.toLowerCase()))];
-      if (emails.length === 0) return;
-      const html = await this.layout.wrap(
-        interviewReportReadyEmail(report, {
-          candidateName: interview.candidate_name,
-          jobTitle: interview.job_title,
-          when: (await this.held(interview)).when,
-          url: `${businessDashboardUrl()}/entretiens?compte-rendu=${encodeURIComponent(interview.id)}`,
-        }),
-        {
-          previewText: `Votre compte rendu est prêt — ${interview.candidate_name}`,
-          product: 'business',
-        },
-      );
-      for (const to of emails) {
+      const readers = readersByEmail(recipients);
+      if (readers.size === 0) return;
+      for (const [to, language] of readers) {
+        const html = await this.layout.wrap(
+          interviewReportReadyEmail(report, {
+            candidateName: interview.candidate_name,
+            jobTitle: interview.job_title,
+            when: (await this.held(interview, language)).when,
+            url: `${businessDashboardUrl()}/entretiens?compte-rendu=${encodeURIComponent(interview.id)}`,
+            language,
+          }),
+          {
+            previewText: interviewReportSubject.readyPreview(
+              interview.candidate_name,
+              language,
+            ),
+            product: 'business',
+            language,
+          },
+        );
         await this.mail.sendMail({
           to,
-          subject: `Votre compte rendu est prêt — ${interview.candidate_name} (${interview.job_title})`,
+          subject: interviewReportSubject.ready(
+            interview.candidate_name,
+            interview.job_title,
+            language,
+          ),
           html,
         });
       }
@@ -457,31 +524,45 @@ export class InterviewReportService {
             id: { in: memberIds.slice(0, 50) },
             status: 'ACTIVE',
           },
-          select: { email: true },
+          select: { email: true, language: true },
         })
       : await businessEmailRecipients(this.prisma, businessId, 'recruiting');
-    const emails = [...new Set(recipients.map((r) => r.email.toLowerCase()))];
-    if (emails.length === 0) {
+    const readers = readersByEmail(
+      recipients.map((r) => ({
+        email: r.email,
+        language: mailLanguage(r.language),
+      })),
+    );
+    if (readers.size === 0) {
       throw new BadRequestException('Aucun destinataire dans votre équipe.');
     }
-    const html = await this.layout.wrap(
-      interviewReportEmail(report, {
-        candidateName: interview.candidate_name,
-        jobTitle: interview.job_title,
-        when: (await this.held(interview)).when,
-        url: `${businessDashboardUrl()}/entretiens?onglet=passes`,
-      }),
-      {
-        previewText: `Compte rendu — ${interview.candidate_name}`,
-        product: 'business',
-      },
-    );
     let sent = 0;
-    for (const to of emails) {
+    for (const [to, language] of readers) {
       try {
+        const html = await this.layout.wrap(
+          interviewReportEmail(report, {
+            candidateName: interview.candidate_name,
+            jobTitle: interview.job_title,
+            when: (await this.held(interview, language)).when,
+            url: `${businessDashboardUrl()}/entretiens?onglet=passes`,
+            language,
+          }),
+          {
+            previewText: interviewReportSubject.reportPreview(
+              interview.candidate_name,
+              language,
+            ),
+            product: 'business',
+            language,
+          },
+        );
         await this.mail.sendMail({
           to,
-          subject: `Compte rendu d’entretien — ${interview.candidate_name} (${interview.job_title})`,
+          subject: interviewReportSubject.report(
+            interview.candidate_name,
+            interview.job_title,
+            language,
+          ),
           html,
         });
         sent++;
@@ -565,12 +646,15 @@ export class InterviewReportService {
    * The times the interview really ran: from the business joining the call
    * (or the first sentence) to « Terminer » (or the last sentence).
    */
-  private async held(i: {
-    id: string;
-    starts_at: Date;
-    call_started_at?: Date | null;
-    ended_at?: Date | null;
-  }) {
+  private async held(
+    i: {
+      id: string;
+      starts_at: Date;
+      call_started_at?: Date | null;
+      ended_at?: Date | null;
+    },
+    language: MailLanguage = 'fr',
+  ) {
     const span = await this.transcripts.span(i.id);
     const starts = [i.call_started_at, span.first].filter(
       (d): d is Date => !!d,
@@ -578,7 +662,10 @@ export class InterviewReportService {
     const start = starts.length
       ? new Date(Math.min(...starts.map((d) => d.getTime())))
       : null;
-    return heldWhen(i.starts_at, start, i.ended_at ?? span.last);
+    const end = i.ended_at ?? span.last;
+    return language === 'en'
+      ? heldWhenEnglish(i.starts_at, start, end)
+      : heldWhen(i.starts_at, start, end);
   }
 
   /** The business joined the call: its real start, kept once. */

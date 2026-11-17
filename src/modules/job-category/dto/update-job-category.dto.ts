@@ -9,6 +9,15 @@ export class UpdateJobCategoryDto {
   @IsString()
   name?: string;
 
+  @ApiPropertyOptional({
+    description: 'English name, shown to businesses reading in English',
+    example: 'Cleaning',
+  })
+  @Transform(({ value }) => value?.trim())
+  @IsOptional()
+  @IsString()
+  name_en?: string;
+
   @ApiPropertyOptional({ description: 'URL-friendly slug' })
   @Transform(({ value }) => value?.trim().toLowerCase())
   @IsOptional()

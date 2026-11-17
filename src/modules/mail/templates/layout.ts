@@ -29,7 +29,17 @@ export const RECIPIENT_TOKEN = '{{rk:recipient}}';
 /** Where the terms and the privacy policy live, whatever the product. */
 const LEGAL_SITE = 'https://www.rabotka.work';
 
+/** The languages an e-mail is written in. French unless said. */
+export type MailLanguage = 'fr' | 'en';
+
+/** `fr` or `en` from anything that names a language ("en", "en-GB", a header); French otherwise. */
+export function mailLanguage(value: string | null | undefined): MailLanguage {
+  return value?.trim().toLowerCase().startsWith('en') ? 'en' : 'fr';
+}
+
 export type EmailLayoutOptions = {
+  /** The reader's language: the footer's words and the document's `lang`. */
+  language?: MailLanguage;
   previewText?: string;
   rawLayout?: boolean;
   footer?: FooterInfo;
@@ -49,10 +59,11 @@ export function wrapEmailHtml(
     ? `<span style="display:none;max-height:0;overflow:hidden;">${escapeHtml(previewText)}</span>`
     : '';
   const footer = options?.footer;
+  const language = options?.language ?? 'fr';
 
   if (options?.rawLayout) {
     return `<!DOCTYPE html>
-<html lang="fr">
+<html lang="${language}">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -67,7 +78,7 @@ export function wrapEmailHtml(
   }
 
   return `<!DOCTYPE html>
-<html lang="fr">
+<html lang="${language}">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -133,7 +144,7 @@ export function wrapEmailHtml(
 
           </table>
 
-          ${emailFooter(footer, options?.product)}
+          ${emailFooter(footer, options?.product, language)}
         </td>
       </tr>
     </table>
@@ -167,7 +178,9 @@ export function displayPhone(raw: string): string {
 export function emailFooter(
   footer: FooterInfo | undefined,
   product?: 'business',
+  language: MailLanguage = 'fr',
 ): string {
+  const en = language === 'en';
   const font = "font-family:'Ubuntu',Arial,sans-serif;";
   const ink = '#2a322e';
   const grey = '#86868b';
@@ -186,7 +199,7 @@ export function emailFooter(
   const follow = socials.length
     ? [
         p(
-          'Suivez-nous',
+          en ? 'Follow us' : 'Suivez-nous',
           `font-size:15px;line-height:22px;font-weight:600;color:${ink};`,
           '0 0 12px',
         ),
@@ -215,13 +228,13 @@ export function emailFooter(
     product === 'business' ? 'business.rabotka.work' : 'www.rabotka.work';
   const help = [
     p(
-      'Besoin d’aide ?',
+      en ? 'Need help?' : 'Besoin d’aide ?',
       `font-size:15px;line-height:22px;font-weight:600;color:${ink};`,
       '0 0 8px',
     ),
     phone
       ? p(
-          `Service client : ${link(`tel:${phone.replace(/[^\d+]/g, '')}`, `<strong>${escapeHtml(displayPhone(phone))}</strong>`)}`,
+          `${en ? 'Customer service:' : 'Service client :'} ${link(`tel:${phone.replace(/[^\d+]/g, '')}`, `<strong>${escapeHtml(displayPhone(phone))}</strong>`)}`,
           `font-size:14px;line-height:22px;color:${ink};`,
         )
       : '',
@@ -239,7 +252,9 @@ export function emailFooter(
   const small = `font-size:12px;line-height:18px;color:${grey};`;
   const fine = [
     p(
-      `Cet e-mail était destiné à ${RECIPIENT_TOKEN}. Vous le recevez parce que vous utilisez ${product === 'business' ? 'Rabotka Business' : 'Rabotka'}.`,
+      en
+        ? `This email was meant for ${RECIPIENT_TOKEN}. You are receiving it because you use ${product === 'business' ? 'Rabotka Business' : 'Rabotka'}.`
+        : `Cet e-mail était destiné à ${RECIPIENT_TOKEN}. Vous le recevez parce que vous utilisez ${product === 'business' ? 'Rabotka Business' : 'Rabotka'}.`,
       small,
       '0 0 10px',
     ),
@@ -251,14 +266,23 @@ export function emailFooter(
         footer?.address?.trim() ? escapeHtml(footer.address.trim()) : '',
       ]
         .filter(Boolean)
-        .join('&nbsp;&middot;&nbsp;') + '. Tous droits réservés.',
+        .join('&nbsp;&middot;&nbsp;') +
+        (en ? '. All rights reserved.' : '. Tous droits réservés.'),
       small,
       '0 0 10px',
     ),
     p(
       [
-        link(`${LEGAL_SITE}/terms`, 'Conditions d’utilisation', '#515154'),
-        link(`${LEGAL_SITE}/privacy`, 'Confidentialité', '#515154'),
+        link(
+          `${LEGAL_SITE}/terms`,
+          en ? 'Terms of use' : 'Conditions d’utilisation',
+          '#515154',
+        ),
+        link(
+          `${LEGAL_SITE}/privacy`,
+          en ? 'Privacy' : 'Confidentialité',
+          '#515154',
+        ),
       ].join(sep),
       small,
       '0',

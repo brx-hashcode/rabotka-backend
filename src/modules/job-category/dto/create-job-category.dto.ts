@@ -9,6 +9,15 @@ export class CreateJobCategoryDto {
   @IsNotEmpty()
   name: string;
 
+  @ApiPropertyOptional({
+    description: 'English name, shown to businesses reading in English',
+    example: 'Cleaning',
+  })
+  @Transform(({ value }) => value?.trim())
+  @IsOptional()
+  @IsString()
+  name_en?: string;
+
   @ApiProperty({ description: 'URL-friendly slug', example: 'nettoyage' })
   @Transform(({ value }) => value?.trim().toLowerCase())
   @IsString()

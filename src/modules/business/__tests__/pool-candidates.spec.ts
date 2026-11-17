@@ -120,6 +120,23 @@ describe('PoolCandidatesService', () => {
     expect(sent.html).toContain('Bonjour Awa');
   });
 
+  it('invites in English to an offer written in English', async () => {
+    const { service, prisma, mail } = make();
+    prisma.jobOffer.findFirst.mockResolvedValue({
+      title: 'Cashier',
+      description:
+        'We are looking for a cashier to join our team. You will welcome customers and handle payments.',
+      status: 'ACTIVE',
+      reference: 'RBT-1',
+      employer: { business: { name: 'KAMOA', public_slug: 'kamoa' } },
+    });
+    await service.invite('biz', 'cv', 'r1', 'o1');
+    const sent = mail.sendMail.mock.calls[0][0];
+    expect(sent.subject).toBe('KAMOA invites you to apply · Cashier');
+    expect(sent.html).toContain('Hello Awa');
+    expect(sent.html).toContain('/carrieres/kamoa/RBT-1?source=invitation');
+  });
+
   it('refuses an offer they already applied to, a closed one, and no careers page', async () => {
     const { service, prisma } = make();
     await expect(

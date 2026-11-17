@@ -125,6 +125,8 @@ import {
   documentLabel,
   documentsFor,
   missingRecommendedDocuments,
+  missingRequiredDocuments,
+  requiredDocumentsFor,
 } from '../business/business-catalog';
 import type { SignupIdentity } from '../auth/signup-token';
 import {
@@ -434,8 +436,9 @@ export type AdminBusinessDetail = {
   recommendedDocuments: { type: BusinessDocumentType; label: string }[];
   missingRecommended: { type: BusinessDocumentType; label: string }[];
   /**
-   * The same, as one-paper groups, for the admin released before every paper
-   * became optional.
+   * The papers its category, country and legal form must send, as groups
+   * (every group, one paper of each), and the groups not met by a current
+   * paper that was not refused.
    */
   requiredDocuments: { type: BusinessDocumentType; label: string }[][];
   missingDocuments: { type: BusinessDocumentType; label: string }[][];
@@ -2316,6 +2319,20 @@ export class ProfileService {
         .map((d) => d.document_type),
     );
     const current = business.documents.filter((d) => !d.superseded_at);
+    // A refused paper does not meet its group: the business must send another.
+    const required = requiredDocumentsFor(
+      country,
+      business.category,
+      business.legal_form,
+    );
+    const missingRequired = missingRequiredDocuments(
+      country,
+      business.category,
+      business.legal_form,
+      current
+        .filter((d) => d.verification_status !== 'REJECTED')
+        .map((d) => d.document_type),
+    );
     const byId = new Map(business.documents.map((d) => [d.id, d]));
     return {
       id: business.id,
@@ -2369,8 +2386,8 @@ export class ProfileService {
         })),
       recommendedDocuments: recommended.map(named),
       missingRecommended: missing.map(named),
-      requiredDocuments: recommended.map((t) => [named(t)]),
-      missingDocuments: missing.map((t) => [named(t)]),
+      requiredDocuments: required.map((group) => group.map(named)),
+      missingDocuments: missingRequired.map((group) => group.map(named)),
     };
   }
 

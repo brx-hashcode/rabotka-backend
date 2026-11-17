@@ -1,4 +1,4 @@
-import { emailButton, escapeHtml } from './layout';
+import { emailButton, escapeHtml, type MailLanguage } from './layout';
 
 /**
  * What happens in a business's space while nobody is looking at it: a new
@@ -12,7 +12,23 @@ export function businessNewApplicationEmail(
   workerName: string,
   jobTitle: string,
   url: string,
+  language: MailLanguage = 'fr',
 ): string {
+  if (language === 'en') {
+    return `
+    <p>Hello${name ? ` ${escapeHtml(name)}` : ''},</p>
+    <p>
+      <strong>${escapeHtml(workerName)}</strong> applied to your job
+      <strong>${escapeHtml(jobTitle)}</strong> on Rabotka.
+    </p>
+    <p>Find all its candidates on the job, ranked from most to least suited.</p>
+    ${emailButton(url, 'View the candidates')}
+    <p>
+      Thank you for your trust,<br />
+      <strong>The Rabotka Business team</strong>
+    </p>
+  `;
+  }
   return `
     <p>Bonjour${name ? ` ${escapeHtml(name)}` : ''},</p>
     <p>
@@ -33,7 +49,23 @@ export function businessNewMessageEmail(
   senderName: string,
   jobTitle: string | null,
   url: string,
+  language: MailLanguage = 'fr',
 ): string {
+  if (language === 'en') {
+    return `
+    <p>Hello${name ? ` ${escapeHtml(name)}` : ''},</p>
+    <p>
+      <strong>${escapeHtml(senderName)}</strong> wrote to you${
+        jobTitle ? ` about <strong>${escapeHtml(jobTitle)}</strong>` : ''
+      }.
+    </p>
+    ${emailButton(url, 'Read the message')}
+    <p>
+      Thank you for your trust,<br />
+      <strong>The Rabotka Business team</strong>
+    </p>
+  `;
+  }
   return `
     <p>Bonjour${name ? ` ${escapeHtml(name)}` : ''},</p>
     <p>
@@ -47,4 +79,22 @@ export function businessNewMessageEmail(
       <strong>L'équipe Rabotka Business</strong>
     </p>
   `;
+}
+
+export function businessNewApplicationSubject(
+  jobTitle: string,
+  language: MailLanguage = 'fr',
+): string {
+  return language === 'en'
+    ? `New application: ${jobTitle}`
+    : `Nouvelle candidature : ${jobTitle}`;
+}
+
+export function businessNewMessageSubject(
+  senderName: string,
+  language: MailLanguage = 'fr',
+): string {
+  return language === 'en'
+    ? `New message from ${senderName}`
+    : `Nouveau message de ${senderName}`;
 }

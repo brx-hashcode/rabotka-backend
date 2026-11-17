@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { shownIn, type OutputLanguage } from '../output-language';
 import { ConfigService } from '@nestjs/config';
 import { InterviewMode, InterviewStatus } from '@prisma/client';
 import { signJitsiJoin } from '../../../common/services/jitsi/jitsi-token';
@@ -35,10 +36,13 @@ type VisioInterview = {
   duration_minutes: number;
   ended_at?: Date | null;
   business: { name: string; profile?: { avatar_url: string | null } | null };
+  offer?: { description: string | null } | null;
 };
 
 export type VisioJoin = {
   jobTitle: string;
+  /** Null when the job does not tell: each page then uses its own language. */
+  language: OutputLanguage | null;
   businessName: string;
   candidateName: string;
   startsAt: string;
@@ -175,6 +179,7 @@ export class InterviewVisioService {
             profile: { select: { email: true, avatar_url: true } },
           },
         },
+        offer: { select: { description: true } },
       },
     });
     if (!interview) throw new NotFoundException('Visio introuvable.');
@@ -205,6 +210,14 @@ export class InterviewVisioService {
   ) {
     return {
       jobTitle: interview.job_title,
+      // The language the interview is held in, as far as the job tells: the
+      // call is transcribed in it, whatever language each page is read in.
+      language: shownIn(
+        interview.offer?.description
+          ? `${interview.job_title}\n${interview.offer.description}`
+          : null,
+        interview.job_title,
+      ),
       businessName: interview.business.name,
       businessLogoUrl: interview.business.profile?.avatar_url ?? null,
       candidateName: interview.candidate_name,

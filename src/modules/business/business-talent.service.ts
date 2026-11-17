@@ -16,6 +16,7 @@ import {
   notifyProfile,
 } from '../profile-notification/profile-notification.events';
 import { CONTACTABLE_WORKER } from '../recommendation/contactable-worker';
+import { writtenIn } from './output-language';
 import { BusinessSubscriptionService } from './subscription/business-subscription.service';
 import {
   talentInviteEmail,
@@ -269,6 +270,7 @@ export class BusinessTalentService {
         select: {
           id: true,
           title: true,
+          description: true,
           status: true,
           reference: true,
           employment_type: true,
@@ -332,6 +334,10 @@ export class BusinessTalentService {
       countryName: offer.country_name,
       isRemote: offer.is_remote,
       scheduledAt: offer.scheduled_at,
+      language: writtenIn(
+        offer.description ? `${offer.title}\n${offer.description}` : null,
+        offer.title,
+      ),
     });
     return { invited: true };
   }
@@ -361,6 +367,7 @@ export class BusinessTalentService {
         subject,
         html: await this.layout.wrap(talentInviteEmail(mail), {
           previewText: subject,
+          language: mail.language,
         }),
       });
     } catch (err) {

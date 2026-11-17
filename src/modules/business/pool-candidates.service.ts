@@ -11,7 +11,11 @@ import { searchTokens } from '../../common/queries/text-search';
 import { businessSiteUrl } from '../mail/audience';
 import { LayoutService } from '../mail/layout.service';
 import { MailService } from '../mail/mail.service';
-import { poolInviteEmail } from '../mail/templates/external-application';
+import {
+  externalApplicationSubject,
+  offerLanguage,
+  poolInviteEmail,
+} from '../mail/templates/external-application';
 import { cleanTags } from './business-talent.service';
 
 /** Where someone in « Mes profils » comes from, beyond Rabotka workers. */
@@ -126,6 +130,7 @@ export class PoolCandidatesService {
       where: { id: offerId, employer_id: profileId, deleted_at: null },
       select: {
         title: true,
+        description: true,
         status: true,
         reference: true,
         employer: {
@@ -158,19 +163,29 @@ export class PoolCandidatesService {
       throw new ConflictException('Ce candidat a déjà postulé à cette offre.');
     }
     const url = `${businessSiteUrl()}/carrieres/${encodeURIComponent(business.public_slug)}/${encodeURIComponent(offer.reference)}?source=invitation`;
+    const language = offerLanguage(offer);
     await this.mail.sendMail({
       to: who.email,
-      subject: `${business.name} vous invite à postuler · ${offer.title}`,
+      subject: externalApplicationSubject.poolInvite(
+        business.name,
+        offer.title,
+        language,
+      ),
       html: await this.layout.wrap(
         poolInviteEmail({
-          firstName: who.firstName || 'Bonjour',
+          firstName: who.firstName || (language === 'en' ? 'there' : 'Bonjour'),
           businessName: business.name,
           jobTitle: offer.title,
           url,
+          language,
         }),
         {
-          previewText: `Une offre pour vous : ${offer.title}`,
+          previewText: externalApplicationSubject.poolInvitePreview(
+            offer.title,
+            language,
+          ),
           product: 'business',
+          language,
         },
       ),
     });

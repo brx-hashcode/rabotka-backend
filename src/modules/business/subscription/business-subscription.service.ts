@@ -35,6 +35,8 @@ import {
   businessSubscriptionGrantedEmail,
   businessTrialStartedEmail,
 } from '../../mail/templates';
+import { businessSubscriptionSubject } from '../../mail/templates/business-subscription';
+import type { MailLanguage } from '../../mail/templates/layout';
 import { notifyProfile } from '../../profile-notification/profile-notification.events';
 import type { NotificationInput } from '../../profile-notification/notification-catalog';
 import {
@@ -147,6 +149,39 @@ export const PERIOD_LABEL: Record<BusinessBillingPeriod, string> = {
   MONTHLY: 'mensuel',
   ANNUAL: 'annuel',
 };
+
+const PERIOD_LABEL_EN: Record<BusinessBillingPeriod, string> = {
+  TRIAL: 'free trial',
+  MONTHLY: 'monthly',
+  ANNUAL: 'annual',
+};
+
+function periodLabel(
+  period: BusinessBillingPeriod,
+  language: MailLanguage,
+): string {
+  return language === 'en' ? PERIOD_LABEL_EN[period] : PERIOD_LABEL[period];
+}
+
+/** `creditLabel` in the reader's language (the French one stays the source). */
+function creditLabelIn(
+  kind: BusinessCreditKind,
+  n: number,
+  language: MailLanguage,
+): string {
+  if (language !== 'en') return creditLabel(kind, n);
+  const s = n > 1 ? 's' : '';
+  switch (kind) {
+    case BusinessCreditKind.CV:
+      return `${n} CV${s} to analyse`;
+    case BusinessCreditKind.OFFER:
+      return `${n} job${s} to publish`;
+    case BusinessCreditKind.CONTACT:
+      return `${n} contact${s} to get`;
+    case BusinessCreditKind.OFFER_DRAFT:
+      return `${n} job${s} written by AI`;
+  }
+}
 
 /** What a business may do right now, from its current period's plan. */
 export type BusinessEntitlements = {
@@ -606,9 +641,10 @@ export class BusinessSubscriptionService {
         planName: plan.name,
         endsAt: sub.ends_at.toISOString(),
       },
-      'Votre essai gratuit Rabotka Business commence',
-      (name, businessName) =>
+      (language) => businessSubscriptionSubject.trialStarted(language),
+      (name, businessName, language) =>
         businessTrialStartedEmail(name, {
+          language,
           businessName,
           planName: plan.name,
           endsAt: sub.ends_at,
@@ -682,11 +718,13 @@ export class BusinessSubscriptionService {
         planName: created.plan.name,
         endsAt: created.ends_at.toISOString(),
       },
-      `Votre abonnement ${created.plan.name} est confirmé`,
-      (name) =>
+      (language) =>
+        businessSubscriptionSubject.active(created.plan.name, language),
+      (name, _businessName, language) =>
         businessSubscriptionActiveEmail(name, {
+          language,
           planName: created.plan.name,
-          periodLabel: PERIOD_LABEL[created.billing_period],
+          periodLabel: periodLabel(created.billing_period, language),
           startsAt: created.starts_at,
           endsAt: created.ends_at,
           url: this.subscriptionUrl(),
@@ -772,18 +810,21 @@ export class BusinessSubscriptionService {
       }
       throw err;
     }
-    const what = creditLabel(credit.kind, credit.quantity);
+    const what = (language: MailLanguage) =>
+      creditLabelIn(credit.kind, credit.quantity, language);
     await this.tell(
       businessId,
       {
         type: 'BUSINESS_CREDITS_ADDED',
-        what,
+        what: what('fr'),
         expiresAt: credit.expires_at.toISOString(),
       },
-      `Pack ajouté : ${what}`,
-      (name) =>
+      (language) =>
+        businessSubscriptionSubject.creditsAdded(what(language), language),
+      (name, _businessName, language) =>
         businessCreditsAddedEmail(name, {
-          what,
+          language,
+          what: what(language),
           expiresAt: credit.expires_at,
           url: this.subscriptionUrl(),
         }),
@@ -851,11 +892,13 @@ export class BusinessSubscriptionService {
         startsAt: created.starts_at.toISOString(),
         endsAt: created.ends_at.toISOString(),
       },
-      `La formule ${created.plan.name} vous a été attribuée`,
-      (name) =>
+      (language) =>
+        businessSubscriptionSubject.granted(created.plan.name, language),
+      (name, _businessName, language) =>
         businessSubscriptionGrantedEmail(name, {
+          language,
           planName: created.plan.name,
-          periodLabel: PERIOD_LABEL[created.billing_period],
+          periodLabel: periodLabel(created.billing_period, language),
           startsAt: created.starts_at,
           endsAt: created.ends_at,
           url: this.subscriptionUrl(),
@@ -886,9 +929,11 @@ export class BusinessSubscriptionService {
         planName: sub.plan.name,
         reason,
       },
-      `Votre abonnement ${sub.plan.name} a été arrêté`,
-      (name) =>
+      (language) =>
+        businessSubscriptionSubject.cancelled(sub.plan.name, language),
+      (name, _businessName, language) =>
         businessSubscriptionCancelledEmail(name, {
+          language,
           planName: sub.plan.name,
           reason,
           url: this.subscriptionUrl(),
@@ -1099,9 +1144,10 @@ export class BusinessSubscriptionService {
           planName: plan.name,
           trial: false,
         },
-        'Votre abonnement Rabotka Business est terminé',
-        (name) =>
+        (language) => businessSubscriptionSubject.ended(language),
+        (name, _businessName, language) =>
           businessSubscriptionExpiredEmail(name, {
+            language,
             planName: plan.name,
             trial: false,
             withdrawn: true,
@@ -1934,11 +1980,13 @@ export class BusinessSubscriptionService {
           endsAt: sub.ends_at.toISOString(),
           trial,
         },
-        trial
-          ? 'Votre essai Rabotka Business se termine bientôt'
-          : 'Votre abonnement Rabotka Business arrive à échéance',
-        (name) =>
+        (language) =>
+          trial
+            ? businessSubscriptionSubject.trialExpiring(language)
+            : businessSubscriptionSubject.expiring(language),
+        (name, _businessName, language) =>
           businessSubscriptionExpiringEmail(name, {
+            language,
             planName: sub.plan.name,
             endsAt: sub.ends_at,
             trial,
@@ -1976,11 +2024,13 @@ export class BusinessSubscriptionService {
           planName: sub.plan.name,
           trial,
         },
-        trial
-          ? 'Votre essai Rabotka Business est terminé'
-          : 'Votre abonnement Rabotka Business est terminé',
-        (name) =>
+        (language) =>
+          trial
+            ? businessSubscriptionSubject.trialEnded(language)
+            : businessSubscriptionSubject.ended(language),
+        (name, _businessName, language) =>
           businessSubscriptionExpiredEmail(name, {
+            language,
             planName: sub.plan.name,
             trial,
             url: this.subscriptionUrl(),
@@ -2003,8 +2053,12 @@ export class BusinessSubscriptionService {
   private async tell(
     businessId: string,
     input: NotificationInput,
-    subject: string,
-    html: (name: string, businessName: string) => string,
+    subject: (language: MailLanguage) => string,
+    html: (
+      name: string,
+      businessName: string,
+      language: MailLanguage,
+    ) => string,
   ): Promise<void> {
     try {
       const business = await this.prisma.business.findUnique({
@@ -2024,11 +2078,15 @@ export class BusinessSubscriptionService {
       for (const r of recipients) {
         await this.mail.sendMail({
           to: r.email,
-          subject,
-          html: await this.layout.wrap(html(r.name, business.name), {
-            previewText: subject,
-            product: 'business',
-          }),
+          subject: subject(r.language),
+          html: await this.layout.wrap(
+            html(r.name, business.name, r.language),
+            {
+              previewText: subject(r.language),
+              product: 'business',
+              language: r.language,
+            },
+          ),
         });
       }
     } catch (err) {

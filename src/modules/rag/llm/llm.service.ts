@@ -386,7 +386,9 @@ export class LlmService {
    * Falls over to the next provider only BEFORE the first chunk: once text has
    * reached the reader, switching models would splice two answers together, so
    * a failure after that point is thrown as is. `idleMs` bounds the wait for
-   * each chunk (the first one included); `signal` stops everything (the reader
+   * each chunk; `firstMs` bounds the wait for the first one (default: `idleMs`),
+   * so a provider that never starts answering is left quickly while one that
+   * pauses mid-answer is given time. `signal` stops everything (the reader
    * left). `providers` narrows the chain, e.g. to those that read a PDF.
    */
   async *stream(
@@ -394,6 +396,7 @@ export class LlmService {
     options: {
       tier: LlmTier;
       idleMs?: number;
+      firstMs?: number;
       signal?: AbortSignal;
       correlationId?: string;
       providers?: LlmProviderSpec['provider'][];
@@ -401,6 +404,7 @@ export class LlmService {
   ): AsyncGenerator<string> {
     const startedAt = Date.now();
     const idleMs = options.idleMs ?? this.defaultTimeoutMs;
+    const firstMs = options.firstMs ?? idleMs;
     const chain = resolveChain(options.tier).filter(
       (spec) => !options.providers || options.providers.includes(spec.provider),
     );
@@ -428,11 +432,11 @@ export class LlmService {
 
       const idle = new AbortController();
       let timer: NodeJS.Timeout | undefined;
-      const arm = () => {
+      const arm = (ms: number) => {
         clearTimeout(timer);
         timer = setTimeout(
           () => idle.abort(new Error(`${specId(spec)} went quiet`)),
-          idleMs,
+          ms,
         );
       };
       const signal = options.signal
@@ -443,12 +447,12 @@ export class LlmService {
 
       try {
         const model = await this.factory.build(spec);
-        arm();
+        arm(firstMs);
         const chunks = await model.stream(this.shapeFor(spec, input), {
           signal,
         });
         for await (const chunk of chunks) {
-          arm();
+          arm(idleMs);
           const text = chunkText(chunk.content);
           if (!text) continue;
           yielded = true;

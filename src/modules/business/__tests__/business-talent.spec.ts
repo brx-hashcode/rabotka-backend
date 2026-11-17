@@ -139,6 +139,7 @@ describe('BusinessTalentService', () => {
         claimed?: boolean;
         mailFails?: boolean;
         noSlug?: boolean;
+        description?: string;
       } = {},
     ) => {
       const emit = jest.fn();
@@ -152,6 +153,7 @@ describe('BusinessTalentService', () => {
           findFirst: jest.fn().mockResolvedValue({
             id: 'o1',
             title: 'Serveuse',
+            description: o.description ?? null,
             status: o.status ?? 'ACTIVE',
             reference: 'RBK-1234',
             employment_type: 'MISSION',
@@ -248,6 +250,20 @@ describe('BusinessTalentService', () => {
       expect(html).toContain('RBK-1234');
       expect(html).toContain('Brazzaville, Congo');
       expect(html).toContain('Commence le mardi 24 novembre à 09:00');
+    });
+
+    it('writes in English when the offer is written in English', async () => {
+      const { service, sendMail } = setup({
+        description:
+          'We are looking for a waitress to join our team. You will welcome customers and serve the tables.',
+      });
+      await service.invite('biz', 'w1', 'o1');
+      const sent = (
+        sendMail.mock.calls[0] as [{ subject: string; html: string }]
+      )[0];
+      expect(sent.subject).toBe('Love Life invites you to apply — Serveuse');
+      expect(sent.html).toContain('Reference:');
+      expect(sent.html).toContain('Starts on Tuesday 24 November at 09:00');
     });
 
     it('still names the reference when the business has no careers page', async () => {

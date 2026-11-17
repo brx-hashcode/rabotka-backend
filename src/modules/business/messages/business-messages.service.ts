@@ -9,7 +9,10 @@ import { BusinessMessageKind } from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { LayoutService } from '../../mail/layout.service';
 import { MailService } from '../../mail/mail.service';
-import { businessMessageEmail } from '../../mail/templates/external-application';
+import {
+  businessMessageEmail,
+  offerLanguage,
+} from '../../mail/templates/external-application';
 import { ProfileChatService } from '../../profile-chat/profile-chat.service';
 import { detectContacts } from '../../profile-chat/moderation/detect';
 import type {
@@ -177,12 +180,14 @@ export class BusinessMessagesService {
       select: {
         id: true,
         title: true,
+        description: true,
         employer: { select: { business: { select: { name: true } } } },
       },
     });
     if (!offer) throw new NotFoundException('Offre introuvable.');
     const entreprise = offer.employer.business?.name ?? '';
     const poste = offer.title;
+    const language = offerLanguage(offer);
 
     const [rabotka, external, replyTo] = await Promise.all([
       rabotkaIds.length
@@ -234,19 +239,25 @@ export class BusinessMessagesService {
           poste,
           entreprise,
         });
-        const subject = `Message de ${entreprise || 'votre recruteur'} · ${poste}`;
+        const subject =
+          language === 'en'
+            ? `Message from ${entreprise || 'your recruiter'} · ${poste}`
+            : `Message de ${entreprise || 'votre recruteur'} · ${poste}`;
         await this.mail.sendMail({
           to: a.email,
           subject,
           html: await this.layout.wrap(
             businessMessageEmail({
               firstName: a.first_name,
-              businessName: entreprise || 'Le recruteur',
+              businessName:
+                entreprise ||
+                (language === 'en' ? 'The recruiter' : 'Le recruteur'),
               jobTitle: poste,
               body: text,
               replyTo,
+              language,
             }),
-            { previewText: text.slice(0, 120), product: 'business' },
+            { previewText: text.slice(0, 120), product: 'business', language },
           ),
         });
         sent++;

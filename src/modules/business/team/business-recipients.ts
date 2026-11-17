@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
+import { mailLanguage, type MailLanguage } from '../../mail/templates/layout';
 
 /** What an e-mail to a business is about: hiring, or the plan and payments. */
 export type BusinessMailKind = 'recruiting' | 'billing';
@@ -6,7 +7,12 @@ export type BusinessMailKind = 'recruiting' | 'billing';
 type Db = Pick<PrismaClient, 'businessMember' | 'business'>;
 
 /** One person to write to, greeted by their first name. */
-export type BusinessRecipient = { email: string; name: string };
+export type BusinessRecipient = {
+  email: string;
+  name: string;
+  /** The language they read the app in: their e-mails follow it. */
+  language: MailLanguage;
+};
 
 /**
  * Who of a business gets one of its e-mails: the account holder (at its
@@ -35,7 +41,7 @@ export async function businessEmailRecipients(
         emails_on: true,
         ...(kind === 'billing' ? { role: 'ADMIN' as const } : {}),
       },
-      select: { email: true, name: true, is_owner: true },
+      select: { email: true, name: true, is_owner: true, language: true },
     }),
   ]);
   const holder = business?.profile.email?.trim().toLowerCase();
@@ -43,19 +49,24 @@ export async function businessEmailRecipients(
   // e-mails stay on, as they always were.
   const holderRow = await db.businessMember.findFirst({
     where: { business_id: businessId, is_owner: true },
-    select: { emails_on: true },
+    select: { emails_on: true, language: true },
   });
   const out = new Map<string, BusinessRecipient>();
   if (holder && (holderRow?.emails_on ?? true)) {
     out.set(holder, {
       email: holder,
       name: business?.profile.first_name ?? '',
+      language: mailLanguage(holderRow?.language),
     });
   }
   for (const m of members) {
     const email = m.email.toLowerCase();
     if (!m.is_owner && !out.has(email)) {
-      out.set(email, { email, name: m.name.split(' ')[0] ?? m.name });
+      out.set(email, {
+        email,
+        name: m.name.split(' ')[0] ?? m.name,
+        language: mailLanguage(m.language),
+      });
     }
   }
   return [...out.values()];

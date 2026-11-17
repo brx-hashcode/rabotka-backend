@@ -144,6 +144,26 @@ describe('BusinessMessagesService.send', () => {
     expect(email.html).toContain('mailto:rh@kamoa.cg');
   });
 
+  it('writes to a careers candidate in English for an offer written in English', async () => {
+    const { service, prisma, mail } = make();
+    prisma.jobOffer.findFirst.mockResolvedValue({
+      id: 'o1',
+      title: 'Cashier',
+      description:
+        'We are looking for a cashier to join our team. You will welcome customers and handle payments.',
+      employer: { business: { name: 'KAMOA' } },
+    });
+    await service.send({ profileId: 'biz', memberId: 'm1' }, 'o1', {
+      external: ['e1'],
+      body: 'Bonjour {prenom}, merci.',
+    });
+    const email = mail.sendMail.mock.calls[0][0];
+    expect(email.subject).toBe('Message from KAMOA · Cashier');
+    expect(email.html).toContain('is writing to you about your application');
+    // The recruiter's own words stay as written.
+    expect(email.html).toContain('Bonjour Jean, merci.');
+  });
+
   it('refuses contact details when a Rabotka candidate is among them, before writing to anyone', async () => {
     const { service, chat, mail } = make();
     await expect(

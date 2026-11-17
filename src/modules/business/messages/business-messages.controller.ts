@@ -14,6 +14,7 @@ import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ProfileAuthGuard } from '../../auth/guards/profile-auth.guard';
 import { BusinessProfileGuard } from '../../auth/guards/business-profile.guard';
+import { KycVerifiedGuard } from '../../auth/guards/kyc-verified.guard';
 import type { ProfileAuthenticatedRequest } from '../../auth/guards/jwt-auth.guard';
 import { BulkMessageDto, MessageTemplateDto } from './dto/message-template.dto';
 import { BusinessMessagesService } from './business-messages.service';
@@ -71,6 +72,8 @@ export class BusinessMessagesController {
   }
 
   @Post('offers/:offerId/messages')
+  // Reaches candidates or uses the plan: only once the organisation is approved.
+  @UseGuards(KycVerifiedGuard)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({
     summary: 'Send one message to several candidates of an offer',

@@ -22,6 +22,7 @@ import { isTerminalJobOfferStatus } from '../../job-offer/utils/job-offer-status
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { MailService } from '../../mail/mail.service';
 import { LayoutService } from '../../mail/layout.service';
+import type { MailLanguage } from '../../mail/templates/layout';
 import { businessDashboardUrl } from '../../mail/audience';
 import { notifyProfile } from '../../profile-notification/profile-notification.events';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
@@ -31,7 +32,9 @@ import {
   interviewCancelledEmail,
   interviewChosenEmail,
   interviewInviteEmail,
+  interviewLanguage,
   interviewReminderEmail,
+  interviewSubject,
   type InterviewMail,
 } from './interview-emails';
 import { interviewIcs } from './interview-ics';
@@ -71,6 +74,8 @@ type Loaded = Interview & {
   application: {
     worker: { id: string; email: string | null };
   } | null;
+  /** Loaded with LOAD: the offer's text tells the language of the e-mails. */
+  offer?: { description: string } | null;
 };
 
 const LOAD = {
@@ -82,6 +87,7 @@ const LOAD = {
     },
   },
   application: { select: { worker: { select: { id: true, email: true } } } },
+  offer: { select: { description: true } },
   slots: {
     select: { id: true, starts_at: true },
     orderBy: { starts_at: 'asc' as const },
@@ -320,9 +326,11 @@ export class InterviewService {
     if (to) {
       await this.send(
         to,
-        `Entretien annulé — ${loaded.job_title}`,
+        interviewSubject.cancelled(loaded.job_title, mail.language),
         interviewCancelledEmail(mail),
         [this.icsAttachment(loaded, true)],
+        false,
+        mail.language,
       );
     }
     if (loaded.application) {
@@ -475,9 +483,14 @@ export class InterviewService {
       if (to) {
         await this.send(
           to,
-          `Entretien confirmé — ${updated.job_title}`,
+          interviewSubject.chosen(
+            updated.job_title,
+            interviewLanguage(updated),
+          ),
           interviewChosenEmail(this.mailOf(updated)),
           [this.icsAttachment(updated, false)],
+          false,
+          interviewLanguage(updated),
         );
       }
     }
@@ -495,11 +508,18 @@ export class InterviewService {
         answer,
       },
     });
-    await this.sendToBusiness(
-      updated.business.profile_id,
-      `${updated.candidate_name} — ${answer === 'CONFIRMED' ? 'entretien confirmé' : answer === 'DECLINED' ? 'entretien décliné' : 'autre moment demandé'}`,
-      interviewAnsweredEmail(this.mailOf(updated), answer, clean),
-    );
+    // To the business's team: each in the language they read the app in, not the job's.
+    await this.sendToBusiness(updated.business.profile_id, (language) => ({
+      subject:
+        language === 'en'
+          ? `${updated.candidate_name} — ${answer === 'CONFIRMED' ? 'interview confirmed' : answer === 'DECLINED' ? 'interview declined' : 'another time requested'}`
+          : `${updated.candidate_name} — ${answer === 'CONFIRMED' ? 'entretien confirmé' : answer === 'DECLINED' ? 'entretien décliné' : 'autre moment demandé'}`,
+      content: interviewAnsweredEmail(
+        { ...this.mailOf(updated), language },
+        answer,
+        clean,
+      ),
+    }));
     return publicView(updated);
   }
 
@@ -530,15 +550,20 @@ export class InterviewService {
       if (to) {
         await this.send(
           to,
-          `Rappel : entretien demain — ${interview.job_title}`,
+          interviewSubject.reminder(interview.job_title, mail.language),
           interviewReminderEmail(mail, 'candidate'),
+          [],
+          false,
+          mail.language,
         );
       }
-      await this.sendToBusiness(
-        interview.business.profile_id,
-        `Rappel : entretien avec ${interview.candidate_name} demain`,
-        interviewReminderEmail(mail, 'business'),
-      );
+      await this.sendToBusiness(interview.business.profile_id, (language) => ({
+        subject:
+          language === 'en'
+            ? `Reminder: interview with ${interview.candidate_name} tomorrow`
+            : `Rappel : entretien avec ${interview.candidate_name} demain`,
+        content: interviewReminderEmail({ ...mail, language }, 'business'),
+      }));
       sent++;
     }
     return sent;
@@ -757,10 +782,12 @@ export class InterviewService {
     if (to) {
       await this.send(
         to,
-        `${changed ? 'Entretien modifié' : 'Invitation à un entretien'} — ${interview.job_title}`,
+        interviewSubject.invite(interview.job_title, changed, mail.language),
         interviewInviteEmail(mail, answerUrl(token), changed, options),
         // No agenda file while the time is to choose: it comes once chosen.
         options.length > 0 ? [] : [this.icsAttachment(interview, false)],
+        false,
+        mail.language,
       );
     }
     if (interview.application) {
@@ -791,6 +818,7 @@ export class InterviewService {
     return {
       businessName: interview.business.name,
       jobTitle: interview.job_title,
+      language: interviewLanguage(interview),
       candidateName: interview.candidate_name,
       startsAt: interview.starts_at,
       durationMinutes: interview.duration_minutes,
@@ -801,8 +829,9 @@ export class InterviewService {
   }
 
   private icsAttachment(interview: Loaded, cancelled: boolean) {
+    const language = interviewLanguage(interview);
     return {
-      filename: 'entretien.ics',
+      filename: language === 'en' ? 'interview.ics' : 'entretien.ics',
       contentType: `text/calendar; charset=utf-8; method=${cancelled ? 'CANCEL' : 'REQUEST'}`,
       content: interviewIcs({
         uid: interview.id,
@@ -810,9 +839,14 @@ export class InterviewService {
         sequence: Math.floor(interview.updated_at.getTime() / 1000),
         startsAt: interview.starts_at,
         durationMinutes: interview.duration_minutes,
-        summary: `Entretien — ${interview.job_title} (${interview.business.name})`,
+        summary: interviewSubject.icsSummary(
+          interview.job_title,
+          interview.business.name,
+          language,
+        ),
         description:
-          interview.message ?? `Entretien avec ${interview.business.name}.`,
+          interview.message ??
+          interviewSubject.icsDescription(interview.business.name, language),
         location: interview.location,
         organizerName: interview.business.name,
         cancelled,
@@ -826,8 +860,8 @@ export class InterviewService {
    */
   private async sendToBusiness(
     profileId: string,
-    subject: string,
-    content: string,
+    /** The e-mail, written for one reader's language. */
+    write: (language: MailLanguage) => { subject: string; content: string },
   ) {
     const recipients = await businessEmailRecipientsOfProfile(
       this.prisma,
@@ -835,7 +869,8 @@ export class InterviewService {
       'recruiting',
     ).catch(() => []);
     for (const r of recipients) {
-      await this.send(r.email, subject, content, [], true);
+      const { subject, content } = write(r.language);
+      await this.send(r.email, subject, content, [], true, r.language);
     }
   }
 
@@ -849,6 +884,7 @@ export class InterviewService {
       contentType: string;
     }[] = [],
     business = false,
+    language: MailLanguage = 'fr',
   ) {
     if (!to) return;
     try {
@@ -857,6 +893,7 @@ export class InterviewService {
         subject,
         html: await this.layout.wrap(content, {
           previewText: subject,
+          language,
           ...(business ? { product: 'business' as const } : {}),
         }),
         attachments,

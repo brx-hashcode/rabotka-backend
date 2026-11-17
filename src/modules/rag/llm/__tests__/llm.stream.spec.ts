@@ -155,6 +155,23 @@ describe('LlmService.stream', () => {
     ).resolves.toEqual([`from ${SECOND}`]);
   });
 
+  it('leaves a provider that never starts after firstMs, well before idleMs', async () => {
+    const factory = makeFactory({ [FIRST]: { hang: true } });
+    const service = new LlmService(
+      factory as never,
+      makeBreaker() as never,
+      config as never,
+    );
+    const startedAt = Date.now();
+
+    await expect(
+      collect(
+        service.stream('hi', { tier: 'document', idleMs: 5_000, firstMs: 20 }),
+      ),
+    ).resolves.toEqual([`from ${SECOND}`]);
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+  });
+
   it('stops quietly when the reader leaves', async () => {
     const factory = makeFactory({ [FIRST]: { hang: true } });
     const service = new LlmService(
