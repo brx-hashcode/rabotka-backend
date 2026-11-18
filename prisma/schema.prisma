@@ -12,9 +12,12 @@ enum ProfileType {
 }
 
 enum VerificationStatus {
+  /// Documents sent, waiting for a reviewer (and the default for every path but the one below).
   PENDING
   VERIFIED
   REJECTED
+  /// Signed up without identity documents (« Plus tard »): nothing to review yet.
+  NOT_SUBMITTED
 }
 
 /// ADMIN / MANAGER / MODERATOR / SUPER_ADMIN form a hierarchy (see

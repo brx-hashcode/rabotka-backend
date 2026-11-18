@@ -9,6 +9,7 @@ export {
   businessWelcomeEmail,
   sendWelcomeEmail,
   WELCOME_EMAIL_PREVIEW,
+  WELCOME_EMAIL_PREVIEW_NO_DOCUMENTS,
 } from './welcome';
 export {
   referralRewardedEmail,
@@ -44,7 +45,11 @@ export {
 } from './business-review';
 export { kycApprovedEmail } from './kyc-approved';
 export { kycRejectedEmail } from './kyc-rejected';
-export { kycReviewRequestedEmail } from './kyc-review-requested';
+export {
+  kycReviewRequestedEmail,
+  kycReviewSubject,
+  type KycReviewKind,
+} from './kyc-review-requested';
 export { paymentRejectedEmail } from './payment-rejected';
 export { invoiceEmail, paymentSuccessEmail } from './payment-success';
 export { accountSuspendedEmail } from './account-suspended';

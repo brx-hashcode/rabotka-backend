@@ -1604,8 +1604,8 @@ export class ApplicationService {
       profileId: workerId,
       reason,
     } satisfies ProfileAutoSuspendedPayload);
-    this.eventEmitter.emit(AdminNotificationEvent.PROFILE_STATUS_CHANGED, {
-      event: AdminNotificationEvent.PROFILE_STATUS_CHANGED,
+    this.eventEmitter.emit(AdminNotificationEvent.PROFILE_AUTO_SUSPENDED, {
+      event: AdminNotificationEvent.PROFILE_AUTO_SUSPENDED,
       title: 'Account suspended automatically',
       message: `Account suspended: ${reason}`,
       entityType: 'profile',

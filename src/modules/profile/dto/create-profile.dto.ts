@@ -27,6 +27,33 @@ import { BusinessSignupDto } from '../../business/dto/business-signup.dto';
  */
 const isPersonalSignup = (o: CreateProfileDto) => o.business === undefined;
 
+/** A value that is missing, null or blank counts as not sent. */
+const blankToUndefined = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? value.trim() || undefined : (value ?? undefined);
+
+/**
+ * Whether a sign-up carries identity documents. A person may sign up without
+ * them (« Plus tard ») and send them later from the app
+ * (`POST /profile/me/kyc`); but once any of them is sent, the whole set is
+ * required, as before: half a set is a mistake, never a choice.
+ */
+export function sendsKycDocuments(
+  o: Pick<
+    CreateProfileDto,
+    'documentType' | 'kycDocumentUrl' | 'kycSelfieUrl' | 'kycDocumentBackUrl'
+  >,
+): boolean {
+  return [
+    o.documentType,
+    o.kycDocumentUrl,
+    o.kycSelfieUrl,
+    o.kycDocumentBackUrl,
+  ].some((v) => typeof v === 'string' && v.trim() !== '');
+}
+
+const isPersonalSignupWithDocuments = (o: CreateProfileDto) =>
+  isPersonalSignup(o) && sendsKycDocuments(o);
+
 export class CreateProfileDto extends LocationDto {
   @ApiProperty({ description: 'First name of the profile' })
   @Transform(({ value }) => value?.trim())
@@ -115,8 +142,8 @@ export class CreateProfileDto extends LocationDto {
     enum: DocumentType,
     example: DocumentType.IDENTITY_CARD,
   })
-  @Transform(({ value }) => value as DocumentType)
-  @ValidateIf(isPersonalSignup)
+  @Transform(blankToUndefined)
+  @ValidateIf(isPersonalSignupWithDocuments)
   @IsEnum(DocumentType)
   @IsNotEmpty()
   documentType?: DocumentType;
@@ -133,7 +160,8 @@ export class CreateProfileDto extends LocationDto {
     description:
       'URL of the KYC identity document, pre-uploaded via POST /profile/kyc-upload. Not sent by a business sign-up.',
   })
-  @ValidateIf(isPersonalSignup)
+  @Transform(blankToUndefined)
+  @ValidateIf(isPersonalSignupWithDocuments)
   @IsString()
   @IsNotEmpty()
   kycDocumentUrl?: string;
@@ -142,7 +170,8 @@ export class CreateProfileDto extends LocationDto {
     description:
       'URL of the KYC selfie, pre-uploaded via POST /profile/kyc-upload. Not sent by a business sign-up.',
   })
-  @ValidateIf(isPersonalSignup)
+  @Transform(blankToUndefined)
+  @ValidateIf(isPersonalSignupWithDocuments)
   @IsString()
   @IsNotEmpty()
   kycSelfieUrl?: string;
@@ -169,6 +198,7 @@ export class CreateProfileDto extends LocationDto {
       'POST /profile/kyc-upload. Expected for every document type except ' +
       'PASSPORT, which has no back to photograph.',
   })
+  @Transform(blankToUndefined)
   @IsOptional()
   @IsString()
   @IsNotEmpty()

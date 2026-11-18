@@ -10,14 +10,15 @@ export function kycRejectedEmail(name: string, reason?: string): string {
 
     <p>
       Après examen de votre dossier, nous avons le regret de vous informer que votre
-      vérification d'identité (KYC) a été <strong>rejetée</strong>.
+      vérification d'identité a été <strong>rejetée</strong>.
     </p>
 
     ${reasonBlock}
 
     <p>
-      Si vous pensez qu'il s'agit d'une erreur ou souhaitez soumettre un nouveau dossier,
-      veuillez contacter notre équipe support.
+      Corrigez ce qui est indiqué ci-dessus et envoyez de nouveaux documents
+      depuis l'application, rubrique <strong>Profil › Vérification d'identité</strong>.
+      Votre dossier sera réexaminé dès réception.
     </p>
 
     <p>

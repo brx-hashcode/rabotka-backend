@@ -189,8 +189,8 @@ export class ClaimService {
       include: claimInclude,
     });
 
-    this.eventEmitter.emit(AdminNotificationEvent.CLAIM_CREATED, {
-      event: AdminNotificationEvent.CLAIM_CREATED,
+    this.eventEmitter.emit(AdminNotificationEvent.CLAIM_CREATED_BY_ADMIN, {
+      event: AdminNotificationEvent.CLAIM_CREATED_BY_ADMIN,
       title: 'New claim',
       message: `New claim "${dto.title}" from ${claim.profile ? `${claim.profile.first_name} ${claim.profile.last_name}` : 'a profile'}`,
       entityType: 'claim',
@@ -578,8 +578,8 @@ export class ClaimService {
 
     const authorName =
       `${comment.user?.first_name ?? ''} ${comment.user?.last_name ?? ''}`.trim();
-    this.eventEmitter.emit(AdminNotificationEvent.CLAIM_COMMENTED, {
-      event: AdminNotificationEvent.CLAIM_COMMENTED,
+    this.eventEmitter.emit(AdminNotificationEvent.CLAIM_COMMENTED_BY_ADMIN, {
+      event: AdminNotificationEvent.CLAIM_COMMENTED_BY_ADMIN,
       title: 'New comment (admin)',
       message: `${authorName} commented on the claim « ${exists.title} »`,
       entityType: 'claim',

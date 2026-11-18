@@ -1,6 +1,9 @@
-import { ctaReply } from '../../../common/constants/whatsapp-carousel';
 import {
-  CLAIM_FORM_CTA_PATH,
+  ctaReply,
+  type CtaReply,
+} from '../../../common/constants/whatsapp-carousel';
+import {
+  KYC_DOCUMENTS_CTA_PATH,
   OPEN_APP_CTA_PATH,
   PENALTIES_PAYMENT_CTA_PATH,
   WHATSAPP_TEMPLATES,
@@ -140,30 +143,55 @@ export function vovaUnavailableMessage(
  *
  * So the refused state gets its own fallback, and it says the one thing the
  * system prompt already tells the assistant to say (`prompts.ts`, the REJECTED
- * branch): documents cannot be re-sent from the app, and the route forward is
- * a réclamation. Deterministic on purpose — it has to work on the day the
- * model does not.
+ * branch): new documents are sent from the app, and that alone puts the dossier
+ * back under review — no réclamation. Deterministic on purpose — it has to work on the day the model
+ * does not.
  *
- * The button lands on the claim FORM rather than `/home`: somebody who has
- * just been told to file a réclamation should not then have to find it.
+ * The button lands on the documents page rather than `/home`: somebody who
+ * has just been told to send new documents should not then have to find it.
  */
 export function kycRejectedHelpMessage(firstName: string): string {
   return ctaReply({
     body: [
       '*Votre vérification a été refusée*',
       '',
-      'Vos documents ne peuvent pas être renvoyés depuis l’application.',
-      'Pour faire examiner votre situation — pièce perdue, volée, ou refus que vous contestez — ouvrez une réclamation : l’équipe vous répondra dans la conversation.',
+      'Envoyez de nouveaux documents depuis l’application : une pièce d’identité lisible et un selfie.',
+      'Votre dossier sera réexaminé dès réception.',
     ].join('\n'),
-    buttonText: 'Ouvrir une réclamation',
-    path: CLAIM_FORM_CTA_PATH,
+    buttonText: 'Envoyer mes documents',
+    path: KYC_DOCUMENTS_CTA_PATH,
     // The window may have shut between the reply being built and the job
     // draining. `openApp` is the approved UTILITY letter we already own; it
-    // lands on /home rather than the form, which is the honest limit of a
+    // lands on /home rather than the page, which is the honest limit of a
     // template written for something else.
     fallbackTemplate: 'openApp',
     fallbackVariables: WHATSAPP_TEMPLATES.openApp.variables(firstName),
   });
+}
+
+/**
+ * Signed up without identity documents (« Plus tard »): nothing is under
+ * review, and the one thing to do is send them. The button opens the page.
+ */
+export function kycDocumentsMissingCta(firstName: string): CtaReply {
+  return {
+    body: [
+      '*Vérifiez votre identité*',
+      '',
+      'Pour postuler ou publier une mission, envoyez votre pièce d’identité et un selfie depuis l’application.',
+    ].join('\n'),
+    buttonText: 'Envoyer mes documents',
+    path: KYC_DOCUMENTS_CTA_PATH,
+    // Outside the 24h window (most sign-ups come from the web and never
+    // wrote to the bot), the approved generic door: it opens the app, whose
+    // home says what is missing.
+    fallbackTemplate: 'openApp',
+    fallbackVariables: WHATSAPP_TEMPLATES.openApp.variables(firstName),
+  };
+}
+
+export function kycDocumentsMissingMessage(firstName: string): string {
+  return ctaReply(kycDocumentsMissingCta(firstName));
 }
 
 export function openAppBotMessage(firstName: string): string {

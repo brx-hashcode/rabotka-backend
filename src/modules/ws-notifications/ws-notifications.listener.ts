@@ -2,7 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { WsNotificationsGateway } from './ws-notifications.gateway';
 import { AdminNotificationService } from './admin-notification.service';
-import type { AdminNotificationPayload } from '../../common/events/admin-notification.events';
+import {
+  isBellEvent,
+  type AdminNotificationPayload,
+} from '../../common/events/admin-notification.events';
 
 @Injectable()
 export class WsNotificationsListener {
@@ -17,6 +20,9 @@ export class WsNotificationsListener {
   async handleAdminNotification(
     payload: AdminNotificationPayload,
   ): Promise<void> {
+    // Only what someone has to act on reaches the bell (ADMIN_BELL_EVENTS).
+    if (!isBellEvent(payload?.event)) return;
+
     const { dedupeWindowMs, ...notification } = payload;
 
     if (dedupeWindowMs && (await this.isDuplicate(payload, dedupeWindowMs))) {

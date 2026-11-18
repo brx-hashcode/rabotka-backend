@@ -1,11 +1,25 @@
 import { emailButton, escapeHtml } from './layout';
 
 export type WelcomeEmailOptions = {
-  /** Where the CTA points. Not a one-tap link — those are minted for WhatsApp. */
-  appUrl: string;
+  /**
+   * Unused since the email lost its button: the candidate app opens inside
+   * WhatsApp, so a web link from an email only leads out of it. Kept so a
+   * caller passing it still compiles.
+   */
+  appUrl?: string;
   /** Granted at signup by `grantWelcomeCredit`; 0 when the grant failed. */
   creditedBalance: number;
+  /**
+   * Whether the identity documents came with the sign-up. False for « Plus
+   * tard »: nothing is under review, and the email says what to send instead.
+   * Absent means sent, as every sign-up did before.
+   */
+  documentsSent?: boolean;
 };
+
+/** The preview line for a sign-up without documents. */
+export const WELCOME_EMAIL_PREVIEW_NO_DOCUMENTS =
+  "Votre compte est créé. Envoyez votre pièce d'identité pour commencer.";
 
 /** Shown by the client on the same event, so both channels read alike. */
 export const WELCOME_EMAIL_PREVIEW =
@@ -26,7 +40,7 @@ export const WELCOME_EMAIL_PREVIEW =
  */
 export function sendWelcomeEmail(
   name: string,
-  { appUrl, creditedBalance }: WelcomeEmailOptions,
+  { creditedBalance, documentsSent = true }: WelcomeEmailOptions,
 ): string {
   // Hidden entirely when the grant failed, matching the success screen — an
   // empty gift box reads worse than no gift box.
@@ -45,12 +59,22 @@ export function sendWelcomeEmail(
 
     <p>Votre profil a été créé avec succès 🎉</p>
 
+${
+  documentsSent
+    ? `
     <p>
       Une fois vos informations vérifiées, votre compte sera activé.
       Un agent Rabotka examine actuellement les documents que vous avez transmis.
-    </p>
+    </p>`
+    : `
+    <p>
+      Pour postuler ou publier une mission, il reste une étape : envoyer votre
+      pièce d'identité et un selfie depuis l'application, rubrique
+      <strong>Profil › Vérification d'identité</strong>. Un agent Rabotka les
+      vérifie ensuite, et votre compte est activé.
+    </p>`
+}
 ${creditBlock}
-    ${emailButton(appUrl, 'Ouvrir Rabotka')}
 
     <p>Vous recevrez un message sur WhatsApp dès que votre compte sera activé.</p>
 
