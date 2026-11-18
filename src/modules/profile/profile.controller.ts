@@ -47,7 +47,8 @@ import {
   ProfilePenaltyItem,
   ProfileApplicationsResponse,
 } from './profile.service';
-import { CreateProfileDto } from './dto/create-profile.dto';
+import { CreateProfileDto, sendsKycDocuments } from './dto/create-profile.dto';
+import { SubmitKycDocumentsDto } from './dto/submit-kyc-documents.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import {
   RequestPhoneChangeDto,
@@ -58,6 +59,7 @@ import {
   businessWelcomeEmail,
   sendWelcomeEmail,
   WELCOME_EMAIL_PREVIEW,
+  WELCOME_EMAIL_PREVIEW_NO_DOCUMENTS,
 } from '../mail/templates';
 import { businessOrganisationUrl } from '../mail/audience';
 import { setAuthCookie } from '../auth/auth-cookie.util';
@@ -79,6 +81,37 @@ import {
   ALLOWED_IMAGE_MIME_TYPES,
   isAllowedImageMimeType,
 } from '../../common/constants/image-upload';
+
+/**
+ * One KYC file: 10 MB at most, an image or a scanned PDF. Shared by the
+ * sign-up upload and the signed-in one, so the two cannot drift apart.
+ */
+const KYC_FILE_OPTIONS = {
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (
+    _req: unknown,
+    file: Express.Multer.File,
+    cb: (error: Error | null, accept: boolean) => void,
+  ) => {
+    const allowed: string[] = [...ALLOWED_IMAGE_MIME_TYPES, 'application/pdf'];
+    cb(null, allowed.includes(file.mimetype));
+  },
+};
+
+/** The bytes must agree with the declared type: a renamed page stops here. */
+function assertKycFile(
+  file: Express.Multer.File | undefined,
+): Express.Multer.File {
+  if (!file) {
+    throw new BadRequestException('Le fichier KYC est requis');
+  }
+  if (sniffFileType(file.buffer) !== file.mimetype) {
+    throw new BadRequestException(
+      'Fichier non reconnu : envoyez une photo (JPG, PNG, WEBP) ou un PDF.',
+    );
+  }
+  return file;
+}
 
 @ApiTags('Profile')
 @Controller('profile')
@@ -175,6 +208,8 @@ export class ProfileController {
       createProfileDto,
       entry,
     );
+    // « Plus tard »: signed up without identity documents (NOT_SUBMITTED).
+    const documentsSent = sendsKycDocuments(createProfileDto);
     // Spent: one verified number, one account.
     await consumeSignupToken(this.redis, createProfileDto.signupToken);
 
@@ -204,8 +239,13 @@ export class ProfileController {
           sendWelcomeEmail(createProfileDto.firstName, {
             appUrl: this.frontendUrl(),
             creditedBalance: result.creditedBalance,
+            documentsSent,
           }),
-          { previewText: WELCOME_EMAIL_PREVIEW },
+          {
+            previewText: documentsSent
+              ? WELCOME_EMAIL_PREVIEW
+              : WELCOME_EMAIL_PREVIEW_NO_DOCUMENTS,
+          },
         ),
       });
     }
@@ -224,7 +264,11 @@ export class ProfileController {
       createProfileDto.profileType === ProfileType.EMPLOYER
         ? ('profileCreatedEmployer' as const)
         : ('profileCreatedWorker' as const);
-    if (entry === 'whatsapp') {
+    // Not either when the documents were skipped (« Plus tard »): both
+    // approved templates say the profile is under review, which it is not. A
+    // template that asks for the documents instead waits for Meta's approval;
+    // until then the email and the app say it.
+    if (entry === 'whatsapp' && documentsSent) {
       void this.whatsApp
         .sendTemplateMessage(
           createProfileDto.phone,
@@ -306,7 +350,7 @@ export class ProfileController {
         },
         verificationStatus: {
           type: 'string',
-          enum: ['PENDING', 'VERIFIED', 'REJECTED'],
+          enum: ['NOT_SUBMITTED', 'PENDING', 'VERIFIED', 'REJECTED'],
         },
         reliabilityScore: { type: 'number', nullable: true },
         whatsappConnected: { type: 'boolean' },
@@ -504,7 +548,7 @@ export class ProfileController {
         },
         verificationStatus: {
           type: 'string',
-          enum: ['PENDING', 'VERIFIED', 'REJECTED'],
+          enum: ['NOT_SUBMITTED', 'PENDING', 'VERIFIED', 'REJECTED'],
         },
         reliabilityScore: { type: 'number', nullable: true },
         whatsappConnected: { type: 'boolean' },
@@ -593,20 +637,7 @@ export class ProfileController {
   // Token checked before the body is read; see SignupUploadGuard.
   @UseGuards(SignupUploadGuard)
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
-  @UseInterceptors(
-    FileInterceptor('file', {
-      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
-      // Not an image-only route: KYC accepts a scanned PDF too, so this
-      // extends the shared list rather than using it as-is.
-      fileFilter: (_req, file, cb) => {
-        const allowed: string[] = [
-          ...ALLOWED_IMAGE_MIME_TYPES,
-          'application/pdf',
-        ];
-        cb(null, allowed.includes(file.mimetype));
-      },
-    }),
-  )
+  @UseInterceptors(FileInterceptor('file', KYC_FILE_OPTIONS))
   @ApiOperation({
     summary: 'Pre-upload a KYC file during onboarding',
     description:
@@ -657,18 +688,50 @@ export class ProfileController {
   async uploadKyc(
     @UploadedFile() file: Express.Multer.File,
   ): Promise<{ url: string; key: string }> {
-    if (!file) {
-      throw new BadRequestException('Le fichier KYC est requis');
-    }
-    // The declared type is a header anyone can set: the bytes must agree.
-    // An HTML page or a script renamed photo.png stops here.
-    if (sniffFileType(file.buffer) !== file.mimetype) {
-      throw new BadRequestException(
-        'Fichier non reconnu : envoyez une photo (JPG, PNG, WEBP) ou un PDF.',
-      );
-    }
+    return this.profileService.uploadKycFile(assertKycFile(file));
+  }
 
-    return this.profileService.uploadKycFile(file);
+  @Post('me/kyc-upload')
+  @UseGuards(ProfileAuthGuard, UnblockedProfileGuard)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @UseInterceptors(FileInterceptor('file', KYC_FILE_OPTIONS))
+  @ApiBearerAuth()
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Upload one identity document file, signed in',
+    description:
+      'For a person who signed up without their documents, or whose documents were rejected. Same file rules as POST /profile/kyc-upload; the descriptor is then sent to POST /profile/me/kyc.',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  async uploadMyKyc(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<{ url: string; key: string }> {
+    return this.profileService.uploadKycFile(assertKycFile(file));
+  }
+
+  @Post('me/kyc')
+  @UseGuards(ProfileAuthGuard, UnblockedProfileGuard)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiBearerAuth()
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Send identity documents for verification',
+    description:
+      'From NOT_SUBMITTED (signed up without them) or REJECTED. The profile becomes PENDING and the reviewers are alerted. 409 when verified or already under review.',
+  })
+  @ApiResponse({ status: 201, description: 'Documents received: now PENDING.' })
+  async submitMyKyc(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Body() dto: SubmitKycDocumentsDto,
+  ) {
+    return this.profileService.submitKycDocuments(req.user.profileId, dto);
   }
 
   @Post('phone-change/request')

@@ -4,6 +4,12 @@ export enum AdminNotificationEvent {
   PROFILE_UPDATED = 'admin.notification.profile.updated',
   PROFILE_STATUS_CHANGED = 'admin.notification.profile.status_changed',
   PROFILE_KYC_VERIFIED = 'admin.notification.profile.kyc_verified',
+  /** A person sent their identity documents (at sign-up or later): a KYC to review. */
+  PROFILE_KYC_SUBMITTED = 'admin.notification.profile.kyc_submitted',
+  /** An organisation signed up, or resubmitted its papers: to review. */
+  ORGANISATION_REVIEW_REQUESTED = 'admin.notification.profile.organisation_review_requested',
+  /** The platform suspended an account by itself (repeated cancellations…). */
+  PROFILE_AUTO_SUSPENDED = 'admin.notification.profile.auto_suspended',
   /** Typed a support keyword to the WhatsApp bot — may want a human. */
   SUPPORT_REQUESTED = 'admin.notification.profile.support_requested',
 
@@ -29,7 +35,12 @@ export enum AdminNotificationEvent {
   // Claim
   CLAIM_CREATED = 'admin.notification.claim.created',
   CLAIM_UPDATED = 'admin.notification.claim.updated',
+  /** A client commented on their claim. */
   CLAIM_COMMENTED = 'admin.notification.claim.commented',
+  /** An admin commented on a claim: their own action, never on the bell. */
+  /** An admin opened a claim for someone: their own action, never on the bell. */
+  CLAIM_CREATED_BY_ADMIN = 'admin.notification.claim.created_by_admin',
+  CLAIM_COMMENTED_BY_ADMIN = 'admin.notification.claim.commented_by_admin',
 
   // Event (calendar)
   EVENT_CREATED = 'admin.notification.event.created',
@@ -90,4 +101,32 @@ export interface AdminNotificationPayload {
    * next occurrence alerts again.
    */
   dedupeWindowMs?: number;
+}
+
+/**
+ * The events the admin bell shows: only those someone has to act on.
+ *
+ * Every event is still emitted (other listeners use them: the KYC reviewer
+ * emails, the demo-request emails); the bell just stops storing and pushing
+ * routine activity and an admin's own actions, which the dashboards and lists
+ * already show. It used to ring for every profile created, every KYC an admin
+ * had just verified, every profile edit, every application.
+ */
+export const ADMIN_BELL_EVENTS: ReadonlySet<string> = new Set<string>([
+  AdminNotificationEvent.PROFILE_KYC_SUBMITTED,
+  AdminNotificationEvent.ORGANISATION_REVIEW_REQUESTED,
+  AdminNotificationEvent.PROFILE_AUTO_SUSPENDED,
+  AdminNotificationEvent.SUPPORT_REQUESTED,
+  AdminNotificationEvent.CONVERSATION_MESSAGE_HELD,
+  AdminNotificationEvent.CLAIM_CREATED,
+  AdminNotificationEvent.CLAIM_COMMENTED,
+  // Only emitted as « subscription paid without a period: grant it by hand ».
+  AdminNotificationEvent.PAYMENT_ACTIVATION,
+  AdminNotificationEvent.AGENT_WITHDRAWAL_REQUESTED,
+  AdminNotificationEvent.DEMO_REQUEST_CREATED,
+]);
+
+/** Whether an alert belongs on the admin bell. Unknown or missing: no. */
+export function isBellEvent(event: string | null | undefined): boolean {
+  return !!event && ADMIN_BELL_EVENTS.has(event);
 }

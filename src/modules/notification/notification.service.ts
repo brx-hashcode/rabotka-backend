@@ -12,6 +12,7 @@ import {
   claimRejectedEmail,
   claimAssignedEmail,
   kycReviewRequestedEmail,
+  kycReviewSubject,
   claimUnassignedEmail,
   eventCreatedEmail,
   eventUpdatedEmail,
@@ -159,9 +160,9 @@ export class NotificationService {
   ): Promise<void> {
     await this.mail.sendMail({
       to,
-      subject: `Rabotka – Nouveau profil à vérifier : ${params.profileName}`,
+      subject: kycReviewSubject(params.kind ?? 'documents', params.profileName),
       html: await this.layout.wrap(kycReviewRequestedEmail(params), {
-        previewText: 'Un nouveau profil attend la vérification de son KYC.',
+        previewText: 'Des documents attendent votre vérification.',
       }),
     });
   }

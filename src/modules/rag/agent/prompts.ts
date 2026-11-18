@@ -385,11 +385,10 @@ export function buildSystemPromptParts(ctx: PromptContext): SystemPromptParts {
     // la même phrase — d'où des réponses identiques pour des cas opposés.
     //
     // PENDING attend une décision : il n'y a rien à faire et rien à promettre.
-    // REJECTED a reçu une décision, et le produit n'offre AUCUN moyen de
-    // renvoyer ses pièces : les documents ne sont acceptés qu'à la création du
-    // profil (`UpdateProfileDto` ne porte aucun champ KYC). Dire « recommencez »
-    // envoie la personne buter sur une porte qui n'existe pas. Le canal réel est
-    // la réclamation.
+    // REJECTED a reçu une décision : la personne renvoie de nouvelles pièces
+    // depuis Profil › Vérification d'identité (`POST /profile/me/kyc`), et
+    // conteste par une réclamation. NOT_SUBMITTED n'a rien envoyé (« Plus
+    // tard ») : rien n'est en cours, il faut envoyer les pièces.
     //
     // Une ligne, pas six : les étapes vivent dans `corpus/kyc-refuse.md`, que la
     // retrieval remonte sur ces questions. Ce prompt a déjà été dégradé une fois
@@ -537,8 +536,16 @@ function verificationLines(status: VerificationStatus): string[] {
       ];
     case VerificationStatus.REJECTED:
       return [
-        "\nLa vérification de cette personne a été REFUSÉE. Elle ne peut pas renvoyer ses documents elle-même — ce n'est pas prévu dans l'application. Le seul canal est une réclamation, dont la documentation ci-dessus donne les étapes : suis-les exactement, sans en inventer d'autres. Ne lui dis jamais de recommencer sa photo ou de renvoyer sa pièce, et ne reviens pas sur la décision.",
+        "\nLa vérification de cette personne a été REFUSÉE. Elle peut renvoyer de nouveaux documents (pièce d'identité et selfie) dans l'application, rubrique Profil › Vérification d'identité : la carte jointe sous ta réponse l'y emmène, et la documentation ci-dessus donne les étapes. Ne reviens pas sur la décision et ne promets pas que le nouveau dossier sera accepté ; pour contester le refus, le canal est une réclamation.",
       ];
+    case VerificationStatus.NOT_SUBMITTED:
+      return [
+        "\nCette personne s'est inscrite SANS envoyer ses documents d'identité : rien n'est en cours d'examen. Pour postuler ou publier une mission, elle doit d'abord envoyer sa pièce d'identité et un selfie dans l'application, rubrique Profil › Vérification d'identité — la carte jointe sous ta réponse l'y emmène. Ne lui dis jamais que son profil est en cours de vérification.",
+      ];
+    default:
+      // A status this prompt does not know yet: say nothing rather than
+      // something false.
+      return [];
   }
 }
 

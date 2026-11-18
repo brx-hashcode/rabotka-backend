@@ -176,6 +176,26 @@ describe('ProfileController', () => {
       );
     });
 
+    describe('without identity documents (« Plus tard »)', () => {
+      const later = {
+        ...dto,
+        kycDocumentUrl: undefined,
+        kycSelfieUrl: undefined,
+      };
+
+      it('sends no « under review » WhatsApp template', async () => {
+        await controller.createProfile(later as any, mockRes());
+        expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+      });
+
+      it('welcomes by email, asking for the documents instead', async () => {
+        await controller.createProfile(later as any, mockRes());
+        const html = String(mailService.sendMail.mock.calls.at(-1)?.[0]?.html);
+        expect(html).toContain('/profile/verification');
+        expect(html).not.toContain('examine actuellement les documents');
+      });
+    });
+
     it('refuses a business body with a WhatsApp token', async () => {
       await expect(
         controller.createProfile(

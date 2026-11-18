@@ -1,6 +1,9 @@
 import { WsNotificationsListener } from '../ws-notifications.listener';
 import { WsNotificationsGateway } from '../ws-notifications.gateway';
-import { AdminNotificationEvent } from '../../../common/events/admin-notification.events';
+import {
+  ADMIN_BELL_EVENTS,
+  AdminNotificationEvent,
+} from '../../../common/events/admin-notification.events';
 import type { AdminNotificationPayload } from '../../../common/events/admin-notification.events';
 
 describe('WsNotificationsListener', () => {
@@ -20,11 +23,11 @@ describe('WsNotificationsListener', () => {
     } as any);
   });
 
-  it('broadcasts notification to admins room', async () => {
+  it('broadcasts an alert someone must act on to the admins room', async () => {
     const payload: AdminNotificationPayload = {
-      event: AdminNotificationEvent.PROFILE_CREATED,
-      title: 'Nouveau profil',
-      message: 'Jean Dupont a créé un compte',
+      event: AdminNotificationEvent.PROFILE_KYC_SUBMITTED,
+      title: 'Documents to review',
+      message: 'Jean Dupont sent identity documents to review',
       entityType: 'profile',
       entityId: 'profile-123',
       timestamp: '2026-03-28T12:00:00.000Z',
@@ -36,14 +39,14 @@ describe('WsNotificationsListener', () => {
     expect(emitMock).toHaveBeenCalledWith('notification', payload);
   });
 
-  it('handles payloads with metadata', async () => {
+  it('keeps metadata on what it broadcasts', async () => {
     const payload: AdminNotificationPayload = {
-      event: AdminNotificationEvent.APPLICATION_CANCELLED,
-      title: 'Candidature annulée',
-      message: 'Candidature #42 annulée',
-      entityType: 'application',
+      event: AdminNotificationEvent.PROFILE_KYC_SUBMITTED,
+      title: 'Documents sent again',
+      message: 'Jean Dupont sent new identity documents after a rejection',
+      entityType: 'profile',
       entityId: '42',
-      metadata: { reason: 'employer', penaltyCreated: true },
+      metadata: { resubmitted: true },
       timestamp: '2026-03-28T12:00:00.000Z',
     };
 
@@ -52,29 +55,58 @@ describe('WsNotificationsListener', () => {
     expect(emitMock).toHaveBeenCalledWith('notification', payload);
   });
 
-  it('handles different event types', async () => {
-    const events = [
+  it('rings for every event someone has to act on', async () => {
+    for (const event of ADMIN_BELL_EVENTS) {
+      await listener.handleAdminNotification({
+        event: event as AdminNotificationEvent,
+        title: 'Test',
+        message: 'Test message',
+        entityType: 'profile',
+        entityId: '1',
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    expect(emitMock).toHaveBeenCalledTimes(ADMIN_BELL_EVENTS.size);
+  });
+
+  it('stays silent on routine activity and an admin’s own actions', async () => {
+    const create = (listener as any).notificationService.create as jest.Mock;
+    for (const event of [
+      AdminNotificationEvent.PROFILE_CREATED,
+      AdminNotificationEvent.PROFILE_UPDATED,
+      AdminNotificationEvent.PROFILE_KYC_VERIFIED,
+      AdminNotificationEvent.APPLICATION_CREATED,
       AdminNotificationEvent.JOB_OFFER_CREATED,
       AdminNotificationEvent.CLAIM_UPDATED,
-      AdminNotificationEvent.PAYMENT_ACTIVATION,
+      AdminNotificationEvent.CLAIM_COMMENTED_BY_ADMIN,
+      AdminNotificationEvent.CLAIM_CREATED_BY_ADMIN,
       AdminNotificationEvent.PENALTY_SOLVED,
       AdminNotificationEvent.EVENT_CREATED,
-    ];
-
-    for (const event of events) {
-      const payload: AdminNotificationPayload = {
+    ]) {
+      await listener.handleAdminNotification({
         event,
         title: 'Test',
         message: 'Test message',
         entityType: 'profile',
         entityId: '1',
         timestamp: new Date().toISOString(),
-      };
-
-      await listener.handleAdminNotification(payload);
+      });
     }
 
-    expect(emitMock).toHaveBeenCalledTimes(events.length);
+    expect(emitMock).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('ignores a payload with no event', async () => {
+    await listener.handleAdminNotification(undefined as never);
+    await listener.handleAdminNotification({} as never);
+    expect(emitMock).not.toHaveBeenCalled();
+  });
+
+  it('only names events that exist', () => {
+    const known = new Set<string>(Object.values(AdminNotificationEvent));
+    for (const event of ADMIN_BELL_EVENTS) expect(known.has(event)).toBe(true);
   });
 
   describe('dedupeWindowMs', () => {

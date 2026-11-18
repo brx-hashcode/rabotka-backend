@@ -1,7 +1,7 @@
 ---
 id: kyc-refuse
 title: Ma vérification a été refusée, que faire
-action_id: action:reclamation
+action_id: action:verification
 lang: fr
 audience: all
 ---
@@ -9,44 +9,42 @@ audience: all
 ## Pourquoi ma vérification a été refusée
 
 Je peux vous dire le motif exact enregistré sur votre dossier — c'est ce qui
-vous permet de préparer votre réclamation. {{tool:etat_du_profil}}
+vous permet de corriger vos documents avant de les renvoyer. {{tool:etat_du_profil}}
 
 ## D'abord, lisez le motif
 
 Le message que vous avez reçu indique la raison : photo illisible, document
 expiré, selfie qui ne correspond pas, nom différent de celui du profil.
 
-## On ne renvoie pas ses documents soi-même
+## Renvoyer de nouveaux documents
 
-Les pièces d'identité ne sont demandées qu'une seule fois, à la création du
-compte. Il n'y a pas d'écran pour les renvoyer ensuite — inutile de chercher,
-il n'existe pas.
+Vous pouvez renvoyer vos pièces vous-même, depuis l'application : ouvrez
+*Profil*, puis *Vérification d'identité*. Le motif du refus y est affiché.
 
-Après un refus, le canal est la réclamation. Une personne de l'équipe reprend
-le dossier, vous demande ce qui manque, et c'est elle qui débloque la
-situation.
+1. Choisissez le type de pièce.
+2. Photographiez le recto, puis le verso (pas de verso pour un passeport).
+3. Prenez un selfie en tenant la pièce en main.
+4. Envoyez. Votre dossier repart en vérification, et une personne de l'équipe
+   le reprend.
 
-## Ouvrir la réclamation, étape par étape
+Corrigez d'abord ce que dit le motif : une photo nette, une pièce valide, le
+même nom que sur le profil.
 
-1. Dans l'application, ouvrez *Réclamations*.
-2. Donnez un titre court : « Vérification d'identité » convient très bien.
-3. Écrivez une description : le motif du refus que vous avez reçu, et ce que
-   vous contestez ou ce que vous voulez corriger.
-4. Joignez vos justificatifs — la photo de votre pièce, le selfie, tout ce qui
-   appuie votre dossier.
-5. Soumettez. Le support prend le dossier en charge.
-6. Revenez la consulter de temps en temps : les réponses de l'équipe arrivent
-   dans la réclamation elle-même.
+## Contester le refus
+
+Si vous pensez que le refus est une erreur, ou si votre pièce a été perdue ou
+volée, ouvrez une réclamation dans l'application (*Réclamations*) : expliquez
+la situation et joignez ce qui appuie votre dossier. Les réponses de l'équipe
+arrivent dans la réclamation elle-même.
 
 ## Combien de temps
 
 Je ne sais pas. La vérification est faite par une personne, pas par une
 machine, et il n'y a pas de délai garanti. Ce qui accélère vraiment les choses,
-c'est une réclamation précise avec les bons justificatifs joints du premier
-coup.
+ce sont des photos nettes et une pièce valide, envoyées du premier coup.
 
 ## Ce que je ne peux pas faire
 
 Je ne peux ni valider un compte, ni revenir sur un refus, ni accélérer un
-dossier. Je ne peux pas non plus déposer la réclamation à votre place : c'est
-vous qui l'ouvrez, et vous voyez ce que vous envoyez avant de l'envoyer.
+dossier. Je ne peux pas non plus envoyer vos documents ni déposer une réclamation à
+votre place : c'est vous qui le faites, et vous voyez ce que vous envoyez.

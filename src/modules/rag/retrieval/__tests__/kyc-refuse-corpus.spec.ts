@@ -4,15 +4,14 @@ import * as path from 'node:path';
 /**
  * Le contenu de `kyc-refuse.md`, testé comme du code.
  *
- * Ce fichier a passé des mois à conseiller « Recommencez […] Reprenez-la de
- * jour, à plat » à des gens dont le compte venait d'être refusé. Or les pièces
- * ne sont acceptées qu'à la création du profil : `UpdateProfileDto` ne porte
- * aucun champ KYC et aucun écran ne permet de les renvoyer. VoVa envoyait donc
- * ces personnes buter sur une porte qui n'existe pas.
+ * Longtemps, les pièces n'étaient acceptées qu'à la création du profil, et ce
+ * fichier devait dire « on ne renvoie pas ses documents soi-même ». Depuis que
+ * `POST /profile/me/kyc` existe (page Profil › Vérification d'identité), c'est
+ * l'inverse : une personne refusée renvoie ses pièces elle-même, et la
+ * réclamation sert à contester. Le test garde ce fichier fidèle au produit.
  *
- * Le test porte sur le FICHIER plutôt que sur une réponse du modèle : c'est la
- * régression qui compte, et elle se réintroduit en éditant ce markdown, pas en
- * touchant au code.
+ * Il porte sur le FICHIER plutôt que sur une réponse du modèle : c'est la
+ * régression qui compte, et elle se réintroduit en éditant ce markdown.
  */
 
 const corpus = (name: string) =>
@@ -21,51 +20,17 @@ const corpus = (name: string) =>
 describe('corpus/kyc-refuse.md', () => {
   const text = corpus('kyc-refuse');
 
-  it('ne conseille plus de renvoyer ses documents', () => {
-    // Les formulations exactes qui étaient là, plus les variantes évidentes.
-    for (const forbidden of [
-      'Recommencez',
-      'Reprenez-la',
-      'renvoyer',
-      'renvoyez',
-      'à nouveau votre document',
-    ]) {
-      // « on ne renvoie pas ses documents soi-même » est légitime : on ne
-      // cherche que les tournures qui DEMANDENT de le faire.
-      const lines = text
-        .split('\n')
-        .filter((l) => l.toLowerCase().includes(forbidden.toLowerCase()));
-      for (const line of lines) {
-        expect(line.toLowerCase()).toMatch(
-          /pas d'écran|on ne renvoie pas|il n'y a pas|inutile/,
-        );
-      }
-    }
+  it('ne dit plus qu’aucun écran ne permet de renvoyer ses documents', () => {
+    expect(text).not.toMatch(/on ne renvoie pas|pas d'écran|il n'existe pas/i);
   });
 
-  it('donne les six étapes de la réclamation, dans l’ordre', () => {
-    const steps = [
-      '*Réclamations*',
-      'titre',
-      'description',
-      'justificatifs',
-      'Soumettez',
-      'Revenez',
-    ];
-    let cursor = -1;
-    for (const step of steps) {
-      const at = text.indexOf(step, cursor + 1);
-      expect(at).toBeGreaterThan(cursor);
-      cursor = at;
-    }
+  it('mène à la page où l’on renvoie ses documents', () => {
+    expect(text).toContain("*Vérification d'identité*");
+    expect(text).toContain('action_id: action:verification');
   });
 
-  it('propose « Vérification d’identité » comme titre', () => {
-    expect(text).toContain("Vérification d'identité");
-  });
-
-  it('garde son action_id pour ouvrir la bonne page', () => {
-    expect(text).toContain('action_id: action:reclamation');
+  it('garde la réclamation pour contester', () => {
+    expect(text).toContain('*Réclamations*');
   });
 
   it('ne promet aucun délai', () => {

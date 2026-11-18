@@ -7,9 +7,9 @@ import type { NotificationService } from '../../notification/notification.servic
 const PROFILE_ID = 'profile-1';
 
 const payload = {
-  event: AdminNotificationEvent.PROFILE_CREATED,
-  title: 'Nouveau profil',
-  message: 'Nouveau profil créé : Awa Mboko',
+  event: AdminNotificationEvent.PROFILE_KYC_SUBMITTED,
+  title: 'Documents to review',
+  message: 'Awa Mboko sent identity documents to review',
   entityType: 'profile' as const,
   entityId: PROFILE_ID,
   timestamp: new Date().toISOString(),
@@ -57,7 +57,7 @@ describe('KycReviewerListener', () => {
       ],
     });
 
-    await listener.onProfileCreated(payload);
+    await listener.onDocumentsSubmitted(payload);
 
     expect(notify).toHaveBeenCalledTimes(2);
     expect(notify).toHaveBeenCalledWith('a@rabotka.work', {
@@ -66,13 +66,56 @@ describe('KycReviewerListener', () => {
       profileType: 'WORKER',
       city: 'Brazzaville',
       reviewUrl: `https://admin.rabotka.work/profiles/${PROFILE_ID}`,
+      kind: 'documents',
     });
+  });
+
+  it('says when the documents come again after a rejection', async () => {
+    const { listener, notify } = setup({
+      reviewers: [{ email: 'a@rabotka.work', first_name: 'Alice' }],
+    });
+    await listener.onDocumentsSubmitted({
+      ...payload,
+      metadata: { resubmitted: true },
+    });
+    expect(notify).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ kind: 'resubmitted' }),
+    );
+  });
+
+  it('emails for an organisation to review', async () => {
+    const { listener, notify } = setup({
+      reviewers: [{ email: 'a@rabotka.work', first_name: 'Alice' }],
+    });
+    await listener.onOrganisationToReview({
+      ...payload,
+      event: AdminNotificationEvent.ORGANISATION_REVIEW_REQUESTED,
+    });
+    expect(notify).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ kind: 'organisation' }),
+    );
+  });
+
+  it('no longer listens to « profile created »', () => {
+    // A person may sign up without documents: nothing to review then.
+    expect(
+      Reflect.getMetadata(
+        'EVENT_LISTENER_METADATA',
+        KycReviewerListener.prototype.onDocumentsSubmitted,
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        event: AdminNotificationEvent.PROFILE_KYC_SUBMITTED,
+      }),
+    ]);
   });
 
   it('asks only for active, non-archived group members', async () => {
     const { listener, prisma } = setup({});
 
-    await listener.onProfileCreated(payload);
+    await listener.onDocumentsSubmitted(payload);
 
     expect(prisma.user.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -84,7 +127,7 @@ describe('KycReviewerListener', () => {
   it('sends nothing when the group is empty', async () => {
     const { listener, notify } = setup({ reviewers: [] });
 
-    await listener.onProfileCreated(payload);
+    await listener.onDocumentsSubmitted(payload);
 
     expect(notify).not.toHaveBeenCalled();
   });
@@ -95,7 +138,7 @@ describe('KycReviewerListener', () => {
       reviewers: [{ email: 'a@rabotka.work', first_name: 'Alice' }],
     });
 
-    await listener.onProfileCreated(payload);
+    await listener.onDocumentsSubmitted(payload);
 
     expect(notify).not.toHaveBeenCalled();
   });
@@ -113,7 +156,9 @@ describe('KycReviewerListener', () => {
       ],
     });
 
-    await expect(listener.onProfileCreated(payload)).resolves.toBeUndefined();
+    await expect(
+      listener.onDocumentsSubmitted(payload),
+    ).resolves.toBeUndefined();
     expect(notify).toHaveBeenCalledTimes(2);
   });
 
@@ -121,6 +166,8 @@ describe('KycReviewerListener', () => {
     const { listener, prisma } = setup({});
     prisma.user.findMany.mockRejectedValue(new Error('db down'));
 
-    await expect(listener.onProfileCreated(payload)).resolves.toBeUndefined();
+    await expect(
+      listener.onDocumentsSubmitted(payload),
+    ).resolves.toBeUndefined();
   });
 });

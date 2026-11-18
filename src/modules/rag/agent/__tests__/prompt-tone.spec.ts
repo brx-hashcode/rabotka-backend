@@ -79,19 +79,24 @@ describe('les branches de vérification', () => {
     );
   });
 
-  it('dit à un dossier REFUSÉ de passer par la réclamation', () => {
+  it('dit à un dossier REFUSÉ de renvoyer ses pièces, et de contester par réclamation', () => {
     const rejected = promptFor(VerificationStatus.REJECTED);
     expect(rejected).toContain('REFUSÉE');
+    expect(rejected).toContain('renvoyer de nouveaux documents');
+    expect(rejected).toContain("Vérification d'identité");
     expect(rejected).toContain('réclamation');
-    expect(rejected).toContain('ne peut pas renvoyer ses documents');
   });
 
-  it('interdit de conseiller de recommencer la photo', () => {
-    // Le produit n'a aucun écran pour ça : les pièces ne sont acceptées qu'à la
-    // création du compte.
-    expect(promptFor(VerificationStatus.REJECTED)).toContain(
-      'jamais de recommencer sa photo',
+  it('ne dit jamais « en cours » à qui n’a rien envoyé', () => {
+    const missing = promptFor(VerificationStatus.NOT_SUBMITTED);
+    expect(missing).toContain('SANS envoyer ses documents');
+    expect(missing).toContain("Vérification d'identité");
+    // The PENDING sentence, not merely the words: this line says « rien n'est
+    // en cours d'examen ».
+    expect(missing).not.toContain(
+      "La vérification de cette personne est en cours d'examen",
     );
+    expect(missing).not.toContain('déjà vérifiée');
   });
 
   it('distingue PENDING de REJECTED', () => {

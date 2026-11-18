@@ -27,6 +27,7 @@ import { templateReply } from '../../../common/constants/whatsapp-carousel';
 import {
   supportCardBotMessage,
   hasPenaltiesBotMessage,
+  kycDocumentsMissingMessage,
   kycRejectedHelpMessage,
   openAppBotMessage,
   vovaUnavailableMessage,
@@ -331,12 +332,13 @@ export class BotOrchestratorService {
       // the assistant's to say — it has the status and the admin's own words.
       // This card only has to open the app, and it does so in one tap instead
       // of asking for a typed command.
+      // Someone with no documents, or refused ones, has one thing to do:
+      // send them. Their card opens that page; everyone else gets the door.
+      const card = this.kycCard(profile);
       if (vovaReply) {
-        return this.wantsAppCard(text)
-          ? [...vovaReply, this.openAppCard(profile.first_name)]
-          : vovaReply;
+        return this.wantsAppCard(text) ? [...vovaReply, card] : vovaReply;
       }
-      return [this.openAppCard(profile.first_name)];
+      return [card];
     }
 
     // KYC verified + user types Menu → activate account
@@ -417,6 +419,21 @@ export class BotOrchestratorService {
 
   private openAppCard(firstName: string): string {
     return openAppBotMessage(firstName);
+  }
+
+  /** The card for a not-yet-verified person: the documents page when they have something to send. */
+  private kycCard(profile: {
+    first_name: string;
+    verification_status: VerificationStatus | null;
+  }): string {
+    switch (profile.verification_status) {
+      case VerificationStatus.NOT_SUBMITTED:
+        return kycDocumentsMissingMessage(profile.first_name);
+      case VerificationStatus.REJECTED:
+        return kycRejectedHelpMessage(profile.first_name);
+      default:
+        return this.openAppCard(profile.first_name);
+    }
   }
 
   /**
