@@ -143,8 +143,8 @@ export function vovaUnavailableMessage(
  *
  * So the refused state gets its own fallback, and it says the one thing the
  * system prompt already tells the assistant to say (`prompts.ts`, the REJECTED
- * branch): new documents are sent from the app (a réclamation stays the way to
- * contest). Deterministic on purpose — it has to work on the day the model
+ * branch): new documents are sent from the app, and that alone puts the dossier
+ * back under review — no réclamation. Deterministic on purpose — it has to work on the day the model
  * does not.
  *
  * The button lands on the documents page rather than `/home`: somebody who
@@ -156,7 +156,7 @@ export function kycRejectedHelpMessage(firstName: string): string {
       '*Votre vérification a été refusée*',
       '',
       'Envoyez de nouveaux documents depuis l’application : une pièce d’identité lisible et un selfie.',
-      'Pour contester le refus — ou si votre pièce a été perdue ou volée — vous pouvez aussi ouvrir une réclamation depuis l’application.',
+      'Votre dossier sera réexaminé dès réception.',
     ].join('\n'),
     buttonText: 'Envoyer mes documents',
     path: KYC_DOCUMENTS_CTA_PATH,

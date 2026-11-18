@@ -84,7 +84,8 @@ describe('les branches de vérification', () => {
     expect(rejected).toContain('REFUSÉE');
     expect(rejected).toContain('renvoyer de nouveaux documents');
     expect(rejected).toContain("Vérification d'identité");
-    expect(rejected).toContain('réclamation');
+    // Resending is how the dossier is re-examined: no claim to open.
+    expect(rejected).toContain("Ne l'envoie pas vers une réclamation");
   });
 
   it('ne dit jamais « en cours » à qui n’a rien envoyé', () => {

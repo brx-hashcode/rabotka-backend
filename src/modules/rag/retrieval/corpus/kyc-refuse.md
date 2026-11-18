@@ -30,12 +30,9 @@ Vous pouvez renvoyer vos pièces vous-même, depuis l'application : ouvrez
 Corrigez d'abord ce que dit le motif : une photo nette, une pièce valide, le
 même nom que sur le profil.
 
-## Contester le refus
-
-Si vous pensez que le refus est une erreur, ou si votre pièce a été perdue ou
-volée, ouvrez une réclamation dans l'application (*Réclamations*) : expliquez
-la situation et joignez ce qui appuie votre dossier. Les réponses de l'équipe
-arrivent dans la réclamation elle-même.
+Pas besoin d'ouvrir une réclamation : c'est en renvoyant vos documents que
+votre dossier est réexaminé. Si votre pièce a été perdue ou volée, envoyez une
+autre pièce acceptée (passeport, permis de conduire, carte NIU).
 
 ## Combien de temps
 
@@ -46,5 +43,5 @@ ce sont des photos nettes et une pièce valide, envoyées du premier coup.
 ## Ce que je ne peux pas faire
 
 Je ne peux ni valider un compte, ni revenir sur un refus, ni accélérer un
-dossier. Je ne peux pas non plus envoyer vos documents ni déposer une réclamation à
-votre place : c'est vous qui le faites, et vous voyez ce que vous envoyez.
+dossier. Je ne peux pas non plus envoyer vos documents à votre place : c'est vous qui
+le faites, et vous voyez ce que vous envoyez.

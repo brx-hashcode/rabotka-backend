@@ -120,8 +120,8 @@ describe('kycRejectedHelpMessage', () => {
     const body = String(card(kycRejectedHelpMessage('Richesse')).body);
     expect(body).toMatch(/refusée/i);
     expect(body).toMatch(/nouveaux documents/i);
-    // Contesting is still a claim.
-    expect(body).toMatch(/réclamation/i);
+    // Resending is the whole route: no claim.
+    expect(body).not.toMatch(/réclamation/i);
   });
 
   it('lands on the documents page, not the generic door', () => {

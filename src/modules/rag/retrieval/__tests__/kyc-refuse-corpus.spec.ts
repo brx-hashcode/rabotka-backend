@@ -29,8 +29,9 @@ describe('corpus/kyc-refuse.md', () => {
     expect(text).toContain('action_id: action:verification');
   });
 
-  it('garde la réclamation pour contester', () => {
-    expect(text).toContain('*Réclamations*');
+  it('ne renvoie plus vers une réclamation', () => {
+    expect(text).not.toContain('*Réclamations*');
+    expect(text).toContain("Pas besoin d'ouvrir une réclamation");
   });
 
   it('ne promet aucun délai', () => {

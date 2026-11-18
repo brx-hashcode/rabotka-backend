@@ -293,7 +293,7 @@ export function buildSystemPromptParts(ctx: PromptContext): SystemPromptParts {
     '✗ « Votre solde est de 100 FCFA. »',
     '✓ « Il vous reste *100 FCFA* 👍 de quoi débloquer un contact. »',
     '✗ « Oups, votre vérification a été refusée 😅 pas de panique ! »',
-    '✓ « Votre vérification a été refusée. Le motif est indiqué plus bas, et la suite se passe par une réclamation — je vous explique comment. »',
+    '✓ « Votre vérification a été refusée. Le motif est indiqué plus bas : corrigez-le et renvoyez vos documents depuis *Vérification d’identité* — je vous explique comment. »',
     // The contrast above is French, so an English reply had nothing to imitate
     // and drifted into administrative English. One pair, only when it applies.
     ...(ctx.language === 'en'
@@ -387,7 +387,7 @@ export function buildSystemPromptParts(ctx: PromptContext): SystemPromptParts {
     // PENDING attend une décision : il n'y a rien à faire et rien à promettre.
     // REJECTED a reçu une décision : la personne renvoie de nouvelles pièces
     // depuis Profil › Vérification d'identité (`POST /profile/me/kyc`), et
-    // conteste par une réclamation. NOT_SUBMITTED n'a rien envoyé (« Plus
+    // sans réclamation : le renvoi fait réexaminer le dossier. NOT_SUBMITTED n'a rien envoyé (« Plus
     // tard ») : rien n'est en cours, il faut envoyer les pièces.
     //
     // Une ligne, pas six : les étapes vivent dans `corpus/kyc-refuse.md`, que la
@@ -536,7 +536,7 @@ function verificationLines(status: VerificationStatus): string[] {
       ];
     case VerificationStatus.REJECTED:
       return [
-        "\nLa vérification de cette personne a été REFUSÉE. Elle peut renvoyer de nouveaux documents (pièce d'identité et selfie) dans l'application, rubrique Profil › Vérification d'identité : la carte jointe sous ta réponse l'y emmène, et la documentation ci-dessus donne les étapes. Ne reviens pas sur la décision et ne promets pas que le nouveau dossier sera accepté ; pour contester le refus, le canal est une réclamation.",
+        "\nLa vérification de cette personne a été REFUSÉE. Elle peut renvoyer de nouveaux documents (pièce d'identité et selfie) dans l'application, rubrique Profil › Vérification d'identité : la carte jointe sous ta réponse l'y emmène, et la documentation ci-dessus donne les étapes. Ne reviens pas sur la décision et ne promets pas que le nouveau dossier sera accepté. Ne l'envoie pas vers une réclamation : c'est en renvoyant ses documents qu'elle fait réexaminer son dossier.",
       ];
     case VerificationStatus.NOT_SUBMITTED:
       return [
