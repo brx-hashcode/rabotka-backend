@@ -1,8 +1,12 @@
 import { emailButton, escapeHtml } from './layout';
 
 export type WelcomeEmailOptions = {
-  /** Where the CTA points. Not a one-tap link — those are minted for WhatsApp. */
-  appUrl: string;
+  /**
+   * Unused since the email lost its button: the candidate app opens inside
+   * WhatsApp, so a web link from an email only leads out of it. Kept so a
+   * caller passing it still compiles.
+   */
+  appUrl?: string;
   /** Granted at signup by `grantWelcomeCredit`; 0 when the grant failed. */
   creditedBalance: number;
   /**
@@ -36,7 +40,7 @@ export const WELCOME_EMAIL_PREVIEW =
  */
 export function sendWelcomeEmail(
   name: string,
-  { appUrl, creditedBalance, documentsSent = true }: WelcomeEmailOptions,
+  { creditedBalance, documentsSent = true }: WelcomeEmailOptions,
 ): string {
   // Hidden entirely when the grant failed, matching the success screen — an
   // empty gift box reads worse than no gift box.
@@ -71,7 +75,6 @@ ${
     </p>`
 }
 ${creditBlock}
-    ${emailButton(documentsSent ? appUrl : `${appUrl.replace(/\/+$/, '')}/profile/verification`, documentsSent ? 'Ouvrir Rabotka' : 'Envoyer mes documents')}
 
     <p>Vous recevrez un message sur WhatsApp dès que votre compte sera activé.</p>
 

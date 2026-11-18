@@ -224,8 +224,10 @@ describe('ProfileController', () => {
       it('welcomes by email, asking for the documents instead', async () => {
         await controller.createProfile(later as any, mockRes());
         const html = String(mailService.sendMail.mock.calls.at(-1)?.[0]?.html);
-        expect(html).toContain('/profile/verification');
+        expect(html).toContain("Vérification d'identité");
         expect(html).not.toContain('examine actuellement les documents');
+        // No button: the app opens inside WhatsApp, not from an email link.
+        expect(html).not.toContain('/profile/verification');
       });
     });
 
