@@ -200,11 +200,13 @@ export const BROADCAST_MESSAGE_VAR_MAX = 700;
  * processor's `withLoginCode` (the only other place that fills a url-suffix
  * var) never runs for them. The caller mints against these exact paths.
  *
- * A rejected KYC is contested with a claim; a suspension is lifted by an admin
+ * A rejected KYC is answered by sending new documents, on the same page a
+ * person who signed up without them uses; a suspension is lifted by an admin
  * and by nothing the user can do, so that one just opens the app so they can
  * read their own status.
  */
-export const KYC_REJECTED_CTA_PATH = 'claims/new';
+export const KYC_DOCUMENTS_CTA_PATH = 'profile/verification';
+export const KYC_REJECTED_CTA_PATH = KYC_DOCUMENTS_CTA_PATH;
 /** Where the KYC-pending card's single button lands: the profile. */
 export const KYC_PENDING_CTA_PATH = 'profile';
 export const SUSPENDED_CTA_PATH = 'home';

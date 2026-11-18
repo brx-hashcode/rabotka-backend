@@ -40,14 +40,23 @@ describe('CreateProfileDto, business sign-up', () => {
     expect(await failedFields({ ...base, business })).toEqual([]);
   });
 
-  it('still needs them without a business', async () => {
-    expect(await failedFields(base)).toEqual(
-      expect.arrayContaining([
-        'documentType',
-        'kycDocumentUrl',
-        'kycSelfieUrl',
-      ]),
-    );
+  it('lets a person sign up without them (« Plus tard »)', async () => {
+    expect(await failedFields(base)).toEqual([]);
+  });
+
+  it('treats blank document fields as not sent', async () => {
+    expect(
+      await failedFields({ ...base, kycDocumentUrl: '  ', kycSelfieUrl: '' }),
+    ).toEqual([]);
+  });
+
+  it('wants the whole set once any document is sent', async () => {
+    expect(
+      await failedFields({
+        ...base,
+        kycDocumentUrl: 'https://cdn.example.com/kyc-documents/front.jpg',
+      }),
+    ).toEqual(expect.arrayContaining(['documentType', 'kycSelfieUrl']));
   });
 
   it('validates the business itself', async () => {

@@ -1,11 +1,12 @@
 import {
+  kycDocumentsMissingMessage,
   kycRejectedHelpMessage,
   openAppBotMessage,
   supportCardBotMessage,
   whatsappSupportLink,
 } from '../menu.messages';
 import {
-  CLAIM_FORM_CTA_PATH,
+  KYC_DOCUMENTS_CTA_PATH,
   OPEN_APP_CTA_PATH,
 } from '../../../../common/constants/whatsapp-templates';
 
@@ -117,16 +118,28 @@ describe('kycRejectedHelpMessage', () => {
 
   it('names the route forward instead of just opening the app', () => {
     const body = String(card(kycRejectedHelpMessage('Richesse')).body);
-    expect(body).toMatch(/réclamation/i);
     expect(body).toMatch(/refusée/i);
-    // The one thing the prompt forbids telling them to do.
-    expect(body).not.toMatch(/renvoyer vos documents|reprenez votre photo/i);
+    expect(body).toMatch(/nouveaux documents/i);
+    // Resending is the whole route: no claim.
+    expect(body).not.toMatch(/réclamation/i);
   });
 
-  it('lands on the claim form, not the generic door', () => {
+  it('lands on the documents page, not the generic door', () => {
     const payload = card(kycRejectedHelpMessage('Richesse'));
-    expect(payload.path).toBe(CLAIM_FORM_CTA_PATH);
+    expect(payload.path).toBe(KYC_DOCUMENTS_CTA_PATH);
     expect(payload.path).not.toBe(OPEN_APP_CTA_PATH);
-    expect(String(payload.buttonText)).toMatch(/réclamation/i);
+    expect(String(payload.buttonText)).toMatch(/documents/i);
+  });
+});
+
+describe('kycDocumentsMissingMessage', () => {
+  const card = (reply: string) =>
+    JSON.parse(reply.slice('[CTA:]'.length)) as Record<string, unknown>;
+
+  it('asks for the documents and opens their page, never « en cours »', () => {
+    const payload = card(kycDocumentsMissingMessage('Richesse'));
+    expect(String(payload.body)).toMatch(/pièce d’identité/i);
+    expect(String(payload.body)).not.toMatch(/en cours/i);
+    expect(payload.path).toBe(KYC_DOCUMENTS_CTA_PATH);
   });
 });

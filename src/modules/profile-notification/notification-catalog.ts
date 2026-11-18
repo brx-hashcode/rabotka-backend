@@ -633,12 +633,18 @@ export function renderNotification(
         link: `/job-offers/${input.jobOfferId}`,
       };
 
-    case 'KYC_REJECTED':
+    case 'KYC_REJECTED': {
+      // The reviewer's words usually end with their own full stop; adding
+      // ours made « validité.. Envoyez ».
+      const reason =
+        input.reason?.trim().replace(/[.!…\s]+$/u, '') || 'non précisé';
       return {
         title: 'Vérification refusée',
-        body: `Vos documents n’ont pas pu être validés. Motif : ${input.reason?.trim() || 'non précisé'}. Vous pouvez envoyer de nouveaux documents ou ouvrir une réclamation.`,
-        link: '/claims/new',
+        body: `Vos documents n’ont pas pu être validés. Motif : ${reason}. Envoyez de nouveaux documents depuis Vérification d’identité.`,
+        // The page where new ones are sent, with the reason shown.
+        link: '/profile/verification',
       };
+    }
 
     case 'ACCOUNT_SUSPENDED':
       return {

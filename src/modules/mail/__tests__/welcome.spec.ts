@@ -53,11 +53,20 @@ describe('sendWelcomeEmail', () => {
     });
   });
 
-  describe('call to action', () => {
-    it('links to the app — the old version named a next step with no destination', () => {
-      expect(sendWelcomeEmail('Jean', OPTS)).toContain(
-        'href="https://rabotka.work"',
-      );
+  describe('no call to action', () => {
+    // The candidate app opens inside WhatsApp: a web link from an email only
+    // leads out of it. The email says where to go instead.
+    it('carries no button, with or without documents', () => {
+      expect(sendWelcomeEmail('Jean', OPTS)).not.toContain('href=');
+      expect(
+        sendWelcomeEmail('Jean', { ...OPTS, documentsSent: false }),
+      ).not.toContain('href=');
+    });
+
+    it('says where to send the documents when they were skipped', () => {
+      const html = sendWelcomeEmail('Jean', { ...OPTS, documentsSent: false });
+      expect(html).toContain("Vérification d'identité");
+      expect(html).not.toContain('examine actuellement les documents');
     });
   });
 

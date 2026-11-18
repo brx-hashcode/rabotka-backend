@@ -26,9 +26,11 @@ concrètes valent mieux qu'une longue liste.
 
 ## Ensuite
 
-Après l'inscription, il reste la vérification d'identité. Tant qu'elle n'est
-pas validée, le compte existe mais ne permet pas encore de postuler ni de
-publier.
+Après l'inscription, il reste la vérification d'identité. Vous pouvez envoyer
+votre pièce et un selfie pendant l'inscription, ou choisir « Plus tard » et
+les envoyer depuis *Profil* › *Vérification d'identité*. Tant que la
+vérification n'est pas validée, le compte existe mais ne permet pas encore de
+postuler ni de publier.
 
 Une fois validé, vous recevez un message WhatsApp et un crédit de bienvenue est
 ajouté à votre portefeuille.

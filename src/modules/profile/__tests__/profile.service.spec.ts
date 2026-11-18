@@ -1,4 +1,5 @@
-import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
+import { AdminNotificationEvent } from '../../../common/events/admin-notification.events';
 import { ProfileService } from '../profile.service';
 import { GeoService } from '../../geo/geo.service';
 
@@ -41,6 +42,8 @@ function makePrisma() {
       create: jest.fn().mockResolvedValue({ id: 'new-p-1' }),
       count: jest.fn().mockResolvedValue(0),
       findMany: jest.fn().mockResolvedValue([baseProfile]),
+      findFirst: jest.fn().mockResolvedValue(null),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     penalty: {
       count: jest.fn().mockResolvedValue(0),
@@ -67,6 +70,11 @@ function makePrisma() {
       updateMany: jest.fn().mockResolvedValue({}),
       create: jest.fn().mockResolvedValue({}),
       findFirst: jest.fn().mockResolvedValue(null),
+      // A profile reviewed by these tests sent its documents unless one says
+      // otherwise (NOT_SUBMITTED has none).
+      count: jest.fn().mockResolvedValue(3),
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     kycVerificationImage: {
       deleteMany: jest.fn().mockResolvedValue({}),
@@ -1110,6 +1118,190 @@ describe('ProfileService', () => {
       ).rejects.toThrow(NotFoundException);
 
       expect(fileService.uploadToStorage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('identity documents later (« Plus tard »)', () => {
+    const base = {
+      firstName: 'Alice',
+      lastName: 'Dupont',
+      phone: '+242000001',
+      address: '10 Rue Paris',
+      description: 'Expert',
+      profileType: 'WORKER' as any,
+      readAndApprovedPolicies: true,
+    };
+    const set = {
+      documentType: 'IDENTITY_CARD' as any,
+      kycDocumentUrl: 'https://cdn.example.com/kyc-documents/id.jpg',
+      kycDocumentBackUrl: 'https://cdn.example.com/kyc-documents/back.jpg',
+      kycSelfieUrl: 'https://cdn.example.com/kyc-documents/selfie.jpg',
+    };
+    const emitted = () =>
+      ((service as any).eventEmitter.emit as jest.Mock).mock.calls.map(
+        (c: any[]) => c[0] as string,
+      );
+
+    it('creates the account with nothing to review, and alerts no reviewer', async () => {
+      const txPrisma = makePrisma();
+      txPrisma.profile.create.mockResolvedValue({ id: 'late-1' });
+      prisma.$transaction.mockImplementation((fn: any) => fn(txPrisma));
+
+      const result = await service.createProfile(base as any);
+
+      expect(result?.profileId).toBe('late-1');
+      expect(txPrisma.profile.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            verification_status: 'NOT_SUBMITTED',
+            status: 'PENDING_ACTIVATION',
+          }),
+        }),
+      );
+      expect(txPrisma.kycDocument.create).not.toHaveBeenCalled();
+      expect(emitted()).not.toContain(
+        AdminNotificationEvent.PROFILE_KYC_SUBMITTED,
+      );
+    });
+
+    it('alerts the reviewers when the documents come with the sign-up', async () => {
+      const txPrisma = makePrisma();
+      txPrisma.profile.create.mockResolvedValue({ id: 'with-1' });
+      prisma.$transaction.mockImplementation((fn: any) => fn(txPrisma));
+
+      await service.createProfile({ ...base, ...set } as any);
+
+      expect(txPrisma.profile.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ verification_status: 'PENDING' }),
+        }),
+      );
+      expect(emitted()).toContain(AdminNotificationEvent.PROFILE_KYC_SUBMITTED);
+    });
+
+    describe('submitKycDocuments()', () => {
+      const owner = (status: string, extra: Record<string, unknown> = {}) => {
+        prisma.profile.findFirst.mockResolvedValue({
+          first_name: 'Alice',
+          last_name: null,
+          is_business: false,
+          verification_status: status,
+          ...extra,
+        });
+      };
+
+      it('moves NOT_SUBMITTED to PENDING, writes the set, alerts the reviewers', async () => {
+        owner('NOT_SUBMITTED');
+        prisma.profile.updateMany.mockResolvedValue({ count: 1 });
+
+        const result = await service.submitKycDocuments('p-1', set);
+
+        expect(result).toEqual({ verificationStatus: 'PENDING' });
+        expect(prisma.profile.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: { verification_status: 'PENDING', rejection_reason: null },
+          }),
+        );
+        expect(prisma.kycDocument.deleteMany).toHaveBeenCalledWith({
+          where: { profile_id: 'p-1' },
+        });
+        const categories = prisma.kycDocument.create.mock.calls.map(
+          (c: any[]) => c[0].data.document_category,
+        );
+        expect(categories.sort()).toEqual(['DOCUMENT', 'DOCUMENT_BACK', 'SELFIE']);
+        expect(emitted()).toContain(AdminNotificationEvent.PROFILE_KYC_SUBMITTED);
+      });
+
+      it('says « sent again » after a rejection, and frees the old files', async () => {
+        owner('REJECTED');
+        prisma.profile.updateMany.mockResolvedValue({ count: 1 });
+        prisma.kycDocument.findMany.mockResolvedValue([
+          { storage_key: 'kyc-documents/old-front.jpg' },
+          { storage_key: null },
+        ]);
+
+        await service.submitKycDocuments('p-1', set);
+
+        const emit = (service as any).eventEmitter.emit as jest.Mock;
+        const payload = emit.mock.calls.find(
+          (c: any[]) => c[0] === AdminNotificationEvent.PROFILE_KYC_SUBMITTED,
+        )?.[1];
+        expect(payload).toMatchObject({
+          title: 'Documents sent again',
+          metadata: { resubmitted: true },
+        });
+        expect(redis.zadd).toHaveBeenCalledWith(
+          expect.any(String),
+          0,
+          'kyc-documents/old-front.jpg',
+        );
+      });
+
+      it('keeps no back for a passport', async () => {
+        owner('NOT_SUBMITTED');
+        prisma.profile.updateMany.mockResolvedValue({ count: 1 });
+
+        await service.submitKycDocuments('p-1', {
+          ...set,
+          documentType: 'PASSPORT' as any,
+        });
+
+        const categories = prisma.kycDocument.create.mock.calls.map(
+          (c: any[]) => c[0].data.document_category,
+        );
+        expect(categories).not.toContain('DOCUMENT_BACK');
+      });
+
+      it.each([
+        ['VERIFIED', ConflictException],
+        ['PENDING', ConflictException],
+      ])('refuses a %s profile', async (status, error) => {
+        owner(status);
+        await expect(service.submitKycDocuments('p-1', set)).rejects.toThrow(
+          error,
+        );
+        expect(prisma.kycDocument.deleteMany).not.toHaveBeenCalled();
+      });
+
+      it('refuses an organisation, and a missing profile', async () => {
+        owner('NOT_SUBMITTED', { is_business: true });
+        await expect(service.submitKycDocuments('p-1', set)).rejects.toThrow(
+          BadRequestException,
+        );
+        prisma.profile.findFirst.mockResolvedValue(null);
+        await expect(service.submitKycDocuments('p-1', set)).rejects.toThrow(
+          NotFoundException,
+        );
+      });
+
+      it('refuses half a set before touching anything', async () => {
+        owner('NOT_SUBMITTED');
+        await expect(
+          service.submitKycDocuments('p-1', { ...set, kycSelfieUrl: '  ' }),
+        ).rejects.toThrow(BadRequestException);
+        expect(prisma.profile.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('loses the race cleanly when another submit got there first', async () => {
+        owner('NOT_SUBMITTED');
+        prisma.profile.updateMany.mockResolvedValue({ count: 0 });
+        await expect(service.submitKycDocuments('p-1', set)).rejects.toThrow(
+          ConflictException,
+        );
+        expect(prisma.kycDocument.deleteMany).not.toHaveBeenCalled();
+      });
+    });
+
+    it('will not verify a profile that sent no document', async () => {
+      prisma.kycDocument.count.mockResolvedValueOnce(0);
+      await expect(
+        service.verifyProfileKyc('p-1', 'admin-1', 'VERIFIED', 'ok'),
+      ).rejects.toThrow(BadRequestException);
+      // Rejecting is still possible.
+      prisma.kycDocument.count.mockResolvedValueOnce(0);
+      await expect(
+        service.verifyProfileKyc('p-1', 'admin-1', 'REJECTED', 'no papers'),
+      ).resolves.toBeDefined();
     });
   });
 

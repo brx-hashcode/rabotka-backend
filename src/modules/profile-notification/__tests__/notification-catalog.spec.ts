@@ -315,6 +315,16 @@ describe('SIMILAR_PROFILE_HIRED', () => {
         renderNotification({ type: 'ACCOUNT_SUSPENDED', reason: null }).body,
       ).toContain('Motif : non précisé.');
     });
+
+    it('ends a rejection reason with one full stop, and opens the documents page', () => {
+      const rendered = renderNotification({
+        type: 'KYC_REJECTED',
+        reason: 'Document expiré. Merci de fournir un document valide. ',
+      });
+      expect(rendered.body).toContain('document valide. Envoyez');
+      expect(rendered.body).not.toContain('..');
+      expect(rendered.link).toBe('/profile/verification');
+    });
   });
 });
 

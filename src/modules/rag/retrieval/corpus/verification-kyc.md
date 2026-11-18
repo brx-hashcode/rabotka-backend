@@ -15,7 +15,9 @@ Vous envoyez le recto et le verso de la pièce, plus un selfie où vous la tenez
 en main. Le passeport fait exception : il n'a pas de verso à envoyer, tout est
 sur la page principale.
 
-Tout se dépose depuis l'application.
+Tout se dépose depuis l'application : pendant l'inscription, ou plus tard,
+depuis *Profil* › *Vérification d'identité* si vous avez choisi « Plus tard ».
+Tant que rien n'est envoyé, rien n'est en cours de vérification.
 
 ## Pourquoi c'est obligatoire
 
@@ -41,4 +43,4 @@ faire, c'est vérifier où en est votre dossier. {{tool:etat_du_profil}}
 - Le nom sur la pièce doit être celui du profil.
 
 Si votre dossier a été refusé, le motif vous est communiqué et vous pouvez
-recommencer.
+envoyer de nouveaux documents depuis *Profil* › *Vérification d'identité*.

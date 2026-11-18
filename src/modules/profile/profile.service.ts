@@ -75,7 +75,7 @@ import { PortfolioService } from '../portfolio/portfolio.service';
 import { GeocodingService } from '../../common/services/geocoding/geocoding.service';
 import { GeoService } from '../geo/geo.service';
 import { ReferralService } from '../referral/referral.service';
-import { CreateProfileDto } from './dto/create-profile.dto';
+import { CreateProfileDto, sendsKycDocuments } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { AdminUpdateProfileDto } from './dto/admin-update-profile.dto';
 import { deletedAtFilter } from '../../common/utils/soft-delete.util';
@@ -558,6 +558,27 @@ const VERIFICATION_TOKEN_KEY_PREFIX = `${REDIS_KEY_PREFIX}wa:verify:`;
 
 /** Where the activation message's button lands. `/home` is role-aware. */
 const ACTIVATION_LANDING_PATH = 'home';
+
+/** The identity documents of one submission, as the client sends them. */
+export type KycSetInput = Pick<
+  CreateProfileDto,
+  | 'documentType'
+  | 'kycDocumentUrl'
+  | 'kycDocumentKey'
+  | 'kycDocumentBackUrl'
+  | 'kycDocumentBackKey'
+  | 'kycSelfieUrl'
+  | 'kycSelfieKey'
+>;
+
+/** The same, checked: the type and the storage keys this service derived. */
+type ResolvedKycSet = {
+  documentType: DocumentType;
+  bucket: string;
+  documentKey: string;
+  documentBackKey: string | null;
+  selfieKey: string;
+};
 
 @Injectable()
 export class ProfileService {
@@ -1264,6 +1285,21 @@ export class ProfileService {
 
     if (!profile) {
       throw new NotFoundException('Profil non trouvé');
+    }
+
+    // Nothing to approve: the person signed up without their documents
+    // (NOT_SUBMITTED), or a row was lost. Approving would activate an account
+    // nobody has seen an ID for — unless the reviewer attaches evidence of
+    // their own (an identity checked in person).
+    if (decision === 'VERIFIED' && !(documents?.length ?? 0)) {
+      const sent = await this.prisma.kycDocument.count({
+        where: { profile_id: profileId },
+      });
+      if (sent === 0) {
+        throw new BadRequestException(
+          "Aucun document d'identité n'a été envoyé : ce profil ne peut pas être vérifié sans pièce.",
+        );
+      }
     }
 
     // Private, like the KYC documents themselves. These are evidence an admin
@@ -2184,14 +2220,37 @@ export class ProfileService {
           );
       }
 
+      const fullName =
+        `${createProfileDto.firstName ?? ''} ${createProfileDto.lastName ?? ''}`.trim() ||
+        'A profile';
+      // Kept for any listener of it; the bell no longer shows it (see
+      // ADMIN_BELL_EVENTS): a profile created is not, by itself, a task.
       this.eventEmitter.emit(AdminNotificationEvent.PROFILE_CREATED, {
         event: AdminNotificationEvent.PROFILE_CREATED,
         title: 'New profile',
-        message: `New profile created: ${createProfileDto.firstName} ${createProfileDto.lastName}`,
+        message: `New profile created: ${fullName}`,
         entityType: 'profile',
         entityId: String(profile.id),
         timestamp: new Date().toISOString(),
       });
+      // What IS a task: papers to review. An organisation's always; a
+      // person's only when they sent their documents with the sign-up — one
+      // who chose « Plus tard » is announced when they send them.
+      if (entry === 'business') {
+        this.eventEmitter.emit(
+          AdminNotificationEvent.ORGANISATION_REVIEW_REQUESTED,
+          {
+            event: AdminNotificationEvent.ORGANISATION_REVIEW_REQUESTED,
+            title: 'Organisation to review',
+            message: `New organisation signed up: ${createProfileDto.business?.name?.trim() || fullName}`,
+            entityType: 'profile',
+            entityId: String(profile.id),
+            timestamp: new Date().toISOString(),
+          },
+        );
+      } else if (sendsKycDocuments(createProfileDto)) {
+        this.emitKycSubmitted(String(profile.id), fullName, false);
+      }
 
       return {
         message: 'Profil créé avec succès',
@@ -2765,15 +2824,125 @@ export class ProfileService {
     });
   }
 
-  private emitBusinessResubmitted(profileId: string, message: string): void {
-    this.eventEmitter.emit(AdminNotificationEvent.PROFILE_UPDATED, {
-      event: AdminNotificationEvent.PROFILE_UPDATED,
-      title: 'Organisation to review',
-      message,
+  /**
+   * A signed-in person sends their identity documents: after signing up
+   * without them (« Plus tard », NOT_SUBMITTED), or again after a rejection.
+   * The profile goes (back) to PENDING and the reviewers hear of it.
+   *
+   * Not for an organisation (its papers go through Rabotka Business), nor
+   * once verified, nor while a set is already under review.
+   */
+  async submitKycDocuments(
+    profileId: string,
+    input: KycSetInput,
+  ): Promise<{ verificationStatus: VerificationStatus }> {
+    const profile = await this.prisma.profile.findFirst({
+      where: { id: profileId, deleted_at: null },
+      select: {
+        first_name: true,
+        last_name: true,
+        is_business: true,
+        verification_status: true,
+      },
+    });
+    if (!profile) throw new NotFoundException('Profil introuvable.');
+    if (profile.is_business) {
+      throw new BadRequestException(
+        "Les documents d'une organisation s'envoient depuis Rabotka Business.",
+      );
+    }
+    if (profile.verification_status === VerificationStatus.VERIFIED) {
+      throw new ConflictException('Votre identité est déjà vérifiée.');
+    }
+    if (profile.verification_status === VerificationStatus.PENDING) {
+      throw new ConflictException(
+        'Vos documents sont déjà en cours de vérification.',
+      );
+    }
+
+    const set = await this.resolveKycSet(input);
+    const previous = await this.prisma.kycDocument.findMany({
+      where: { profile_id: profileId },
+      select: { storage_key: true },
+    });
+
+    await this.prisma.$transaction(async (tx) => {
+      // The status moves first, and only from a state that may send: two
+      // submits at once leave exactly one set, and a review already under way
+      // is never overwritten.
+      const moved = await tx.profile.updateMany({
+        where: {
+          id: profileId,
+          verification_status: {
+            in: [VerificationStatus.NOT_SUBMITTED, VerificationStatus.REJECTED],
+          },
+        },
+        data: {
+          verification_status: VerificationStatus.PENDING,
+          rejection_reason: null,
+        },
+      });
+      if (moved.count === 0) {
+        throw new ConflictException(
+          'Vos documents sont déjà en cours de vérification.',
+        );
+      }
+      // One row per category (unique): the new set replaces the old one, and
+      // a passport replacing an ID card leaves no stale back.
+      await tx.kycDocument.deleteMany({ where: { profile_id: profileId } });
+      await this.writeKycDocuments(tx, profileId, set);
+    });
+
+    // The replaced files no row points at any more: the abandoned-upload sweep
+    // checks for a row, finds none, and deletes them.
+    const kept = new Set([set.documentKey, set.documentBackKey, set.selfieKey]);
+    for (const { storage_key: key } of previous) {
+      if (key && !kept.has(key)) {
+        await this.redis.zadd(KYC_PENDING_UPLOADS, 0, key).catch(() => 0);
+      }
+    }
+
+    const name =
+      `${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim();
+    this.emitKycSubmitted(
+      profileId,
+      name || 'A profile',
+      profile.verification_status === VerificationStatus.REJECTED,
+    );
+    return { verificationStatus: VerificationStatus.PENDING };
+  }
+
+  /** Identity documents to review: on the bell, and emailed to the KYC reviewers. */
+  private emitKycSubmitted(
+    profileId: string,
+    name: string,
+    resubmitted: boolean,
+  ): void {
+    this.eventEmitter.emit(AdminNotificationEvent.PROFILE_KYC_SUBMITTED, {
+      event: AdminNotificationEvent.PROFILE_KYC_SUBMITTED,
+      title: resubmitted ? 'Documents sent again' : 'Documents to review',
+      message: resubmitted
+        ? `${name} sent new identity documents after a rejection`
+        : `${name} sent identity documents to review`,
       entityType: 'profile',
       entityId: String(profileId),
+      metadata: { resubmitted },
       timestamp: new Date().toISOString(),
     });
+  }
+
+  private emitBusinessResubmitted(profileId: string, message: string): void {
+    this.eventEmitter.emit(
+      AdminNotificationEvent.ORGANISATION_REVIEW_REQUESTED,
+      {
+        event: AdminNotificationEvent.ORGANISATION_REVIEW_REQUESTED,
+        title: 'Organisation to review',
+        message,
+        entityType: 'profile',
+        entityId: String(profileId),
+        timestamp: new Date().toISOString(),
+      },
+    );
   }
 
   /** The same, for a verification image attached during review. */
@@ -3094,47 +3263,27 @@ export class ProfileService {
     if (entry === 'business') {
       return this.createBusinessProfileWithDocuments(createProfileDto);
     }
-    const { kycDocumentUrl, kycSelfieUrl, kycDocumentBackUrl } =
-      createProfileDto;
-    // Required by the DTO for every sign-up but a business one.
-    if (!kycDocumentUrl || !kycSelfieUrl) {
-      throw new BadRequestException(
-        "Le document d'identité et le selfie sont requis.",
-      );
+    // « Plus tard »: no documents at all. The account is created with nothing
+    // to review (NOT_SUBMITTED); the person sends them once signed in
+    // (`submitKycDocuments`), and only then do reviewers hear of it.
+    if (!sendsKycDocuments(createProfileDto)) {
+      return this.prisma.$transaction(async (tx) => {
+        const createdProfile = await this.createProfileRecord(
+          tx,
+          createProfileDto,
+          { verificationStatus: VerificationStatus.NOT_SUBMITTED },
+        );
+        await this.linkProfileCategories(
+          tx,
+          createdProfile.id,
+          createProfileDto,
+        );
+        await this.linkPlatformDocuments(tx, createdProfile.id);
+        return createdProfile;
+      });
     }
 
-    // Resolved BEFORE the transaction opens. These do network I/O against R2,
-    // and holding a Postgres transaction open across it is how a slow bucket
-    // becomes a pool exhaustion; a rejection here also has to leave no
-    // half-written profile behind.
-    const wantsBackSide =
-      createProfileDto.documentType !== DocumentType.PASSPORT &&
-      !!kycDocumentBackUrl;
-
-    const [documentKey, documentBackKey, selfieKey] = await Promise.all([
-      this.resolveKycObject(
-        "recto du document d'identité",
-        kycDocumentUrl,
-        createProfileDto.kycDocumentKey,
-      ),
-      wantsBackSide
-        ? this.resolveKycObject(
-            "verso du document d'identité",
-            kycDocumentBackUrl,
-            createProfileDto.kycDocumentBackKey,
-          )
-        : Promise.resolve(undefined),
-      this.resolveKycObject(
-        'selfie',
-        kycSelfieUrl,
-        createProfileDto.kycSelfieKey,
-      ),
-    ]);
-
-    const privateBucket = await kycBucket(
-      this.systemConfig,
-      this.configService,
-    );
+    const kyc = await this.resolveKycSet(createProfileDto);
 
     return this.prisma.$transaction(async (tx) => {
       const createdProfile = await this.createProfileRecord(
@@ -3143,51 +3292,106 @@ export class ProfileService {
       );
 
       await this.linkProfileCategories(tx, createdProfile.id, createProfileDto);
-
-      // A PASSPORT has no back to photograph, so it gets two rows; every other
-      // type gets three. Gating on documentType rather than merely on the URL
-      // being present is what makes a back sent alongside a PASSPORT a no-op
-      // instead of an orphan row no reviewer would ever be shown.
-      //
-      // The keys are the ones this service derived, not the ones the client
-      // sent, and the url is now a canonical `s3://` reference rather than
-      // whatever the client round-tripped. A signed url written here is an
-      // expired url written here.
-      await Promise.all([
-        this.createKycDocumentRecord(
-          tx,
-          createdProfile.id,
-          createProfileDto.documentType,
-          'DOCUMENT',
-          privateBucket,
-          documentKey,
-        ),
-        ...(wantsBackSide && documentBackKey
-          ? [
-              this.createKycDocumentRecord(
-                tx,
-                createdProfile.id,
-                createProfileDto.documentType,
-                'DOCUMENT_BACK',
-                privateBucket,
-                documentBackKey,
-              ),
-            ]
-          : []),
-        this.createKycDocumentRecord(
-          tx,
-          createdProfile.id,
-          createProfileDto.documentType,
-          'SELFIE',
-          privateBucket,
-          selfieKey,
-        ),
-      ]);
-
+      await this.writeKycDocuments(tx, createdProfile.id, kyc);
       await this.linkPlatformDocuments(tx, createdProfile.id);
 
       return createdProfile;
     });
+  }
+
+  /**
+   * A full set of identity documents, checked and resolved to the keys this
+   * service derived — at sign-up, or sent later by a signed-in person.
+   *
+   * Resolved BEFORE any transaction opens. These do network I/O against R2,
+   * and holding a Postgres transaction open across it is how a slow bucket
+   * becomes a pool exhaustion; a rejection here also has to leave nothing
+   * half-written behind.
+   */
+  private async resolveKycSet(input: KycSetInput): Promise<ResolvedKycSet> {
+    const { documentType, kycDocumentUrl, kycSelfieUrl, kycDocumentBackUrl } =
+      input;
+    if (!documentType || !kycDocumentUrl?.trim() || !kycSelfieUrl?.trim()) {
+      throw new BadRequestException(
+        "Le document d'identité et le selfie sont requis.",
+      );
+    }
+
+    // A PASSPORT has no back to photograph. Gating on documentType rather than
+    // merely on the URL being present is what makes a back sent alongside a
+    // PASSPORT a no-op instead of an orphan row no reviewer would ever see.
+    const wantsBackSide =
+      documentType !== DocumentType.PASSPORT && !!kycDocumentBackUrl?.trim();
+
+    const [documentKey, documentBackKey, selfieKey] = await Promise.all([
+      this.resolveKycObject(
+        "recto du document d'identité",
+        kycDocumentUrl,
+        input.kycDocumentKey,
+      ),
+      wantsBackSide && kycDocumentBackUrl
+        ? this.resolveKycObject(
+            "verso du document d'identité",
+            kycDocumentBackUrl,
+            input.kycDocumentBackKey,
+          )
+        : Promise.resolve(undefined),
+      this.resolveKycObject('selfie', kycSelfieUrl, input.kycSelfieKey),
+    ]);
+
+    const bucket = await kycBucket(this.systemConfig, this.configService);
+    return {
+      documentType,
+      bucket,
+      documentKey,
+      documentBackKey: documentBackKey ?? null,
+      selfieKey,
+    };
+  }
+
+  /**
+   * The KYC rows of a resolved set: two for a PASSPORT, three otherwise.
+   *
+   * The keys are the ones this service derived, not the ones the client sent,
+   * and the url is a canonical `s3://` reference rather than whatever the
+   * client round-tripped. A signed url written here is an expired url written
+   * here.
+   */
+  private async writeKycDocuments(
+    tx: PrismaTransactionClient,
+    profileId: string,
+    set: ResolvedKycSet,
+  ): Promise<void> {
+    await Promise.all([
+      this.createKycDocumentRecord(
+        tx,
+        profileId,
+        set.documentType,
+        'DOCUMENT',
+        set.bucket,
+        set.documentKey,
+      ),
+      ...(set.documentBackKey
+        ? [
+            this.createKycDocumentRecord(
+              tx,
+              profileId,
+              set.documentType,
+              'DOCUMENT_BACK',
+              set.bucket,
+              set.documentBackKey,
+            ),
+          ]
+        : []),
+      this.createKycDocumentRecord(
+        tx,
+        profileId,
+        set.documentType,
+        'SELFIE',
+        set.bucket,
+        set.selfieKey,
+      ),
+    ]);
   }
 
   /**
@@ -3304,7 +3508,10 @@ export class ProfileService {
   private async createProfileRecord(
     tx: PrismaTransactionClient,
     createProfileDto: CreateProfileDto,
-    { isBusiness = false }: { isBusiness?: boolean } = {},
+    {
+      isBusiness = false,
+      verificationStatus = VerificationStatus.PENDING,
+    }: { isBusiness?: boolean; verificationStatus?: VerificationStatus } = {},
   ): Promise<{ id: string }> {
     return tx.profile.create({
       data: {
@@ -3323,7 +3530,7 @@ export class ProfileService {
         profile_type: createProfileDto.profileType,
         category_id: null,
         status: 'PENDING_ACTIVATION',
-        verification_status: 'PENDING',
+        verification_status: verificationStatus,
         reliability_score: 100,
         read_and_approved_policies: true,
         // Signup already proves the number: onboarding is WhatsApp-first and

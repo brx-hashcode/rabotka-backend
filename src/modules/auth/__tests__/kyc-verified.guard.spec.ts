@@ -49,7 +49,7 @@ describe('KycVerifiedGuard', () => {
 
   it('blocks a rejected profile with different copy', async () => {
     // A refused user must never be told to wait for a notification that will
-    // never arrive — only an admin can change the decision.
+    // never arrive: they are told to send new documents.
     mockPrisma.profile.findUnique.mockResolvedValue({
       verification_status: VerificationStatus.REJECTED,
     });
@@ -58,8 +58,27 @@ describe('KycVerifiedGuard', () => {
       response: {
         code: KYC_NOT_VERIFIED,
         verificationStatus: VerificationStatus.REJECTED,
-        message: expect.stringContaining('support') as string,
+        message: expect.stringContaining('nouveaux documents') as string,
       },
+    });
+  });
+
+  it('asks for the documents, never « en cours de vérification », when none were sent', async () => {
+    mockPrisma.profile.findUnique.mockResolvedValue({
+      verification_status: VerificationStatus.NOT_SUBMITTED,
+    });
+
+    await expect(guard.canActivate(makeContext('p1'))).rejects.toMatchObject({
+      response: {
+        code: KYC_NOT_VERIFIED,
+        verificationStatus: VerificationStatus.NOT_SUBMITTED,
+        message: expect.stringContaining("pièce d'identité") as string,
+      },
+    });
+    await expect(
+      guard.canActivate(makeContext('p1')),
+    ).rejects.not.toMatchObject({
+      response: { message: expect.stringContaining('en cours') as string },
     });
   });
 
