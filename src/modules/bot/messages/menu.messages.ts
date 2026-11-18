@@ -1,4 +1,7 @@
-import { ctaReply } from '../../../common/constants/whatsapp-carousel';
+import {
+  ctaReply,
+  type CtaReply,
+} from '../../../common/constants/whatsapp-carousel';
 import {
   KYC_DOCUMENTS_CTA_PATH,
   OPEN_APP_CTA_PATH,
@@ -170,8 +173,8 @@ export function kycRejectedHelpMessage(firstName: string): string {
  * Signed up without identity documents (« Plus tard »): nothing is under
  * review, and the one thing to do is send them. The button opens the page.
  */
-export function kycDocumentsMissingMessage(firstName: string): string {
-  return ctaReply({
+export function kycDocumentsMissingCta(firstName: string): CtaReply {
+  return {
     body: [
       '*Vérifiez votre identité*',
       '',
@@ -179,9 +182,16 @@ export function kycDocumentsMissingMessage(firstName: string): string {
     ].join('\n'),
     buttonText: 'Envoyer mes documents',
     path: KYC_DOCUMENTS_CTA_PATH,
+    // Outside the 24h window (most sign-ups come from the web and never
+    // wrote to the bot), the approved generic door: it opens the app, whose
+    // home says what is missing.
     fallbackTemplate: 'openApp',
     fallbackVariables: WHATSAPP_TEMPLATES.openApp.variables(firstName),
-  });
+  };
+}
+
+export function kycDocumentsMissingMessage(firstName: string): string {
+  return ctaReply(kycDocumentsMissingCta(firstName));
 }
 
 export function openAppBotMessage(firstName: string): string {

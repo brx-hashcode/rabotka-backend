@@ -76,6 +76,10 @@ import { randomUUID } from 'crypto';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { ProfileType } from '@prisma/client';
 import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
+import { QueueService } from '../../common/services/queue/queue.service';
+import { WHATSAPP_OUTBOUND_QUEUE } from '../../common/services/queue/queue.module';
+import type { WhatsAppOutboundJobData } from '../whatsapp/whatsapp-outbound.processor';
+import { kycDocumentsMissingCta } from '../bot/messages/menu.messages';
 import { PayPenaltyDto } from '../wallet/dto/pay-penalty.dto';
 import {
   ALLOWED_IMAGE_MIME_TYPES,
@@ -131,6 +135,8 @@ export class ProfileController {
     // Appended and @Optional(): the specs build this controller positionally.
     // Only the bearer-session answer of createProfile uses it.
     @Optional() private readonly authService?: AuthService,
+    // Same reason: only the « Plus tard » WhatsApp card uses it.
+    @Optional() private readonly queue?: QueueService,
   ) {}
 
   @Get('contacts')
@@ -264,10 +270,16 @@ export class ProfileController {
       createProfileDto.profileType === ProfileType.EMPLOYER
         ? ('profileCreatedEmployer' as const)
         : ('profileCreatedWorker' as const);
-    // Not either when the documents were skipped (« Plus tard »): both
-    // approved templates say the profile is under review, which it is not. A
-    // template that asks for the documents instead waits for Meta's approval;
-    // until then the email and the app say it.
+    // Not when the documents were skipped (« Plus tard »): both approved
+    // templates say the profile is under review, which it is not. That person
+    // gets the bot's « Envoyer mes documents » card instead (below).
+    if (entry === 'whatsapp' && !documentsSent) {
+      void this.sendDocumentsCard(
+        createProfileDto.phone,
+        createProfileDto.firstName,
+        result.profileId,
+      );
+    }
     if (entry === 'whatsapp' && documentsSent) {
       void this.whatsApp
         .sendTemplateMessage(
@@ -313,6 +325,33 @@ export class ProfileController {
     setAuthCookie(res, this.configService, this.jwtService.sign(payload));
 
     return { message: result.message, creditedBalance: result.creditedBalance };
+  }
+
+  /**
+   * « Envoyer mes documents », for a sign-up without them. A free-form card,
+   * so no Meta template to approve: WhatsApp accepts it when the person wrote
+   * to us in the last 24 hours (sign-up started from the chat), and otherwise
+   * the outbound worker falls back to the approved `openApp` template, whose
+   * button opens the app (its home asks for the documents). Through the queue
+   * so the worker mints the one-tap link, as for every bot card. Never throws:
+   * the account already exists.
+   */
+  private async sendDocumentsCard(
+    phone: string,
+    firstName: string,
+    profileId: string,
+  ): Promise<void> {
+    if (!this.queue) return;
+    await this.queue
+      .addJob<WhatsAppOutboundJobData>(WHATSAPP_OUTBOUND_QUEUE, {
+        type: 'cta',
+        phone,
+        profileId,
+        cta: kycDocumentsMissingCta(firstName?.trim() || ''),
+      })
+      .catch((err: unknown) =>
+        this.logger.warn(`Documents card not queued for ${profileId}`, err),
+      );
   }
 
   private frontendUrl(): string {

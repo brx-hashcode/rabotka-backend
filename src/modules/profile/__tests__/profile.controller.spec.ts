@@ -188,6 +188,39 @@ describe('ProfileController', () => {
         expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
       });
 
+      it('queues the « Envoyer mes documents » card, falling back to openApp', async () => {
+        const queue = { addJob: jest.fn().mockResolvedValue(undefined) };
+        (controller as any).queue = queue;
+        await controller.createProfile(later as any, mockRes());
+        await new Promise((r) => setImmediate(r));
+        expect(queue.addJob).toHaveBeenCalledWith(
+          'whatsapp-outbound-queue',
+          expect.objectContaining({
+            type: 'cta',
+            phone: dto.phone,
+            cta: expect.objectContaining({
+              path: 'profile/verification',
+              fallbackTemplate: 'openApp',
+            }),
+          }),
+        );
+      });
+
+      it('still signs up when the card cannot be queued', async () => {
+        (controller as any).queue = {
+          addJob: jest.fn().mockRejectedValue(new Error('redis down')),
+        };
+        const result = await controller.createProfile(later as any, mockRes());
+        expect(result.message).toBe('Profil créé avec succès');
+      });
+
+      it('queues no card when the documents were sent', async () => {
+        const queue = { addJob: jest.fn() };
+        (controller as any).queue = queue;
+        await controller.createProfile(dto as any, mockRes());
+        expect(queue.addJob).not.toHaveBeenCalled();
+      });
+
       it('welcomes by email, asking for the documents instead', async () => {
         await controller.createProfile(later as any, mockRes());
         const html = String(mailService.sendMail.mock.calls.at(-1)?.[0]?.html);
