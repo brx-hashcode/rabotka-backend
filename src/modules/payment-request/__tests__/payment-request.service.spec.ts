@@ -979,6 +979,7 @@ describe('PaymentRequestService', () => {
         payment: { create: jest.fn().mockResolvedValue({}) },
         walletTransaction: { create: jest.fn().mockResolvedValue({}) },
         wallet: { update: jest.fn().mockResolvedValue({}) },
+        domainEvent: { create: jest.fn().mockResolvedValue({}) },
         penalty: {
           updateMany: jest.fn().mockResolvedValue({}),
           count: jest.fn().mockResolvedValue(0),
@@ -1044,6 +1045,7 @@ describe('PaymentRequestService', () => {
         payment: { create: jest.fn() },
         walletTransaction: { create: jest.fn() },
         wallet: { update: jest.fn() },
+        domainEvent: { create: jest.fn().mockResolvedValue({}) },
       };
       (prisma.$transaction as jest.Mock).mockImplementation(async (cb) => {
         if (typeof cb === 'function') return cb(txMock);
@@ -1082,6 +1084,7 @@ describe('PaymentRequestService', () => {
         payment: { create: jest.fn().mockResolvedValue({}) },
         walletTransaction: { create: jest.fn().mockResolvedValue({}) },
         wallet: { update: jest.fn().mockResolvedValue({}) },
+        domainEvent: { create: jest.fn().mockResolvedValue({}) },
         penalty: {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
           count: jest.fn().mockResolvedValue(1),
@@ -1243,6 +1246,7 @@ describe('PaymentRequestService', () => {
         payment: { create: jest.fn().mockResolvedValue({}) },
         walletTransaction: { create: jest.fn().mockResolvedValue({}) },
         wallet: { update: jest.fn().mockResolvedValue({}) },
+        domainEvent: { create: jest.fn().mockResolvedValue({}) },
       };
       (prisma.$transaction as jest.Mock).mockImplementation(async (cb) => {
         if (typeof cb === 'function') return cb(txMock);
@@ -1299,6 +1303,7 @@ describe('PaymentRequestService', () => {
         payment: { create: jest.fn().mockResolvedValue({}) },
         walletTransaction: { create: jest.fn().mockResolvedValue({}) },
         wallet: { update: jest.fn().mockResolvedValue({}) },
+        domainEvent: { create: jest.fn().mockResolvedValue({}) },
       };
       (prisma.$transaction as jest.Mock).mockImplementation(async (cb) => {
         if (typeof cb === 'function') return cb(txMock);
@@ -1344,6 +1349,7 @@ describe('PaymentRequestService', () => {
                 payment: { create: jest.fn().mockResolvedValue({}) },
                 walletTransaction: { create: jest.fn().mockResolvedValue({}) },
                 wallet: { update: jest.fn().mockResolvedValue({}) },
+                domainEvent: { create: jest.fn().mockResolvedValue({}) },
               })
             : Promise.resolve([]),
         );
@@ -1510,6 +1516,7 @@ describe('PaymentRequestService', () => {
         payment: { create: jest.fn().mockResolvedValue({}) },
         walletTransaction: { create: jest.fn().mockResolvedValue({}) },
         wallet: { update: jest.fn().mockResolvedValue({}) },
+        domainEvent: { create: jest.fn().mockResolvedValue({}) },
       };
       (prisma.$transaction as jest.Mock).mockImplementation(async (cb) => {
         if (typeof cb === 'function') return cb(txMock);

@@ -1,10 +1,5 @@
-/** A BUSINESS_SUBSCRIPTION payment request was paid: activate its period. */
-export const BUSINESS_SUBSCRIPTION_PAID_EVENT = 'business.subscription.paid';
-
-export type BusinessSubscriptionPaidPayload = { paymentRequestId: string };
-
-/** A BUSINESS_CREDIT_PACK payment request was paid: add its credits. */
-export const BUSINESS_CREDIT_PACK_PAID_EVENT = 'business.credit-pack.paid';
+// A paid plan period or credit pack travels as the durable `payment.approved`
+// domain event (src/common/events/domain), not on this in-memory bus.
 
 /** An admin approved a business: its trial starts (if configured). */
 export const BUSINESS_VERIFIED_EVENT = 'business.verified';

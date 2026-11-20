@@ -832,6 +832,26 @@ model AgentEventOutbox {
   @@map("agent_event_outbox")
 }
 
+/// The transactional outbox of domain events (src/common/events/domain).
+/// Written in the transaction of the change it describes; relayed to each
+/// subscribed consumer's queue, then stamped. Kept 30 days after relay.
+model DomainEvent {
+  id             BigInt    @id @default(autoincrement())
+  /// `payment.approved`, … — see domain-event.catalog.ts.
+  type           String
+  version        Int       @default(1)
+  aggregate_type String
+  /// The future Kafka partition key: one aggregate's events stay in order.
+  aggregate_id   String
+  payload        Json
+  occurred_at    DateTime  @default(now()) @db.Timestamptz
+  relayed_at     DateTime? @db.Timestamptz
+
+  @@index([relayed_at, id], name: "idx_domain_events_pending")
+  @@index([aggregate_type, aggregate_id], name: "idx_domain_events_aggregate")
+  @@map("domain_events")
+}
+
 /// One city an agent covers. An agent sees only the jobs located in their
 /// zones.
 ///

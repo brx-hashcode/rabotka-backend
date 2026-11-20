@@ -93,6 +93,7 @@ function make(
       mail,
       layout,
       events,
+      { subscribe: jest.fn() } as any,
     ),
     prisma,
     mail,
@@ -742,6 +743,61 @@ describe('BusinessSubscriptionService', () => {
       await expect(service.activateFromPayment('pr')).resolves.toEqual({
         id: 'existing',
       });
+    });
+  });
+
+  describe('onPaymentApproved (payment.approved consumer)', () => {
+    const event = (requestType: string | null) =>
+      ({
+        id: '1',
+        type: 'payment.approved',
+        version: 1,
+        aggregateType: 'payment_request',
+        aggregateId: 'pr',
+        payload: { paymentRequestId: 'pr', requestType, profileId: 'p1' },
+        occurredAt: '2026-11-20T10:00:00.000Z',
+      }) as any;
+
+    it('subscribes as the business-subscription consumer', () => {
+      const { service } = make();
+      const bus = (service as any).domainEvents;
+      service.onModuleInit();
+      expect(bus.subscribe).toHaveBeenCalledWith(
+        expect.objectContaining({
+          consumer: 'business-subscription',
+          events: ['payment.approved'],
+        }),
+      );
+    });
+
+    it('routes a plan to its period and a pack to its credits', async () => {
+      const { service } = make();
+      const activate = jest
+        .spyOn(service, 'activateFromPayment')
+        .mockResolvedValue(null);
+      const credits = jest
+        .spyOn(service, 'addCreditsFromPayment')
+        .mockResolvedValue(null);
+
+      await service.onPaymentApproved(event('BUSINESS_SUBSCRIPTION'));
+      await service.onPaymentApproved(event('BUSINESS_CREDIT_PACK'));
+      await service.onPaymentApproved(event('CONTACT_UNLOCK'));
+      await service.onPaymentApproved(event(null));
+
+      expect(activate).toHaveBeenCalledTimes(1);
+      expect(activate).toHaveBeenCalledWith('pr');
+      expect(credits).toHaveBeenCalledTimes(1);
+      expect(credits).toHaveBeenCalledWith('pr');
+    });
+
+    it('lets a failure through, so the queue retries it', async () => {
+      const { service } = make();
+      jest
+        .spyOn(service, 'activateFromPayment')
+        .mockRejectedValue(new Error('db down'));
+      await expect(
+        service.onPaymentApproved(event('BUSINESS_SUBSCRIPTION')),
+      ).rejects.toThrow('db down');
     });
   });
 

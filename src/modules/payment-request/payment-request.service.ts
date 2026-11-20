@@ -1,8 +1,4 @@
-import {
-  BUSINESS_CREDIT_PACK_PAID_EVENT,
-  BUSINESS_SUBSCRIPTION_PAID_EVENT,
-  type BusinessSubscriptionPaidPayload,
-} from '../business/subscription/subscription.events';
+import { publishDomainEvent } from '../../common/events/domain/publish-domain-event';
 import {
   CFA_CURRENCIES,
   toAlpha3,
@@ -878,19 +874,9 @@ export class PaymentRequestService {
     this.emitAdminPaymentNotification(request, context);
     await this.handlePenaltyPostPayment(request);
     await this.handleWalletTopUpPostPayment(request, context);
-    // A business plan period: activated by BusinessSubscriptionService, which
-    // this module does not import (it depends on payments, not the reverse).
-    if (request.request_type === PaymentRequestType.BUSINESS_SUBSCRIPTION) {
-      this.eventEmitter.emit(BUSINESS_SUBSCRIPTION_PAID_EVENT, {
-        paymentRequestId: request.id,
-      } satisfies BusinessSubscriptionPaidPayload);
-    }
-    // A pack: its credits are added by BusinessSubscriptionService.
-    if (request.request_type === PaymentRequestType.BUSINESS_CREDIT_PACK) {
-      this.eventEmitter.emit(BUSINESS_CREDIT_PACK_PAID_EVENT, {
-        paymentRequestId: request.id,
-      } satisfies BusinessSubscriptionPaidPayload);
-    }
+    // A business plan period or credit pack: activated by
+    // BusinessSubscriptionService from the `payment.approved` domain event
+    // written in persistApprovedPayment's transaction.
 
     // Compute unlock result first (needed for the confirmation message text).
     const unlockResult = await this.handleContactUnlockPostPayment(request);
@@ -1086,6 +1072,15 @@ export class PaymentRequestService {
       await tx.wallet.update({
         where: { id: mobileMoneyWallet.id },
         data: { balance: { increment: context.amount } },
+      });
+
+      // In this transaction, so it exists exactly when the claim committed:
+      // the business plan / credit pack is then activated by its consumer
+      // (BusinessSubscriptionService) even if this process dies right after.
+      await publishDomainEvent(tx, 'payment.approved', request.id, {
+        paymentRequestId: request.id,
+        requestType: request.request_type,
+        profileId: request.profile_id,
       });
 
       return true;

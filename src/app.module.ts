@@ -22,6 +22,7 @@ import { CollaborationGraphModule } from './modules/collaboration-graph/collabor
 import { RedisModule } from './common/services/redis/redis.module';
 import { IdempotencyModule } from './common/services/idempotency/idempotency.module';
 import { QueueModule } from './common/services/queue/queue.module';
+import { DomainEventsModule } from './common/events/domain/domain-events.module';
 import { HealthModule } from './modules/health/health.module';
 import { getMailerTransportConfig } from './modules/mail/mailer-transport.config.js';
 import { MailModule } from './modules/mail/mail.module';
@@ -166,6 +167,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     AdminArchiveModule,
     CollaborationGraphModule,
     QueueModule.forRoot(),
+    DomainEventsModule,
     MailerModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
