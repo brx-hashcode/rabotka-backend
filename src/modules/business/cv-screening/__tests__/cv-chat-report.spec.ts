@@ -98,6 +98,46 @@ describe('cv-chat-report', () => {
     expect(html).toContain('Intro<br>suite');
   });
 
+  it('prints headings, tables and the charts the server wrote; nothing else as markup', () => {
+    const chart = JSON.stringify({
+      v: 1,
+      kind: 'bar',
+      layout: 'vertical',
+      title: 'Scores par critère',
+      unit: '/100',
+      categories: ['Compétences'],
+      series: [{ name: 'Glody M.', values: [92] }],
+    });
+    const html = answerHtml(
+      [
+        '### Le classement',
+        '| Candidat | Score |',
+        '|---|---|',
+        '| **Glody** | 91 |',
+        '',
+        '```rabotka-chart',
+        chart,
+        '```',
+        '',
+        '```rabotka-chart',
+        '{"v":1,"pas fini',
+        '```',
+        '<script>alert(1)</script>',
+      ].join('\n'),
+    );
+    expect(html).toContain('Le classement</p>');
+    expect(html).toContain('<table');
+    expect(html).toContain(
+      '<strong style="font-weight:600; color:#0F1713;">Glody</strong>',
+    );
+    expect(html).toContain('Scores par critère');
+    expect(html).toContain('width:92.0%');
+    expect(html).toContain('92/100');
+    expect(html).not.toContain('pas fini');
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('&lt;script&gt;');
+  });
+
   it('words a score as the business space does', () => {
     expect([verdict(85), verdict(60), verdict(45), verdict(10)]).toEqual([
       'Très adapté',

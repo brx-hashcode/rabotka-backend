@@ -66,7 +66,21 @@ function make(
       .fn()
       .mockResolvedValue({ kind: 'text', text: 'CV de Grâce, caissière.' }),
   };
-  const llm: any = { stream: jest.fn() };
+  // A turn of the model as streamTurn gives it: the text `stream` is set to
+  // yield, then the whole message; `toolTurns` are turns that ask for charts.
+  const llm: any = { stream: jest.fn(), toolTurns: [] as unknown[] };
+  llm.streamTurn = jest.fn((...args: unknown[]) =>
+    (async function* () {
+      const calls = llm.toolTurns.shift();
+      if (calls) {
+        yield { type: 'end', message: { tool_calls: calls, content: '' } };
+        return;
+      }
+      for await (const text of llm.stream(...args))
+        yield { type: 'text', text };
+      yield { type: 'end', message: { tool_calls: [], content: '' } };
+    })(),
+  );
   const service = new CvChatService(prisma, llm, subscriptions, screenings);
   return { service, prisma, llm, screenings };
 }
@@ -333,6 +347,95 @@ describe('CvChatService', () => {
         },
       });
       expect(prisma.cvResumeMessage.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('draws the chart the model asks for into the answer, then lets it comment', async () => {
+      const { service, prisma, llm } = make();
+      const turn = await service.prepare('p1', 's1', 'r1', 'Ses scores ?');
+      turn.resume = {
+        ...turn.resume,
+        criteria: { skills: 80, experience: 60, training: null },
+      };
+      prisma.cvResumeMessage.create.mockClear();
+      llm.toolTurns.push([
+        { id: 't1', name: 'afficher_graphique', args: { type: 'criteres' } },
+      ]);
+      llm.stream.mockImplementation(async function* () {
+        await Promise.resolve();
+        yield 'Les compétences tirent le score.';
+      });
+
+      const shown = await drain(
+        service.answer(turn, new AbortController().signal),
+      );
+      expect(shown[0]).toContain('```rabotka-chart');
+      expect(shown[0]).toContain('"Compétences","Expérience"');
+      expect(shown[0]).not.toContain('Formation');
+      expect(shown[1]).toBe('Les compétences tirent le score.');
+      // The second turn hears the tool's reply.
+      const second = llm.streamTurn.mock.calls[1][0];
+      expect(second.at(-1).constructor.name).toBe('ToolMessage');
+      const saved = prisma.cvResumeMessage.create.mock.calls[0][0].data.content;
+      expect(saved).toContain('```rabotka-chart');
+      expect(saved).toContain('Les compétences tirent le score.');
+    });
+
+    it('makes the first turn call the chart tool when the question asks for a chart', async () => {
+      const { service, llm } = make();
+      llm.stream.mockImplementation(async function* () {
+        await Promise.resolve();
+        yield 'Réponse.';
+      });
+
+      const asked = await service.prepare(
+        'p1',
+        's1',
+        'r1',
+        'Fais un graphique de ses scores',
+      );
+      await drain(service.answer(asked, new AbortController().signal));
+      expect(llm.streamTurn.mock.calls[0][1].toolChoice).toBe('any');
+
+      llm.streamTurn.mockClear();
+      const plain = await service.prepare(
+        'p1',
+        's1',
+        'r1',
+        'Parle-t-elle anglais ?',
+      );
+      await drain(service.answer(plain, new AbortController().signal));
+      expect(llm.streamTurn.mock.calls[0][1].toolChoice).toBeUndefined();
+    });
+
+    it('stops asking after a few rounds of charts', async () => {
+      const { service, llm } = make();
+      const turn = await service.prepare('p1', 's1', 'r1', 'Graphiques ?');
+      turn.resume = { ...turn.resume, criteria: { skills: 80 } };
+      const ask = () => [
+        { id: 'x', name: 'afficher_graphique', args: { type: 'criteres' } },
+      ];
+      llm.toolTurns.push(ask(), ask(), ask(), ask());
+
+      const shown = await drain(
+        service.answer(turn, new AbortController().signal),
+      );
+      expect(llm.streamTurn).toHaveBeenCalledTimes(3);
+      expect(shown.filter((t) => t.includes('rabotka-chart'))).toHaveLength(3);
+    });
+
+    it('still refuses an off-topic question when charts are on offer', async () => {
+      const { service, prisma, llm } = make();
+      const turn = await service.prepare('p1', 's1', 'r1', 'La météo ?');
+      prisma.cvResumeMessage.create.mockClear();
+      llm.stream.mockImplementation(async function* () {
+        await Promise.resolve();
+        yield 'HORS_SUJET';
+      });
+
+      await expect(
+        drain(service.answer(turn, new AbortController().signal)),
+      ).rejects.toBeInstanceOf(OffTopicError);
+      expect(prisma.cvResumeMessage.create).not.toHaveBeenCalled();
     });
   });
 });

@@ -195,12 +195,25 @@ describe('CvCompareService', () => {
       );
       const out: string[] = [];
       for await (const t of service.answer(
-        { comparisonId: 'c1', messages: [], remaining: 3 },
+        {
+          comparisonId: 'c1',
+          messages: [],
+          remaining: 3,
+          language: 'fr',
+          questionId: 'q1',
+          resumes: [{ score: 80, criteria: { skills: 80 }, candidate: null }],
+        },
         new AbortController().signal,
       )) {
         out.push(t);
       }
       expect(out).toEqual(['A']);
+      // The compared CVs' chart tool, every kind of chart.
+      const store = chat.streamReply.mock.calls[0][3];
+      expect(store.charts.definitions[0].name).toBe('afficher_graphique');
+      expect(
+        store.charts.call('afficher_graphique', { type: 'scores' }).fence,
+      ).toContain('rabotka-chart');
       expect(prisma.cvComparisonMessage.create).toHaveBeenCalledWith({
         data: { comparison_id: 'c1', role: 'ASSISTANT', content: 'A' },
       });
