@@ -36,6 +36,7 @@ import {
 import type { OutputLanguage } from '../output-language';
 import { answersBlock, readApplicationAnswers } from './cv-assessment';
 import type { ChatReportInput } from './cv-chat-report';
+import { chartTools, criteriaLine, type ChartResume } from './cv-chart';
 
 export const MIN_COMPARED = 2;
 export const MAX_COMPARED = 5;
@@ -62,6 +63,8 @@ export type CvCompareTurn = {
   remaining: number;
   /** The question saved for this turn: the one taken back if nothing came. */
   questionId: string;
+  /** The compared CVs, best first: what the charts are drawn from. */
+  resumes: ChartResume[];
 };
 
 /**
@@ -249,6 +252,7 @@ export class CvCompareService {
       comparisonId: comparison.id,
       questionId: saved.id,
       remaining: limit - before - 1,
+      resumes,
       messages: [
         new SystemMessage(chatPrompt(SYSTEM_PROMPT, language)),
         new HumanMessage(
@@ -274,6 +278,11 @@ export class CvCompareService {
     const comparisonId = turn.comparisonId;
     return this.chat.streamReply(turn.messages, comparisonId, signal, {
       language: turn.language,
+      charts: chartTools(turn.resumes, turn.language, [
+        'scores',
+        'criteres',
+        'experience',
+      ]),
       save: async (content) => {
         await this.prisma.cvComparisonMessage.create({
           data: {
@@ -337,6 +346,7 @@ function contextText(
     return [
       `### ${name}`,
       `Score : ${resume.score ?? '?'}/100`,
+      criteriaLine(resume),
       resume.summary ? `Résumé : ${resume.summary}` : null,
       resume.strengths.length
         ? `Points forts : ${resume.strengths.join(' ; ')}`

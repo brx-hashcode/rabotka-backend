@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { AIMessageChunk } from '@langchain/core/messages';
 import { LlmService } from '../llm.service';
 import { LlmChainExhaustedError } from '../llm.errors';
 import { specId, type LlmProviderSpec } from '../llm.types';
@@ -211,5 +212,103 @@ describe('LlmService.stream', () => {
       ),
     ).rejects.toThrow(LlmChainExhaustedError);
     expect(factory.calls).toEqual(google);
+  });
+});
+
+describe('LlmService.streamTurn', () => {
+  const original = process.env;
+  beforeEach(() => {
+    process.env = { ...original, ...KEYS };
+  });
+  afterEach(() => {
+    process.env = original;
+  });
+
+  /** A model that binds tools, then streams the given chunks. */
+  function toolFactory(chunks: AIMessageChunk[], bindable = true) {
+    const bound = {
+      stream: jest.fn(() =>
+        Promise.resolve(
+          (async function* () {
+            await Promise.resolve();
+            for (const c of chunks) yield c;
+          })(),
+        ),
+      ),
+    };
+    const model = {
+      stream: jest.fn(),
+      ...(bindable ? { bindTools: jest.fn(() => bound) } : {}),
+    };
+    return { model, bound, build: jest.fn(() => model) };
+  }
+
+  const TOOLS = [{ name: 'afficher_graphique', description: 'x', schema: {} }];
+
+  it('streams the text, then the whole message with its tool calls', async () => {
+    const factory = toolFactory([
+      new AIMessageChunk({ content: 'Voici ' }),
+      new AIMessageChunk({
+        content: '',
+        tool_call_chunks: [
+          {
+            name: 'afficher_graphique',
+            args: '{"type":',
+            id: 't1',
+            index: 0,
+            type: 'tool_call_chunk',
+          },
+        ],
+      }),
+      new AIMessageChunk({
+        content: '',
+        tool_call_chunks: [
+          { args: '"scores"}', index: 0, type: 'tool_call_chunk' },
+        ],
+      }),
+    ]);
+    const service = new LlmService(
+      factory as never,
+      makeBreaker() as never,
+      config as never,
+    );
+
+    const events: unknown[] = [];
+    for await (const e of service.streamTurn('hi', {
+      tier: 'document',
+      tools: TOOLS as never,
+    }))
+      events.push(e);
+
+    expect(factory.model.bindTools).toHaveBeenCalledWith(TOOLS);
+    expect(events[0]).toEqual({ type: 'text', text: 'Voici ' });
+    const end = events[1] as { type: string; message: AIMessageChunk };
+    expect(end.type).toBe('end');
+    expect(end.message.tool_calls).toEqual([
+      expect.objectContaining({
+        name: 'afficher_graphique',
+        args: { type: 'scores' },
+        id: 't1',
+      }),
+    ]);
+  });
+
+  it('fails fatal on a model that cannot call tools, rather than answering without them', async () => {
+    const factory = toolFactory([], false);
+    const service = new LlmService(
+      factory as never,
+      makeBreaker() as never,
+      config as never,
+    );
+
+    await expect(
+      (async () => {
+        for await (const _ of service.streamTurn('hi', {
+          tier: 'document',
+          tools: TOOLS as never,
+        }))
+          void _;
+      })(),
+    ).rejects.toThrow('does not support tool calling');
   });
 });

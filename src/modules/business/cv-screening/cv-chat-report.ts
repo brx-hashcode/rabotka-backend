@@ -126,41 +126,187 @@ function inline(line: string): string {
   );
 }
 
-/**
- * An answer as the drawer shows it: paragraphs, « - » or numbered lists, and
- * **bold** — the only marks the assistant is asked to use.
- */
-export function answerHtml(text: string): string {
-  const blocks: { list: boolean; lines: string[] }[] = [];
-  for (const raw of text.split('\n')) {
-    const line = raw.trimEnd();
-    const item = /^\s*(?:[-*•]|\d+[.)])\s+/.exec(line);
-    const last = blocks.at(-1);
-    if (!line.trim()) {
-      blocks.push({ list: false, lines: [] });
-    } else if (item) {
-      const content = line.slice(item[0].length);
-      if (last?.list) last.lines.push(content);
-      else blocks.push({ list: true, lines: [content] });
-    } else if (last && !last.list && last.lines.length) {
-      last.lines.push(line);
-    } else {
-      blocks.push({ list: false, lines: [line] });
-    }
+/** The colours of a printed chart's series, the portal's order. */
+const SERIES = ['#1F8A4C', '#0F1713', '#9BE15D', '#5B8DEF', '#F2A33A'];
+
+type PrintedChart = {
+  title: string;
+  unit: string;
+  categories: string[];
+  series: { name: string; values: (number | null)[] }[];
+};
+
+/** A ```rabotka-chart block, or null when it is not one (then printed as nothing). */
+function readChart(json: string): PrintedChart | null {
+  try {
+    const d = JSON.parse(json) as Partial<PrintedChart> & { v?: number };
+    if (d.v !== 1 || !Array.isArray(d.categories) || !Array.isArray(d.series))
+      return null;
+    if (typeof d.title !== 'string' || typeof d.unit !== 'string') return null;
+    const count = d.categories.length;
+    const ok = d.series.every(
+      (x) =>
+        x &&
+        typeof x.name === 'string' &&
+        Array.isArray(x.values) &&
+        x.values.length === count,
+    );
+    return ok ? (d as PrintedChart) : null;
+  } catch {
+    return null;
   }
-  return blocks
-    .filter((b) => b.lines.length)
-    .map((b) =>
-      b.list
-        ? `<ul style="margin:6px 0; padding:0; list-style:none;">${b.lines
-            .map(
-              (l) =>
-                `<li style="display:flex; gap:9px; margin:4px 0;"><span style="flex-shrink:0; width:5px; height:5px; margin-top:7px; border-radius:50%; background:${GREEN};"></span><span>${inline(l)}</span></li>`,
-            )
-            .join('')}</ul>`
-        : `<p style="margin:6px 0;">${b.lines.map(inline).join('<br>')}</p>`,
+}
+
+/** A chart as bars across, one group per category: what a PDF prints without a script. */
+function chartHtml(chart: PrintedChart): string {
+  const values = chart.series.flatMap((s) =>
+    s.values.filter((v): v is number => typeof v === 'number'),
+  );
+  const max = chart.unit === '/100' ? 100 : Math.max(1, ...values);
+  const several = chart.series.length > 1;
+  const groups = chart.categories
+    .map((category, i) => {
+      const bars = chart.series
+        .map((s, j) => {
+          const v = s.values[i];
+          const width =
+            typeof v === 'number' ? Math.max(1, (v / max) * 100) : 0;
+          return `<div style="display:flex; align-items:center; gap:8px; margin:2px 0;">
+            <div style="flex:1; height:9px; border-radius:5px; background:${RULE};"><div style="width:${width.toFixed(1)}%; height:9px; border-radius:5px; background:${SERIES[j % SERIES.length]};"></div></div>
+            <span style="width:56px; text-align:right; font-size:10px; color:${BODY};">${typeof v === 'number' ? `${v}${escapeHtml(chart.unit)}` : '—'}</span>
+          </div>`;
+        })
+        .join('');
+      return `<div style="margin:7px 0;"><div style="font-size:10.5px; font-weight:600; color:${INK}; margin-bottom:2px;">${escapeHtml(category)}</div>${bars}</div>`;
+    })
+    .join('');
+  const legend = several
+    ? `<div style="display:flex; flex-wrap:wrap; gap:4px 14px; margin-top:6px; font-size:9.5px; color:${MUTED};">${chart.series
+        .map(
+          (s, j) =>
+            `<span style="display:inline-flex; align-items:center; gap:5px;"><span style="width:8px; height:8px; border-radius:50%; background:${SERIES[j % SERIES.length]};"></span>${escapeHtml(s.name)}</span>`,
+        )
+        .join('')}</div>`
+    : '';
+  return `<div style="margin:10px 0; padding:12px 14px; border-radius:12px; background:#F4F6F5; break-inside:avoid;">
+    <div style="font-size:11px; font-weight:700; color:${INK}; margin-bottom:4px;">${escapeHtml(chart.title)}</div>${groups}${legend}
+  </div>`;
+}
+
+/** A markdown table's row: its cells, trimmed. */
+const cells = (line: string) =>
+  line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((c) => c.trim());
+
+function tableHtml(lines: string[]): string {
+  // The second line is the |---|---| separator.
+  const [head, , ...rows] = lines;
+  const th = cells(head)
+    .map(
+      (c) =>
+        `<th style="text-align:left; padding:5px 8px; font-size:9.5px; font-weight:600; color:${MUTED};">${inline(c)}</th>`,
     )
     .join('');
+  const body = rows
+    .map(
+      (r) =>
+        `<tr>${cells(r)
+          .map(
+            (c) =>
+              `<td style="padding:5px 8px; border-top:1px solid ${RULE}; vertical-align:top;">${inline(c)}</td>`,
+          )
+          .join('')}</tr>`,
+    )
+    .join('');
+  return `<table style="width:100%; border-collapse:collapse; margin:8px 0; font-size:10.5px; break-inside:avoid;"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+const listHtml = (items: string[]) =>
+  `<ul style="margin:6px 0; padding:0; list-style:none;">${items
+    .map(
+      (l) =>
+        `<li style="display:flex; gap:9px; margin:4px 0;"><span style="flex-shrink:0; width:5px; height:5px; margin-top:7px; border-radius:50%; background:${GREEN};"></span><span>${inline(l)}</span></li>`,
+    )
+    .join('')}</ul>`;
+
+const paragraphHtml = (lines: string[]) =>
+  `<p style="margin:6px 0;">${lines.map(inline).join('<br>')}</p>`;
+
+/**
+ * An answer as the drawer shows it: paragraphs, « - » or numbered lists,
+ * **bold**, small « ### » headings, tables, and the charts the server wrote
+ * (```rabotka-chart blocks). Everything else is printed as text, escaped.
+ */
+export function answerHtml(text: string): string {
+  const out: string[] = [];
+  const lines = text.split('\n');
+  let list: string[] | null = null;
+  let para: string[] = [];
+  const flush = () => {
+    if (list?.length) out.push(listHtml(list));
+    if (para.length) out.push(paragraphHtml(para));
+    list = null;
+    para = [];
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trimEnd();
+    const fence = /^\s*```\s*([\w-]*)\s*$/.exec(line);
+    if (fence) {
+      flush();
+      const body: string[] = [];
+      i++;
+      while (i < lines.length && !/^\s*```\s*$/.test(lines[i]))
+        body.push(lines[i++]);
+      if (fence[1] === 'rabotka-chart') {
+        const chart = readChart(body.join('\n'));
+        if (chart) out.push(chartHtml(chart));
+      } else if (body.length) {
+        out.push(
+          `<pre style="margin:6px 0; white-space:pre-wrap; font-size:9.5px;">${escapeHtml(body.join('\n'))}</pre>`,
+        );
+      }
+      continue;
+    }
+    // A table: a | row followed by a |---| separator.
+    if (
+      line.trim().startsWith('|') &&
+      /^\s*\|?\s*:?-{2,}/.test(lines[i + 1] ?? '')
+    ) {
+      flush();
+      const rows = [line];
+      while (i + 1 < lines.length && lines[i + 1].trim().startsWith('|'))
+        rows.push(lines[++i]);
+      out.push(tableHtml(rows));
+      continue;
+    }
+    const heading = /^\s*#{1,6}\s+(.*)$/.exec(line);
+    if (heading) {
+      flush();
+      out.push(
+        `<p style="margin:10px 0 4px; font-weight:700; color:${INK};">${inline(heading[1].replaceAll('**', ''))}</p>`,
+      );
+      continue;
+    }
+    const item = /^\s*(?:[-*•]|\d+[.)])\s+/.exec(line);
+    if (!line.trim()) {
+      flush();
+    } else if (item) {
+      if (para.length) out.push(paragraphHtml(para));
+      para = [];
+      (list ??= []).push(line.slice(item[0].length));
+    } else {
+      if (list) out.push(listHtml(list));
+      list = null;
+      para.push(line);
+    }
+  }
+  flush();
+  return out.join('');
 }
 
 function candidateCard(c: ChatReportCandidate): string {

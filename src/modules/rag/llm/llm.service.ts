@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { BaseMessage, type AIMessage } from '@langchain/core/messages';
+import {
+  BaseMessage,
+  type AIMessage,
+  type AIMessageChunk,
+} from '@langchain/core/messages';
 import type { BaseLanguageModelInput } from '@langchain/core/language_models/base';
 import type { BindToolsInput } from '@langchain/core/language_models/chat_models';
 import type { Runnable } from '@langchain/core/runnables';
@@ -43,6 +47,25 @@ import {
   llmRequestCounter,
   type LlmRequestStatus,
 } from './metrics';
+
+/** How a streamed answer is bounded and where it may come from. */
+export interface LlmStreamOptions {
+  tier: LlmTier;
+  /** Longest wait for each chunk. */
+  idleMs?: number;
+  /** Longest wait for the first chunk (default: `idleMs`). */
+  firstMs?: number;
+  /** The reader left: stop everything. */
+  signal?: AbortSignal;
+  correlationId?: string;
+  /** Narrows the chain, e.g. to those that read a PDF. */
+  providers?: LlmProviderSpec['provider'][];
+}
+
+/** A streamed turn: text as it comes, then the whole message (with its tool calls, if any). */
+export type LlmStreamEvent =
+  | { type: 'text'; text: string }
+  | { type: 'end'; message: AIMessageChunk | null };
 
 export interface LlmInvokeOptions {
   tier: LlmTier;
@@ -393,15 +416,33 @@ export class LlmService {
    */
   async *stream(
     input: BaseLanguageModelInput,
-    options: {
-      tier: LlmTier;
-      idleMs?: number;
-      firstMs?: number;
-      signal?: AbortSignal;
-      correlationId?: string;
-      providers?: LlmProviderSpec['provider'][];
-    },
+    options: LlmStreamOptions,
   ): AsyncGenerator<string> {
+    for await (const event of this.streamEvents(input, options)) {
+      if (event.type === 'text') yield event.text;
+    }
+  }
+
+  /**
+   * One turn of a model that may call tools, as it is written: the text chunk
+   * by chunk, then the whole message (its `tool_calls` included) once the
+   * turn ends. The caller runs the tools and asks again. Same chain, timeouts
+   * and fallback rule as {@link stream}: another provider only before any
+   * text has reached the reader. Tools are bound as `invokeWith` binds them,
+   * so a provider without tool support fails fatal rather than answering
+   * without them.
+   */
+  streamTurn(
+    input: BaseLanguageModelInput,
+    options: LlmStreamOptions & { tools: BindToolsInput[] },
+  ): AsyncGenerator<LlmStreamEvent> {
+    return this.streamEvents(input, options);
+  }
+
+  private async *streamEvents(
+    input: BaseLanguageModelInput,
+    options: LlmStreamOptions & { tools?: BindToolsInput[] },
+  ): AsyncGenerator<LlmStreamEvent> {
     const startedAt = Date.now();
     const idleMs = options.idleMs ?? this.defaultTimeoutMs;
     const firstMs = options.firstMs ?? idleMs;
@@ -447,18 +488,33 @@ export class LlmService {
 
       try {
         const model = await this.factory.build(spec);
+        let runnable: Runnable<BaseLanguageModelInput, AIMessageChunk> = model;
+        if (options.tools?.length) {
+          if (typeof model.bindTools !== 'function') {
+            throw new TypeError(
+              `${specId(spec)} does not support tool calling — remove it from a tier that binds tools`,
+            );
+          }
+          runnable = model.bindTools(options.tools);
+        }
         arm(firstMs);
-        const chunks = await model.stream(this.shapeFor(spec, input), {
+        const chunks = await runnable.stream(this.shapeFor(spec, input), {
           signal,
         });
+        // With tools, the whole message, for its tool calls. A tool-call chunk
+        // re-arms the timer like text, so a model that calls first is not cut off.
+        const withTools = !!options.tools?.length;
+        let message: AIMessageChunk | undefined;
         for await (const chunk of chunks) {
           arm(idleMs);
+          if (withTools) message = message ? message.concat(chunk) : chunk;
           const text = chunkText(chunk.content);
           if (!text) continue;
           yielded = true;
-          yield text;
+          yield { type: 'text', text };
         }
         clearTimeout(timer);
+        yield { type: 'end', message: message ?? null };
         await this.breaker.recordSuccess(spec);
         telemetry.provider = spec.provider;
         telemetry.model = spec.model;

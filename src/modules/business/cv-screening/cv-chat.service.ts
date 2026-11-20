@@ -9,6 +9,8 @@ import {
   AIMessage,
   HumanMessage,
   SystemMessage,
+  ToolMessage,
+  type AIMessageChunk,
   type BaseMessage,
 } from '@langchain/core/messages';
 import {
@@ -31,6 +33,13 @@ import { CvScreeningService } from './cv-screening.service';
 import type { ChatReportCandidate, ChatReportInput } from './cv-chat-report';
 import { experiencesText, type CvExperience } from './cv-experience';
 import {
+  CHARTS_RULE,
+  MAX_CHARTS,
+  chartTools,
+  criteriaLine,
+  type ChartTools,
+} from './cv-chart';
+import {
   languageOf,
   promptIn,
   writtenIn,
@@ -47,6 +56,8 @@ const IDLE_MS = 30_000;
  * reader for the whole idle wait, once per provider.
  */
 const FIRST_MS = 8_000;
+/** Model turns in one answer, at most: a chart asked for, then the words around it. */
+const MAX_ROUNDS = 3;
 
 /** What the model answers, alone, to a question outside the conversation's scope. */
 export const OFF_TOPIC = 'HORS_SUJET';
@@ -112,8 +123,8 @@ export const CHAT_RULES = [
 /**
  * How an answer is laid out, for one CV or several: what the business pays
  * for is the reasoning, tied to the CV, so a verdict alone is not an answer.
- * Only the marks the portal draws (paragraphs, « - » lists, numbered lists,
- * **gras**).
+ * In markdown, which the portal and the PDF draw (headings, lists, bold,
+ * tables), with the charts the chart tool writes in.
  */
 export const ANSWER_STYLE = [
   'Forme de la réponse :',
@@ -129,7 +140,10 @@ export const ANSWER_STYLE = [
   '- Questions d’entretien : 5 questions numérotées. Pour chacune : le point précis du CV ou de l’offre qui la motive, la question telle qu’on la pose, puis « Une bonne réponse montre : … » et « À surveiller : … ».',
   '- Information absente du CV (salaire, disponibilité, permis…) : dis-le, explique pourquoi elle compte pour ce poste, puis donne la question à poser au candidat pour l’obtenir.',
   '',
-  'Pas de remplissage : ni conseil général valable pour tout candidat, ni répétition de l’analyse déjà affichée, ni phrase de politesse finale. Mets en **gras** les intitulés de partie courts, sans titre markdown (#) ni tableau.',
+  'Pas de remplissage : ni conseil général valable pour tout candidat, ni répétition de l’analyse déjà affichée, ni phrase de politesse finale.',
+  'Mise en forme (markdown) : intitulés de partie courts en **gras** ou en petit titre « ### » ; listes à tirets ou numérotées ; un tableau markdown quand tu compares plusieurs candidats sur les mêmes points (une ligne par candidat, des cellules courtes). Jamais de HTML.',
+  '',
+  CHARTS_RULE,
   'Longueur : une réponse détaillée, de 250 à 450 mots en général. Plus court seulement pour une question purement factuelle (une date, un diplôme, une ville) ou un simple remerciement ; plus long si on te le demande. Le détail vient du CV et de l’offre, jamais de généralités.',
   'Sois honnête : si le profil ne correspond pas au poste, dis-le dès la première ligne et explique pourquoi.',
 ].join('\n');
@@ -357,6 +371,11 @@ export class CvChatService {
     const resumeId = turn.resume.id;
     return this.streamReply(turn.messages, resumeId, signal, {
       language: turn.language,
+      // Its overall score is already on screen: the criteria and the years.
+      charts: chartTools([turn.resume], turn.language, [
+        'criteres',
+        'experience',
+      ]),
       save: async (content) => {
         await this.prisma.cvResumeMessage.create({
           data: { resume_id: resumeId, role: CvChatRole.ASSISTANT, content },
@@ -384,6 +403,8 @@ export class CvChatService {
     store: {
       /** The refusal's language, when the question is off topic. */
       language?: OutputLanguage;
+      /** The chart tool the model may call; its charts are written into the answer. */
+      charts?: ChartTools;
       save: (text: string) => Promise<void>;
       takeBack: () => Promise<void>;
     },
@@ -393,28 +414,72 @@ export class CvChatService {
     // which must never reach the screen.
     let decided = false;
     let offTopic = false;
+    const charts = store.charts;
+    let conversation = messages;
+    let drawn = 0;
     try {
-      for await (const chunk of this.llm.stream(messages, {
-        tier: 'writing',
-        idleMs: IDLE_MS,
-        firstMs: FIRST_MS,
-        signal,
-        correlationId,
-      })) {
-        text += chunk;
-        if (decided) {
-          yield chunk;
-          continue;
+      rounds: for (let round = 0; round < MAX_ROUNDS; round++) {
+        let turn: AIMessageChunk | null = null;
+        for await (const event of this.llm.streamTurn(conversation, {
+          tier: 'writing',
+          idleMs: IDLE_MS,
+          firstMs: FIRST_MS,
+          signal,
+          correlationId,
+          tools: charts?.definitions ?? [],
+        })) {
+          if (event.type === 'end') {
+            turn = event.message;
+            continue;
+          }
+          const chunk = event.text;
+          text += chunk;
+          if (decided) {
+            yield chunk;
+            continue;
+          }
+          const head = text.trimStart();
+          if (head.startsWith(OFF_TOPIC)) {
+            offTopic = true;
+            break rounds;
+          }
+          if (head.length >= OFF_TOPIC.length || !OFF_TOPIC.startsWith(head)) {
+            decided = true;
+            yield text;
+          }
         }
-        const head = text.trimStart();
-        if (head.startsWith(OFF_TOPIC)) {
-          offTopic = true;
-          break;
-        }
-        if (head.length >= OFF_TOPIC.length || !OFF_TOPIC.startsWith(head)) {
+
+        // The model asked for charts: drawn here from the analyses, written
+        // into the answer, and the model told so before it goes on.
+        const calls = turn?.tool_calls ?? [];
+        if (!charts || !turn || !calls.length) break;
+        if (!decided) {
+          if (text.trim() === OFF_TOPIC) {
+            offTopic = true;
+            break;
+          }
+          if (text) yield text;
           decided = true;
-          yield text;
         }
+        const replies: ToolMessage[] = [];
+        for (const [i, call] of calls.entries()) {
+          const drawnNow =
+            drawn < MAX_CHARTS
+              ? charts.call(call.name, call.args)
+              : { fence: null, note: 'Assez de graphiques : réponds sans.' };
+          if (drawnNow.fence) {
+            drawn++;
+            text += drawnNow.fence;
+            yield drawnNow.fence;
+          }
+          replies.push(
+            new ToolMessage({
+              content: drawnNow.note,
+              tool_call_id: call.id ?? `${call.name}-${round}-${i}`,
+            }),
+          );
+        }
+        conversation = [...conversation, turn, ...replies];
       }
       if (!decided && !offTopic && text.trim()) {
         if (text.trim() === OFF_TOPIC) offTopic = true;
@@ -561,6 +626,7 @@ function contextMessage(
 ): HumanMessage {
   const analysis = [
     `Score : ${resume.score ?? '?'}/100`,
+    criteriaLine(resume),
     resume.summary ? `Résumé : ${resume.summary}` : null,
     resume.strengths.length
       ? `Points forts : ${resume.strengths.join(' ; ')}`
