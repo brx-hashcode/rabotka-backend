@@ -3,6 +3,7 @@ import type { PrismaService } from '../../../../common/services/prisma/prisma.se
 import type { LayoutService } from '../../../mail/layout.service';
 import type { MailService } from '../../../mail/mail.service';
 import { DemoRequestListener } from '../demo-request.listener';
+import { companySizeLabel } from '../../../mail/templates/demo-request';
 
 const payload = {
   event: AdminNotificationEvent.DEMO_REQUEST_CREATED,
@@ -27,7 +28,7 @@ function setup(sendMail = jest.fn().mockResolvedValue(undefined)) {
         country_code: 'CG',
         company_size: '6-20',
         interests: ['analyse-cv'],
-        message: null,
+        message: 'Nous recrutons\n3 vendeuses <vite>',
       }),
     },
   };
@@ -54,8 +55,23 @@ describe('DemoRequestListener', () => {
     );
     expect(mail.html).toContain('Boulangerie du Plateau');
     expect(mail.html).toContain('Analyse de CV');
-    expect(mail.html).toContain('6-20 salariés');
+    expect(mail.html).toContain('6 à 20 salariés');
     expect(mail.html).toContain('+242 06 123 45 67');
+    expect(mail.html).toContain('Awa Mboko · Gérante');
+    expect(mail.html).toContain('awa@example.com');
+    // The message is escaped, its line breaks kept.
+    expect(mail.html).toContain('Nous recrutons<br />3 vendeuses &lt;vite&gt;');
+    // Contacted, not called, within 24 to 48 working hours.
+    expect(mail.html).toContain(
+      'vous contacte <strong>sous 24 à 48 h ouvrées</strong>',
+    );
+    expect(mail.html).not.toContain('appelle');
+  });
+
+  it('reads every headcount bracket as words', () => {
+    expect(companySizeLabel('1-5')).toBe('1 à 5 salariés');
+    expect(companySizeLabel('21-100')).toBe('21 à 100 salariés');
+    expect(companySizeLabel('100+')).toBe('Plus de 100 salariés');
   });
 
   it('never throws when the mail queue fails', async () => {

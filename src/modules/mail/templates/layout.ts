@@ -89,6 +89,11 @@ export function wrapEmailHtml(
       @media only screen and (max-width: 640px) {
         .rk-card { width: 100% !important; border-radius: 0 !important; border-left: none !important; border-right: none !important; }
         .rk-foot { width: 100% !important; }
+        /* A phone has ~360px: the desktop gutters (16 + 32px a side) left the
+           text a column of ~250px. The card already runs edge to edge here. */
+        .rk-outer { padding: 0 0 32px !important; }
+        .rk-head { padding: 24px 20px 0 !important; }
+        .rk-body { padding: 24px 20px !important; }
       }
     </style>
   </head>
@@ -96,7 +101,7 @@ export function wrapEmailHtml(
     ${previewSpan}
     <table width="100%" cellpadding="0" cellspacing="0" bgcolor="#f5f4ef" style="background-color:#f5f4ef;">
       <tr>
-        <td align="center" valign="top" style="padding:40px 16px 64px;">
+        <td class="rk-outer" align="center" valign="top" style="padding:40px 16px 64px;">
 
           <!-- Card -->
           <table class="rk-card" width="600" cellpadding="0" cellspacing="0" bgcolor="#ffffff"
@@ -109,7 +114,7 @@ export function wrapEmailHtml(
                  lines up with the body text. align + text-align because some
                  clients honour only one of the two. -->
             <tr>
-              <td align="left" style="padding:28px 32px 0;text-align:left;">
+              <td class="rk-head" align="left" style="padding:28px 32px 0;text-align:left;">
                 <table role="presentation" cellpadding="0" cellspacing="0" border="0">
                   <tr>
                     <td valign="middle">
@@ -130,7 +135,7 @@ export function wrapEmailHtml(
 
             <!-- Content -->
             <tr>
-              <td style="padding:32px;font-size:16px;color:#2a322e;line-height:1.7;font-family:'Ubuntu',sans-serif;">
+              <td class="rk-body" style="padding:32px;font-size:16px;color:#2a322e;line-height:1.7;font-family:'Ubuntu',sans-serif;">
                 ${content}
               </td>
             </tr>
