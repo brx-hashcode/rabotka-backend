@@ -9,6 +9,7 @@ import { LayoutService } from '../../mail/layout.service';
 import { MailService } from '../../mail/mail.service';
 import { businessSiteUrl } from '../../mail/audience';
 import {
+  DEMO_REQUEST_DELAY,
   DEMO_REQUEST_RECEIVED_SUBJECT,
   demoRequestReceivedEmail,
 } from '../../mail/templates/demo-request';
@@ -60,6 +61,9 @@ export class DemoRequestListener {
       html: await this.layout.wrap(
         demoRequestReceivedEmail({
           firstName: demo.first_name,
+          lastName: demo.last_name,
+          jobTitle: demo.job_title,
+          email: demo.email,
           company: demo.company,
           country,
           companySize: demo.company_size,
@@ -67,10 +71,11 @@ export class DemoRequestListener {
           interests: demo.interests.map(
             (i) => DEMO_INTEREST_LABELS[i as DemoInterest] ?? i,
           ),
+          message: demo.message,
           siteUrl: businessSiteUrl(),
         }),
         {
-          previewText: 'Nous vous appelons sous 24 h ouvrées.',
+          previewText: `Nous vous contactons ${DEMO_REQUEST_DELAY}.`,
           product: 'business',
         },
       ),

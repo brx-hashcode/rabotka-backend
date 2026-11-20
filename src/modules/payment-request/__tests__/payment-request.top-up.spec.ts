@@ -127,6 +127,7 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
       payment: { create: jest.fn().mockResolvedValue({}) },
       walletTransaction: { create: jest.fn().mockResolvedValue({}) },
       wallet: { update: jest.fn().mockResolvedValue({}) },
+      domainEvent: { create: jest.fn().mockResolvedValue({}) },
     };
 
     mockPrisma = {
@@ -335,6 +336,7 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
               payment: { create: jest.fn().mockResolvedValue({}) },
               walletTransaction: { create: jest.fn().mockResolvedValue({}) },
               wallet: { update: jest.fn().mockResolvedValue({}) },
+              domainEvent: { create: jest.fn().mockResolvedValue({}) },
             })
           : Promise.resolve(true),
       )
@@ -347,6 +349,7 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
               payment: { create: jest.fn().mockResolvedValue({}) },
               walletTransaction: { create: jest.fn().mockResolvedValue({}) },
               wallet: { update: jest.fn().mockResolvedValue({}) },
+              domainEvent: { create: jest.fn().mockResolvedValue({}) },
             })
           : Promise.resolve(false),
       );
@@ -362,5 +365,45 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
 
     // creditProfileWallet should only have been called once
     expect(mockWalletService.creditProfileWallet).toHaveBeenCalledTimes(1);
+  });
+
+  it('records payment.approved in the claiming transaction, once per claim', async () => {
+    const claimed = { create: jest.fn().mockResolvedValue({}) };
+    const lost = { create: jest.fn().mockResolvedValue({}) };
+    const tx = (count: number, domainEvent: typeof claimed) => ({
+      paymentRequest: { updateMany: jest.fn().mockResolvedValue({ count }) },
+      payment: { create: jest.fn().mockResolvedValue({}) },
+      walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+      wallet: { update: jest.fn().mockResolvedValue({}) },
+      domainEvent,
+    });
+    (mockPrisma.$transaction as jest.Mock)
+      .mockImplementationOnce((cb: (t: unknown) => unknown) =>
+        cb(tx(1, claimed)),
+      )
+      .mockImplementationOnce((cb: (t: unknown) => unknown) => cb(tx(0, lost)));
+
+    await service.handlePaymentCallback({
+      paymentId: GATEWAY_REF,
+      status: 'SUCCESS',
+    });
+    await service.handlePaymentCallback({
+      paymentId: GATEWAY_REF,
+      status: 'SUCCESS',
+    });
+
+    expect(claimed.create).toHaveBeenCalledTimes(1);
+    expect(claimed.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: 'payment.approved',
+        aggregate_type: 'payment_request',
+        aggregate_id: REQUEST_ID,
+        payload: expect.objectContaining({
+          paymentRequestId: REQUEST_ID,
+          profileId: PROFILE_ID,
+        }),
+      }),
+    });
+    expect(lost.create).not.toHaveBeenCalled();
   });
 });
