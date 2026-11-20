@@ -30,27 +30,6 @@ function recapRow(label: string, value: string, last = false): string {
       </tr>`;
 }
 
-/** Two recap rows side by side, stacked by narrow clients that wrap cells. */
-function recapPair(
-  left: [string, string],
-  right: [string, string],
-  last = false,
-): string {
-  const cell = ([label, value]: [string, string]) => `
-        <td width="50%" style="padding:0 12px ${last ? 0 : 14}px 0;vertical-align:top;">
-          <p style="margin:0 0 2px;font-size:12px;line-height:1.4;color:#6b7570;">${escapeHtml(label)}</p>
-          <p style="margin:0;font-size:15px;line-height:1.45;font-weight:600;color:#2a322e;">${value}</p>
-        </td>`;
-  return `
-      <tr>
-        <td style="padding:0;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-            <tr>${cell(left)}${cell(right)}</tr>
-          </table>
-        </td>
-      </tr>`;
-}
-
 /** The chosen features, as small tags. */
 function tags(labels: string[]): string {
   return labels
@@ -101,20 +80,18 @@ export function demoRequestReceivedEmail(params: {
     ? escapeHtml(params.message.trim()).replace(/\r?\n/g, '<br />')
     : null;
 
-  // A pair sits side by side; the last row has no bottom spacing (the box's
-  // padding is enough).
-  type Row = [string, string] | [[string, string], [string, string]];
-  const rows: Row[] = [
+  // One field per line: side by side, a phone breaks « Congo-Brazzaville »
+  // and the number in two.
+  const rows: Array<[string, string]> = [
     ['Entreprise', escapeHtml(params.company)],
-    [
-      ['Pays', escapeHtml(params.country)],
-      ['Effectif', escapeHtml(companySizeLabel(params.companySize))],
-    ],
     ['Contact', contact],
     [
-      ['Téléphone', escapeHtml(displayPhone(withPlus(params.phone)))],
-      ['E-mail', escapeHtml(params.email)],
+      'Téléphone',
+      `<span style="white-space:nowrap;">${escapeHtml(displayPhone(withPlus(params.phone)))}</span>`,
     ],
+    ['E-mail', escapeHtml(params.email)],
+    ['Pays', escapeHtml(params.country)],
+    ['Effectif', escapeHtml(companySizeLabel(params.companySize))],
   ];
   if (params.interests.length) {
     rows.push(['Ce que vous souhaitez voir', tags(params.interests)]);
@@ -126,12 +103,7 @@ export function demoRequestReceivedEmail(params: {
     ]);
   }
   const recap = rows
-    .map((row, i) => {
-      const last = i === rows.length - 1;
-      return typeof row[0] === 'string'
-        ? recapRow(row[0], row[1] as string, last)
-        : recapPair(row[0], row[1] as [string, string], last);
-    })
+    .map(([label, value], i) => recapRow(label, value, i === rows.length - 1))
     .join('');
 
   return `
@@ -144,8 +116,8 @@ export function demoRequestReceivedEmail(params: {
 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0;border-collapse:separate;background:#f1f4f8;border-radius:12px;">
       <tr>
-        <td style="padding:20px;">
-          <p style="margin:0 0 16px;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#6b7570;">Votre demande</p>
+        <td style="padding:18px 18px 20px;">
+          <p style="margin:0 0 14px;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#6b7570;">Votre demande</p>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
             ${recap}
           </table>
