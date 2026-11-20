@@ -200,6 +200,7 @@ function make(sub: ReturnType<typeof running> | null, credits: Credit[] = []) {
       mail,
       layout,
       events,
+      { subscribe: jest.fn() } as any,
     ),
     prisma,
     table,

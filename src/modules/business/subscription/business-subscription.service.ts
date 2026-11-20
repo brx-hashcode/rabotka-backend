@@ -5,6 +5,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import {
@@ -49,12 +50,11 @@ import {
   upgradedEnd,
 } from './subscription-rules';
 import {
-  BUSINESS_CREDIT_PACK_PAID_EVENT,
-  BUSINESS_SUBSCRIPTION_PAID_EVENT,
   BUSINESS_VERIFIED_EVENT,
-  type BusinessSubscriptionPaidPayload,
   type BusinessVerifiedPayload,
 } from './subscription.events';
+import { DomainEventBus } from '../../../common/events/domain/domain-event-bus.service';
+import type { DomainEvent } from '../../../common/events/domain/domain-event.catalog';
 import { businessEmailRecipients } from '../team/business-recipients';
 import {
   creditBalance,
@@ -287,7 +287,7 @@ export function cvBatchRoom(
  * never WhatsApp.
  */
 @Injectable()
-export class BusinessSubscriptionService {
+export class BusinessSubscriptionService implements OnModuleInit {
   private readonly logger = new Logger(BusinessSubscriptionService.name);
 
   constructor(
@@ -296,7 +296,33 @@ export class BusinessSubscriptionService {
     private readonly mail: MailService,
     private readonly layout: LayoutService,
     private readonly events: EventEmitter2,
+    // Appended: the specs construct this service positionally.
+    private readonly domainEvents: DomainEventBus,
   ) {}
+
+  onModuleInit(): void {
+    this.domainEvents.subscribe({
+      consumer: 'business-subscription',
+      events: ['payment.approved'],
+      handle: (event) => this.onPaymentApproved(event),
+    });
+  }
+
+  /**
+   * A paid plan period or credit pack, from the `payment.approved` domain
+   * event. Delivered at least once and retried on a throw, which is why both
+   * activations are idempotent. The reconcile sweep stays as a last resort.
+   */
+  async onPaymentApproved(
+    event: DomainEvent<'payment.approved'>,
+  ): Promise<void> {
+    const { paymentRequestId, requestType } = event.payload;
+    if (requestType === PaymentRequestType.BUSINESS_SUBSCRIPTION) {
+      await this.activateFromPayment(paymentRequestId);
+    } else if (requestType === PaymentRequestType.BUSINESS_CREDIT_PACK) {
+      await this.addCreditsFromPayment(paymentRequestId);
+    }
+  }
 
   // ── Reading ──────────────────────────────────────────────────────────
 
@@ -655,18 +681,6 @@ export class BusinessSubscriptionService {
   }
 
   /** A paid BUSINESS_SUBSCRIPTION request: create its period (idempotent). */
-  @OnEvent(BUSINESS_SUBSCRIPTION_PAID_EVENT, { async: true })
-  async onPaid(payload: BusinessSubscriptionPaidPayload): Promise<void> {
-    try {
-      await this.activateFromPayment(payload.paymentRequestId);
-    } catch (err) {
-      this.logger.error(
-        `Subscription activation failed for payment request ${payload.paymentRequestId}`,
-        err,
-      );
-    }
-  }
-
   async activateFromPayment(paymentRequestId: string, now = new Date()) {
     const request = await this.prisma.paymentRequest.findUnique({
       where: { id: paymentRequestId },
@@ -731,21 +745,6 @@ export class BusinessSubscriptionService {
         }),
     );
     return created;
-  }
-
-  /** A paid BUSINESS_CREDIT_PACK request: add its credits (idempotent). */
-  @OnEvent(BUSINESS_CREDIT_PACK_PAID_EVENT, { async: true })
-  async onCreditPackPaid(
-    payload: BusinessSubscriptionPaidPayload,
-  ): Promise<void> {
-    try {
-      await this.addCreditsFromPayment(payload.paymentRequestId);
-    } catch (err) {
-      this.logger.error(
-        `Credit pack failed for payment request ${payload.paymentRequestId}`,
-        err,
-      );
-    }
   }
 
   /**
@@ -1815,8 +1814,8 @@ export class BusinessSubscriptionService {
   // ── Scheduled ────────────────────────────────────────────────────────
 
   /**
-   * A payment taken whose period was never created: `onPaid` runs once, off
-   * an event, and only logs when it fails (a database error, a plan moved to
+   * A payment taken whose period was never created: `onPaymentApproved` is
+   * retried a few times, then gives up (a database outage, a plan moved to
    * another business since the checkout). Every approved subscription payment
    * of the last 30 days with no period is activated again here
    * (activateFromPayment is idempotent). The admins hear of one that still
