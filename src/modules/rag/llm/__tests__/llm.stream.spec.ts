@@ -280,7 +280,7 @@ describe('LlmService.streamTurn', () => {
     }))
       events.push(e);
 
-    expect(factory.model.bindTools).toHaveBeenCalledWith(TOOLS);
+    expect(factory.model.bindTools).toHaveBeenCalledWith(TOOLS, {});
     expect(events[0]).toEqual({ type: 'text', text: 'Voici ' });
     const end = events[1] as { type: string; message: AIMessageChunk };
     expect(end.type).toBe('end');

@@ -58,6 +58,13 @@ const IDLE_MS = 30_000;
 const FIRST_MS = 8_000;
 /** Model turns in one answer, at most: a chart asked for, then the words around it. */
 const MAX_ROUNDS = 3;
+/**
+ * A question that asks for a chart in so many words. Then the first turn must
+ * call the chart tool: left to choose, a model sometimes wrote the numbers
+ * as a table instead.
+ */
+const ASKS_FOR_CHART =
+  /\b(graph\w*|chart\w*|diagram\w*|histogram\w*|courbe\w*|visuel\w*|plot)\b/i;
 
 /** What the model answers, alone, to a question outside the conversation's scope. */
 export const OFF_TOPIC = 'HORS_SUJET';
@@ -415,6 +422,9 @@ export class CvChatService {
     let decided = false;
     let offTopic = false;
     const charts = store.charts;
+    const question = messages.at(-1)?.content;
+    const forceChart =
+      !!charts && typeof question === 'string' && ASKS_FOR_CHART.test(question);
     let conversation = messages;
     let drawn = 0;
     try {
@@ -427,6 +437,7 @@ export class CvChatService {
           signal,
           correlationId,
           tools: charts?.definitions ?? [],
+          ...(forceChart && round === 0 ? { toolChoice: 'any' as const } : {}),
         })) {
           if (event.type === 'end') {
             turn = event.message;

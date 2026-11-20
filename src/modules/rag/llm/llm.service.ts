@@ -434,14 +434,21 @@ export class LlmService {
    */
   streamTurn(
     input: BaseLanguageModelInput,
-    options: LlmStreamOptions & { tools: BindToolsInput[] },
+    options: LlmStreamOptions & {
+      tools: BindToolsInput[];
+      /** « any »: the model must call one of the tools this turn. */
+      toolChoice?: 'any';
+    },
   ): AsyncGenerator<LlmStreamEvent> {
     return this.streamEvents(input, options);
   }
 
   private async *streamEvents(
     input: BaseLanguageModelInput,
-    options: LlmStreamOptions & { tools?: BindToolsInput[] },
+    options: LlmStreamOptions & {
+      tools?: BindToolsInput[];
+      toolChoice?: 'any';
+    },
   ): AsyncGenerator<LlmStreamEvent> {
     const startedAt = Date.now();
     const idleMs = options.idleMs ?? this.defaultTimeoutMs;
@@ -495,7 +502,10 @@ export class LlmService {
               `${specId(spec)} does not support tool calling — remove it from a tier that binds tools`,
             );
           }
-          runnable = model.bindTools(options.tools);
+          runnable = model.bindTools(
+            options.tools,
+            options.toolChoice ? { tool_choice: options.toolChoice } : {},
+          );
         }
         arm(firstMs);
         const chunks = await runnable.stream(this.shapeFor(spec, input), {

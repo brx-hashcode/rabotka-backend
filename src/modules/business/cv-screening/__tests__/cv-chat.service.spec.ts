@@ -380,6 +380,33 @@ describe('CvChatService', () => {
       expect(saved).toContain('Les compétences tirent le score.');
     });
 
+    it('makes the first turn call the chart tool when the question asks for a chart', async () => {
+      const { service, llm } = make();
+      llm.stream.mockImplementation(async function* () {
+        await Promise.resolve();
+        yield 'Réponse.';
+      });
+
+      const asked = await service.prepare(
+        'p1',
+        's1',
+        'r1',
+        'Fais un graphique de ses scores',
+      );
+      await drain(service.answer(asked, new AbortController().signal));
+      expect(llm.streamTurn.mock.calls[0][1].toolChoice).toBe('any');
+
+      llm.streamTurn.mockClear();
+      const plain = await service.prepare(
+        'p1',
+        's1',
+        'r1',
+        'Parle-t-elle anglais ?',
+      );
+      await drain(service.answer(plain, new AbortController().signal));
+      expect(llm.streamTurn.mock.calls[0][1].toolChoice).toBeUndefined();
+    });
+
     it('stops asking after a few rounds of charts', async () => {
       const { service, llm } = make();
       const turn = await service.prepare('p1', 's1', 'r1', 'Graphiques ?');
