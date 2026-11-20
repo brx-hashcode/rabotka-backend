@@ -327,5 +327,7 @@ export function chartTools(
 export const CHARTS_RULE = [
   `Graphiques : l’outil ${CHART_TOOL} affiche au lecteur un graphique tiré des analyses (scores, scores par critère, années d’expérience).`,
   'Appelle-le quand la question porte sur des scores, une comparaison chiffrée ou des durées, ou quand un graphique rend la réponse plus claire : au plus deux par réponse, et pas pour une question qui n’en a pas besoin.',
-  'Les chiffres viennent de l’outil : ne les invente jamais et ne dessine jamais de graphique toi-même (ni bloc de code, ni barres en texte). Après le graphique, commente ce qu’il montre, sans recopier ses chiffres ni son titre.',
+  'Pour un classement ou « qui est le plus adapté », commence par le graphique des scores par critère (type « criteres »), puis donne le classement et ses raisons.',
+  'Les chiffres viennent de l’outil : ne les invente jamais et ne dessine jamais de graphique toi-même (ni bloc de code, ni barres en texte).',
+  'Après le graphique, ne recopie ni son titre ni ses chiffres un par un : le lecteur les voit. Dis ce qu’ils signifient pour ce recrutement : qui est nettement devant et sur quoi, où l’écart est faible ou nul, et ce qu’il faut vérifier en entretien.',
 ].join('\n');
