@@ -124,6 +124,74 @@ describe('CareersPageService', () => {
   });
 });
 
+describe('poster cache', () => {
+  const offer = {
+    reference: 'RBT-1',
+    title: 'Comptable',
+    description: 'Le poste',
+    employment_type: 'CDI',
+    scheduled_at: null,
+    is_remote: false,
+    city: 'Brazzaville',
+    amount: null,
+    payment_flow: null,
+  };
+  const setup = () => {
+    const store = new Map<string, Buffer>();
+    const redis = {
+      getBuffer: jest.fn((k: string) => Promise.resolve(store.get(k) ?? null)),
+      set: jest.fn((k: string, v: Buffer) => {
+        store.set(k, v);
+        return Promise.resolve('OK');
+      }),
+    };
+    const prisma = {
+      business: { findUnique: jest.fn().mockResolvedValue(business) },
+      jobOffer: { findFirst: jest.fn().mockResolvedValue(offer) },
+    };
+    const service = new CareersPageService(
+      prisma as never,
+      {} as never,
+      redis as never,
+    );
+    return { service, prisma, redis };
+  };
+
+  it('draws a poster once, then serves it from the cache for a day', async () => {
+    const { service, redis } = setup();
+    jest.mocked(htmlToImage).mockClear();
+    const first = await service.poster('p1', 'o1', 'post');
+    const again = await service.poster('p1', 'o1', 'post');
+    expect(htmlToImage).toHaveBeenCalledTimes(1);
+    expect(again).toEqual(first);
+    expect(redis.set.mock.calls[0][0]).toMatch(/^poster:v1:post:[0-9a-f]{64}$/);
+    expect(redis.set.mock.calls[0].slice(2)).toEqual(['EX', 86400]);
+  });
+
+  it('draws it again once the offer changes', async () => {
+    const { service, prisma } = setup();
+    jest.mocked(htmlToImage).mockClear();
+    await service.poster('p1', 'o1', 'post');
+    prisma.jobOffer.findFirst.mockResolvedValue({
+      ...offer,
+      title: 'Comptable senior',
+    });
+    await service.poster('p1', 'o1', 'post');
+    expect(htmlToImage).toHaveBeenCalledTimes(2);
+  });
+
+  it('still draws when Redis is out of reach', async () => {
+    const { service, redis } = setup();
+    redis.getBuffer.mockRejectedValue(new Error('down'));
+    redis.set.mockRejectedValue(new Error('down'));
+    jest.mocked(htmlToPdf).mockClear();
+    await expect(service.poster('p1', 'o1')).resolves.toMatchObject({
+      mime: 'application/pdf',
+    });
+    expect(htmlToPdf).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('CareersPageController', () => {
   it('refuses an image format it does not make', async () => {
     const pages = { poster: jest.fn() };
