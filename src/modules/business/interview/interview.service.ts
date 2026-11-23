@@ -143,7 +143,7 @@ export class InterviewService {
     const who = applicationId
       ? await this.fromApplication(profileId, applicationId)
       : externalId
-        ? await this.fromExternal(profileId, externalId)
+        ? await this.fromExternal(profileId, externalId, input.candidateEmail)
         : await this.fromCv(
             businessId,
             input.cvResumeId!,
@@ -717,7 +717,12 @@ export class InterviewService {
   }
 
   /** A careers-page candidate, with or without a CV analysis. */
-  private async fromExternal(profileId: string, id: string) {
+  private async fromExternal(
+    profileId: string,
+    id: string,
+    /** For an imported CV whose address was not found: typed by the business. */
+    typed?: string | null,
+  ) {
     const application = await this.prisma.externalApplication.findFirst({
       where: { id, job_offer: { employer_id: profileId } },
       include: {
@@ -733,9 +738,19 @@ export class InterviewService {
         'Cette candidature a été refusée : pas d’entretien.',
       );
     }
+    const email = (
+      application.email?.trim() ||
+      typed?.trim() ||
+      ''
+    ).toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new BadRequestException(
+        'Indiquez l’e-mail du candidat : l’invitation lui est envoyée par e-mail.',
+      );
+    }
     return {
       name: `${application.first_name} ${application.last_name}`.trim(),
-      email: application.email.trim().toLowerCase(),
+      email,
       jobTitle: application.job_offer.title,
       offerId: application.job_offer.id,
     };

@@ -14,6 +14,7 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import {
   CvScreeningResumeStatus,
+  ExternalApplicationOrigin,
   ExternalApplicationStatus,
   JobOfferStatus,
   OfferQuestionKind,
@@ -58,7 +59,11 @@ import { takenSeats } from '../../job-offer/utils/offer-seats';
 import { feedSite, jobsFeedXml } from './job-feed';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { BUSINESS_CATEGORY_LABELS } from '../business-catalog';
-import { CvScreeningService } from '../cv-screening/cv-screening.service';
+import {
+  CvScreeningService,
+  type CvUpload,
+} from '../cv-screening/cv-screening.service';
+import { fillImportedContact } from './imported-contact';
 import {
   BusinessSubscriptionService,
   cvBatchRoom,
@@ -68,6 +73,7 @@ import {
   cvFileType,
   type CvFileType,
   DOCX_MIME,
+  TEXT_MIME,
 } from '../cv-screening/cv-files';
 import type { ApplyDto } from './dto/apply.dto';
 import { businessEmailRecipientsOfProfile } from '../team/business-recipients';
@@ -76,6 +82,19 @@ const OPEN: JobOfferStatus[] = [
   JobOfferStatus.ACTIVE,
   JobOfferStatus.PARTIALLY_FILLED,
 ];
+
+/** Where an imported CV came from: the business's computer, or its mailbox. */
+export type ImportSource = 'import-device' | 'import-gmail';
+
+/** « CV_Julien-Mbongolo_2026.pdf » → « CV Julien Mbongolo 2026 »: a name until the CV is read. */
+export function placeholderName(fileName: string): string {
+  const base = fileName.replace(/\.[a-z0-9]{2,5}$/i, '');
+  const words = base
+    .replace(/[_\-.]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return (words || 'CV').slice(0, 80);
+}
 
 const MAX_COMPANIES = 200;
 /** Careers applications listed at once for a business (the newest). */
@@ -533,6 +552,165 @@ export class CareersService {
     return { sent: true };
   }
 
+  /**
+   * CVs the business has itself (on its computer, or ticked in its mailbox)
+   * become candidates of one of its open offers: read and ranked with those
+   * who applied, decided the same way. Each uses one of the plan's « CV
+   * inclus », so a batch above what is left is refused whole rather than
+   * half imported and half never read. Nobody is told: they did not apply.
+   * Name and contact come from the analysis (fillImportedContact).
+   */
+  async importCvs(
+    profileId: string,
+    offerId: string,
+    files: (CvUpload & { source: ImportSource })[],
+  ) {
+    const offer = await this.prisma.jobOffer.findFirst({
+      where: {
+        id: offerId,
+        employer_id: profileId,
+        deleted_at: null,
+        status: { in: OPEN },
+      },
+      select: { id: true },
+    });
+    if (!offer) throw new NotFoundException('Cette offre ne recrute plus.');
+    if (files.length === 0) {
+      throw new BadRequestException('Ajoutez au moins un CV.');
+    }
+    const businessId = await this.subscriptions.businessOf(profileId);
+    if (!businessId) throw new NotFoundException('Organisation introuvable.');
+    const e = await this.subscriptions.entitlements(businessId);
+    const room = cvBatchRoom(e);
+    if (room === 0 || e.trialLocked.includes('cvAnalysis')) {
+      throw new ForbiddenException(
+        'Vous avez utilisé tous les CV inclus dans votre formule pour cette période. Changez de formule pour en analyser davantage.',
+      );
+    }
+    if (files.length > room) {
+      throw new BadRequestException(
+        `Votre formule permet encore ${room} CV : retirez-en ${files.length - room}.`,
+      );
+    }
+    const maxBytes = e.cvFileMaxMb * 1024 * 1024;
+    const typed = files.map((file) => {
+      const name = file.originalname || 'cv';
+      if (file.size > maxBytes) {
+        throw new BadRequestException(
+          `« ${name} » dépasse ${e.cvFileMaxMb} Mo.`,
+        );
+      }
+      // Sniffed: a text CV is only ever Rabotka's own, never an upload.
+      const type = cvFileType(file.buffer, file.mimetype);
+      if (!type || type === TEXT_MIME) {
+        throw new BadRequestException(
+          `« ${name} » n'est pas reconnu : envoyez un PDF, un fichier Word (.docx) ou une photo (JPG, PNG, WEBP).`,
+        );
+      }
+      return { file, type, name };
+    });
+
+    const bucket = await kycBucket(this.systemConfig, this.config);
+    const ids: string[] = [];
+    for (const { file, type, name } of typed) {
+      const id = randomUUID();
+      const { key } = await this.storage.upload(
+        file.buffer,
+        `${randomUUID()}.${CV_EXTENSION[type]}`,
+        {
+          folder: `external-applications/${businessId}/${id}`,
+          mimeType: type,
+          access: 'private',
+          bucket,
+        },
+      );
+      try {
+        await this.prisma.externalApplication.create({
+          data: {
+            id,
+            job_offer_id: offer.id,
+            origin: ExternalApplicationOrigin.IMPORT,
+            // Until the analysis reads the name: the file's, as the business knows it.
+            first_name: placeholderName(name),
+            last_name: '',
+            source: file.source,
+            cv_file_name: name.slice(0, 200),
+            cv_mime_type: type,
+            cv_size_bytes: file.size,
+            cv_storage_key: key,
+            cv_storage_bucket: bucket,
+          },
+        });
+      } catch (err) {
+        await this.storage.delete(key, { bucket }).catch(() => undefined);
+        throw err;
+      }
+      ids.push(id);
+    }
+    // Read like a careers CV, one job each: charged as it is read.
+    for (const id of ids) {
+      await enqueueCvAnalysis(this.queue, {
+        kind: 'careers',
+        applicationId: id,
+        offerId: offer.id,
+        employerId: profileId,
+      }).catch((err) =>
+        this.logger.warn(`CV analysis of ${id} not queued: ${String(err)}`),
+      );
+    }
+    return { imported: ids.length };
+  }
+
+  /**
+   * Takes imported CVs off an offer: the candidate, its analysis and both
+   * files go. Only imports: someone who applied stays, to be refused. A
+   * retained one is kept (its post is taken): « Ne plus retenir » first.
+   * Their notes and opinions go with them; an interview keeps its record.
+   */
+  async deleteImported(profileId: string, ids: string[]) {
+    const rows = await this.prisma.externalApplication.findMany({
+      where: {
+        id: { in: ids },
+        origin: ExternalApplicationOrigin.IMPORT,
+        status: { not: ExternalApplicationStatus.RETAINED },
+        job_offer: { employer_id: profileId },
+      },
+      select: {
+        id: true,
+        cv_storage_key: true,
+        cv_storage_bucket: true,
+        cv_resume: {
+          select: { id: true, storage_key: true, storage_bucket: true },
+        },
+      },
+    });
+    if (rows.length === 0) return { deleted: 0, kept: ids.length };
+    const resumes = rows.flatMap((r) => (r.cv_resume ? [r.cv_resume] : []));
+    await this.prisma.$transaction([
+      this.prisma.externalApplication.deleteMany({
+        where: { id: { in: rows.map((r) => r.id) } },
+      }),
+      this.prisma.cvScreeningResume.deleteMany({
+        where: { id: { in: resumes.map((r) => r.id) } },
+      }),
+    ]);
+    // The files after the rows: a file left behind is only storage, a row
+    // left without its file would be a CV that cannot open.
+    const objects = [
+      ...rows.map((r) => [r.cv_storage_key, r.cv_storage_bucket] as const),
+      ...resumes.map((r) => [r.storage_key, r.storage_bucket] as const),
+    ];
+    for (const [key, bucket] of objects) {
+      if (!key) continue;
+      await this.storage
+        .delete(key, { bucket: bucket ?? undefined })
+        .catch((err) =>
+          this.logger.warn(`Imported CV file not deleted: ${String(err)}`),
+        );
+    }
+    return { deleted: rows.length, kept: ids.length - rows.length };
+  }
+
   /** The business's own: newest first, a failed « éliminatoire » after the others. */
   /**
    * The careers-page applications of the business, or of one offer: the
@@ -578,6 +756,7 @@ export class CareersService {
       ).map((x) => ({ ...x, value: answerText(x) })),
       knockedOut: a.knocked_out,
       source: a.source,
+      origin: a.origin,
       hasCv: a.cv_storage_key !== null,
       cvFileName: a.cv_file_name,
       cvMimeType: a.cv_mime_type,
@@ -734,6 +913,20 @@ export class CareersService {
         data: { cv_resume_id: resumeId, analysis_attempts: { increment: 1 } },
         select: { pool_expires_at: true },
       });
+      // An import read before this link was written: its contact is taken now.
+      if (a.origin === ExternalApplicationOrigin.IMPORT) {
+        const read = await this.prisma.cvScreeningResume.findUnique({
+          where: { id: resumeId },
+          select: { status: true, candidate: true },
+        });
+        if (read?.status === CvScreeningResumeStatus.SCORED) {
+          await fillImportedContact(
+            this.prisma,
+            resumeId,
+            read.candidate as Parameters<typeof fillImportedContact>[2],
+          ).catch(() => undefined);
+        }
+      }
       // Kept with the candidate's consent: their CV and its analysis last as
       // long, so the business can still find them in « Mes profils ».
       if (linked.pool_expires_at && linked.pool_expires_at > new Date()) {

@@ -4,13 +4,32 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { CandidateOpinionVerdict } from '@prisma/client';
+import {
+  type CandidateOpinionVerdict,
+  CvScreeningResumeStatus,
+  ExternalApplicationOrigin,
+} from '@prisma/client';
 
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import type { TeamActor } from '../team/team.service';
 
 /** Which application: a Rabotka one, or one from the careers page. */
 export type ApplicationKind = 'rabotka' | 'external';
+
+const scoredSelect = { status: true, score: true, updated_at: true } as const;
+
+/** When the CV analysis gave its score (the last change of a scored CV). */
+function scoredAt(
+  r: {
+    status: CvScreeningResumeStatus;
+    score: number | null;
+    updated_at: Date;
+  } | null,
+) {
+  return r?.status === CvScreeningResumeStatus.SCORED
+    ? { at: r.updated_at, score: r.score }
+    : null;
+}
 
 export const MAX_NOTE = 4000;
 
@@ -228,6 +247,8 @@ export class CandidateNotesService {
       at: string;
       kind:
         | 'APPLIED'
+        | 'IMPORTED'
+        | 'ANALYSED'
         | 'VIEWED'
         | 'SHORTLISTED'
         | 'RETAINED'
@@ -240,6 +261,8 @@ export class CandidateNotesService {
       member?: { id: string; name: string; role: string } | null;
       verdict?: CandidateOpinionVerdict;
       interview?: { startsAt: string; status: string };
+      /** ANALYSED: the CV's score for the offer. */
+      score?: number | null;
       /** WITHDRAWN: who ended it — the worker, the business, or Rabotka (the offer closed or expired). */
       cancelledBy?: 'WORKER' | 'EMPLOYER' | 'SYSTEM' | null;
     };
@@ -247,7 +270,12 @@ export class CandidateNotesService {
     const push = (at: Date | null | undefined, e: Omit<Event, 'at'>) => {
       if (at) events.push({ at: at.toISOString(), ...e });
     };
-    push(dates.applied, { kind: 'APPLIED' });
+    // An imported CV never applied: the business brought it in.
+    push(dates.applied, { kind: dates.imported ? 'IMPORTED' : 'APPLIED' });
+    push(dates.analysed?.at, {
+      kind: 'ANALYSED',
+      score: dates.analysed?.score ?? null,
+    });
     push(dates.viewed, { kind: 'VIEWED' });
     push(dates.shortlisted, {
       kind: 'SHORTLISTED',
@@ -336,10 +364,13 @@ export class CandidateNotesService {
           rejected_at: true,
           cancelled_at: true,
           cancelled_by: true,
+          cv_resume: { select: scoredSelect },
         },
       });
       return {
         applied: a.created_at,
+        imported: false,
+        analysed: scoredAt(a.cv_resume),
         viewed: a.viewed_at,
         shortlisted: a.shortlisted_at,
         retained: a.accepted_at,
@@ -357,10 +388,14 @@ export class CandidateNotesService {
         shortlisted_at: true,
         retained_at: true,
         refused_at: true,
+        origin: true,
+        cv_resume: { select: scoredSelect },
       },
     });
     return {
       applied: a.created_at,
+      imported: a.origin === ExternalApplicationOrigin.IMPORT,
+      analysed: scoredAt(a.cv_resume),
       viewed: a.viewed_at,
       shortlisted: a.shortlisted_at,
       retained: a.retained_at,

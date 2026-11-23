@@ -233,6 +233,8 @@ export class BusinessMessagesService {
       }
     }
     for (const a of external) {
+      // An imported CV whose address was not found: not reached, counted as skipped.
+      if (!a.email) continue;
       try {
         const text = renderTemplate(body, {
           prenom: a.first_name,
