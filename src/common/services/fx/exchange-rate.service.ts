@@ -55,24 +55,23 @@ export class ExchangeRateService {
     const entries = Object.entries(snapshot.rates).filter(
       ([currency]) => !isCfa(currency),
     );
-    await this.prisma.$transaction(
-      entries.map(([currency, perXaf]) =>
-        this.prisma.exchangeRate.upsert({
-          where: { currency },
-          create: {
-            currency,
-            per_xaf: perXaf,
-            source: snapshot.source,
-            as_of: snapshot.asOf,
-          },
-          update: {
-            per_xaf: perXaf,
-            source: snapshot.source,
-            as_of: snapshot.asOf,
-          },
-        }),
-      ),
-    );
+    // One statement for the whole feed (160-odd currencies): as a transaction
+    // of upserts it outran Prisma's 5 s limit while the app was booting.
+    // Rates go as text, so numeric(24,12) gets them without a float's noise.
+    if (entries.length > 0) {
+      await this.prisma.$executeRaw`
+        INSERT INTO exchange_rates (currency, per_xaf, source, as_of, fetched_at)
+        SELECT t.currency, t.per_xaf::numeric, ${snapshot.source}, ${snapshot.asOf}, now()
+        FROM unnest(
+          ${entries.map(([currency]) => currency)}::text[],
+          ${entries.map(([, perXaf]) => String(perXaf))}::text[]
+        ) AS t(currency, per_xaf)
+        ON CONFLICT (currency) DO UPDATE SET
+          per_xaf = EXCLUDED.per_xaf,
+          source = EXCLUDED.source,
+          as_of = EXCLUDED.as_of,
+          fetched_at = now()`;
+    }
     this.cache = null;
     return { source: snapshot.source, count: entries.length };
   }

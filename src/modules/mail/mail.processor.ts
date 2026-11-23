@@ -47,11 +47,8 @@ export class MailProcessor implements OnModuleInit {
   }
 
   onModuleInit() {
-    if (!this.mailerService && !this.isMock()) {
-      this.logger.warn(
-        '⚠️ MailerService is not injected and SMTP_MOCK is not set — emails will fail at runtime. Ensure MailerModule is configured.',
-      );
-    }
+    // No check of the mailer here: the worker attaches it after this runs
+    // (worker.ts, which warns if it cannot), and the API never sends mail.
     if (process.env.RUN_QUEUE_WORKER === 'true') {
       this.logger.log(
         '⏭️ Email worker is registered by worker bootstrap (worker.ts)',

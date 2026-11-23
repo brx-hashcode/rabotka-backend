@@ -136,6 +136,8 @@ export class LlmService {
   private readonly defaultTimeoutMs: number;
   /** Pause before the single retry a 5xx earns. */
   private readonly retryBackoffMs: number;
+  /** A server error slower than this is not retried in place: the model is struggling. */
+  private readonly retrySlowMs: number;
   /** Budget held back so a fallback is reachable inside the SAME turn. */
   private readonly fallbackReserveMs: number;
   /** Below this, a call is not "short" — it is a guaranteed timeout that bills tokens. */
@@ -160,6 +162,7 @@ export class LlmService {
     // `budgetFor` — this is now a CEILING that the deadline routinely lowers.
     this.defaultTimeoutMs = readNumber(config, 'VOVA_LLM_TIMEOUT_MS', 12000);
     this.retryBackoffMs = readNumber(config, 'VOVA_LLM_RETRY_BACKOFF_MS', 250);
+    this.retrySlowMs = readNumber(config, 'VOVA_LLM_RETRY_SLOW_MS', 8000);
     this.fallbackReserveMs = readNumber(
       config,
       'VOVA_FALLBACK_RESERVE_MS',
@@ -674,6 +677,7 @@ export class LlmService {
 
     for (let attempt = 0; attempt < 2; attempt++) {
       telemetry.attempts += 1;
+      const startedAt = Date.now();
       try {
         return await this.callOnce(spec, input, options);
       } catch (err) {
@@ -681,6 +685,17 @@ export class LlmService {
         cls = classifyLlmError(err);
         if (!isRetryableInPlace(cls)) break;
         if (attempt === 0) {
+          // A 5xx that took long is a model struggling, not a blip: asking it
+          // again doubled a CV analysis (two ~40 s hangs before the next model
+          // answered in 4 s). The next provider is the better bet.
+          const tookMs = Date.now() - startedAt;
+          if (tookMs > this.retrySlowMs) {
+            this.logger.debug(
+              `${specId(spec)} returned a server error after ${tookMs}ms — ` +
+                'skipping the retry, falling over',
+            );
+            break;
+          }
           // A retry that cannot finish is worse than an immediate failover: it
           // spends the backoff, bills a prompt, and hands the next provider a
           // budget too small to use.
