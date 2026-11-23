@@ -45,12 +45,46 @@ import { EmploymentType } from '@prisma/client';
 export function isDatedMission(
   employmentType?: EmploymentType | string | null,
 ): boolean {
-  return (
-    employmentType !== EmploymentType.CDD &&
-    employmentType !== EmploymentType.CDI &&
-    employmentType !== EmploymentType.STAGE
-  );
+  return !ONGOING.has(employmentType as EmploymentType);
 }
+
+/**
+ * Every type but MISSION: recruited, then the offer stops at the hire and
+ * the business closes it. A new type joins here, or it is read as a mission.
+ */
+const ONGOING: ReadonlySet<EmploymentType> = new Set([
+  EmploymentType.CDD,
+  EmploymentType.CDI,
+  EmploymentType.STAGE,
+  EmploymentType.CONSULTANT,
+  EmploymentType.VOLONTARIAT,
+  EmploymentType.APPRENTISSAGE,
+  EmploymentType.INTERIM,
+]);
+
+/** The type as a business or a candidate reads it, in French. */
+export const EMPLOYMENT_LABEL: Record<EmploymentType, string> = {
+  MISSION: 'Mission',
+  CDD: 'CDD',
+  CDI: 'CDI',
+  STAGE: 'Stage',
+  CONSULTANT: 'Consultant',
+  VOLONTARIAT: 'Volontariat',
+  APPRENTISSAGE: 'Apprentissage',
+  INTERIM: 'Intérim',
+};
+
+/** The same, in English. */
+export const EMPLOYMENT_LABEL_EN: Record<EmploymentType, string> = {
+  MISSION: 'Mission',
+  CDD: 'Fixed-term contract',
+  CDI: 'Permanent contract',
+  STAGE: 'Internship',
+  CONSULTANT: 'Consultancy',
+  VOLONTARIAT: 'Volunteering',
+  APPRENTISSAGE: 'Apprenticeship',
+  INTERIM: 'Temporary (agency)',
+};
 
 /**
  * Whether filling every slot is what ends this offer's life.

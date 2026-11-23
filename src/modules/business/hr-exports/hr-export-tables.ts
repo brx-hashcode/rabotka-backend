@@ -7,6 +7,7 @@ import type {
 } from '@prisma/client';
 import { OFFER_STATUS_LABEL } from '../report/business-report';
 import type { DataTable } from '../report/table-files';
+import { EMPLOYMENT_LABEL } from '../../job-offer/utils/employment-type.util';
 
 /**
  * The HR exports as tables: who applied to an offer, the staff register of
@@ -14,12 +15,7 @@ import type { DataTable } from '../report/table-files';
  * is tested without a database.
  */
 
-const CONTRACT: Record<EmploymentType, string> = {
-  MISSION: 'Mission',
-  CDD: 'CDD',
-  CDI: 'CDI',
-  STAGE: 'Stage',
-};
+const CONTRACT: Record<EmploymentType, string> = EMPLOYMENT_LABEL;
 
 const PER: Record<PaymentFlow, string> = {
   TASK: 'la tâche',

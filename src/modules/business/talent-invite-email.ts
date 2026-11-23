@@ -6,6 +6,10 @@ import {
   type MailLanguage,
 } from '../mail/templates/layout';
 import { whenIn } from './interview/interview-emails';
+import {
+  EMPLOYMENT_LABEL,
+  EMPLOYMENT_LABEL_EN,
+} from '../job-offer/utils/employment-type.util';
 
 export type TalentInviteMail = {
   firstName: string | null;
@@ -23,12 +27,7 @@ export type TalentInviteMail = {
   language?: MailLanguage;
 };
 
-const TYPE: Record<EmploymentType, string> = {
-  MISSION: 'Mission',
-  CDD: 'CDD',
-  CDI: 'CDI',
-  STAGE: 'Stage',
-};
+const TYPE: Record<EmploymentType, string> = EMPLOYMENT_LABEL;
 
 /**
  * The offer on the business's careers page, where anybody can apply without
@@ -39,12 +38,7 @@ export function talentInviteUrl(i: TalentInviteMail): string | null {
   return `${businessSiteUrl()}/carrieres/${encodeURIComponent(i.businessSlug)}/${encodeURIComponent(i.reference)}?source=invitation`;
 }
 
-const TYPE_EN: Record<EmploymentType, string> = {
-  MISSION: 'Mission',
-  CDD: 'Fixed-term contract',
-  CDI: 'Permanent contract',
-  STAGE: 'Internship',
-};
+const TYPE_EN: Record<EmploymentType, string> = EMPLOYMENT_LABEL_EN;
 
 const TZ = 'Africa/Brazzaville';
 const DAY_MS = 24 * 60 * 60 * 1000;
