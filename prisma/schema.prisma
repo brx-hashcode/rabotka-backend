@@ -232,6 +232,14 @@ enum EmploymentType {
   CDD
   CDI
   STAGE
+  /// « Consultant » : une consultance, un mandat sur un livrable.
+  CONSULTANT
+  /// « Volontariat / Bénévolat » : souvent une ONG, une indemnité plutôt qu'un salaire.
+  VOLONTARIAT
+  /// « Apprentissage » : une formation en alternance.
+  APPRENTISSAGE
+  /// « Intérim » : par une agence de travail temporaire.
+  INTERIM
 }
 
 enum WalletOwnerType {

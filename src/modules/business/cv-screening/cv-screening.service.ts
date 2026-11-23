@@ -1,3 +1,4 @@
+import { EMPLOYMENT_LABEL } from '../../job-offer/utils/employment-type.util';
 import {
   BadRequestException,
   ForbiddenException,
@@ -74,13 +75,6 @@ export type CvUpload = {
   internalType?: CvFileType;
   /** Server code only: the answers of the application this CV came with. */
   answers?: ApplicationAnswerNote[];
-};
-
-const EMPLOYMENT_LABEL: Record<string, string> = {
-  MISSION: 'Mission',
-  CDD: 'CDD',
-  CDI: 'CDI',
-  STAGE: 'Stage',
 };
 
 /** A CV still waiting this long is stuck (a lost job): given up and given back. */

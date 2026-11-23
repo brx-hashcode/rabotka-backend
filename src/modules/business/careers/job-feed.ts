@@ -32,6 +32,10 @@ const JOB_TYPE: Record<EmploymentType, string> = {
   CDD: 'contract',
   CDI: 'fulltime',
   STAGE: 'internship',
+  CONSULTANT: 'contract',
+  VOLONTARIAT: 'volunteer',
+  APPRENTISSAGE: 'internship',
+  INTERIM: 'temporary',
 };
 
 const PER: Partial<Record<PaymentFlow, string>> = {

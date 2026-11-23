@@ -1,4 +1,5 @@
 import { EmploymentType, type PaymentFlow } from '@prisma/client';
+import { EMPLOYMENT_LABEL } from '../../job-offer/utils/employment-type.util';
 
 const esc = (s: string) =>
   s
@@ -7,12 +8,7 @@ const esc = (s: string) =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
-const TYPE: Record<EmploymentType, string> = {
-  MISSION: 'Mission',
-  CDD: 'CDD',
-  CDI: 'CDI',
-  STAGE: 'Stage',
-};
+const TYPE: Record<EmploymentType, string> = EMPLOYMENT_LABEL;
 
 const PER: Partial<Record<PaymentFlow, string>> = {
   TASK: 'la mission',
