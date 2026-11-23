@@ -25,8 +25,10 @@ import {
   ForbiddenException,
   ConflictException,
   Inject,
+  Optional,
   forwardRef,
 } from '@nestjs/common';
+import { AnswerFilesService } from '../answer-files/answer-files.service';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { jobLocationLabel } from '../../common/utils/job-location.util';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
@@ -73,6 +75,7 @@ import {
 } from '@prisma/client';
 import { detectContacts } from '../profile-chat/moderation/detect';
 import {
+  answerFileId,
   answerText,
   checkAnswers,
   type AnswerInput,
@@ -385,6 +388,8 @@ export class ApplicationService {
     private readonly cache: AdminCacheService,
     @Inject(forwardRef(() => JobEventsGateway))
     private readonly jobEvents: JobEventsGateway,
+    // Optional: test modules that never apply with a file need not provide it.
+    @Optional() private readonly answerFiles?: AnswerFilesService,
   ) {}
 
   /**
@@ -523,6 +528,16 @@ export class ApplicationService {
       throw new ForbiddenException(
         `Vous avez atteint votre limite de ${fees.maxDailyApplications} candidatures aujourd'hui. Réessayez demain.`,
       );
+    }
+    // « Fichier » answers: each the worker's own upload for this offer.
+    const fileValues = answered.rows
+      .filter((r) => r.kind === OfferQuestionKind.FILE)
+      .map((r) => r.value);
+    if (fileValues.length > 0) {
+      if (!this.answerFiles) {
+        throw new BadRequestException('Les fichiers ne sont pas acceptés ici.');
+      }
+      await this.answerFiles.claim(jobOfferId, workerId, fileValues);
     }
 
     const application = await this.prisma.$transaction(async (tx) => {
@@ -934,6 +949,8 @@ export class ApplicationService {
         label: x.label,
         kind: x.kind,
         value: answerText(x),
+        // « Fichier »: business/me/answer-files/:fileId opens it.
+        fileId: answerFileId(x),
         passed: x.passed,
       })),
     }));

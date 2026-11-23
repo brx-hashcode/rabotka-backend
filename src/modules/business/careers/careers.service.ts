@@ -31,7 +31,9 @@ import {
   answerText,
   type AnswerInput,
   candidateQuestion,
+  answerFileId,
   checkAnswers,
+  fileAnswerValue,
 } from '../../job-offer/offer-questions';
 import { businessSiteUrl, businessDashboardUrl } from '../../mail/audience';
 import { LayoutService } from '../../mail/layout.service';
@@ -76,6 +78,7 @@ import {
   TEXT_MIME,
 } from '../cv-screening/cv-files';
 import type { ApplyDto } from './dto/apply.dto';
+import { AnswerFilesService } from '../../answer-files/answer-files.service';
 import { businessEmailRecipientsOfProfile } from '../team/business-recipients';
 
 const OPEN: JobOfferStatus[] = [
@@ -95,6 +98,9 @@ export function placeholderName(fileName: string): string {
     .trim();
   return (words || 'CV').slice(0, 80);
 }
+
+/** Stands in for a « Fichier » answer while the others are checked. */
+const NO_FILE_YET = '00000000-0000-0000-0000-000000000000';
 
 const MAX_COMPANIES = 200;
 /** Careers applications listed at once for a business (the newest). */
@@ -158,6 +164,7 @@ export class CareersService {
     private readonly screenings: CvScreeningService,
     private readonly subscriptions: BusinessSubscriptionService,
     private readonly queue: QueueService,
+    private readonly answerFiles: AnswerFilesService,
   ) {}
 
   /** Where a business may be shown publicly: verified, with a careers page. */
@@ -363,6 +370,8 @@ export class CareersService {
     reference: string,
     file: Express.Multer.File | undefined,
     dto: ApplyDto,
+    /** « Fichier » answers: the answer's value is `file:<index>` in this list. */
+    answerFiles: Express.Multer.File[] = [],
   ) {
     // The field only a bot fills: it is told it worked, and nothing is kept.
     if (dto.website) return { sent: true };
@@ -417,10 +426,25 @@ export class CareersService {
       }
     }
 
-    const { rows, knockedOut } = checkAnswers(
-      offer.questions,
-      this.parseAnswers(dto.answers),
-    );
+    // A « Fichier » answer names its file by index: checked like the others
+    // with a stand-in, the file stored only once every answer is valid.
+    const fileIndex = new Map<string, number>();
+    const answers = this.parseAnswers(dto.answers).map((a) => {
+      const m = /^file:(\d)$/.exec(String(a?.value ?? ''));
+      const q = offer.questions.find((x) => x.id === a?.questionId);
+      if (!m || q?.kind !== OfferQuestionKind.FILE) return a;
+      fileIndex.set(q.id, Number(m[1]));
+      return { ...a, value: fileAnswerValue(NO_FILE_YET, `#${m[1]}`) };
+    });
+    const { rows, knockedOut } = checkAnswers(offer.questions, answers);
+    for (const row of rows) {
+      const i = fileIndex.get(row.question_id);
+      if (i === undefined) continue;
+      const stored = await this.answerFiles.upload(offer.id, answerFiles[i], {
+        attached: true,
+      });
+      row.value = stored.value;
+    }
 
     const id = randomUUID();
     const bucket = await kycBucket(this.systemConfig, this.config);
@@ -753,7 +777,12 @@ export class CareersService {
       answers: (Array.isArray(a.answers)
         ? (a.answers as { kind: OfferQuestionKind; value: string }[])
         : []
-      ).map((x) => ({ ...x, value: answerText(x) })),
+      ).map((x) => ({
+        ...x,
+        value: answerText(x),
+        // « Fichier »: business/me/answer-files/:fileId opens it.
+        fileId: answerFileId(x),
+      })),
       knockedOut: a.knocked_out,
       source: a.source,
       origin: a.origin,
@@ -883,20 +912,18 @@ export class CareersService {
         size: a.cv_size_bytes,
         buffer: await this.readCv(a),
         tag: a.id,
-        // Read with the CV: what the candidate answered when applying.
-        answers: (Array.isArray(a.answers)
-          ? (a.answers as {
-              label: string;
-              kind: OfferQuestionKind;
-              value: string;
-              passed?: boolean | null;
-            }[])
-          : []
-        ).map((x) => ({
-          question: x.label,
-          answer: answerText(x),
-          knockoutFailed: x.passed === false,
-        })),
+        // Read with the CV: what the candidate answered when applying,
+        // a « Fichier » answer by the text of its file.
+        answers: await this.answerFiles.notes(
+          Array.isArray(a.answers)
+            ? (a.answers as {
+                label: string;
+                kind: OfferQuestionKind;
+                value: string;
+                passed?: boolean | null;
+              }[])
+            : [],
+        ),
       })),
     );
 

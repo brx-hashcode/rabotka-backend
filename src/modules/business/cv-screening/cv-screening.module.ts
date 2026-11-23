@@ -1,3 +1,4 @@
+import { AnswerFilesModule } from '../../answer-files/answer-files.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AuthModule } from '../../auth/auth.module';
@@ -19,6 +20,7 @@ import { CvCompareService } from './cv-compare.service';
     LlmModule,
     BusinessSubscriptionModule,
     MailboxModule,
+    AnswerFilesModule,
   ],
   controllers: [CvScreeningController],
   exports: [CvScreeningService],
