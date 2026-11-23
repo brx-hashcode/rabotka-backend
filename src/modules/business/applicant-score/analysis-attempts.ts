@@ -31,3 +31,10 @@ export function claimable(now: Date) {
     ],
   };
 }
+
+/** Whether a claim is held by a run still going: being read now. */
+export function claimFresh(claimedAt: Date | null, now: Date): boolean {
+  return (
+    claimedAt !== null && now.getTime() - claimedAt.getTime() < CLAIM_STALE_MS
+  );
+}

@@ -192,7 +192,7 @@ export class ExternalApplicationsController {
     @Req() req: { user: { profileId: string } },
     @Body() dto: AnalyseExternalDto,
   ) {
-    return this.careers.analyse(
+    return this.careers.analyseRequested(
       req.user.profileId,
       dto.offerId,
       dto.applicationId,
