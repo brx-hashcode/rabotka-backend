@@ -4345,6 +4345,14 @@ enum ExternalApplicationStatus {
   REFUSED
 }
 
+/// How a candidate without a Rabotka account reached the offer: they applied
+/// on the careers page, or the business imported their CV (from its computer
+/// or its mailbox). An import has no contact until its CV is read.
+enum ExternalApplicationOrigin {
+  CAREERS
+  IMPORT
+}
+
 /// An application from a business's public careers page, by someone with no
 /// Rabotka account: `Application` needs a Profile, and no hidden account is
 /// made for them. They gave their contact themselves, so it costs no unlock.
@@ -4355,17 +4363,21 @@ model ExternalApplication {
   job_offer_id    String                    @db.Uuid
   first_name      String
   last_name       String
-  /// Lower-cased: one application per person and offer.
-  email           String
-  phone           String
+  /// Lower-cased: one application per person and offer. Null for an import
+  /// until its CV is read (and if that address already applied to the offer).
+  email           String?
+  phone           String?
+  origin          ExternalApplicationOrigin @default(CAREERS)
   status          ExternalApplicationStatus @default(PENDING)
   /// The questions as they were asked: { label, kind, value, passed }[].
   answers         Json                      @default("[]")
   /// A wrong answer to an « éliminatoire » question: kept, listed after the others.
   knocked_out     Boolean                   @default(false)
   /// Where they came from: google, jooble, qr, whatsapp… Null before tracking.
+  /// For an import: device or gmail.
   source          String?
-  consented_at    DateTime                  @db.Timestamptz
+  /// Their consent on the careers form; null for an import.
+  consented_at    DateTime?                 @db.Timestamptz
   /// « Garder ma candidature pour d'autres postes »: an opt-in on the form.
   /// Until pool_expires_at the business may keep and search the candidate
   /// in « Mes profils », and the CV is kept that long.

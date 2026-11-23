@@ -177,4 +177,26 @@ describe('CandidateNotesService', () => {
       }),
     );
   });
+
+  it('says an imported CV was imported, and when its analysis scored it', async () => {
+    prisma.externalApplication.findUniqueOrThrow.mockResolvedValue({
+      created_at: new Date('2026-11-01T08:00:00Z'),
+      viewed_at: null,
+      retained_at: null,
+      refused_at: null,
+      origin: 'IMPORT',
+      cv_resume: {
+        status: 'SCORED',
+        score: 48,
+        updated_at: new Date('2026-11-01T08:01:00Z'),
+      },
+    });
+    prisma.interview.findMany.mockResolvedValue([]);
+    prisma.businessActivity.findMany.mockResolvedValue([]);
+    const events = await service.timeline(actor(), 'external', 'ext-1');
+    expect(events.map((e) => [e.kind, e.score])).toEqual([
+      ['IMPORTED', undefined],
+      ['ANALYSED', 48],
+    ]);
+  });
 });

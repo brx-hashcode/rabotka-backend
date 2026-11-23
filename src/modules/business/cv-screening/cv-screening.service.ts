@@ -50,6 +50,7 @@ import {
   type CvCandidate,
   type CvSource,
 } from './cv-assessment';
+import { fillImportedContact } from '../careers/imported-contact';
 import {
   CV_SCREENING_PROGRESS,
   type CvScreeningProgress,
@@ -624,6 +625,18 @@ export class CvScreeningService {
       data,
     });
     if (count === 0) return;
+    if (outcome.status === 'SCORED') {
+      // An imported CV takes the name and contact its analysis read.
+      await fillImportedContact(
+        this.prisma,
+        resume.id,
+        outcome.assessment.candidate,
+      ).catch((err) =>
+        this.logger.warn(
+          `Contact of imported CV ${resume.id} not filled: ${String(err)}`,
+        ),
+      );
+    }
     // Given back to the period it was taken from, not the screening's: an
     // offer's screening outlives a period, and the period may have changed.
     const charged = resume.subscription_id ?? resume.screening.subscription_id;

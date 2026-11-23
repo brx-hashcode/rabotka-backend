@@ -1,4 +1,8 @@
 import {
+  ArrayMaxSize,
+  IsBoolean,
+  ArrayNotEmpty,
+  IsArray,
   IsIn,
   Matches,
   Equals,
@@ -9,6 +13,7 @@ import {
   Length,
   MaxLength,
 } from 'class-validator';
+import { AddCvScreeningFilesDto } from '../../cv-screening/dto/create-cv-screening.dto';
 
 /** The text fields of the multipart form; the CV comes as the `cv` file. */
 export class ApplyDto {
@@ -54,6 +59,15 @@ export class ApplyDto {
   website?: string;
 }
 
+/** Imported CVs to take off their offer. */
+export class DeleteImportedDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(200)
+  @IsUUID('all', { each: true })
+  ids!: string[];
+}
+
 export class RefuseExternalDto {
   @IsOptional()
   @IsString()
@@ -69,4 +83,18 @@ export class AnalyseExternalDto {
   @IsOptional()
   @IsUUID()
   applicationId?: string;
+
+  /** « Réessayer »: also one whose analysis failed, at once (within its tries). */
+  @IsOptional()
+  @IsBoolean()
+  retry?: boolean;
+}
+
+/**
+ * CVs a business imports into one of its offers: multipart `files` and/or
+ * `mailAttachments` (CVs ticked in a connected mailbox), as in « Analyse de CV ».
+ */
+export class ImportCvsDto extends AddCvScreeningFilesDto {
+  @IsUUID()
+  offerId!: string;
 }
