@@ -9,6 +9,7 @@ import {
 import {
   MAX_ANALYSIS_ATTEMPTS,
   claimable,
+  claimFresh,
 } from '../applicant-score/analysis-attempts';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
@@ -26,7 +27,10 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { kycBucket } from '../../../common/services/storage/kyc-bucket';
 import { StorageService } from '../../../common/services/storage/storage.service';
 import { QueueService } from '../../../common/services/queue/queue.service';
-import { enqueueCvAnalysis } from '../applicant-score/cv-analysis-jobs';
+import {
+  enqueueCvAnalysis,
+  queuedCvAnalyses,
+} from '../applicant-score/cv-analysis-jobs';
 import {
   answerText,
   type AnswerInput,
@@ -766,6 +770,15 @@ export class CareersService {
         },
       },
     });
+    // A CV not linked to its analysis yet may already be on its way: queued
+    // at import or on applying, or being read now (claimed).
+    const unread = rows.filter((a) => !a.cv_resume && a.cv_storage_key);
+    const queued = await queuedCvAnalyses(
+      this.queue,
+      'careers',
+      unread.map((a) => a.id),
+    );
+    const now = new Date();
     return rows.map((a) => ({
       id: a.id,
       firstName: a.first_name,
@@ -793,6 +806,11 @@ export class CareersService {
       viewedAt: a.viewed_at?.toISOString() ?? null,
       shortlistedAt: a.shortlisted_at?.toISOString() ?? null,
       offer: a.job_offer,
+      // Being read, though no analysis shows yet: nothing to press, it comes.
+      analysisQueued:
+        !a.cv_resume &&
+        !!a.cv_storage_key &&
+        (queued.has(a.id) || claimFresh(a.analysis_claimed_at, now)),
       analysis: a.cv_resume && {
         resumeId: a.cv_resume.id,
         screeningId: a.cv_resume.screening_id,
@@ -804,6 +822,38 @@ export class CareersService {
         criteria: a.cv_resume.criteria,
       },
     }));
+  }
+
+  /**
+   * « Analyser » pressed by the business. One CV already on its way (queued,
+   * or being read) is said to be so, rather than « Aucun CV à analyser ».
+   */
+  async analyseRequested(
+    profileId: string,
+    offerId: string,
+    applicationId?: string,
+    retryFailedBefore?: Date,
+  ) {
+    if (applicationId) {
+      const row = await this.prisma.externalApplication.findFirst({
+        where: {
+          id: applicationId,
+          job_offer: { id: offerId, employer_id: profileId },
+        },
+        select: { id: true, cv_resume_id: true, analysis_claimed_at: true },
+      });
+      if (
+        row &&
+        !row.cv_resume_id &&
+        (claimFresh(row.analysis_claimed_at, new Date()) ||
+          (await queuedCvAnalyses(this.queue, 'careers', [row.id])).has(row.id))
+      ) {
+        throw new ConflictException(
+          'Ce CV est déjà en cours d’analyse : son score arrive dans un instant.',
+        );
+      }
+    }
+    return this.analyse(profileId, offerId, applicationId, retryFailedBefore);
   }
 
   /**

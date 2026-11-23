@@ -29,3 +29,23 @@ export async function enqueueCvAnalysis(
     removeOnFail: true,
   });
 }
+
+/**
+ * Of these applications, those whose analysis is waiting or running in the
+ * queue: a job is removed as soon as it ends, so one that is there is still
+ * to come. The queue out of reach: none, rather than failing the caller.
+ */
+export async function queuedCvAnalyses(
+  queue: QueueService,
+  kind: CvAnalysisJob['kind'],
+  ids: string[],
+): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  try {
+    const q = queue.getQueue(CV_ANALYSIS_QUEUE);
+    const jobs = await Promise.all(ids.map((id) => q.getJob(`${kind}-${id}`)));
+    return new Set(ids.filter((_, i) => !!jobs[i]));
+  } catch {
+    return new Set();
+  }
+}
