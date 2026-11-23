@@ -1,8 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
 import {
+  answerFileId,
   answerText,
   candidateQuestion,
   checkAnswers,
+  fileAnswer,
+  fileAnswerValue,
   normalizeQuestions,
   ownerQuestion,
 } from '../offer-questions';
@@ -339,5 +342,46 @@ describe('long answers, numbers and dates', () => {
     expect(answerText({ kind: 'DATE', value: '2026-12-01' })).toBe(
       '1 décembre 2026',
     );
+  });
+});
+
+describe('« Fichier » questions', () => {
+  const diplome = {
+    id: 'q9',
+    kind: 'FILE' as const,
+    label: 'Votre diplôme',
+    options: [],
+    required: true,
+    knockout: false,
+    accepted: [],
+    position: 0,
+  };
+  const id = '3f2b8a1e-1c2d-4e5f-8a9b-0c1d2e3f4a5b';
+
+  it('is never « éliminatoire »', () => {
+    expect(() =>
+      normalizeQuestions([
+        { kind: 'FILE', label: 'Votre diplôme', knockout: true },
+      ]),
+    ).toThrow(BadRequestException);
+  });
+
+  it('takes an answer naming its file, and reads as the file’s name', () => {
+    const value = fileAnswerValue(id, 'diplome.pdf');
+    const { rows } = checkAnswers([diplome], [{ questionId: 'q9', value }]);
+    expect(rows[0]).toMatchObject({ kind: 'FILE', value, passed: null });
+    expect(answerText(rows[0])).toBe('diplome.pdf');
+    expect(answerFileId(rows[0])).toBe(id);
+    expect(fileAnswer(value)).toEqual({ id, name: 'diplome.pdf' });
+  });
+
+  it('refuses anything that does not name a file', () => {
+    expect(() =>
+      checkAnswers([diplome], [{ questionId: 'q9', value: 'mon diplôme' }]),
+    ).toThrow('joignez un fichier');
+  });
+
+  it('gives no file id for another kind of answer', () => {
+    expect(answerFileId({ kind: 'SHORT_TEXT', value: `${id}:x` })).toBeNull();
   });
 });

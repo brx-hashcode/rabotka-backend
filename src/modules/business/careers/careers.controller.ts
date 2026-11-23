@@ -15,7 +15,10 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
+import {
+  FileFieldsInterceptor,
+  FilesInterceptor,
+} from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
   ApiConsumes,
@@ -120,17 +123,31 @@ export class CareersController {
   @Post(':slug/offers/:reference/apply')
   @Throttle({ default: { limit: 5, ttl: 600_000 } })
   @UseInterceptors(
-    FileInterceptor('cv', { limits: { fileSize: MAX_CV_BYTES, files: 1 } }),
+    FileFieldsInterceptor(
+      [
+        { name: 'cv', maxCount: 1 },
+        // « Fichier » answers: an answer `file:<i>` is the i-th of these.
+        { name: 'answerFiles', maxCount: 5 },
+      ],
+      { limits: { fileSize: MAX_CV_BYTES, files: 6 } },
+    ),
   )
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Apply with a CV, without a Rabotka account' })
   apply(
     @Param('slug') slug: string,
     @Param('reference') reference: string,
-    @UploadedFile() cv: Express.Multer.File | undefined,
+    @UploadedFiles()
+    files: { cv?: Express.Multer.File[]; answerFiles?: Express.Multer.File[] },
     @Body() dto: ApplyDto,
   ) {
-    return this.careers.apply(slug, reference, cv, dto);
+    return this.careers.apply(
+      slug,
+      reference,
+      files?.cv?.[0],
+      dto,
+      files?.answerFiles ?? [],
+    );
   }
 }
 

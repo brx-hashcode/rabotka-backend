@@ -1,4 +1,5 @@
 import { AdminArchiveModule } from '../admin-archive/admin-archive.module';
+import { AnswerFilesModule } from '../answer-files/answer-files.module';
 import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { ApplicationService } from './application.service';
@@ -26,6 +27,8 @@ import { RecommendationEngineModule } from '../recommendation-engine/recommendat
     MatchingModule,
     RecommendationEngineModule,
     forwardRef(() => WsNotificationsModule),
+    // « Fichier » answers, uploaded before applying.
+    AnswerFilesModule,
   ],
   controllers: [AdminApplicationController],
   providers: [ApplicationService],

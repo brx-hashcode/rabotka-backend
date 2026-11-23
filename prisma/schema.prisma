@@ -1415,6 +1415,7 @@ model JobOffer {
   applications            Application[]
   /// Questions the candidates answer when they apply (« Questions aux candidats »).
   questions               OfferQuestion[]
+  answer_files            AnswerFile[]
   external_applications   ExternalApplication[]
   assignments             Assignment[]
   contact_unlock_attempts ContactUnlockAttempt[]
@@ -4430,6 +4431,35 @@ enum OfferQuestionKind {
   NUMBER
   /// YYYY-MM-DD. « Éliminatoire »: `accepted[0]` is the latest date accepted.
   DATE
+  /// A document sent with the application (a diploma, a letter, a portfolio).
+  /// The answer's value is `<AnswerFile id>:<file name>`.
+  FILE
+}
+
+/// A file a candidate sent as the answer to a FILE question. Uploaded before
+/// the application (the Rabotka app) or with it (the careers page); one never
+/// used by an application is purged after a day, the others with the CVs.
+model AnswerFile {
+  id             String    @id @default(uuid()) @db.Uuid
+  created_at     DateTime  @default(now())
+  job_offer_id   String    @db.Uuid
+  /// The worker who uploaded it from the Rabotka app; null from the careers page.
+  profile_id     String?   @db.Uuid
+  file_name      String
+  mime_type      String
+  size_bytes     Int
+  /// Null once purged.
+  storage_key    String?
+  storage_bucket String?
+  /// Its text (PDF, Word), read by the CV analysis with the CV.
+  text           String?   @db.Text
+  /// Set once an application answered with it.
+  attached_at    DateTime? @db.Timestamptz
+
+  job_offer JobOffer @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
+
+  @@index([created_at], name: "idx_answer_file_created")
+  @@map("answer_files")
 }
 
 /// A question an offer asks its candidates when they apply.

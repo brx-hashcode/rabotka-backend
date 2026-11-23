@@ -187,6 +187,10 @@ export function checkAnswers(
     if (q.kind === OfferQuestionKind.DATE && !isDay(value)) {
       throw bad(`« ${q.label} » : indiquez une date.`);
     }
+    // Which file is the caller's to check (its owner, its offer): only its shape here.
+    if (q.kind === OfferQuestionKind.FILE && !fileAnswer(value)) {
+      throw bad(`« ${q.label} » : joignez un fichier.`);
+    }
     const free =
       q.kind === OfferQuestionKind.SHORT_TEXT ||
       q.kind === OfferQuestionKind.LONG_TEXT;
@@ -216,8 +220,39 @@ export function checkAnswers(
   return { rows, knockedOut: rows.some((r) => r.passed === false) };
 }
 
+const FILE_ANSWER = /^([0-9a-f-]{36}):(.{1,200})$/s;
+
+/** A FILE answer's value: the AnswerFile and the name the candidate gave it. */
+export function fileAnswer(value: string): { id: string; name: string } | null {
+  const m = FILE_ANSWER.exec(value);
+  return m ? { id: m[1], name: m[2] } : null;
+}
+
+/** The value a FILE answer is stored with. */
+export function fileAnswerValue(id: string, name: string): string {
+  return `${id}:${
+    name
+      .replace(/[\r\n]+/g, ' ')
+      .trim()
+      .slice(0, 200) || 'fichier'
+  }`;
+}
+
+/** A FILE answer's file, for the business to open it; null for any other answer. */
+export function answerFileId(a: {
+  kind: OfferQuestionKind;
+  value: string;
+}): string | null {
+  return a.kind === OfferQuestionKind.FILE
+    ? (fileAnswer(a.value)?.id ?? null)
+    : null;
+}
+
 /** An answer as the business reads it. */
 export function answerText(a: { kind: OfferQuestionKind; value: string }) {
+  if (a.kind === OfferQuestionKind.FILE) {
+    return fileAnswer(a.value)?.name ?? a.value;
+  }
   if (a.kind === OfferQuestionKind.YES_NO)
     return a.value === YES ? 'Oui' : 'Non';
   if (a.kind === OfferQuestionKind.DATE && isDay(a.value)) {
