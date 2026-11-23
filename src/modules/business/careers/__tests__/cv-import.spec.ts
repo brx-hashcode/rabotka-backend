@@ -325,3 +325,110 @@ describe('deleting imported CVs', () => {
     ]);
   });
 });
+
+describe('a CV on its way to its analysis', () => {
+  const make = (
+    rows: Record<string, unknown>[],
+    queuedIds: string[],
+    findFirst: unknown = null,
+  ) => {
+    const getJob = jest.fn((id: string) =>
+      Promise.resolve(queuedIds.includes(id) ? { id } : undefined),
+    );
+    const prisma = {
+      externalApplication: {
+        findMany: jest.fn().mockResolvedValue(rows),
+        findFirst: jest.fn().mockResolvedValue(findFirst),
+      },
+    };
+    const service = new CareersService(
+      prisma as never,
+      {} as never,
+      { get: jest.fn() } as never,
+      { get: jest.fn() } as never,
+      {} as never,
+      { wrap: jest.fn() } as never,
+      { emit: jest.fn() } as never,
+      {} as never,
+      { businessOf: jest.fn().mockResolvedValue(null) } as never,
+      { getQueue: jest.fn(() => ({ getJob })) } as never,
+    );
+    return { service, getJob };
+  };
+  const row = (over: Record<string, unknown>) => ({
+    id: 'a1',
+    first_name: 'CV Grace',
+    last_name: '',
+    email: null,
+    phone: null,
+    status: 'PENDING',
+    answers: [],
+    knocked_out: false,
+    source: 'import-device',
+    origin: ExternalApplicationOrigin.IMPORT,
+    cv_storage_key: 'cv-key',
+    cv_file_name: 'grace.pdf',
+    cv_mime_type: 'application/pdf',
+    created_at: new Date(),
+    viewed_at: null,
+    shortlisted_at: null,
+    analysis_claimed_at: null,
+    job_offer: { id: 'o1', title: 'Comptable', status: 'ACTIVE' },
+    cv_resume: null,
+    ...over,
+  });
+
+  it('is listed as queued while its job waits, or while it is being read', async () => {
+    const { service, getJob } = make(
+      [
+        row({ id: 'a1' }),
+        row({ id: 'a2', analysis_claimed_at: new Date() }),
+        row({ id: 'a3' }),
+        row({
+          id: 'a4',
+          cv_resume: { id: 'r4', status: 'SCORED', score: 70 },
+        }),
+      ],
+      ['careers-a1'],
+    );
+    const list = await service.listForBusiness('p1', 'o1');
+    expect(list.map((a) => [a.id, a.analysisQueued])).toEqual([
+      ['a1', true],
+      ['a2', true],
+      ['a3', false],
+      ['a4', false],
+    ]);
+    // Only the unread ones are looked up.
+    expect(getJob).toHaveBeenCalledTimes(3);
+  });
+
+  it('is never queued when the queue is out of reach', async () => {
+    const { service, getJob } = make([row({ id: 'a1' })], []);
+    getJob.mockRejectedValue(new Error('redis down'));
+    const [a] = await service.listForBusiness('p1', 'o1');
+    expect(a.analysisQueued).toBe(false);
+  });
+
+  it('says so when « Analyser » is pressed on a CV already on its way', async () => {
+    const { service } = make([], ['careers-a1'], {
+      id: 'a1',
+      cv_resume_id: null,
+      analysis_claimed_at: null,
+    });
+    await expect(service.analyseRequested('p1', 'o1', 'a1')).rejects.toThrow(
+      /déjà en cours d’analyse/,
+    );
+  });
+
+  it('analyses it when it is not on its way', async () => {
+    const { service } = make([], [], {
+      id: 'a1',
+      cv_resume_id: null,
+      analysis_claimed_at: null,
+    });
+    // On to the analysis itself, which here finds no organisation.
+    await expect(service.analyseRequested('p1', 'o1', 'a1')).rejects.toThrow(
+      'Organisation introuvable.',
+    );
+  });
+});
