@@ -129,6 +129,24 @@ describe('BusinessTalentService', () => {
   });
 
   describe('invite', () => {
+    // The offer starts on 24 November 2026: read from well before it, or the
+    // e-mail says « demain » once the calendar catches up. Only Date is frozen.
+    beforeEach(() => {
+      jest.useFakeTimers({
+        now: new Date('2026-11-01T08:00:00Z'),
+        doNotFake: [
+          'nextTick',
+          'setImmediate',
+          'setTimeout',
+          'setInterval',
+          'clearTimeout',
+          'clearInterval',
+          'queueMicrotask',
+        ],
+      });
+    });
+    afterEach(() => jest.useRealTimers());
+
     const setup = (
       o: {
         status?: string;

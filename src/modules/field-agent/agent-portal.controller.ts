@@ -149,7 +149,8 @@ export class AgentPortalController {
   @ApiQuery({
     name: 'employmentType',
     required: false,
-    description: 'Comma list: MISSION,CDD,CDI,STAGE',
+    description:
+      'Comma list: MISSION,CDD,CDI,STAGE,CONSULTANT,VOLONTARIAT,APPRENTISSAGE,INTERIM',
   })
   @ApiQuery({
     name: 'category',

@@ -8,11 +8,11 @@ import { JobOfferStatus } from '@prisma/client';
 import * as QRCode from 'qrcode';
 
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
-import { htmlToPdf } from '../../../common/utils/puppeteer';
+import { htmlToImage, htmlToPdf } from '../../../common/utils/puppeteer';
 import { withSafeImageName } from '../../../common/utils/image-upload.util';
 import { FileService } from '../../file/file.service';
 import { businessSiteUrl } from '../../mail/audience';
-import { posterHtml } from './poster';
+import { posterHtml, posterSize, type PosterFormat } from './poster';
 
 export const MAX_PHOTOS = 6;
 export const MAX_BENEFITS = 8;
@@ -91,8 +91,15 @@ export class CareersPageService {
     return this.page(profileId);
   }
 
-  /** An A4 poster of one open offer, its QR code leading to the careers page. */
-  async poster(profileId: string, offerId: string) {
+  /**
+   * The poster of one open offer, its QR code leading to the careers page:
+   * an A4 PDF to print, or a PNG sized for a social network.
+   */
+  async poster(
+    profileId: string,
+    offerId: string,
+    format: PosterFormat = 'a4',
+  ) {
     const b = await this.business(profileId);
     const offer = await this.prisma.jobOffer.findFirst({
       where: {
@@ -126,24 +133,41 @@ export class CareersPageService {
       width: 640,
       errorCorrectionLevel: 'M',
     });
+    const html = posterHtml(
+      {
+        company: b.name,
+        logoUrl: b.profile.avatar_url,
+        title: offer.title,
+        description: offer.description,
+        employmentType: offer.employment_type,
+        closesAt: offer.scheduled_at,
+        place: offer.is_remote ? 'Télétravail' : offer.city,
+        amount: offer.amount === null ? null : Number(offer.amount),
+        paymentFlow: offer.payment_flow,
+        qrDataUrl: qr,
+        url: url.replace(/^https?:\/\//, ''),
+      },
+      format,
+    );
     try {
-      const buffer = await htmlToPdf(
-        posterHtml({
-          company: b.name,
-          logoUrl: b.profile.avatar_url,
-          title: offer.title,
-          description: offer.description,
-          employmentType: offer.employment_type,
-          closesAt: offer.scheduled_at,
-          place: offer.is_remote ? 'Télétravail' : offer.city,
-          amount: offer.amount === null ? null : Number(offer.amount),
-          paymentFlow: offer.payment_flow,
-          qrDataUrl: qr,
-          url: url.replace(/^https?:\/\//, ''),
-        }),
-        "Offre d'emploi",
-      );
-      return { buffer, filename: `affiche-${offer.reference}.pdf` };
+      if (format === 'a4') {
+        const buffer = await htmlToPdf(html, "Offre d'emploi", {
+          pageNumbers: false,
+          margin: '0',
+        });
+        return {
+          buffer,
+          filename: `affiche-${offer.reference}.pdf`,
+          mime: 'application/pdf',
+        };
+      }
+      const { width, height } = posterSize(format);
+      const buffer = await htmlToImage(html, { width, height: height! });
+      return {
+        buffer,
+        filename: `affiche-${offer.reference}-${format}.png`,
+        mime: 'image/png',
+      };
     } catch (err) {
       this.logger.error(`Poster for ${offerId} failed: ${String(err)}`);
       throw err;

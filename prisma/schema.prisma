@@ -232,6 +232,14 @@ enum EmploymentType {
   CDD
   CDI
   STAGE
+  /// « Consultant » : une consultance, un mandat sur un livrable.
+  CONSULTANT
+  /// « Volontariat / Bénévolat » : souvent une ONG, une indemnité plutôt qu'un salaire.
+  VOLONTARIAT
+  /// « Apprentissage » : une formation en alternance.
+  APPRENTISSAGE
+  /// « Intérim » : par une agence de travail temporaire.
+  INTERIM
 }
 
 enum WalletOwnerType {
@@ -1415,6 +1423,7 @@ model JobOffer {
   applications            Application[]
   /// Questions the candidates answer when they apply (« Questions aux candidats »).
   questions               OfferQuestion[]
+  answer_files            AnswerFile[]
   external_applications   ExternalApplication[]
   assignments             Assignment[]
   contact_unlock_attempts ContactUnlockAttempt[]
@@ -4345,6 +4354,14 @@ enum ExternalApplicationStatus {
   REFUSED
 }
 
+/// How a candidate without a Rabotka account reached the offer: they applied
+/// on the careers page, or the business imported their CV (from its computer
+/// or its mailbox). An import has no contact until its CV is read.
+enum ExternalApplicationOrigin {
+  CAREERS
+  IMPORT
+}
+
 /// An application from a business's public careers page, by someone with no
 /// Rabotka account: `Application` needs a Profile, and no hidden account is
 /// made for them. They gave their contact themselves, so it costs no unlock.
@@ -4355,17 +4372,21 @@ model ExternalApplication {
   job_offer_id    String                    @db.Uuid
   first_name      String
   last_name       String
-  /// Lower-cased: one application per person and offer.
-  email           String
-  phone           String
+  /// Lower-cased: one application per person and offer. Null for an import
+  /// until its CV is read (and if that address already applied to the offer).
+  email           String?
+  phone           String?
+  origin          ExternalApplicationOrigin @default(CAREERS)
   status          ExternalApplicationStatus @default(PENDING)
   /// The questions as they were asked: { label, kind, value, passed }[].
   answers         Json                      @default("[]")
   /// A wrong answer to an « éliminatoire » question: kept, listed after the others.
   knocked_out     Boolean                   @default(false)
   /// Where they came from: google, jooble, qr, whatsapp… Null before tracking.
+  /// For an import: device or gmail.
   source          String?
-  consented_at    DateTime                  @db.Timestamptz
+  /// Their consent on the careers form; null for an import.
+  consented_at    DateTime?                 @db.Timestamptz
   /// « Garder ma candidature pour d'autres postes »: an opt-in on the form.
   /// Until pool_expires_at the business may keep and search the candidate
   /// in « Mes profils », and the CV is kept that long.
@@ -4418,6 +4439,35 @@ enum OfferQuestionKind {
   NUMBER
   /// YYYY-MM-DD. « Éliminatoire »: `accepted[0]` is the latest date accepted.
   DATE
+  /// A document sent with the application (a diploma, a letter, a portfolio).
+  /// The answer's value is `<AnswerFile id>:<file name>`.
+  FILE
+}
+
+/// A file a candidate sent as the answer to a FILE question. Uploaded before
+/// the application (the Rabotka app) or with it (the careers page); one never
+/// used by an application is purged after a day, the others with the CVs.
+model AnswerFile {
+  id             String    @id @default(uuid()) @db.Uuid
+  created_at     DateTime  @default(now())
+  job_offer_id   String    @db.Uuid
+  /// The worker who uploaded it from the Rabotka app; null from the careers page.
+  profile_id     String?   @db.Uuid
+  file_name      String
+  mime_type      String
+  size_bytes     Int
+  /// Null once purged.
+  storage_key    String?
+  storage_bucket String?
+  /// Its text (PDF, Word), read by the CV analysis with the CV.
+  text           String?   @db.Text
+  /// Set once an application answered with it.
+  attached_at    DateTime? @db.Timestamptz
+
+  job_offer JobOffer @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
+
+  @@index([created_at], name: "idx_answer_file_created")
+  @@map("answer_files")
 }
 
 /// A question an offer asks its candidates when they apply.

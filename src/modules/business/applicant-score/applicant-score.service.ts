@@ -5,7 +5,9 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { AnswerFilesService } from '../../answer-files/answer-files.service';
 import { answerSnippet } from '../cv-screening/lenient-answer';
 import { OnEvent } from '@nestjs/event-emitter';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
@@ -89,6 +91,8 @@ export class ApplicantScoreService {
     private readonly screenings: CvScreeningService,
     private readonly queue: QueueService,
     private readonly careers: CareersService,
+    // Optional: the specs build it without; answers then read as plain text.
+    @Optional() private readonly answerFiles?: AnswerFilesService,
   ) {}
 
   /** Scores the applications that have none yet; returns how many were scored. */
@@ -221,11 +225,14 @@ export class ApplicantScoreService {
         completedAt: m.completed_at,
       })),
       portfolio: portfolio.map((p) => (p.description ?? '').slice(0, 200)),
-      answers: (app.answers ?? []).map((x) => ({
-        question: x.label,
-        answer: answerText(x),
-        knockoutFailed: x.passed === false,
-      })),
+      // A « Fichier » answer by the text of its file.
+      answers: this.answerFiles
+        ? await this.answerFiles.notes(app.answers ?? [])
+        : (app.answers ?? []).map((x) => ({
+            question: x.label,
+            answer: answerText(x),
+            knockoutFailed: x.passed === false,
+          })),
       cvText: app.profile_cv?.cv_text || undefined,
     };
     return { app, offer, applicant };

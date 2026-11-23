@@ -1,4 +1,5 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { AnswerFilesService } from '../../answer-files/answer-files.service';
 import {
   CV_SCREENING_QUEUE,
   CV_SCREENING_SWEEP_QUEUE,
@@ -25,6 +26,8 @@ export class CvScreeningScheduler implements OnModuleInit {
   constructor(
     private readonly queueService: QueueService,
     private readonly screenings: CvScreeningService,
+    // « Fichier » answers follow the CVs' retention, on the same hourly sweep.
+    @Optional() private readonly answerFiles?: AnswerFilesService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -42,6 +45,10 @@ export class CvScreeningScheduler implements OnModuleInit {
           this.logger.log(
             `CV screenings: ${result.stuck} stuck given up, ${result.purged} purged`,
           );
+        }
+        const files = (await this.answerFiles?.sweep()) ?? 0;
+        if (files > 0) {
+          this.logger.log(`Answer files: ${files} purged`);
         }
         const careers = await this.screenings.backfillCareers();
         if (careers > 0) {

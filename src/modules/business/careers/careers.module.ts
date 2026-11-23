@@ -3,6 +3,8 @@ import { ConfigModule } from '@nestjs/config';
 import { AuthModule } from '../../auth/auth.module';
 import { MailModule } from '../../mail/mail.module';
 import { CvScreeningModule } from '../cv-screening/cv-screening.module';
+import { MailboxModule } from '../mailbox/mailbox.module';
+import { AnswerFilesModule } from '../../answer-files/answer-files.module';
 import { BusinessSubscriptionModule } from '../subscription/business-subscription.module';
 import {
   CareersController,
@@ -23,6 +25,10 @@ import { AdminExternalApplicationsController } from './admin-external-applicatio
     AuthModule,
     MailModule,
     CvScreeningModule,
+    // The CVs a business imports from its mailbox.
+    MailboxModule,
+    // « Fichier » answers sent with an application.
+    AnswerFilesModule,
     BusinessSubscriptionModule,
     FileModule,
     LogModule,

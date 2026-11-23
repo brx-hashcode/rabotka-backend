@@ -63,6 +63,26 @@ const subscriptions = {
 const sendMail = jest.fn().mockResolvedValue(undefined);
 const wrap = jest.fn().mockResolvedValue('<html>');
 const emit = jest.fn();
+/** Answers read as their text; a « Fichier » answer stored as `<id>:<name>`. */
+const answerFiles = {
+  notes: jest.fn(
+    (rows: { label: string; value: string; passed?: boolean | null }[]) =>
+      Promise.resolve(
+        rows.map((r) => ({
+          question: r.label,
+          answer: r.value,
+          knockoutFailed: r.passed === false,
+        })),
+      ),
+  ),
+  upload: jest.fn((_offer: string, file: { originalname: string }) =>
+    Promise.resolve({
+      id: '11111111-1111-1111-1111-111111111111',
+      name: file.originalname,
+      value: `11111111-1111-1111-1111-111111111111:${file.originalname}`,
+    }),
+  ),
+};
 
 const serviceWith = (found: unknown, offers: unknown[] = [], one?: unknown) => {
   const prisma = {
@@ -100,6 +120,7 @@ const serviceWith = (found: unknown, offers: unknown[] = [], one?: unknown) => {
     screenings as never,
     subscriptions as never,
     queue as never,
+    answerFiles as never,
   );
   return { prisma, service };
 };
@@ -728,6 +749,68 @@ describe('CareersService', () => {
         knocked_out: true,
         cv_storage_key: 'cv-key',
       });
+    });
+
+    it('stores a « Fichier » answer’s file once every answer is valid', async () => {
+      const withFile = {
+        ...open,
+        questions: [
+          ...open.questions,
+          {
+            id: 'q2',
+            kind: OfferQuestionKind.FILE,
+            label: 'Votre diplôme',
+            options: [],
+            required: true,
+            knockout: false,
+            accepted: [],
+            position: 1,
+          },
+        ],
+      };
+      const { prisma, service } = serviceWith(business, [], withFile);
+      const diploma = { ...pdf, originalname: 'diplome.pdf' };
+
+      await service.apply(
+        'kamoa',
+        'RBT-AC5LF',
+        pdf,
+        {
+          ...dto,
+          answers: JSON.stringify([
+            { questionId: 'q1', value: 'yes' },
+            { questionId: 'q2', value: 'file:0' },
+          ]),
+        },
+        [diploma],
+      );
+
+      expect(answerFiles.upload).toHaveBeenCalledWith('o1', diploma, {
+        attached: true,
+      });
+      const stored = prisma.externalApplication.create.mock.calls[0][0].data
+        .answers as { kind: string; value: string }[];
+      expect(stored[1]).toMatchObject({
+        kind: 'FILE',
+        value: '11111111-1111-1111-1111-111111111111:diplome.pdf',
+      });
+    });
+
+    it('stores no file when another answer is wrong', async () => {
+      const { service } = serviceWith(business, [], open);
+      await expect(
+        service.apply(
+          'kamoa',
+          'RBT-AC5LF',
+          pdf,
+          {
+            ...dto,
+            answers: JSON.stringify([{ questionId: 'q1', value: 'maybe' }]),
+          },
+          [pdf],
+        ),
+      ).rejects.toThrow();
+      expect(answerFiles.upload).not.toHaveBeenCalled();
     });
 
     it('keeps where the candidate came from', async () => {

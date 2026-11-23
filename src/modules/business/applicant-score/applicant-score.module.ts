@@ -1,3 +1,4 @@
+import { AnswerFilesModule } from '../../answer-files/answer-files.module';
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../../auth/auth.module';
 import { LlmModule } from '../../rag/llm/llm.module';
@@ -17,6 +18,7 @@ import { ApplicantScoreService } from './applicant-score.service';
     BusinessSubscriptionModule,
     CvScreeningModule,
     CareersModule,
+    AnswerFilesModule,
   ],
   controllers: [ApplicantScoreController],
   providers: [ApplicantScoreService, ApplicantScoreScheduler],

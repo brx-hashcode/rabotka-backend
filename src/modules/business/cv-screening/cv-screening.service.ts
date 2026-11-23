@@ -1,3 +1,4 @@
+import { EMPLOYMENT_LABEL } from '../../job-offer/utils/employment-type.util';
 import {
   BadRequestException,
   ForbiddenException,
@@ -50,6 +51,7 @@ import {
   type CvCandidate,
   type CvSource,
 } from './cv-assessment';
+import { fillImportedContact } from '../careers/imported-contact';
 import {
   CV_SCREENING_PROGRESS,
   type CvScreeningProgress,
@@ -73,13 +75,6 @@ export type CvUpload = {
   internalType?: CvFileType;
   /** Server code only: the answers of the application this CV came with. */
   answers?: ApplicationAnswerNote[];
-};
-
-const EMPLOYMENT_LABEL: Record<string, string> = {
-  MISSION: 'Mission',
-  CDD: 'CDD',
-  CDI: 'CDI',
-  STAGE: 'Stage',
 };
 
 /** A CV still waiting this long is stuck (a lost job): given up and given back. */
@@ -624,6 +619,18 @@ export class CvScreeningService {
       data,
     });
     if (count === 0) return;
+    if (outcome.status === 'SCORED') {
+      // An imported CV takes the name and contact its analysis read.
+      await fillImportedContact(
+        this.prisma,
+        resume.id,
+        outcome.assessment.candidate,
+      ).catch((err) =>
+        this.logger.warn(
+          `Contact of imported CV ${resume.id} not filled: ${String(err)}`,
+        ),
+      );
+    }
     // Given back to the period it was taken from, not the screening's: an
     // offer's screening outlives a period, and the period may have changed.
     const charged = resume.subscription_id ?? resume.screening.subscription_id;

@@ -39,6 +39,7 @@ import { MatchingModule } from './modules/matching/matching.module';
 import { RecommendationEngineModule } from './modules/recommendation-engine/recommendation-engine.module';
 import { ApplicationModule } from './modules/application/application.module';
 import { MobileFeedModule } from './modules/mobile-feed/mobile-feed.module';
+import { AnswerFilesModule } from './modules/answer-files/answer-files.module';
 import { PenaltyModule } from './modules/penalty/penalty.module';
 import { PaymentRequestModule } from './modules/payment-request/payment-request.module';
 import { FileModule } from './modules/file/file.module';
@@ -194,6 +195,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     RecommendationEngineModule,
     ApplicationModule,
     MobileFeedModule,
+    AnswerFilesModule,
     PenaltyModule,
     PaymentRequestModule,
     SystemConfigModule,

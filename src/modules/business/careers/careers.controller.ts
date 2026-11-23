@@ -4,16 +4,21 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Post,
   Req,
   Res,
   UploadedFile,
+  UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  FileFieldsInterceptor,
+  FilesInterceptor,
+} from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
   ApiConsumes,
@@ -28,13 +33,18 @@ import { BusinessProfileGuard } from '../../auth/guards/business-profile.guard';
 import { KycVerifiedGuard } from '../../auth/guards/kyc-verified.guard';
 import { ProfileAuthGuard } from '../../auth/guards/profile-auth.guard';
 import { CareersService } from './careers.service';
+import { MailboxService } from '../mailbox/mailbox.service';
 import {
   AnalyseExternalDto,
   ApplyDto,
+  DeleteImportedDto,
+  ImportCvsDto,
   RefuseExternalDto,
 } from './dto/apply.dto';
 
 const MAX_CV_BYTES = 10 * 1024 * 1024;
+/** Per request: the site sends a batch in chunks, the plan's own limit is the service's. */
+const MAX_IMPORTED_FILES = 20;
 
 /** The public careers page of a business: no session, no contact details. */
 @ApiTags('Public')
@@ -113,17 +123,31 @@ export class CareersController {
   @Post(':slug/offers/:reference/apply')
   @Throttle({ default: { limit: 5, ttl: 600_000 } })
   @UseInterceptors(
-    FileInterceptor('cv', { limits: { fileSize: MAX_CV_BYTES, files: 1 } }),
+    FileFieldsInterceptor(
+      [
+        { name: 'cv', maxCount: 1 },
+        // « Fichier » answers: an answer `file:<i>` is the i-th of these.
+        { name: 'answerFiles', maxCount: 5 },
+      ],
+      { limits: { fileSize: MAX_CV_BYTES, files: 6 } },
+    ),
   )
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Apply with a CV, without a Rabotka account' })
   apply(
     @Param('slug') slug: string,
     @Param('reference') reference: string,
-    @UploadedFile() cv: Express.Multer.File | undefined,
+    @UploadedFiles()
+    files: { cv?: Express.Multer.File[]; answerFiles?: Express.Multer.File[] },
     @Body() dto: ApplyDto,
   ) {
-    return this.careers.apply(slug, reference, cv, dto);
+    return this.careers.apply(
+      slug,
+      reference,
+      files?.cv?.[0],
+      dto,
+      files?.answerFiles ?? [],
+    );
   }
 }
 
@@ -133,7 +157,10 @@ export class CareersController {
 @Controller('business/me/external-applications')
 @UseGuards(ProfileAuthGuard, BusinessProfileGuard)
 export class ExternalApplicationsController {
-  constructor(private readonly careers: CareersService) {}
+  constructor(
+    private readonly careers: CareersService,
+    private readonly mailboxes: MailboxService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Applications from the public careers page' })
@@ -169,7 +196,57 @@ export class ExternalApplicationsController {
       req.user.profileId,
       dto.offerId,
       dto.applicationId,
+      // Failed before now: the one on screen, without the automatic retry's wait.
+      dto.retry ? new Date() : undefined,
     );
+  }
+
+  @Post('import')
+  // Uses the plan: only once the organisation is approved.
+  @UseGuards(KycVerifiedGuard)
+  // A large batch arrives in several requests.
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @UseInterceptors(
+    FilesInterceptor('files', MAX_IMPORTED_FILES, {
+      limits: { fileSize: MAX_CV_BYTES },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary:
+      'Import CVs into an offer: they are read and ranked with its candidates',
+    description:
+      'Multipart: `offerId`, `files` (PDF, DOCX, JPG, PNG, WEBP) and/or `mailAttachments` (CVs ticked in a connected mailbox). Each uses one of the plan’s « CV inclus »; nobody is e-mailed on import.',
+  })
+  async import(
+    @Req() req: { user: { profileId: string } },
+    @UploadedFiles() files: Express.Multer.File[] | undefined,
+    @Body() dto: ImportCvsDto,
+  ) {
+    const fromMail = await this.mailboxes.download(
+      req.user.profileId,
+      dto.mailAttachments ?? [],
+    );
+    return this.careers.importCvs(req.user.profileId, dto.offerId, [
+      ...(files ?? []).map((f) => ({
+        ...f,
+        source: 'import-device' as const,
+      })),
+      ...fromMail.map((f) => ({ ...f, source: 'import-gmail' as const })),
+    ]);
+  }
+
+  @Post('delete')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Delete imported CVs (never an application): the candidate, its analysis and files',
+  })
+  deleteImported(
+    @Req() req: { user: { profileId: string } },
+    @Body() dto: DeleteImportedDto,
+  ) {
+    return this.careers.deleteImported(req.user.profileId, dto.ids);
   }
 
   @Post(':id/retain')
