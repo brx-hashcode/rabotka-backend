@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
   OnModuleInit,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -26,6 +27,7 @@ import {
 } from '../../../common/services/queue/queue.service';
 import { businessDashboardUrl } from '../../mail/audience';
 import { notifyProfile } from '../../profile-notification/profile-notification.events';
+import { CareersPageService } from '../careers/careers-page.service';
 import { MailboxCrypto } from '../mailbox/mailbox-crypto';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
 import {
@@ -98,6 +100,8 @@ export class LinkedinService implements OnModuleInit {
     private readonly queue: QueueService,
     private readonly events: EventEmitter2,
     config: ConfigService,
+    // The offer's social visual (4:5), the post's picture by default.
+    @Optional() private readonly posters?: CareersPageService,
   ) {
     this.clientId = config.get<string>('LINKEDIN_CLIENT_ID') || undefined;
     this.clientSecret =
@@ -369,7 +373,8 @@ export class LinkedinService implements OnModuleInit {
     const author = `urn:li:person:${account.linkedin_sub}`;
     try {
       const thumbnail =
-        post.thumbnail_urn ?? (await this.cardPicture(token, author, offer));
+        post.thumbnail_urn ??
+        (await this.cardPicture(token, author, offer, post.offer_id));
       const urn = await createPost(token, {
         authorUrn: author,
         text: post.text,
@@ -456,12 +461,29 @@ export class LinkedinService implements OnModuleInit {
     return previous?.thumbnail_urn ?? null;
   }
 
-  /** The offer's share picture, uploaded; none if anything goes wrong. */
+  /**
+   * The post's picture, uploaded: the offer's social visual (4:5, the one
+   * « Partager » gives), else its share picture; none if both go wrong.
+   */
   private async cardPicture(
     token: string,
     author: string,
-    offer: { slug: string; reference: string },
+    offer: { slug: string; reference: string; profileId: string },
+    offerId: string,
   ): Promise<string | null> {
+    if (this.posters) {
+      try {
+        const { buffer } = await this.posters.poster(
+          offer.profileId,
+          offerId,
+          'post',
+        );
+        return await uploadImage(token, author, buffer);
+      } catch (err) {
+        if (err instanceof LinkedinAuthError) throw err;
+        this.logger.warn(`LinkedIn social visual skipped: ${String(err)}`);
+      }
+    }
     try {
       const res = await fetch(
         `${businessOrigin()}/carrieres/${encodeURIComponent(offer.slug)}/${encodeURIComponent(offer.reference)}/opengraph-image`,
@@ -554,6 +576,7 @@ export class LinkedinService implements OnModuleInit {
       ...offer,
       slug: business.public_slug,
       businessName: business.name,
+      profileId: business.profile_id,
     };
   }
 

@@ -165,7 +165,7 @@ describe('LinkedinService', () => {
     ...over,
   });
 
-  function make(env: Record<string, string | undefined> = {}) {
+  function make(env: Record<string, string | undefined> = {}, posters?: any) {
     const config = {
       get: (k: string) =>
         ({
@@ -209,6 +209,7 @@ describe('LinkedinService', () => {
       queue,
       events,
       config as any,
+      posters,
     );
     return { service, prisma, queue, events, subscriptions };
   }
@@ -517,6 +518,69 @@ describe('LinkedinService', () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).content.media.id).toBe(
       'urn:li:image:42',
     );
+  });
+
+  it('posts with the offer’s social visual by default', async () => {
+    const posters = {
+      poster: jest.fn().mockResolvedValue({ buffer: Buffer.from('PNG') }),
+    };
+    const { service, prisma } = make({}, posters);
+    prisma.jobOfferLinkedinPost.findUnique.mockResolvedValue(queued);
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            value: {
+              uploadUrl: 'https://upload.linkedin/x',
+              image: 'urn:li:image:9',
+            },
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 201 }))
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 201,
+          headers: { 'x-restli-id': 'urn:li:share:9' },
+        }),
+      );
+    global.fetch = fetchMock as never;
+
+    await service.process({ data: { postId: 'post-1' }, attemptsMade: 0 });
+
+    // The 4:5 visual of the offer's owner, never the OG image.
+    expect(posters.poster).toHaveBeenCalledWith('p-1', 'o-1', 'post');
+    expect(fetchMock.mock.calls[1][0]).toBe('https://upload.linkedin/x');
+    expect(Buffer.from(fetchMock.mock.calls[1][1].body).toString()).toBe('PNG');
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body).content.media.id).toBe(
+      'urn:li:image:9',
+    );
+  });
+
+  it('falls back to the share picture when the visual cannot be drawn', async () => {
+    const posters = {
+      poster: jest.fn().mockRejectedValue(new Error('chrome')),
+    };
+    const { service, prisma } = make({}, posters);
+    prisma.jobOfferLinkedinPost.findUnique.mockResolvedValue(queued);
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(new Response('nope', { status: 404 }))
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 201,
+          headers: { 'x-restli-id': 'urn:li:share:10' },
+        }),
+      );
+    global.fetch = fetchMock as never;
+
+    await service.process({ data: { postId: 'post-1' }, attemptsMade: 0 });
+
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/opengraph-image$/);
+    expect(
+      prisma.jobOfferLinkedinPost.update.mock.calls[0][0].data,
+    ).toMatchObject({ status: 'PUBLISHED' });
   });
 
   it('marks the connection expired when LinkedIn refuses the token', async () => {

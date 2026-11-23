@@ -8,6 +8,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Query,
   Req,
   Res,
   UploadedFile,
@@ -16,7 +17,12 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 import { ArrayMaxSize, IsArray, IsString } from 'class-validator';
 import type { Response } from 'express';
 
@@ -25,6 +31,7 @@ import type { ProfileAuthenticatedRequest } from '../../auth/guards/jwt-auth.gua
 import { ProfileAuthGuard } from '../../auth/guards/profile-auth.guard';
 import { imageMulterOptions } from '../../../common/utils/image-upload.util';
 import { CareersPageService, MAX_BENEFITS } from './careers-page.service';
+import { POSTER_FORMATS, type PosterFormat } from './poster';
 
 class BenefitsDto {
   @IsArray()
@@ -32,6 +39,9 @@ class BenefitsDto {
   @IsString({ each: true })
   benefits!: string[];
 }
+
+/** The poster's social sizes; A4 is the PDF route. */
+const IMAGE_FORMATS = POSTER_FORMATS.filter((f) => f !== 'a4');
 
 const IMAGE = FileInterceptor('image', imageMulterOptions(8 * 1024 * 1024));
 
@@ -104,11 +114,40 @@ export class CareersPageController {
     @Param('id') id: string,
     @Res() res: Response,
   ): Promise<void> {
-    const { buffer, filename } = await this.pages.poster(
-      req.user.profileId,
-      id,
+    await this.sendPoster(res, req.user.profileId, id, 'a4');
+  }
+
+  @Get('job-offers/:id/poster.png')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary:
+      'The poster of an open offer as a social image (post, square, story)',
+  })
+  @ApiQuery({ name: 'format', enum: IMAGE_FORMATS })
+  async posterImage(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id') id: string,
+    @Query('format') format: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    if (!(IMAGE_FORMATS as readonly string[]).includes(format)) {
+      throw new BadRequestException('Format inconnu.');
+    }
+    await this.sendPoster(res, req.user.profileId, id, format as PosterFormat);
+  }
+
+  private async sendPoster(
+    res: Response,
+    profileId: string,
+    offerId: string,
+    format: PosterFormat,
+  ) {
+    const { buffer, filename, mime } = await this.pages.poster(
+      profileId,
+      offerId,
+      format,
     );
-    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Type', mime);
     res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
     res.send(buffer);
   }
