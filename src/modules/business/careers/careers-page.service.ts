@@ -1,13 +1,18 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { JobOfferStatus } from '@prisma/client';
+import type Redis from 'ioredis';
+import { createHash } from 'node:crypto';
 import * as QRCode from 'qrcode';
 
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
+import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 import { htmlToImage, htmlToPdf } from '../../../common/utils/puppeteer';
 import { withSafeImageName } from '../../../common/utils/image-upload.util';
 import { FileService } from '../../file/file.service';
@@ -22,6 +27,10 @@ export const BENEFIT_MAX = 80;
  * What a business shows of itself on its careers page (cover, photos,
  * benefits), and the printable poster of an offer, with a QR code to apply.
  */
+/** Rendered posters, by the hash of their page; a day is plenty for a share. */
+const POSTER_CACHE_PREFIX = 'poster:v1:';
+const POSTER_CACHE_SECONDS = 24 * 60 * 60;
+
 @Injectable()
 export class CareersPageService {
   private readonly logger = new Logger(CareersPageService.name);
@@ -29,6 +38,10 @@ export class CareersPageService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly files: FileService,
+    // Rendered posters, kept a day: a browser launch costs 2 to 4 s.
+    @Optional()
+    @Inject(REDIS_CONNECTION)
+    private readonly redis?: Redis,
   ) {}
 
   async page(profileId: string) {
@@ -149,28 +162,54 @@ export class CareersPageService {
       },
       format,
     );
+    const file =
+      format === 'a4'
+        ? {
+            filename: `affiche-${offer.reference}.pdf`,
+            mime: 'application/pdf',
+          }
+        : {
+            filename: `affiche-${offer.reference}-${format}.png`,
+            mime: 'image/png',
+          };
+    // The page drawn says all the poster shows (texts, logo, QR code, size):
+    // its hash is the key, so any change is a new render, with nothing to clear.
+    const key = `${POSTER_CACHE_PREFIX}${format}:${createHash('sha256').update(html).digest('hex')}`;
+    const cached = await this.cachedPoster(key);
+    if (cached) return { buffer: cached, ...file };
     try {
+      let buffer: Buffer;
       if (format === 'a4') {
-        const buffer = await htmlToPdf(html, "Offre d'emploi", {
+        buffer = await htmlToPdf(html, "Offre d'emploi", {
           pageNumbers: false,
           margin: '0',
         });
-        return {
-          buffer,
-          filename: `affiche-${offer.reference}.pdf`,
-          mime: 'application/pdf',
-        };
+      } else {
+        const { width, height } = posterSize(format);
+        buffer = await htmlToImage(html, { width, height: height! });
       }
-      const { width, height } = posterSize(format);
-      const buffer = await htmlToImage(html, { width, height: height! });
-      return {
-        buffer,
-        filename: `affiche-${offer.reference}-${format}.png`,
-        mime: 'image/png',
-      };
+      await this.keepPoster(key, buffer);
+      return { buffer, ...file };
     } catch (err) {
       this.logger.error(`Poster for ${offerId} failed: ${String(err)}`);
       throw err;
+    }
+  }
+
+  /** A poster drawn before; none when Redis is out of reach (drawn again). */
+  private async cachedPoster(key: string): Promise<Buffer | null> {
+    try {
+      return (await this.redis?.getBuffer(key)) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async keepPoster(key: string, buffer: Buffer): Promise<void> {
+    try {
+      await this.redis?.set(key, buffer, 'EX', POSTER_CACHE_SECONDS);
+    } catch (err) {
+      this.logger.warn(`Poster not cached: ${String(err)}`);
     }
   }
 

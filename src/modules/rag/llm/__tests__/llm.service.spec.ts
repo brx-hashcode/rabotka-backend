@@ -174,6 +174,32 @@ describe('LlmService', () => {
     expect(telemetry.attempts).toBe(2);
   });
 
+  it('falls over at once after a SLOW 5xx, without retrying the same provider', async () => {
+    const calls: string[] = [];
+    const factory = {
+      calls,
+      build: jest.fn((spec: LlmProviderSpec) => ({
+        invoke: jest.fn(() => {
+          calls.push(specId(spec));
+          if (specId(spec) !== FIRST) return Promise.resolve({ content: 'ok' });
+          // A server error that took its time: the model is struggling.
+          return new Promise((_, reject) =>
+            setTimeout(() => reject(httpError(503)), 30),
+          );
+        }),
+      })),
+    };
+    const { telemetry } = await build(
+      factory as never,
+      makeBreaker(),
+      makeConfig({ VOVA_LLM_RETRY_BACKOFF_MS: 0, VOVA_LLM_RETRY_SLOW_MS: 10 }),
+    ).invoke('hi', { tier: 'standard' });
+
+    expect(calls).toEqual([FIRST, SECOND]);
+    expect(telemetry.provider).toBe(providerOf(SECOND));
+    expect(telemetry.attempts).toBe(2);
+  });
+
   it('gives a 429 no second attempt at the same provider', async () => {
     const factory = makeFactory({ [FIRST]: [httpError(429)] });
     await build(factory, makeBreaker()).invoke('hi', { tier: 'standard' });

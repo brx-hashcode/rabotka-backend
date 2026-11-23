@@ -9,9 +9,8 @@ function setup(rows: { currency: string; per_xaf: number; as_of: Date }[]) {
       findMany: jest.fn(({ where }: { where: { as_of: { gte: Date } } }) =>
         Promise.resolve(rows.filter((r) => r.as_of >= where.as_of.gte)),
       ),
-      upsert: jest.fn((args: unknown) => args),
     },
-    $transaction: jest.fn((ops: unknown[]) => Promise.resolve(ops)),
+    $executeRaw: jest.fn(() => Promise.resolve(2)),
   };
   const systemConfig = {
     getFxRules: jest.fn().mockResolvedValue(DEFAULT_FX_RULES),
@@ -58,7 +57,17 @@ describe('ExchangeRateService', () => {
       }),
     );
     expect(result).toEqual({ source: 'test', count: 2 });
-    expect(prisma.exchangeRate.upsert).toHaveBeenCalledTimes(2);
+    // One statement for the whole feed, the rates as text.
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+    const [sql, source, asOf, currencies, rates] = prisma.$executeRaw.mock
+      .calls[0] as unknown as [TemplateStringsArray, ...unknown[]];
+    expect(sql.join('?')).toMatch(/ON CONFLICT \(currency\) DO UPDATE/);
+    expect([source, asOf, currencies, rates]).toEqual([
+      'test',
+      NOW,
+      ['USD', 'CDF'],
+      ['0.0017', '3.97'],
+    ]);
   });
 
   it('keeps the stored rates when no feed answers', async () => {
@@ -66,6 +75,6 @@ describe('ExchangeRateService', () => {
     await expect(service.refresh(() => Promise.resolve(null))).resolves.toBe(
       null,
     );
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.$executeRaw).not.toHaveBeenCalled();
   });
 });
