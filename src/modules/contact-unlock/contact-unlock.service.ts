@@ -504,48 +504,33 @@ export class ContactUnlockService {
     const expiresAt = preferredExpiry > minExpiry ? preferredExpiry : minExpiry;
 
     const now = new Date();
-    const attemptId = randomUUID();
-
     const coveredAtJobLevel = isEmployerCoveredAtJobLevel(
       jobOffer.quantity,
       jobOffer.employer_unlock_paid,
     );
-    // A business's plan covers the employer side while its quota lasts;
-    // past it (or without a plan) the fee applies, as for any employer.
+    // A running plan covers the employer side of its applicants, without
+    // spending a contact; without one the fee applies, as for any employer.
     const coveredByPlan =
       !coveredAtJobLevel &&
-      ((await this.subscriptions?.consumeUnlock(employerId, attemptId, tx)) ??
-        false);
+      ((await this.subscriptions?.hasRunningPlan(employerId, tx)) ?? false);
     const employerAlreadyPaid = coveredAtJobLevel || coveredByPlan;
 
-    try {
-      return await db.contactUnlockAttempt.create({
-        data: {
-          id: attemptId,
-          application_id: applicationId,
-          job_offer_id: app.job_offer_id,
-          worker_id: app.worker_id,
-          employer_id: employerId,
-          status: employerAlreadyPaid
-            ? ContactUnlockStatus.PENDING_WORKER
-            : ContactUnlockStatus.PENDING_BOTH,
-          employer_paid: employerAlreadyPaid,
-          employer_paid_at: employerAlreadyPaid ? now : null,
-          employer_amount: coveredByPlan ? 0 : fees.employerFeeFcfa,
-          worker_amount: fees.workerFeeFcfa,
-          expires_at: expiresAt,
-        },
-      });
-    } catch (err) {
-      // Inside a transaction the rollback undoes the quota use with the rest;
-      // outside one, give the unit back by hand.
-      if (coveredByPlan && !tx) {
-        await this.subscriptions
-          ?.releaseUnlock(attemptId)
-          .catch(() => undefined);
-      }
-      throw err;
-    }
+    return db.contactUnlockAttempt.create({
+      data: {
+        application_id: applicationId,
+        job_offer_id: app.job_offer_id,
+        worker_id: app.worker_id,
+        employer_id: employerId,
+        status: employerAlreadyPaid
+          ? ContactUnlockStatus.PENDING_WORKER
+          : ContactUnlockStatus.PENDING_BOTH,
+        employer_paid: employerAlreadyPaid,
+        employer_paid_at: employerAlreadyPaid ? now : null,
+        employer_amount: coveredByPlan ? 0 : fees.employerFeeFcfa,
+        worker_amount: fees.workerFeeFcfa,
+        expires_at: expiresAt,
+      },
+    });
   }
 
   /**

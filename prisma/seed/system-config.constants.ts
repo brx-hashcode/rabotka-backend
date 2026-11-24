@@ -227,6 +227,16 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
       "Entreprises – Durée de conservation d'une candidature gardée avec l'accord du candidat (mois, 1 à 36)",
     isSecret: false,
   },
+  // Kept while the offer recruits, then until the business deletes them: this
+  // is only how long after closing they go by themselves.
+  {
+    key: 'business.cv_limit_months',
+    value: '24',
+    category: ConfigCategory.FEES,
+    label:
+      "Entreprises – Durée maximale de conservation des CV après la clôture de l'offre (mois, 1 à 60)",
+    isSecret: false,
+  },
   {
     key: 'business.trial_cv_analysis',
     value: 'false',

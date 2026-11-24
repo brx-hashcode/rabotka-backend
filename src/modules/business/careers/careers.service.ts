@@ -772,7 +772,9 @@ export class CareersService {
     });
     // A CV not linked to its analysis yet may already be on its way: queued
     // at import or on applying, or being read now (claimed).
-    const unread = rows.filter((a) => !a.cv_resume && a.cv_storage_key);
+    const unread = rows.filter(
+      (a) => !a.cv_resume && a.cv_storage_key && !a.cv_removed_at,
+    );
     const queued = await queuedCvAnalyses(
       this.queue,
       'careers',
@@ -799,7 +801,9 @@ export class CareersService {
       knockedOut: a.knocked_out,
       source: a.source,
       origin: a.origin,
-      hasCv: a.cv_storage_key !== null,
+      hasCv: a.cv_storage_key !== null && !a.cv_removed_at,
+      /** « Supprimer le CV »: by the business, the score stays. */
+      cvRemoved: !!a.cv_removed_at,
       cvFileName: a.cv_file_name,
       cvMimeType: a.cv_mime_type,
       createdAt: a.created_at.toISOString(),
@@ -810,6 +814,7 @@ export class CareersService {
       analysisQueued:
         !a.cv_resume &&
         !!a.cv_storage_key &&
+        !a.cv_removed_at &&
         (queued.has(a.id) || claimFresh(a.analysis_claimed_at, now)),
       analysis: a.cv_resume && {
         resumeId: a.cv_resume.id,
@@ -900,6 +905,7 @@ export class CareersService {
           : []),
       ],
       cv_storage_key: { not: null },
+      cv_removed_at: null,
       // Above the plan's file size it would be refused: never sent.
       cv_size_bytes: { lte: e.cvFileMaxMb * 1024 * 1024 },
       ...(applicationId ? { id: applicationId } : {}),
@@ -1143,10 +1149,8 @@ export class CareersService {
       where: { id },
     });
     if (!application) throw new NotFoundException('Application not found.');
-    if (!application.cv_storage_key) {
-      throw new NotFoundException(
-        'This CV was deleted at the end of its retention.',
-      );
+    if (!application.cv_storage_key || application.cv_removed_at) {
+      throw new NotFoundException('This CV was deleted.');
     }
     const downloaded = await this.storage.download(application.cv_storage_key, {
       bucket: application.cv_storage_bucket ?? undefined,
@@ -1160,9 +1164,11 @@ export class CareersService {
 
   async cvFile(profileId: string, id: string) {
     const application = await this.owned(profileId, id);
-    if (!application.cv_storage_key) {
+    if (!application.cv_storage_key || application.cv_removed_at) {
       throw new NotFoundException(
-        'Ce CV a été supprimé à la fin de sa durée de conservation.',
+        application.cv_removed_at
+          ? 'Ce CV a été supprimé par votre équipe.'
+          : 'Ce CV a été supprimé à la fin de sa durée de conservation.',
       );
     }
     const downloaded = await this.storage.download(application.cv_storage_key, {
@@ -1365,8 +1371,9 @@ export class CareersService {
 
   /**
    * « Retirer ma candidature de la liste » from the e-mail link: the
-   * consent ends at once, the business no longer keeps or finds them, and
-   * their CV goes back to the usual retention.
+   * consent ends at once, the business no longer keeps or finds them. They
+   * stay a candidate of the offer while it recruits; their CV goes as it
+   * closes.
    */
   async withdrawFromPool(token: string) {
     const application = await this.prisma.externalApplication.findUnique({
@@ -1387,6 +1394,8 @@ export class CareersService {
           pool_consent_at: null,
           pool_expires_at: null,
           pool_token_hash: null,
+          // Their CV goes as this offer closes (CvRetentionService).
+          pool_withdrawn_at: new Date(),
         },
       }),
       this.prisma.businessTalent.deleteMany({
@@ -1400,17 +1409,6 @@ export class CareersService {
         },
       }),
     ]);
-    // Their CV goes back to the offer's own retention (no longer the pool's).
-    if (application.cv_resume_id) {
-      const resume = await this.prisma.cvScreeningResume.findUnique({
-        where: { id: application.cv_resume_id },
-        select: { screening: { select: { expires_at: true } } },
-      });
-      await this.prisma.cvScreeningResume.update({
-        where: { id: application.cv_resume_id },
-        data: { expires_at: resume?.screening.expires_at ?? new Date() },
-      });
-    }
     return { withdrawn: true, jobTitle: application.job_offer.title };
   }
 

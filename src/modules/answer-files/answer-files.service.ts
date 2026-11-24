@@ -30,8 +30,6 @@ export const MAX_ANSWER_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_TEXT_CHARS = 4000;
 /** An upload no application used: gone after this. */
 const UNUSED_MS = 24 * 60 * 60 * 1000;
-/** As long as a careers-page CV is kept. */
-export const ANSWER_FILE_RETENTION_DAYS = 90;
 
 const OPEN: JobOfferStatus[] = [
   JobOfferStatus.ACTIVE,
@@ -172,9 +170,11 @@ export class AnswerFilesService {
       where: { id, job_offer: { employer_id: employerId } },
     });
     if (!file) throw new NotFoundException('Fichier introuvable.');
-    if (!file.storage_key) {
+    if (!file.storage_key || file.removed_at) {
       throw new NotFoundException(
-        'Ce fichier a été supprimé à la fin de sa durée de conservation.',
+        file.removed_at
+          ? 'Ce fichier a été supprimé par votre équipe, avec le CV du candidat.'
+          : 'Ce fichier a été supprimé à la fin de sa durée de conservation.',
       );
     }
     const downloaded = await this.storage.download(file.storage_key, {
@@ -224,8 +224,26 @@ export class AnswerFilesService {
   }
 
   /**
-   * Hourly: uploads never used are deleted after a day, the others once the
-   * retention of a careers CV is over. The row stays (its name in the answer).
+   * Deleted by the business, with the candidate's CV. Due now: what the
+   * storage would not delete, the sweep tries again.
+   */
+  async remove(ids: string[], now = new Date()): Promise<void> {
+    if (ids.length === 0) return;
+    const rows = await this.prisma.answerFile.findMany({
+      where: { id: { in: ids }, storage_key: { not: null } },
+      select: { id: true, storage_key: true, storage_bucket: true },
+    });
+    await this.prisma.answerFile.updateMany({
+      where: { id: { in: ids } },
+      data: { removed_at: now, expires_at: now, text: null },
+    });
+    await this.purge(rows);
+  }
+
+  /**
+   * Hourly: uploads never used are deleted after a day, the others at their
+   * date, moved on while the offer recruits (cv-retention.service.ts). The row
+   * stays (its name in the answer).
    */
   async sweep(now = new Date()): Promise<number> {
     const rows = await this.prisma.answerFile.findMany({
@@ -236,18 +254,23 @@ export class AnswerFilesService {
             attached_at: null,
             created_at: { lt: new Date(now.getTime() - UNUSED_MS) },
           },
-          {
-            created_at: {
-              lt: new Date(
-                now.getTime() - ANSWER_FILE_RETENTION_DAYS * 24 * 3600 * 1000,
-              ),
-            },
-          },
+          { expires_at: { lte: now } },
         ],
       },
       select: { id: true, storage_key: true, storage_bucket: true },
       take: 500,
     });
+    await this.purge(rows);
+    return rows.length;
+  }
+
+  private async purge(
+    rows: {
+      id: string;
+      storage_key: string | null;
+      storage_bucket: string | null;
+    }[],
+  ): Promise<void> {
     for (const r of rows) {
       try {
         await this.storage.delete(r.storage_key as string, {
@@ -261,6 +284,5 @@ export class AnswerFilesService {
         this.logger.warn(`Answer file ${r.id} not purged: ${String(err)}`);
       }
     }
-    return rows.length;
   }
 }

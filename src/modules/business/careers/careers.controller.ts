@@ -86,7 +86,7 @@ export class CareersController {
   @ApiOperation({
     summary: '« Retirer ma candidature de la liste », from the e-mail link',
     description:
-      'Ends the consent to be kept for other posts: the business no longer keeps or finds the candidate; the CV goes back to the usual retention.',
+      'Ends the consent to be kept for other posts: the business no longer keeps or finds the candidate; the CV goes as the offer closes.',
   })
   withdrawFromPool(@Param('token') token: string) {
     return this.careers.withdrawFromPool(token);
@@ -172,7 +172,7 @@ export class ExternalApplicationsController {
   }
 
   @Get(':id/cv')
-  @ApiOperation({ summary: 'The CV, until the retention purge' })
+  @ApiOperation({ summary: 'The CV, until it is deleted' })
   async cv(
     @Req() req: { user: { profileId: string } },
     @Param('id', ParseUUIDPipe) id: string,

@@ -67,7 +67,11 @@ function make(
     streamReply: jest.fn(),
   };
   return {
-    service: new CvCompareService(prisma, subscriptions, chat),
+    service: new CvCompareService(prisma, subscriptions, chat, {
+      availability: jest.fn((rows: any[]) =>
+        Promise.resolve(new Map(rows.map((r) => [r.id, r.state ?? 'ready']))),
+      ),
+    } as any),
     prisma,
     chat,
   };
@@ -99,6 +103,28 @@ describe('CvCompareService', () => {
         resumeIds: ['a', 'b'],
         remaining: 20,
         available: true,
+        missing: [],
+      });
+    });
+
+    it('names the CVs that are gone and why, and still compares the others', async () => {
+      const three = [
+        scored('a'),
+        scored('b', { state: 'restorable' }),
+        scored('c', { state: 'removed' }),
+      ];
+      await expect(
+        make({ resumes: three }).service.open('p1', 's1', ['a', 'b', 'c']),
+      ).resolves.toMatchObject({
+        available: true,
+        missing: [{ resumeId: 'c', name: 'Nom c', reason: 'removed' }],
+      });
+      const two = [scored('a'), scored('b', { state: 'expired' })];
+      await expect(
+        make({ resumes: two }).service.open('p1', 's1', ['a', 'b']),
+      ).resolves.toMatchObject({
+        available: false,
+        missing: [{ name: 'Nom b', reason: 'expired' }],
       });
     });
 
@@ -172,9 +198,33 @@ describe('CvCompareService', () => {
       );
       await expect(
         make({
-          resumes: [scored('a'), scored('b', { storage_key: null })],
+          resumes: [scored('a'), scored('b', { state: 'expired' })],
         }).service.prepare('p1', 's1', 'c1', 'Q ?'),
-      ).rejects.toThrow('supprimés');
+      ).rejects.toThrow('N’est plus disponible : Nom b.');
+    });
+
+    it('answers on the CVs that are left', async () => {
+      const { service, chat, prisma } = make({
+        resumes: [
+          scored('a'),
+          scored('b'),
+          scored('c', { state: 'removed' }),
+          scored('d'),
+        ],
+      });
+      // One that turns out unreadable is left out too.
+      chat.cvTextOf.mockImplementation((r: { id: string; cv_text: string }) =>
+        r.id === 'd'
+          ? Promise.reject(new BadRequestException('illisible'))
+          : Promise.resolve(r.cv_text),
+      );
+      const turn = await service.prepare('p1', 's1', 'c1', 'Qui ?');
+      const context = turn.messages[1].content as string;
+      expect(context).toContain('Candidats comparés (2)');
+      expect(context).not.toContain('Nom c');
+      expect(context).not.toContain('Nom d');
+      expect(turn.resumes).toHaveLength(2);
+      expect(prisma.cvComparisonMessage.create).toHaveBeenCalledTimes(1);
     });
   });
 

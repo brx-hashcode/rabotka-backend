@@ -68,7 +68,7 @@ describe('ApplicantScoreService.reanalyse', () => {
 
     expect(prisma.application.update).toHaveBeenCalledWith({
       where: { id: 'a1' },
-      data: { profile_cv_id: 'cv-new' },
+      data: { profile_cv_id: 'cv-new', cv_removed_at: null },
     });
     expect(prisma.applicationAssessment.deleteMany).toHaveBeenCalledWith({
       where: { application_id: 'a1' },

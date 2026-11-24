@@ -106,7 +106,7 @@ export class BusinessApplicationCvController {
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
     summary:
-      "The candidate's own CV, once the contact is unlocked or the application retained",
+      "The candidate's own CV: with a plan running, or once the contact is unlocked or the application retained",
   })
   async file(
     @Req() req: ProfileAuthenticatedRequest,
@@ -148,7 +148,7 @@ export class BusinessCandidateCvController {
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
     summary:
-      "The candidate's CV, once the contact is obtained or an application retained",
+      "The candidate's CV: an applicant's with a plan running, or once the contact is obtained or an application retained",
   })
   async file(
     @Req() req: ProfileAuthenticatedRequest,

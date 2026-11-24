@@ -11,6 +11,13 @@ const SAMPLES: NotificationInput[] = [
   { type: 'PROFILE_VIEW', sector: 'Restauration', city: 'Brazzaville' },
   { type: 'JOB_RECOMMENDATION', jobOfferId: 'o-1', jobTitle: 'Plombier' },
   {
+    type: 'CV_EXPIRING',
+    jobTitle: 'Caissier',
+    others: 1,
+    until: '2028-11-24T00:00:00.000Z',
+    path: 'offres/o-1',
+  },
+  {
     type: 'APPLICATION_ACCEPTED',
     applicationId: 'a-1',
     jobTitle: 'Plombier',

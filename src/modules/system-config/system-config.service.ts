@@ -821,6 +821,18 @@ export class SystemConfigService implements OnModuleInit {
     return Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 36) : 12;
   }
 
+  /**
+   * How long a candidate's CV is kept once its offer stopped recruiting, when
+   * the business has not deleted it: 1 to 60 months, 24 by default.
+   */
+  async getCvLimitMonths(): Promise<number> {
+    const raw = Number.parseInt(
+      (await this.get('business.cv_limit_months', '24')).trim(),
+      10,
+    );
+    return Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 60) : 24;
+  }
+
   async getContactInfo() {
     const [email, phone, address] = await this.mgetBatch([
       { key: 'contact.email', fallback: 'contact@rabotka.com' },

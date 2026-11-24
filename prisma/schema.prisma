@@ -1437,6 +1437,8 @@ model JobOffer {
   /// The employer closed it. Nothing reopens it until they republish, not even
   /// a hire dropping out; an EXPIRED status alone cannot tell this from expiry.
   closed_at               DateTime?              @db.Timestamptz
+  /// The business was told its candidates' CVs go soon.
+  cv_notice_at            DateTime?              @db.Timestamptz
 
   @@index([employer_id], name: "idx_job_offer_employer")
   @@index([status], name: "idx_job_offer_status")
@@ -1504,6 +1506,9 @@ model Application {
   /// only the business sees (the candidate is never told). Cleared with
   /// « Retirer de la présélection ».
   shortlisted_at DateTime? @db.Timestamptz
+  /// The business deleted this application's CV (its copy and analysis text;
+  /// the candidate's own « Mon CV » is theirs). Never rebuilt.
+  cv_removed_at  DateTime? @db.Timestamptz
 
   job_offer              JobOffer              @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
   worker                 Profile               @relation(fields: [worker_id], references: [id], onDelete: Cascade)
@@ -1645,7 +1650,9 @@ model ContactRecord {
   amount      Decimal             @db.Decimal(10, 2)
   unlocked_at DateTime
 
-  /// Set for MISSION only; all three are null for a DIRECT unlock.
+  /// Set for MISSION; all three are null for a DIRECT unlock, but for one a
+  /// business's plan opened on its own applicant: the offer and application,
+  /// no attempt (COUNTED_CONTACT leaves those out of « contacté N fois »).
   ///
   /// `@unique` on the attempt id gives one ledger row per mission unlock, so a
   /// retried `payUnlock` or the multi-seat cascade cannot double-write. It is
@@ -2332,6 +2339,8 @@ enum ProfileNotificationType {
   LINKEDIN_POST
   /// A pack bought: its credits are there to use.
   BUSINESS_CREDITS_ADDED
+  /// CVs reach the end of their time in a month (email + in-app only).
+  CV_EXPIRING
 }
 
 /// The in-app feed behind the bell in rabotka-client.
@@ -3634,7 +3643,8 @@ model BusinessPlan {
   cv_batch_max          Int      @default(5)
   /// Largest CV file accepted, in MB.
   cv_file_max_mb        Int      @default(5)
-  /// Days a screening keeps its files and contact details before the purge.
+  /// Unused since CVs stay until the business deletes them
+  /// (business.cv_limit_months): dropped once no running process reads it.
   cv_retention_days     Int      @default(30)
   /// Questions a business may ask about one analysed CV (its chat).
   cv_chat_questions     Int      @default(20)
@@ -3742,9 +3752,12 @@ model CvScreening {
   /// Candidates from the public careers page: one such screening per offer,
   /// which each new analysis joins, so they can be compared.
   external        Boolean           @default(false)
-  /// The purge date: files and contact details go, scores stay.
+  /// The purge date: files and contact details go, scores stay. Moved on
+  /// while the offer recruits (cv-retention.service.ts).
   expires_at      DateTime          @db.Timestamptz
   purged_at       DateTime?         @db.Timestamptz
+  /// The business was told its CVs go soon.
+  cv_notice_at    DateTime?         @db.Timestamptz
 
   business     Business              @relation(fields: [business_id], references: [id], onDelete: Cascade)
   subscription BusinessSubscription? @relation(fields: [subscription_id], references: [id], onDelete: SetNull)
@@ -3792,10 +3805,12 @@ model CvScreeningResume {
   /// when it is not read. Not always the screening's: an offer's screening
   /// lasts across periods, and its later CVs are charged to the period then.
   subscription_id String?                @db.Uuid
-  /// When this CV loses its file, text and contact details: its own
-  /// retention, from the period it was charged to. An offer's screening lasts
-  /// across periods, and its later CVs were purged with its first ones.
+  /// When this CV loses its file, text and contact details, unless the
+  /// business deletes it first: moved on while the offer recruits, then left
+  /// (business.cv_limit_months after closing).
   expires_at      DateTime?              @db.Timestamptz
+  /// Deleted by the business: never rebuilt.
+  removed_at      DateTime?              @db.Timestamptz
 
   subscription         BusinessSubscription? @relation(fields: [subscription_id], references: [id], onDelete: SetNull)
   external_application ExternalApplication?
@@ -4394,6 +4409,8 @@ model ExternalApplication {
   pool_expires_at DateTime?                 @db.Timestamptz
   /// The candidate's own « retirer ma candidature » link (its hash).
   pool_token_hash String?                   @unique
+  /// They took that consent back: the CV goes as the offer closes.
+  pool_withdrawn_at DateTime?               @db.Timestamptz
   viewed_at       DateTime?                 @db.Timestamptz
   /// « Présélectionnée », while PENDING: seen by the business only.
   shortlisted_at  DateTime?                 @db.Timestamptz
@@ -4403,9 +4420,12 @@ model ExternalApplication {
   cv_file_name    String
   cv_mime_type    String
   cv_size_bytes   Int
-  /// Null once purged (EXTERNAL_CV_RETENTION_DAYS, in the CV screening sweep).
+  /// Null once purged, at cv_expires_at (cv-retention.service.ts).
   cv_storage_key  String?
   cv_storage_bucket String?
+  cv_expires_at   DateTime?                 @db.Timestamptz
+  /// Deleted by the business: never rebuilt.
+  cv_removed_at   DateTime?                 @db.Timestamptz
 
   /// Its analysis, once the business asked for one.
   cv_resume_id    String?                   @unique @db.Uuid
@@ -4463,6 +4483,10 @@ model AnswerFile {
   text           String?   @db.Text
   /// Set once an application answered with it.
   attached_at    DateTime? @db.Timestamptz
+  /// When it goes, once attached: as the CVs do (cv-retention.service.ts).
+  expires_at     DateTime? @db.Timestamptz
+  /// Deleted by the business, with the candidate's CV.
+  removed_at     DateTime? @db.Timestamptz
 
   job_offer JobOffer @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
 

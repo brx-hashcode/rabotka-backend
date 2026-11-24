@@ -121,6 +121,7 @@ describe('BusinessContactsService', () => {
       existing?: boolean;
       covered?: boolean;
       worker?: boolean;
+      applicant?: boolean;
     }) => {
       const findMany = jest
         .fn()
@@ -133,6 +134,15 @@ describe('BusinessContactsService', () => {
           findFirst: jest
             .fn()
             .mockResolvedValue(opts.worker === false ? null : { id: 'w1' }),
+        },
+        application: {
+          findMany: jest
+            .fn()
+            .mockResolvedValue(
+              opts.applicant
+                ? [{ id: 'a1', worker_id: 'w1', job_offer_id: 'o1' }]
+                : [],
+            ),
         },
         $transaction: (fn: (tx: unknown) => Promise<unknown>) =>
           fn({ contactRecord: { create } }),
@@ -166,6 +176,26 @@ describe('BusinessContactsService', () => {
         spent: true,
         contact: { workerId: 'w1', phone: '+242060000000' },
       });
+    });
+
+    it('opens an applicant without the search feature nor a contact spent', async () => {
+      const { service, create, subs } = setup({
+        applicant: true,
+        covered: false,
+      });
+      expect(await service.unlock('biz', 'w1')).toMatchObject({
+        spent: false,
+        contact: { workerId: 'w1', phone: '+242060000000' },
+      });
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(create.mock.calls[0][0].data).toMatchObject({
+        origin: 'DIRECT',
+        amount: 0,
+        application_id: 'a1',
+        job_offer_id: 'o1',
+      });
+      expect(subs.assertFeature).not.toHaveBeenCalled();
+      expect(subs.consumeDirectUnlock).not.toHaveBeenCalled();
     });
 
     it('gives an already unlocked worker back without spending', async () => {

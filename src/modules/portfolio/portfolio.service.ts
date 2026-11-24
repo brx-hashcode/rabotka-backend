@@ -9,6 +9,7 @@ import { ContactRecordOrigin, ProfileType } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { StorageService } from '../../common/services/storage/storage.service';
+import { COUNTED_CONTACT } from '../business/subscription/applicant-access';
 import { FileService } from '../file/file.service';
 import { MatchingService } from '../matching/matching.service';
 import { CreatePortfolioItemDto } from './dto/create-portfolio-item.dto';
@@ -314,7 +315,7 @@ export class PortfolioService {
       }),
       this.prisma.contactRecord.groupBy({
         by: ['origin'],
-        where: { worker_id: profile.id },
+        where: { worker_id: profile.id, ...COUNTED_CONTACT },
         _count: { _all: true },
       }),
     ]);

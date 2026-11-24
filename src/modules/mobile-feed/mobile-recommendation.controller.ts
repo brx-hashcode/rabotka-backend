@@ -1,3 +1,7 @@
+import {
+  COUNTED_CONTACT,
+  openApplicants,
+} from '../business/subscription/applicant-access';
 import { BusinessSubscriptionService } from '../business/subscription/business-subscription.service';
 import {
   Controller,
@@ -352,7 +356,7 @@ export class MobileRecommendationController {
     @Param('workerId') workerId: string,
   ) {
     const profileId = req.user.profileId;
-    await this.assertEmployer(profileId);
+    await this.assertEmployer(profileId, workerId);
 
     const [hydrated, recommendationFee, walletBalance] = await Promise.all([
       this.hydrate([{ id: workerId, score: 0 }], { skipEligibility: true }),
@@ -556,7 +560,7 @@ export class MobileRecommendationController {
             }),
             this.prisma.contactRecord.groupBy({
               by: ['worker_id', 'origin'],
-              where: { worker_id: { in: ids } },
+              where: { worker_id: { in: ids }, ...COUNTED_CONTACT },
               _count: { _all: true },
             }),
           ]);
@@ -622,7 +626,7 @@ export class MobileRecommendationController {
       // the split costs the same single query as the total.
       this.prisma.contactRecord.groupBy({
         by: ['worker_id', 'origin'],
-        where: { worker_id: { in: ids } },
+        where: { worker_id: { in: ids }, ...COUNTED_CONTACT },
         _count: { _all: true },
       }),
     ]);
@@ -723,7 +727,11 @@ export class MobileRecommendationController {
     return Math.min(n, max);
   }
 
-  private async assertEmployer(profileId: string): Promise<void> {
+  /** `workerId`: the one profile read, open to a business they applied to. */
+  private async assertEmployer(
+    profileId: string,
+    workerId?: string,
+  ): Promise<void> {
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
       select: { profile_type: true },
@@ -733,6 +741,13 @@ export class MobileRecommendationController {
     }
     if (profile.profile_type !== ProfileType.EMPLOYER) {
       throw new ForbiddenException('Réservé aux employeurs');
+    }
+    if (
+      workerId &&
+      this.subscriptions &&
+      (await openApplicants(this.prisma, profileId, [workerId])).size > 0
+    ) {
+      return;
     }
     // A business uses the preselection when its plan includes it.
     await this.subscriptions?.assertFeature(profileId, 'preselection');

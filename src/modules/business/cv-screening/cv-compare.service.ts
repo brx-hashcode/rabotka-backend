@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ForbiddenException,
+  HttpException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -30,10 +31,12 @@ import {
   chatPrompt,
   HISTORY_TURNS,
   careerOf,
+  usable,
   reportCandidate,
   view,
 } from './cv-chat.service';
 import type { OutputLanguage } from '../output-language';
+import { CvRestoreService, type CvAvailability } from './cv-restore.service';
 import { answersBlock, readApplicationAnswers } from './cv-assessment';
 import type { ChatReportInput } from './cv-chat-report';
 import { chartTools, criteriaLine, type ChartResume } from './cv-chart';
@@ -78,6 +81,7 @@ export class CvCompareService {
     private readonly prisma: PrismaService,
     private readonly subscriptions: BusinessSubscriptionService,
     private readonly chat: CvChatService,
+    private readonly restores: CvRestoreService,
   ) {}
 
   /** The conversation for these CVs, opened (or reopened) for the business. */
@@ -115,13 +119,16 @@ export class CvCompareService {
     const asked = comparison.messages.filter(
       (m) => m.role === CvChatRole.USER,
     ).length;
+    const missing = await this.missing(resumes);
     return {
       id: comparison.id,
       resumeIds: ids,
       messages: comparison.messages.map(view),
       limit,
       remaining: Math.max(0, limit - asked),
-      available: resumes.every((r) => r.storage_key !== null),
+      available: resumes.length - missing.length >= MIN_COMPARED,
+      /** The CVs that cannot be compared any more, and why: the others are. */
+      missing,
     };
   }
 
@@ -199,16 +206,30 @@ export class CvCompareService {
       );
     }
 
-    const resumes = await this.prisma.cvScreeningResume.findMany({
+    const all = await this.prisma.cvScreeningResume.findMany({
       where: { id: { in: comparison.resume_ids }, screening_id: screeningId },
       orderBy: [{ score: 'desc' }, { created_at: 'asc' }],
     });
-    if (resumes.some((r) => !r.storage_key)) {
+    const gone = new Set((await this.missing(all)).map((m) => m.resumeId));
+    const read = await Promise.all(
+      all
+        .filter((r) => !gone.has(r.id))
+        .map(async (resume) => ({ resume, text: await this.textOf(resume) })),
+    );
+    // One that cannot be read after all is left out, like the missing ones.
+    const compared = read.filter(
+      (c): c is { resume: CvScreeningResume; text: string } => c.text !== null,
+    );
+    if (compared.length < MIN_COMPARED) {
+      const left = new Set(compared.map((c) => c.resume.id));
+      const names = all
+        .filter((r) => !left.has(r.id))
+        .map((r) => candidateName(r) ?? r.file_name);
       throw new ForbiddenException(
-        'Ces CV ont été supprimés à la fin de leur durée de conservation : la comparaison n’est plus possible.',
+        `Il ne reste pas assez de CV à comparer. N’est plus disponible : ${names.join(', ')}.`,
       );
     }
-    const texts = await Promise.all(resumes.map((r) => this.chat.cvTextOf(r)));
+    const resumes = compared.map((c) => c.resume);
 
     // Counted and saved under one lock (per screening): two tabs at once
     // both passed the count above.
@@ -264,7 +285,7 @@ export class CvCompareService {
                 comparison.screening.business_id,
               ),
             },
-            resumes.map((r, i) => ({ resume: r, text: texts[i] })),
+            compared,
           ),
         ),
         new AIMessage(READY[language]),
@@ -320,6 +341,39 @@ export class CvCompareService {
       ),
     );
     return Math.max(0, ...counts);
+  }
+
+  /** Those of these CVs that cannot be compared any more, and why. */
+  private async missing(resumes: CvScreeningResume[]): Promise<
+    {
+      resumeId: string;
+      name: string;
+      reason: Exclude<CvAvailability, 'ready' | 'restorable'>;
+    }[]
+  > {
+    const states = await this.restores.availability(resumes);
+    return resumes.flatMap((r) => {
+      const state = states.get(r.id) ?? 'expired';
+      return usable(state)
+        ? []
+        : [
+            {
+              resumeId: r.id,
+              name: candidateName(r) ?? r.file_name,
+              reason: state,
+            },
+          ];
+    });
+  }
+
+  /** A CV's text; null when it cannot be had (a scan nobody reads, a rebuild that failed). */
+  private async textOf(resume: CvScreeningResume): Promise<string | null> {
+    try {
+      return await this.chat.cvTextOf(resume);
+    } catch (err) {
+      if (err instanceof HttpException) return null;
+      throw err;
+    }
   }
 
   private async business(profileId: string) {

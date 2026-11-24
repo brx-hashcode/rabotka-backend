@@ -250,6 +250,36 @@ describe('ContactUnlockService', () => {
       );
     });
 
+    it.each([
+      [true, 0, ContactUnlockStatus.PENDING_WORKER],
+      [false, 500, ContactUnlockStatus.PENDING_BOTH],
+    ])(
+      'a running plan (%s) covers the employer side, without spending a contact',
+      async (runs, amount, status) => {
+        const subscriptions = { hasRunningPlan: jest.fn() };
+        subscriptions.hasRunningPlan.mockResolvedValue(runs);
+        Object.assign(service, { subscriptions });
+        prisma.contactUnlockAttempt.findUnique.mockResolvedValue(null);
+        prisma.application.findUnique.mockResolvedValue({
+          worker_id: 'w-1',
+          job_offer_id: 'jo-1',
+        });
+        prisma.jobOffer.findUnique.mockResolvedValue({
+          quantity: 1,
+          employer_unlock_paid: false,
+          scheduled_at: null,
+        });
+        await service.initiateUnlock('app-1', 'emp-1');
+        expect(
+          prisma.contactUnlockAttempt.create.mock.calls[0][0].data,
+        ).toMatchObject({
+          employer_paid: runs,
+          employer_amount: amount,
+          status,
+        });
+      },
+    );
+
     it('uses twoHBeforeJob expiry when scheduled_at is soon', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(null);
       prisma.application.findUnique.mockResolvedValue({
