@@ -1,0 +1,44 @@
+# The shared e5 embedder (src/embedder.ts): ONE copy of multilingual-e5-large
+# (~2.2GB) for both the prod and develop APIs, which reach it at
+# VOVA_EMBEDDER_URL=http://rabotka_embedder:3100 on hashcode-internal.
+#
+# Its own compose project (-p rabotka-embedder), so neither API project's
+# `up --remove-orphans` touches it. The production deploy owns it and updates it
+# to the prod image; the develop deploy only starts it when it is missing.
+#
+#   docker compose -p rabotka-embedder -f docker-compose.embedder.yml up -d
+#
+# BACKEND_IMAGE comes from the .env next to this file, read only for
+# interpolation: no env_file, since the process needs no secrets.
+services:
+  embedder:
+    image: ${BACKEND_IMAGE:-rabotka-backend:${IMAGE_TAG:-latest}}
+    container_name: rabotka_embedder
+    # Skips docker-entrypoint.sh: that waits for Postgres and runs migrations,
+    # neither of which has anything to do with embedding text.
+    entrypoint: ['/usr/bin/tini', '--']
+    command: ['node', 'dist/src/embedder.js']
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - VOVA_EMBEDDER_PORT=3100
+    # Model ~2.2GB native + a small heap. A cap means a runaway restarts this
+    # container instead of waking the host OOM-killer next to the APIs.
+    mem_limit: 3g
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3100/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 3
+    networks:
+      - internal
+
+networks:
+  internal:
+    name: hashcode-internal
+    external: true
