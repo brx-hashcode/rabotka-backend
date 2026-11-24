@@ -6,6 +6,11 @@ import { LlmModule } from '../../rag/llm/llm.module';
 import { BusinessSubscriptionModule } from '../subscription/business-subscription.module';
 import { MailboxModule } from '../mailbox/mailbox.module';
 import { CvScreeningController } from './cv-screening.controller';
+import { MailModule } from '../../mail/mail.module';
+import { CvRemovalController } from './cv-removal.controller';
+import { CvRemovalService } from './cv-removal.service';
+import { CvRestoreService } from './cv-restore.service';
+import { CvRetentionService } from './cv-retention.service';
 import { CvScreeningScheduler } from './cv-screening.scheduler';
 import { CvScreeningService } from './cv-screening.service';
 import { CvChatService } from './cv-chat.service';
@@ -21,14 +26,18 @@ import { CvCompareService } from './cv-compare.service';
     BusinessSubscriptionModule,
     MailboxModule,
     AnswerFilesModule,
+    MailModule,
   ],
-  controllers: [CvScreeningController],
+  controllers: [CvScreeningController, CvRemovalController],
   exports: [CvScreeningService],
   providers: [
     CvScreeningService,
     CvScreeningScheduler,
     CvChatService,
     CvCompareService,
+    CvRestoreService,
+    CvRemovalService,
+    CvRetentionService,
   ],
 })
 export class CvScreeningModule {}

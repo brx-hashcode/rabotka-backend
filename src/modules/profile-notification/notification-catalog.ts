@@ -292,6 +292,16 @@ export type NotificationInput =
       ok: boolean;
     }
   | {
+      /** CVs that go within a month, the offer or analysis they go from first. */
+      type: 'CV_EXPIRING';
+      jobTitle: string;
+      /** How many more offers or analyses. */
+      others: number;
+      until: string;
+      /** « offres/… » or « analyse-cv/… », in the business's space. */
+      path: string;
+    }
+  | {
       type: 'CV_SCREENING_DONE';
       screeningId: string;
       jobTitle: string;
@@ -787,6 +797,13 @@ export function renderNotification(
             body: `Le compte rendu de l’entretien avec ${input.candidateName} n’a pas pu être rédigé : réessayez depuis l’entretien.`,
             link: interviewLink(input.interviewId),
           };
+
+    case 'CV_EXPIRING':
+      return {
+        title: 'Des CV vont être supprimés',
+        body: `Les CV reçus pour${quoted(input.jobTitle)} seront supprimés à partir du ${shortDate(input.until)}${input.others > 0 ? `, et ceux de ${input.others} autre${input.others > 1 ? 's' : ''}` : ''}. Les notes restent.`,
+        link: `/espace/${input.path}`,
+      };
 
     case 'CV_SCREENING_DONE':
       return {

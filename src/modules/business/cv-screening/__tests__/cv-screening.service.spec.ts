@@ -47,11 +47,6 @@ function make() {
       findMany: jest.fn().mockResolvedValue([]),
       update: jest.fn(),
     },
-    businessSubscription: {
-      findUnique: jest
-        .fn()
-        .mockResolvedValue({ plan: { cv_retention_days: 30 } }),
-    },
     cvScreening: {
       create: jest.fn().mockImplementation(({ data }) => ({
         ...data,
@@ -107,7 +102,10 @@ function make() {
     consumeCv: jest.fn().mockResolvedValue({ subscriptionId: 'sub-1' }),
     releaseCv: jest.fn().mockResolvedValue(undefined),
   };
-  const systemConfig: any = { get: jest.fn().mockResolvedValue('kyc-bucket') };
+  const systemConfig: any = {
+    get: jest.fn().mockResolvedValue('kyc-bucket'),
+    getCvLimitMonths: jest.fn().mockResolvedValue(24),
+  };
   const config: any = { get: jest.fn().mockReturnValue('') };
   const events: any = { emit: jest.fn() };
   const service = new CvScreeningService(
@@ -749,8 +747,60 @@ describe('CvScreeningService', () => {
     });
   });
 
+  it('keeps a CV for the configured months, whatever the plan says', async () => {
+    const { service, prisma } = make();
+    const before = new Date();
+    before.setUTCMonth(before.getUTCMonth() + 23);
+    await service.create('p1', [file('cv.pdf')], JOB);
+    const data = prisma.cvScreening.create.mock.calls[0][0].data;
+    expect(data.expires_at.getTime()).toBeGreaterThan(before.getTime());
+    expect(data.resumes.create[0].expires_at).toEqual(data.expires_at);
+  });
+
+  it('adds an offer’s candidates to its one screening, even a purged one', async () => {
+    const { service, prisma } = make();
+    prisma.jobOffer.findFirst.mockResolvedValue({
+      id: 'o1',
+      title: 'Caissier',
+      description: JOB.jobText,
+      employment_type: 'CDI',
+      is_remote: false,
+    });
+    prisma.cvScreening.findFirst = jest.fn().mockResolvedValue({ id: 's-old' });
+    prisma.cvScreening.update.mockImplementation(({ data }: any) => ({
+      id: 's-old',
+      job_title: 'Caissier',
+      job_text: '',
+      status: 'PROCESSING',
+      created_at: new Date(),
+      expires_at: new Date(),
+      purged_at: null,
+      resumes: (data.resumes?.create ?? []).map((r: object) => ({
+        ...r,
+        id: 'r1',
+        status: 'QUEUED',
+        score: null,
+        created_at: new Date(),
+      })),
+    }));
+    const { screeningId } = await service.addToOffer('p1', 'o1', [
+      { ...file('Awa t1.pdf'), tag: 't1' },
+    ]);
+    expect(screeningId).toBe('s-old');
+    // Neither the date nor the purge filters it out.
+    expect(prisma.cvScreening.findFirst.mock.calls[0][0].where).toEqual({
+      business_id: 'b1',
+      offer_id: 'o1',
+      external: true,
+    });
+    expect(
+      prisma.cvScreening.update.mock.calls[0][0].data.purged_at,
+    ).toBeNull();
+    expect(prisma.cvScreening.create).not.toHaveBeenCalled();
+  });
+
   describe('sweep', () => {
-    it('purges each CV past its own retention, and keeps the scores', async () => {
+    it('purges each CV past its own date, and keeps the scores', async () => {
       const { service, prisma, storage } = make();
       const now = new Date('2026-12-01T00:00:00Z');
       (prisma.cvScreening as any).updateMany = jest
@@ -773,13 +823,19 @@ describe('CvScreeningService', () => {
         purged: 1,
       });
 
-      // Due by its own date, or its screening's for a CV from before.
+      // Due by its own date, its screening's for a CV from before, or deleted
+      // by the business with a file the storage would not delete then.
       expect(
         prisma.cvScreeningResume.findMany.mock.calls[1][0].where.AND[0].OR,
       ).toEqual([
         { expires_at: { lte: now } },
         { expires_at: null, screening: { expires_at: { lte: now } } },
+        { removed_at: { not: null } },
       ]);
+      // Careers originals by their date too, not 90 days after applying.
+      expect(
+        prisma.externalApplication.findMany.mock.calls[0][0].where,
+      ).toEqual({ cv_storage_key: { not: null }, cv_expires_at: { lte: now } });
       expect(storage.delete).toHaveBeenCalledWith('k/r1.pdf', {
         bucket: 'kyc-bucket',
       });

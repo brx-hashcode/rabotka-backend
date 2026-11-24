@@ -890,7 +890,7 @@ export class ApplicationService {
     );
 
     // « Mon CV »: the file has the contacts on it, so it opens only once they
-    // are unlocked or the application retained.
+    // are unlocked, the application retained, or while the plan runs.
     const unlocked = employerId
       ? await unlockedWorkers(
           this.prisma,
@@ -915,7 +915,7 @@ export class ApplicationService {
         a.status !== ApplicationStatus.CANCELLED &&
         a.status !== ApplicationStatus.REJECTED,
       cv:
-        a.profile_cv && !a.profile_cv.purged_at
+        a.profile_cv && !a.profile_cv.purged_at && !a.cv_removed_at
           ? {
               kind: CvChoice.UPLOADED,
               fileName: a.profile_cv.file_name,
@@ -923,6 +923,8 @@ export class ApplicationService {
               available: cvOpen(a.status, a.worker_id, unlocked),
             }
           : { kind: CvChoice.RABOTKA },
+      // « Supprimer le CV »: by the business, the score stays.
+      cvRemoved: !!a.cv_removed_at,
       // Its CV analysis, in the offer's screening: asked about and compared
       // with the careers-page CVs.
       analysis: a.cv_resume
