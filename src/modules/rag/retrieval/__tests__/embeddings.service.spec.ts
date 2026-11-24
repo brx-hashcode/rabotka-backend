@@ -142,3 +142,137 @@ describe('HelpEmbeddingsService — truncation guard', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 });
+
+describe('HelpEmbeddingsService — shared embedder', () => {
+  const URL = 'http://embedder:3100';
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status });
+
+  let fetchMock: jest.SpyInstance;
+
+  beforeEach(() => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] });
+    fetchMock = jest.spyOn(global, 'fetch');
+  });
+
+  afterEach(() => {
+    fetchMock.mockRestore();
+    jest.useRealTimers();
+  });
+
+  it('never loads the model in-process when VOVA_EMBEDDER_URL is set', async () => {
+    // The point of the shared embedder: a second ~2.2GB copy in each API was
+    // half the VPS's RAM.
+    const { service, embedder } = serviceWith({ VOVA_EMBEDDER_URL: URL });
+    fetchMock
+      .mockResolvedValueOnce(json(200, { ready: true }))
+      .mockResolvedValueOnce(json(200, { vectors: [[0.3, 0.4]] }));
+
+    await expect(service.embedQuery('plombier')).resolves.toEqual([0.3, 0.4]);
+
+    expect(embedder.queryEmbed).not.toHaveBeenCalled();
+    const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe(`${URL}/embed`);
+    // The side is sent, not implied: e5 needs `query: ` vs `passage: `.
+    expect(JSON.parse(init.body as string)).toEqual({
+      kind: 'query',
+      texts: ['plombier'],
+    });
+  });
+
+  it('sends passages as the passage side', async () => {
+    const { service } = serviceWith({ VOVA_EMBEDDER_URL: `${URL}/` });
+    fetchMock
+      .mockResolvedValueOnce(json(200, { ready: true }))
+      .mockResolvedValueOnce(json(200, { vectors: [[1], [2]] }));
+
+    await expect(service.embedPassages(['a', 'b'])).resolves.toEqual([
+      [1],
+      [2],
+    ]);
+    const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe(`${URL}/embed`);
+    expect(JSON.parse(init.body as string)).toEqual({
+      kind: 'passage',
+      texts: ['a', 'b'],
+    });
+  });
+
+  it('waits for the embedder to finish loading before the first call', async () => {
+    // A deploy recreates the embedder and the API together; the category
+    // prebuild starts before the model is up.
+    const { service } = serviceWith({ VOVA_EMBEDDER_URL: URL });
+    fetchMock
+      .mockRejectedValueOnce(new Error('ECONNREFUSED'))
+      .mockResolvedValueOnce(json(503, { ready: false }))
+      .mockResolvedValueOnce(json(200, { ready: true }))
+      .mockResolvedValueOnce(json(200, { vectors: [[0.5]] }));
+
+    const result = service.embedQuery('maçon');
+    await jest.advanceTimersByTimeAsync(2_000);
+
+    await expect(result).resolves.toEqual([0.5]);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('gives up after VOVA_EMBEDDER_WAIT_MS, then waits again on the next call', async () => {
+    const { service } = serviceWith({
+      VOVA_EMBEDDER_URL: URL,
+      VOVA_EMBEDDER_WAIT_MS: '1500',
+    });
+    fetchMock.mockRejectedValue(new Error('ECONNREFUSED'));
+
+    const first = service.embedQuery('a');
+    const assertion = expect(first).rejects.toThrow('not ready');
+    await jest.advanceTimersByTimeAsync(3_000);
+    await assertion;
+
+    // A failed wait is not cached: once the embedder is back, calls work.
+    fetchMock
+      .mockReset()
+      .mockResolvedValueOnce(json(200, { ready: true }))
+      .mockResolvedValueOnce(json(200, { vectors: [[0.7]] }));
+    await expect(service.embedQuery('a')).resolves.toEqual([0.7]);
+  });
+
+  it('re-checks health after the embedder drops out', async () => {
+    const { service } = serviceWith({ VOVA_EMBEDDER_URL: URL });
+    fetchMock
+      .mockResolvedValueOnce(json(200, { ready: true }))
+      .mockResolvedValueOnce(json(200, { vectors: [[1]] }))
+      .mockRejectedValueOnce(new Error('ECONNRESET'))
+      .mockResolvedValueOnce(json(200, { ready: true }))
+      .mockResolvedValueOnce(json(200, { vectors: [[2]] }));
+
+    await service.embedQuery('a');
+    await expect(service.embedQuery('b')).rejects.toThrow('ECONNRESET');
+    await expect(service.embedQuery('c')).resolves.toEqual([2]);
+    expect((fetchMock.mock.calls[3] as [string])[0]).toBe(`${URL}/health`);
+  });
+
+  it('rejects a response with the wrong number of vectors', async () => {
+    const { service } = serviceWith({ VOVA_EMBEDDER_URL: URL });
+    fetchMock
+      .mockResolvedValueOnce(json(200, { ready: true }))
+      .mockResolvedValueOnce(json(200, { vectors: [[1]] }));
+
+    await expect(service.embedPassages(['a', 'b'])).rejects.toThrow(
+      '1 vectors for 2 texts',
+    );
+  });
+
+  it('warms up by waiting for the embedder, not by loading a model', async () => {
+    const { service, embedder } = serviceWith({ VOVA_EMBEDDER_URL: URL });
+    const ensure = jest.spyOn(
+      service as unknown as { ensure(): Promise<unknown> },
+      'ensure',
+    );
+    fetchMock.mockResolvedValueOnce(json(200, { ready: true }));
+
+    await service.warmUp();
+
+    expect(ensure).not.toHaveBeenCalled();
+    expect(embedder.queryEmbed).not.toHaveBeenCalled();
+    expect((fetchMock.mock.calls[0] as [string])[0]).toBe(`${URL}/health`);
+  });
+});

@@ -391,7 +391,13 @@ jobs:
           # unaffected. Measured 2026-10-22: api_prod already sat at 4.6GiB with
           # the model loaded on first use (3.7GiB host headroom) — warming moves
           # that load to boot, it does not add to it.
+          # Remote since 2026-11-24 (see VOVA_EMBEDDER_URL): warming now waits
+          # for the shared embedder and prebuilds the category vectors.
           VOVA_WARMUP=true
+          # The e5 model lives in ONE shared container (docker-compose.embedder.yml,
+          # updated by the deploy step below) instead of in each API: prod and
+          # develop each held a ~2.2GB copy, half the VPS's RAM.
+          VOVA_EMBEDDER_URL=http://rabotka_embedder:3100
           VOVA_WARMUP_PROVIDERS=google,openai
           VOVA_HEDGE_ENABLED=false
           # Head start for the leading provider; 0 races everyone at once.
@@ -677,6 +683,13 @@ jobs:
 
             git fetch origin main
             git reset --hard origin/main
+
+            # The shared e5 embedder both APIs call (VOVA_EMBEDDER_URL). Prod owns
+            # its version; recreated only when the image changed. Not part of the
+            # rollback: an older API image talks to it the same way, and when it
+            # fails VoVa falls back to literal matching rather than going down.
+            docker compose -p rabotka-embedder -f docker-compose.embedder.yml up -d \
+              || echo 'WARNING: shared embedder failed to start; VoVa semantic search is degraded'
 
             docker compose -f docker-compose.prod.yml up -d --remove-orphans || rollback
           "
