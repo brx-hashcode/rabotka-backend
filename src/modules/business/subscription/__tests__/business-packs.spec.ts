@@ -296,12 +296,14 @@ describe('BusinessSubscriptionService with packs', () => {
       credit({ id: 'pack-1', kind: 'CONTACT' }),
     ]);
     prisma.businessSubscription.updateMany.mockResolvedValueOnce({ count: 0 });
-    await expect(service.consumeUnlock('p1', 'att-1')).resolves.toBe(true);
+    await expect(service.consumeDirectUnlock('p1', 'rec-1')).resolves.toBe(
+      true,
+    );
     expect(prisma.businessQuotaUsage.create).toHaveBeenCalledWith({
       data: {
         subscription_id: 'sub-1',
         credit_id: 'pack-1',
-        contact_unlock_attempt_id: 'att-1',
+        contact_record_id: 'rec-1',
       },
     });
     expect(table.rows[0].used).toBe(1);
@@ -319,10 +321,12 @@ describe('BusinessSubscriptionService with packs', () => {
     expect(prisma.businessSubscription.updateMany).not.toHaveBeenCalled();
   });
 
-  it('still charges the fee without a contact pack', async () => {
+  it('covers nothing more without a contact pack', async () => {
     const { service, prisma } = make(running({ unlocks_used: 2 }));
     prisma.businessSubscription.updateMany.mockResolvedValueOnce({ count: 0 });
-    await expect(service.consumeUnlock('p1', 'att-1')).resolves.toBe(false);
+    await expect(service.consumeDirectUnlock('p1', 'rec-1')).resolves.toBe(
+      false,
+    );
     expect(prisma.businessQuotaUsage.create).not.toHaveBeenCalled();
   });
 

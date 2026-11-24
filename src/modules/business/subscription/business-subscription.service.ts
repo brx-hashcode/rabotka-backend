@@ -56,6 +56,7 @@ import {
 import { DomainEventBus } from '../../../common/events/domain/domain-event-bus.service';
 import type { DomainEvent } from '../../../common/events/domain/domain-event.catalog';
 import { businessEmailRecipients } from '../team/business-recipients';
+import { RUNNING, runningAt } from './applicant-access';
 import {
   creditBalance,
   creditExpiry,
@@ -118,11 +119,6 @@ function frenchDay(d: Date): string {
     timeZone: 'Africa/Brazzaville',
   });
 }
-
-const RUNNING: BusinessSubscriptionStatus[] = [
-  BusinessSubscriptionStatus.TRIAL,
-  BusinessSubscriptionStatus.ACTIVE,
-];
 
 const NO_PLAN_TO_PUBLISH =
   'Choisissez une formule depuis votre espace, rubrique « Abonnement », pour publier vos offres.';
@@ -333,14 +329,8 @@ export class BusinessSubscriptionService implements OnModuleInit {
    * first in a month resets it, once (conditional on the month it was in).
    */
   async current(businessId: string, db: Db = this.prisma, now = new Date()) {
-    const where = {
-      business_id: businessId,
-      status: { in: RUNNING },
-      starts_at: { lte: now },
-      ends_at: { gt: now },
-    };
     const sub = await db.businessSubscription.findFirst({
-      where,
+      where: { business_id: businessId, ...runningAt(now) },
       include: { plan: true },
       orderBy: { starts_at: 'desc' },
     });
@@ -1303,26 +1293,23 @@ export class BusinessSubscriptionService implements OnModuleInit {
   // ── Quotas ───────────────────────────────────────────────────────────
 
   /**
-   * Covers one contact unlock with the current period's quota, atomically:
-   * the conditional update cannot take the last unit twice. False when there
-   * is no period or the quota is used up — the fee applies (pay per unlock).
+   * Whether a plan (trial or paid) runs now: it covers the business's own
+   * applicants, retained or only looked at, without spending a contact.
    */
-  async consumeUnlock(
+  async hasRunningPlan(
     employerProfileId: string,
-    attemptId: string,
     db: Db = this.prisma,
-  ) {
-    return this.consume(
-      employerProfileId,
-      { contact_unlock_attempt_id: attemptId },
-      db,
-    );
+  ): Promise<boolean> {
+    const businessId = await this.businessOf(employerProfileId, db);
+    return !!businessId && !!(await this.current(businessId, db));
   }
 
   /**
-   * A direct unlock from the business's own search: covered by the same
-   * quota as a mission unlock, recorded against its contact record. Never
-   * released — the contact is revealed at once, there is nothing to expire.
+   * Covers one contact from the business's own search with the current
+   * period's quota, atomically: the conditional update cannot take the last
+   * unit twice. Recorded against its contact record, and never released: the
+   * contact is revealed at once, there is nothing to expire. False when there
+   * is no period, or the quota and the packs are used up.
    */
   async consumeDirectUnlock(
     employerProfileId: string,
@@ -1338,8 +1325,7 @@ export class BusinessSubscriptionService implements OnModuleInit {
 
   private async consume(
     employerProfileId: string,
-    target:
-      { contact_unlock_attempt_id: string } | { contact_record_id: string },
+    target: { contact_record_id: string },
     db: Db,
   ) {
     const businessId = await this.businessOf(employerProfileId, db);
@@ -1375,7 +1361,10 @@ export class BusinessSubscriptionService implements OnModuleInit {
     return true;
   }
 
-  /** Gives a covered unlock's unit back (it expired or was cancelled). */
+  /**
+   * Gives a covered unlock's unit back (it expired or was cancelled). Only
+   * for attempts from when retaining spent a contact: it no longer does.
+   */
   async releaseUnlock(
     attemptId: string,
     db: Db = this.prisma,

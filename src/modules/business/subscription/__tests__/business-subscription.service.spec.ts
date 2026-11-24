@@ -118,23 +118,27 @@ const running = (over: Record<string, unknown> = {}) => ({
 });
 
 describe('BusinessSubscriptionService', () => {
-  describe('consumeUnlock', () => {
+  describe('consumeDirectUnlock', () => {
     it('covers an unlock while the quota lasts, with a ledger row', async () => {
       const { service, prisma } = make({ sub: running() });
-      await expect(service.consumeUnlock('p1', 'att-1')).resolves.toBe(true);
+      await expect(service.consumeDirectUnlock('p1', 'rec-1')).resolves.toBe(
+        true,
+      );
       expect(prisma.businessSubscription.updateMany).toHaveBeenCalledWith({
         where: { id: 'sub-1', unlocks_used: { lt: 2 } },
         data: { unlocks_used: { increment: 1 } },
       });
       expect(prisma.businessQuotaUsage.create).toHaveBeenCalledWith({
-        data: { subscription_id: 'sub-1', contact_unlock_attempt_id: 'att-1' },
+        data: { subscription_id: 'sub-1', contact_record_id: 'rec-1' },
       });
     });
 
-    it('falls back to the fee once the conditional update finds no room', async () => {
+    it('refuses once the conditional update finds no room', async () => {
       const { service, prisma } = make({ sub: running() });
       prisma.businessSubscription.updateMany.mockResolvedValue({ count: 0 });
-      await expect(service.consumeUnlock('p1', 'att-1')).resolves.toBe(false);
+      await expect(service.consumeDirectUnlock('p1', 'rec-1')).resolves.toBe(
+        false,
+      );
       expect(prisma.businessQuotaUsage.create).not.toHaveBeenCalled();
     });
 
@@ -142,7 +146,7 @@ describe('BusinessSubscriptionService', () => {
       const { service, prisma } = make({
         sub: running({ plan: plan({ unlocks_per_period: null }) }),
       });
-      await service.consumeUnlock('p1', 'att-1');
+      await service.consumeDirectUnlock('p1', 'rec-1');
       expect(
         prisma.businessSubscription.updateMany.mock.calls[0][0].where,
       ).toEqual({ id: 'sub-1' });
@@ -150,11 +154,30 @@ describe('BusinessSubscriptionService', () => {
 
     it('does nothing for a regular employer or without a running period', async () => {
       const regular = make({ profile: { is_business: false, business: null } });
-      await expect(regular.service.consumeUnlock('p1', 'a')).resolves.toBe(
+      await expect(
+        regular.service.consumeDirectUnlock('p1', 'a'),
+      ).resolves.toBe(false);
+      const none = make({ sub: null });
+      await expect(none.service.consumeDirectUnlock('p1', 'a')).resolves.toBe(
         false,
       );
-      const none = make({ sub: null });
-      await expect(none.service.consumeUnlock('p1', 'a')).resolves.toBe(false);
+    });
+  });
+
+  describe('hasRunningPlan', () => {
+    it('is true with a period running, whatever its contacts left', async () => {
+      const { service, prisma } = make({ sub: running({ unlocks_used: 2 }) });
+      await expect(service.hasRunningPlan('p1')).resolves.toBe(true);
+      expect(prisma.businessQuotaUsage.create).not.toHaveBeenCalled();
+    });
+
+    it('is false for a regular employer or without a running period', async () => {
+      const regular = make({
+        sub: running(),
+        profile: { is_business: false, business: null },
+      });
+      await expect(regular.service.hasRunningPlan('p1')).resolves.toBe(false);
+      await expect(make().service.hasRunningPlan('p1')).resolves.toBe(false);
     });
   });
 

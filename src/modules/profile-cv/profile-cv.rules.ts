@@ -1,6 +1,7 @@
 import { ApplicationStatus, CvChoice, type PrismaClient } from '@prisma/client';
+import { openApplicants } from '../business/subscription/applicant-access';
 
-type Db = Pick<PrismaClient, 'profile' | 'profileCv' | 'contactRecord'>;
+type Db = Pick<PrismaClient, 'profile' | 'profileCv'>;
 
 /** Applications whose recruiter has the candidate in hand: the file is theirs to read. */
 export const CV_OPEN_STATUSES: readonly ApplicationStatus[] = [
@@ -37,24 +38,28 @@ export async function cvForApplication(
 }
 
 /**
- * Which of these workers' contacts this employer holds. The uploaded file has
- * the candidate's phone and e-mail printed on it, so it opens only once the
- * contact is unlocked, or the application retained.
+ * Which of these workers' contacts this employer may read: those it holds,
+ * and its applicants while its plan runs. The uploaded file has the
+ * candidate's phone and e-mail printed on it, so it opens only for them, or
+ * once the application is retained.
  */
 export async function unlockedWorkers(
-  db: Db,
+  db: Pick<PrismaClient, 'profile' | 'application' | 'contactRecord'>,
   employerId: string,
   workerIds: readonly string[],
 ): Promise<Set<string>> {
   if (workerIds.length === 0) return new Set();
-  const rows = await db.contactRecord.findMany({
-    where: {
-      employer_id: employerId,
-      worker_id: { in: [...new Set(workerIds)] },
-    },
-    select: { worker_id: true },
-  });
-  return new Set(rows.map((r) => r.worker_id));
+  const [held, applicants] = await Promise.all([
+    db.contactRecord.findMany({
+      where: {
+        employer_id: employerId,
+        worker_id: { in: [...new Set(workerIds)] },
+      },
+      select: { worker_id: true },
+    }),
+    openApplicants(db, employerId, workerIds),
+  ]);
+  return new Set([...held.map((r) => r.worker_id), ...applicants]);
 }
 
 export function cvOpen(
