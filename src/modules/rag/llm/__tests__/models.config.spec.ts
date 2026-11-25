@@ -61,10 +61,10 @@ describe('models.config', () => {
   });
 
   it('names Anthropic with an undated model id', () => {
-    // Current Anthropic ids are bare — `claude-haiku-4-5`. A date-suffixed id
+    // Current Anthropic ids are bare — `claude-haiku-5-5`. A date-suffixed id
     // is a snapshot, and pinning one belongs in the env override, not here.
     const spec = TIER_CHAINS.standard.find((s) => s.provider === 'anthropic');
-    expect(spec?.model).toBe('claude-haiku-4-5');
+    expect(spec?.model).toBe('claude-haiku-5-5');
   });
 
   describe('hasCredential', () => {
@@ -126,12 +126,23 @@ describe('models.config', () => {
       );
       const providers = resolveChain('standard', env).map((s) => s.provider);
 
-      expect(providers[0]).toBe('openai');
-      expect(providers[1]).toBe('google');
+      expect(providers[0]).toBe('anthropic');
+      expect(providers[1]).toBe('openai');
       expect(providers[0]).not.toBe(providers[1]);
     });
 
-    it('puts a non-thinking model at the head of the chain', () => {
+    it('writes with Claude, then Luna when its key is out of credit', () => {
+      expect(TIER_CHAINS.writing.map((s) => s.provider)).toEqual([
+        'anthropic',
+        'openai',
+        'google',
+        'google',
+      ]);
+      expect(TIER_CHAINS.writing[0].model).toBe('claude-haiku-5-5');
+      expect(TIER_CHAINS.writing[1].model).toBe('gpt-6-luna');
+    });
+
+    it('puts models that do not think at the head of the chain', () => {
       // The incident this order came from: `gemini-3.6-flash` is a thinking
       // model, spent 5116ms emitting a 28-token tool call, then stalled past the
       // per-call cap and expired the whole turn budget. The head of the chain
@@ -142,8 +153,10 @@ describe('models.config', () => {
       );
       const chain = resolveChain('standard', env);
 
-      expect(chain[0].model).toBe('gpt-4o-mini');
-      // …and the thinking model it replaced is still there, just not first.
+      // Haiku 5.5 would think: `anthropicParams` turns it off.
+      expect(chain[0].model).toBe('claude-haiku-5-5');
+      expect(chain[1].model).toBe('gpt-4o-mini');
+      // …and the thinking model is still there, just not first.
       const thinking = chain.findIndex((s) => s.model === 'gemini-3.6-flash');
       expect(thinking).toBeGreaterThan(0);
     });

@@ -77,6 +77,20 @@ const INCOMPATIBLE_TEXT = [
   'tools are not supported',
 ];
 
+/**
+ * A key with no money left. Anthropic says it as a plain 400 (« Your credit
+ * balance is too low »; « specified API usage limits » for a spend limit), so
+ * by its status alone it reads as a request of ours that every vendor would
+ * refuse, and the chain would stop there. Another vendor answers it.
+ */
+const OUT_OF_CREDIT_TEXT = [
+  'credit balance is too low',
+  'specified api usage limits',
+  'billing_hard_limit',
+  'billing hard limit',
+  'insufficient_quota',
+];
+
 function isProgrammerError(err: unknown): boolean {
   return (
     err instanceof TypeError ||
@@ -101,7 +115,8 @@ export function classifyLlmError(err: unknown): LlmErrorClass {
     if (status === 429) return 'rate_limit';
     if (status >= 500) return 'server';
     if (status === 408) return 'transport';
-    if (status === 401 || status === 403 || status === 404) {
+    if ([401, 402, 403, 404].includes(status)) return 'provider_unusable';
+    if (OUT_OF_CREDIT_TEXT.some((t) => message.includes(t))) {
       return 'provider_unusable';
     }
     if (status >= 400) return 'fatal';

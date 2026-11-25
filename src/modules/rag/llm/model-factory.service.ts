@@ -55,6 +55,32 @@ export function openAiParams(
     : { temperature: undefined };
 }
 
+/**
+ * Since Haiku 5.5, and Opus 4.7 before it, Claude refuses a temperature
+ * (`400`) and thinks before answering unless told not to. Haiku answers a
+ * WhatsApp turn, so it does not think. `maxTokens`: the installed LangChain
+ * does not know the model and would cut its answers at 4096.
+ */
+export function anthropicParams(
+  model: string,
+  temperature: number,
+): {
+  temperature?: number;
+  thinking?: { type: 'disabled' };
+  maxTokens?: number;
+} {
+  if (/^claude-haiku-5/.test(model)) {
+    return {
+      temperature: undefined,
+      thinking: { type: 'disabled' },
+      maxTokens: 16_384,
+    };
+  }
+  return /^claude-(opus-(4-[78]|5)|sonnet-5|fable|mythos)/.test(model)
+    ? { temperature: undefined, maxTokens: 16_384 }
+    : { temperature };
+}
+
 @Injectable()
 export class LlmModelFactory {
   private readonly logger = new Logger(LlmModelFactory.name);
@@ -156,6 +182,7 @@ export class LlmModelFactory {
         const { ChatAnthropic } = await import('@langchain/anthropic');
         return new ChatAnthropic({
           ...shared,
+          ...anthropicParams(spec.model, shared.temperature),
           model: spec.model,
         }) as unknown as BaseChatModel;
       }

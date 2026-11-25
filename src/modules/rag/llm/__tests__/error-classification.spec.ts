@@ -88,6 +88,26 @@ describe('provider_unusable', () => {
     }
   });
 
+  // Anthropic's exact wording, as a 400: without it, an empty key stops VoVa
+  // and the AI writing instead of moving to OpenAI.
+  it.each([
+    {
+      status: 400,
+      message:
+        '400 {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."}}',
+    },
+    {
+      status: 400,
+      message:
+        'You have reached your specified API usage limits. You will regain access on 2026-12-01 at 00:00 UTC.',
+    },
+    { status: 402, message: 'billing_error' },
+    { status: 400, message: 'Billing hard limit has been reached' },
+  ])('moves on when a key has no credit left: $message', (err) => {
+    expect(classifyLlmError(err)).toBe('provider_unusable');
+    expect(mayFallOver(classifyLlmError(err))).toBe(true);
+  });
+
   it('falls over — another vendor may serve the same request', () => {
     expect(mayFallOver('provider_unusable')).toBe(true);
     expect(isRetryableInPlace('provider_unusable')).toBe(false);
