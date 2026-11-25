@@ -3632,7 +3632,7 @@ model BusinessPlan {
   /// « Publier sur LinkedIn »: the business's team posts its offers on their
   /// own LinkedIn from Rabotka. The share link stays open to every plan.
   linkedin_posting      Boolean  @default(false)
-  /// « Exports RH »: an offer's candidates, the staff register, the ACPE file.
+  /// « Exports RH »: an offer's candidates, the staff register.
   hr_exports            Boolean  @default(false)
   /// « Visio dans Rabotka »: a link made in Rabotka, guests, transcription.
   /// A Meet or Zoom link pasted by hand stays open to every plan.

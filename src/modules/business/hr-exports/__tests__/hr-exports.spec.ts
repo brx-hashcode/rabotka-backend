@@ -1,10 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
-import {
-  acpeTable,
-  candidatesTable,
-  pay,
-  staffTable,
-} from '../hr-export-tables';
+import { candidatesTable, pay, staffTable } from '../hr-export-tables';
 import { HrExportsService } from '../hr-exports.service';
 
 const d = (iso: string) => new Date(iso);
@@ -85,44 +80,6 @@ describe('HR export tables', () => {
     ]);
     expect(t.rows[1][6]).toBeNull();
   });
-
-  it('leaves a column for the ACPE receipt number', () => {
-    const t = acpeTable([
-      {
-        reference: 'RBT-1',
-        title: 'Comptable',
-        category: 'Comptabilité',
-        contract: 'CDD',
-        quantity: 2,
-        city: 'Pointe-Noire',
-        countryName: 'Congo',
-        address: null,
-        publishedAt: d('2026-11-01T00:00:00Z'),
-        scheduledAt: null,
-        amount: null,
-        paymentFlow: null,
-        description: 'Tenue\n\nde la   comptabilité',
-        status: 'ACTIVE',
-      },
-    ]);
-    expect(t.header.at(-1)).toBe('N° de récépissé ACPE');
-    expect(t.rows[0]).toEqual([
-      'RBT-1',
-      'Comptable',
-      'Comptabilité',
-      'CDD',
-      2,
-      'Pointe-Noire',
-      'Congo',
-      null,
-      '2026-11-01',
-      null,
-      null,
-      'Tenue de la comptabilité',
-      'En ligne',
-      null,
-    ]);
-  });
 });
 
 describe('HrExportsService', () => {
@@ -189,7 +146,7 @@ describe('HrExportsService', () => {
   });
 
   it('writes an Excel workbook by default', async () => {
-    const file = await make().service.acpe('p-1', 30, 'xlsx');
+    const file = await make().service.staffRegister('p-1', 'xlsx');
     expect(file.format).toBe('xlsx');
     expect(
       file.format === 'xlsx' && file.buffer.subarray(0, 2).toString(),
