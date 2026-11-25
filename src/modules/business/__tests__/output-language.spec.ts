@@ -53,7 +53,7 @@ describe('the language the AI writes in', () => {
       expect(prompt).toMatch(/LANGUAGE: .*ENGLISH/);
       expect(prompt).not.toMatch(/en français|Français clair/);
     }
-    expect(draftPrompt('en')).toContain('Apply directly online on Rabotka.');
+    expect(draftPrompt('en')).toContain('en anglais simple');
   });
 
   it('analyses a CV in the language of its job', () => {

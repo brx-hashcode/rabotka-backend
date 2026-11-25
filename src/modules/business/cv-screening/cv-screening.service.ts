@@ -355,25 +355,21 @@ export class CvScreeningService {
     files: (CvUpload & { tag: string })[],
   ): Promise<{ screeningId: string; resumeIds: Map<string, string> }> {
     const businessId = await this.requireBusiness(profileId);
-    // Always the same one, purged or not: a second one split the candidates
-    // into two groups that could not be compared.
-    const open = await this.prisma.cvScreening.findFirst({
-      where: { business_id: businessId, offer_id: offerId, external: true },
-      orderBy: { created_at: 'desc' },
-      select: { id: true },
-    });
+    const shared = await this.sharedScreening(profileId, businessId, offerId);
     const screening = await this.create(
       profileId,
       files,
       { offerId },
-      open?.id,
-    );
-    if (!open) {
-      await this.prisma.cvScreening.update({
-        where: { id: screening.id },
-        data: { external: true },
-      });
-    }
+      shared.id,
+    ).catch(async (err: unknown) => {
+      // Opened for nothing (no « CV inclus » left, a file refused): not left empty.
+      if (shared.opened) {
+        await this.prisma.cvScreening
+          .deleteMany({ where: { id: shared.id, resumes: { none: {} } } })
+          .catch(() => undefined);
+      }
+      throw err;
+    });
     const resumeIds = new Map<string, string>();
     for (const file of files) {
       const resume = screening.resumes.find((r) =>
@@ -387,6 +383,51 @@ export class CvScreeningService {
       });
     }
     return { screeningId: screening.id, resumeIds };
+  }
+
+  /**
+   * The offer's one shared screening, purged or not, opened if there is none.
+   * One at a time per offer: two CVs read at once each opened their own, and
+   * the candidates of one could not be compared with those of the other.
+   */
+  private async sharedScreening(
+    profileId: string,
+    businessId: string,
+    offerId: string,
+  ): Promise<{ id: string; opened: boolean }> {
+    const where = {
+      business_id: businessId,
+      offer_id: offerId,
+      external: true,
+    };
+    const find = (db: Pick<Prisma.TransactionClient, 'cvScreening'>) =>
+      db.cvScreening.findFirst({
+        where,
+        orderBy: { created_at: 'desc' },
+        select: { id: true },
+      });
+    const open = await find(this.prisma);
+    if (open) return { id: open.id, opened: false };
+    const brief = await this.jobBrief(profileId, { offerId });
+    const expiresAt = addMonthsClamped(
+      new Date(),
+      await this.systemConfig.getCvLimitMonths(),
+    );
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`cv-screening:${offerId}`}))`;
+      const other = await find(tx);
+      if (other) return { id: other.id, opened: false };
+      const made = await tx.cvScreening.create({
+        data: {
+          ...where,
+          job_title: brief.title,
+          job_text: brief.text,
+          expires_at: expiresAt,
+        },
+        select: { id: true },
+      });
+      return { id: made.id, opened: true };
+    });
   }
 
   /** The job the CVs are measured against: an offer of the business, or one described by hand. */
