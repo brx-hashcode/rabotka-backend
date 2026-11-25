@@ -102,4 +102,42 @@ describe('GeoService', () => {
       expect(geo.canonicalCity(null, '  Ailleurs ')).toBe('Ailleurs');
     });
   });
+
+  describe('the city someone named', () => {
+    const find = (
+      city: string,
+      text = '',
+      near: string | null = null,
+      country: string | null = null,
+    ) => geo.findPlace(city, { country, text, near });
+
+    it('is the only one there is, whatever its accents', () => {
+      expect(find('yaounde')).toEqual({ city: 'Yaoundé', countryCode: 'CM' });
+      expect(find('KINSHASA')).toEqual({ city: 'Kinshasa', countryCode: 'CD' });
+    });
+
+    it('is in the country they named, not in their own', () => {
+      expect(
+        find('Brazzaville', 'vivant a Brazzaville au Congo', 'CD'),
+      ).toEqual({ city: 'Brazzaville', countryCode: 'CG' });
+      // The model's long form of the wrong Congo: no Brazzaville there.
+      expect(
+        find(
+          'Brazzaville',
+          'au Congo',
+          'CD',
+          'République Démocratique du Congo',
+        ).countryCode,
+      ).toBe('CG');
+    });
+
+    it('is near them, or the country of that name, when they named none', () => {
+      expect(find('Brazzaville', '', 'CI').countryCode).toBe('CI');
+      expect(find('Brazzaville', '', 'CD').countryCode).toBe('CG');
+    });
+
+    it('has no country when nothing tells', () => {
+      expect(find('Xyzville')).toEqual({ city: 'Xyzville', countryCode: null });
+    });
+  });
 });

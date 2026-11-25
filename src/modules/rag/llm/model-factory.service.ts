@@ -39,6 +39,22 @@ const THINKING_LEVELS = new Set<GoogleThinkingLevel>([
  * client, and rebuilding it per message would discard connection reuse on the
  * hottest path in the assistant.
  */
+/**
+ * What GPT-5.6 and GPT-6 ask for, measured on the API (2026-11-25): a
+ * temperature is refused (400) unless reasoning is off, which Luna and Terra
+ * allow and the larger ones (Sol, Astra) do not. `@langchain/openai` does not
+ * know these names as reasoning models, so it would not send the effort itself.
+ */
+export function openAiParams(
+  model: string,
+  temperature: number,
+): { temperature?: number; modelKwargs?: Record<string, unknown> } {
+  if (!/^gpt-(5\.6|6(\.\d+)?)-/.test(model)) return { temperature };
+  return /-(luna|terra)(-|$)/.test(model)
+    ? { temperature, modelKwargs: { reasoning_effort: 'none' } }
+    : { temperature: undefined };
+}
+
 @Injectable()
 export class LlmModelFactory {
   private readonly logger = new Logger(LlmModelFactory.name);
@@ -153,6 +169,7 @@ export class LlmModelFactory {
         const { ChatOpenAI } = await import('@langchain/openai');
         return new ChatOpenAI({
           ...shared,
+          ...openAiParams(spec.model, shared.temperature),
           model: spec.model,
         }) as unknown as BaseChatModel;
       }
