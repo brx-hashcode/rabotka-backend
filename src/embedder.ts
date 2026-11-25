@@ -1,25 +1,3 @@
-/**
- * The shared e5 embedder — one copy of the model for every API on the host.
- *
- * multilingual-e5-large is ~2.2GB of native memory once loaded. The prod and
- * develop APIs each loading their own made it ~4.4GB of a 12GB VPS for
- * identical vectors (measured 2026-11-24: 2.9GiB RSS per API). This process
- * holds the only copy; the APIs reach it through `VOVA_EMBEDDER_URL`
- * (`HelpEmbeddingsService` goes remote when that is set).
- *
- * It runs from the backend image — the model is already baked in — with its
- * own command and compose project (`docker-compose.embedder.yml`). Deliberately
- * not Nest: it needs a model and two routes, not the app's module graph or its
- * credentials.
- *
- * **Queries before passages.** onnxruntime runs synchronously, so one job at a
- * time is all there is. A category rebuild on one API (dozens of passages) must
- * not hold up a person's question on the other, so passage requests are cut
- * into small slices and any waiting query goes ahead of the next slice.
- *
- *   GET  /health → 200 once the model is loaded, 503 before
- *   POST /embed  { kind: 'query' | 'passage', texts: string[] } → { vectors }
- */
 import { createServer, type IncomingMessage } from 'node:http';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
