@@ -5,7 +5,6 @@ import {
   Logger,
   Delete,
   Get,
-  HttpCode,
   Param,
   ParseUUIDPipe,
   Post,
@@ -290,13 +289,13 @@ export class CvScreeningController {
   }
 
   @Delete(':id')
-  @HttpCode(204)
   @ApiOperation({ summary: 'Delete a screening and its files' })
   async remove(
     @Req() req: ProfileAuthenticatedRequest,
     @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<void> {
+  ): Promise<{ deleted: true }> {
     await this.screenings.remove(req.user.profileId, id);
+    return { deleted: true };
   }
 
   private async sendReport(res: Response, input: ChatReportInput) {

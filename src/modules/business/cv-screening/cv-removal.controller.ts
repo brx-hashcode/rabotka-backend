@@ -1,7 +1,6 @@
 import {
   Controller,
   Delete,
-  HttpCode,
   Param,
   ParseUUIDPipe,
   Req,
@@ -16,7 +15,8 @@ import { CvRemovalService } from './cv-removal.service';
 
 /**
  * « Supprimer le CV » of one candidate. Not for an Évaluateur (team-access.ts
- * refuses it every change it does not list).
+ * refuses it every change it does not list). Answered with a body, never an
+ * empty 204: the front's client reads every success as JSON.
  */
 @ApiTags('Business')
 @ApiBearerAuth()
@@ -26,40 +26,40 @@ export class CvRemovalController {
   constructor(private readonly removal: CvRemovalService) {}
 
   @Delete('applications/:id/cv')
-  @HttpCode(204)
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
     summary: 'Delete the CV of a Rabotka application; its score stays',
   })
-  application(
+  async application(
     @Req() req: ProfileAuthenticatedRequest,
     @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<void> {
-    return this.removal.application(req.user.profileId, id);
+  ): Promise<{ deleted: true }> {
+    await this.removal.application(req.user.profileId, id);
+    return { deleted: true };
   }
 
   @Delete('external-applications/:id/cv')
-  @HttpCode(204)
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
     summary: 'Delete the CV of a careers-page or imported candidate',
   })
-  external(
+  async external(
     @Req() req: ProfileAuthenticatedRequest,
     @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<void> {
-    return this.removal.external(req.user.profileId, id);
+  ): Promise<{ deleted: true }> {
+    await this.removal.external(req.user.profileId, id);
+    return { deleted: true };
   }
 
   @Delete('cv-screenings/:id/resumes/:resumeId/file')
-  @HttpCode(204)
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({ summary: 'Delete one CV of an analysis; its score stays' })
-  resume(
+  async resume(
     @Req() req: ProfileAuthenticatedRequest,
     @Param('id', ParseUUIDPipe) id: string,
     @Param('resumeId', ParseUUIDPipe) resumeId: string,
-  ): Promise<void> {
-    return this.removal.resume(req.user.profileId, id, resumeId);
+  ): Promise<{ deleted: true }> {
+    await this.removal.resume(req.user.profileId, id, resumeId);
+    return { deleted: true };
   }
 }
