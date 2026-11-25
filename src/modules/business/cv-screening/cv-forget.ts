@@ -1,5 +1,6 @@
 import type { Logger } from '@nestjs/common';
 import { Prisma, type PrismaClient } from '@prisma/client';
+import { withoutQuotes } from './cv-marking';
 import type { StorageService } from '../../../common/services/storage/storage.service';
 
 type Objects = Pick<StorageService, 'delete'>;
@@ -50,6 +51,8 @@ export async function forgetCv(
     storage_key: string | null;
     storage_bucket: string | null;
     candidate: Prisma.JsonValue;
+    /** What its analysis read: the CV's words go too. */
+    reading?: Prisma.JsonValue;
   },
   removedAt?: Date,
 ): Promise<void> {
@@ -71,6 +74,13 @@ export async function forgetCv(
         cv_text: null,
         application_answers: Prisma.DbNull,
         candidate: withoutContact(r.candidate),
+        ...(r.reading
+          ? {
+              reading:
+                (withoutQuotes(r.reading) as Prisma.InputJsonValue | null) ??
+                Prisma.DbNull,
+            }
+          : {}),
         ...(removedAt ? { removed_at: removedAt } : {}),
       },
     }),

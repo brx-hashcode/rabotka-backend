@@ -189,6 +189,9 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       delay?: number;
       priority?: number;
       jobId?: string;
+      /** Over the default three tries, two seconds apart and growing. */
+      attempts?: number;
+      backoffMs?: number;
       repeat?: {
         pattern?: string;
         every?: number;
@@ -202,6 +205,10 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       priority: options?.priority,
       jobId: options?.jobId,
       repeat: options?.repeat,
+      ...(options?.attempts ? { attempts: options.attempts } : {}),
+      ...(options?.backoffMs
+        ? { backoff: { type: 'exponential', delay: options.backoffMs } }
+        : {}),
     });
     this.logger.debug(`Job [${job.id}] added to queue ${queueName}`);
     return job.id;

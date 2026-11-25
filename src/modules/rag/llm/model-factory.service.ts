@@ -83,8 +83,16 @@ export class LlmModelFactory {
     return typeof key === 'string' && key.trim().length > 0;
   }
 
-  async build(spec: LlmProviderSpec): Promise<BaseChatModel> {
-    const cached = this.cache.get(specId(spec));
+  /** One model per spec, and per temperature when one is asked. */
+  async build(
+    spec: LlmProviderSpec,
+    temperature?: number,
+  ): Promise<BaseChatModel> {
+    const id =
+      temperature === undefined
+        ? specId(spec)
+        : `${specId(spec)}@${temperature}`;
+    const cached = this.cache.get(id);
     if (cached) return cached;
 
     if (!this.hasCredential(spec)) {
@@ -100,8 +108,8 @@ export class LlmModelFactory {
       PROVIDER_API_KEY_ENV[spec.provider],
     ) as string;
 
-    const model = await this.construct(spec, apiKey.trim());
-    this.cache.set(specId(spec), model);
+    const model = await this.construct(spec, apiKey.trim(), temperature);
+    this.cache.set(id, model);
     this.logger.debug(`Built chat model ${specId(spec)}`);
     return model;
   }
@@ -120,6 +128,7 @@ export class LlmModelFactory {
   private async construct(
     spec: LlmProviderSpec,
     apiKey: string,
+    temperature?: number,
   ): Promise<BaseChatModel> {
     /**
      * Shared across vendors.
@@ -132,7 +141,8 @@ export class LlmModelFactory {
      */
     const shared = {
       apiKey,
-      temperature: readNumber(this.config, 'VOVA_TEMPERATURE', 0.2),
+      temperature:
+        temperature ?? readNumber(this.config, 'VOVA_TEMPERATURE', 0.2),
       maxRetries: 0,
     };
 

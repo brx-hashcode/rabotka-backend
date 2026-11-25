@@ -98,6 +98,7 @@ import {
   PROFILE_AUTO_SUSPENDED_EVENT,
   type ProfileAutoSuspendedPayload,
 } from '../../common/events/profile-auto-suspended.event';
+import { scoreView } from '../business/cv-screening/cv-marking';
 
 /**
  * Statuses that count as a worker's "active" candidature — i.e. the worker
@@ -863,6 +864,8 @@ export class ApplicationService {
             strengths: true,
             gaps: true,
             criteria: true,
+            reading: true,
+            grid: { select: { id: true, version: true, items: true } },
             screening_id: true,
           },
         },
@@ -937,6 +940,8 @@ export class ApplicationService {
             strengths: a.cv_resume.strengths,
             gaps: a.cv_resume.gaps,
             criteria: a.cv_resume.criteria,
+            /** Marked on the offer's grid; null on the previous formula. */
+            scoring: scoreView(a.cv_resume),
           }
         : null,
       ratedByEmployer: a.assignment

@@ -833,6 +833,22 @@ export class SystemConfigService implements OnModuleInit {
     return Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 60) : 24;
   }
 
+  /** Whether a new offer is scored on its own criteria; off unless switched on. */
+  async getCvGridScoring(): Promise<boolean> {
+    return (
+      (await this.get('business.cv_grid_scoring', 'false')).trim() === 'true'
+    );
+  }
+
+  /** Free re-analyses of an offer's candidates after its criteria changed: 0 to 10, 2 by default. */
+  async getCvRescoreLimit(): Promise<number> {
+    const raw = Number.parseInt(
+      (await this.get('business.cv_rescore_limit', '2')).trim(),
+      10,
+    );
+    return Number.isFinite(raw) ? Math.min(Math.max(raw, 0), 10) : 2;
+  }
+
   async getContactInfo() {
     const [email, phone, address] = await this.mgetBatch([
       { key: 'contact.email', fallback: 'contact@rabotka.com' },

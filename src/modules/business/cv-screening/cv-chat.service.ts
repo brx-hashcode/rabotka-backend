@@ -38,6 +38,8 @@ import {
   MAX_CHARTS,
   chartTools,
   criteriaLine,
+  WITH_GRID,
+  type OnGrid,
   type ChartTools,
 } from './cv-chart';
 import {
@@ -175,7 +177,7 @@ export type CvChatMessage = {
 };
 
 export type CvChatTurn = {
-  resume: CvScreeningResume;
+  resume: CvScreeningResume & OnGrid;
   language: OutputLanguage;
   messages: BaseMessage[];
   remaining: number;
@@ -574,7 +576,7 @@ export class CvChatService {
         id: resumeId,
         screening: { id: screeningId, business_id: businessId },
       },
-      include: { screening: true },
+      include: { screening: true, ...WITH_GRID },
     });
     if (!resume) throw new NotFoundException('CV introuvable.');
     const e = await this.subscriptions.entitlements(businessId);
@@ -661,7 +663,7 @@ export function view(m: {
 /** The job, what the analysis concluded, and the CV's text. */
 function contextMessage(
   job: { title: string; text: string; country: string | null },
-  resume: CvScreeningResume,
+  resume: CvScreeningResume & OnGrid,
   cvText: string,
 ): HumanMessage {
   const analysis = [

@@ -5,8 +5,10 @@ import {
   CV_SCREENING_SWEEP_QUEUE,
 } from '../../../common/services/queue/queue.module';
 import { QueueService } from '../../../common/services/queue/queue.service';
+import { CvRescoreService } from './cv-rescore.service';
 import { CvRetentionService } from './cv-retention.service';
 import {
+  CV_READING_RETRY,
   CvScreeningService,
   type CvScreeningJob,
 } from './cv-screening.service';
@@ -28,6 +30,7 @@ export class CvScreeningScheduler implements OnModuleInit {
     private readonly queueService: QueueService,
     private readonly screenings: CvScreeningService,
     private readonly retention: CvRetentionService,
+    private readonly rescoring: CvRescoreService,
     // « Fichier » answers follow the CVs' retention, on the same hourly sweep.
     @Optional() private readonly answerFiles?: AnswerFilesService,
   ) {}
@@ -35,7 +38,13 @@ export class CvScreeningScheduler implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     this.queueService.createWorker<CvScreeningJob>(
       CV_SCREENING_QUEUE,
-      async (job) => this.screenings.process(job.data.resumeId),
+      async (job) =>
+        job.data.rescore
+          ? this.rescoring.process(job.data.resumeId)
+          : this.screenings.process(
+              job.data.resumeId,
+              job.attemptsMade + 1 >= CV_READING_RETRY.attempts,
+            ),
       { concurrency: CONCURRENCY },
     );
 

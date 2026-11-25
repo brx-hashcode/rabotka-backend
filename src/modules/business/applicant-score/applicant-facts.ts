@@ -98,6 +98,7 @@ export async function applicantFacts(
           question: x.label,
           answer: answerText(x),
           knockoutFailed: x.passed === false,
+          ...(x.passed === true ? { knockoutPassed: true } : {}),
         })),
     cvText: app.profile_cv?.cv_text || undefined,
   };
