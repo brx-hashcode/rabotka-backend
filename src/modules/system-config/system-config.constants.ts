@@ -254,6 +254,25 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
       "Entreprises – Durée maximale de conservation des CV après la clôture de l'offre (mois, 1 à 60)",
     isSecret: false,
   },
+  // New offers scored on their own criteria (cv-grid). Off: the previous
+  // method. An offer already on its criteria stays on them.
+  {
+    key: 'business.cv_grid_scoring',
+    value: 'false',
+    category: ConfigCategory.FEES,
+    label:
+      "Entreprises – Noter les candidats sur les critères de l'offre (true/false)",
+    isSecret: false,
+  },
+  // A new reading of every CV of an offer costs a model call each.
+  {
+    key: 'business.cv_rescore_limit',
+    value: '2',
+    category: ConfigCategory.FEES,
+    label:
+      "Entreprises – Ré-analyses gratuites des candidats d'une offre après un changement de critères (0 à 10)",
+    isSecret: false,
+  },
   // The AI features the trial includes ('true' / 'false'); off by default: they
   // cost a model call each, and come with a paid plan.
   {

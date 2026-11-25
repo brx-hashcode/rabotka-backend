@@ -163,7 +163,7 @@ export class CreateBusinessPlanDto {
   linkedinPosting?: boolean;
 
   @ApiPropertyOptional({
-    description: '« Exports RH »: candidates, staff register, ACPE declaration',
+    description: '« Exports RH »: candidates, staff register',
   })
   @IsOptional()
   @IsBoolean()

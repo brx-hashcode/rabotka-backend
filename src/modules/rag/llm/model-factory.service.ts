@@ -39,6 +39,48 @@ const THINKING_LEVELS = new Set<GoogleThinkingLevel>([
  * client, and rebuilding it per message would discard connection reuse on the
  * hottest path in the assistant.
  */
+/**
+ * What GPT-5.6 and GPT-6 ask for, measured on the API (2026-11-25): a
+ * temperature is refused (400) unless reasoning is off, which Luna and Terra
+ * allow and the larger ones (Sol, Astra) do not. `@langchain/openai` does not
+ * know these names as reasoning models, so it would not send the effort itself.
+ */
+export function openAiParams(
+  model: string,
+  temperature: number,
+): { temperature?: number; modelKwargs?: Record<string, unknown> } {
+  if (!/^gpt-(5\.6|6(\.\d+)?)-/.test(model)) return { temperature };
+  return /-(luna|terra)(-|$)/.test(model)
+    ? { temperature, modelKwargs: { reasoning_effort: 'none' } }
+    : { temperature: undefined };
+}
+
+/**
+ * Since Haiku 5.5, and Opus 4.7 before it, Claude refuses a temperature
+ * (`400`) and thinks before answering unless told not to. Haiku answers a
+ * WhatsApp turn, so it does not think. `maxTokens`: the installed LangChain
+ * does not know the model and would cut its answers at 4096.
+ */
+export function anthropicParams(
+  model: string,
+  temperature: number,
+): {
+  temperature?: number;
+  thinking?: { type: 'disabled' };
+  maxTokens?: number;
+} {
+  if (/^claude-haiku-5/.test(model)) {
+    return {
+      temperature: undefined,
+      thinking: { type: 'disabled' },
+      maxTokens: 16_384,
+    };
+  }
+  return /^claude-(opus-(4-[78]|5)|sonnet-5|fable|mythos)/.test(model)
+    ? { temperature: undefined, maxTokens: 16_384 }
+    : { temperature };
+}
+
 @Injectable()
 export class LlmModelFactory {
   private readonly logger = new Logger(LlmModelFactory.name);
@@ -67,8 +109,16 @@ export class LlmModelFactory {
     return typeof key === 'string' && key.trim().length > 0;
   }
 
-  async build(spec: LlmProviderSpec): Promise<BaseChatModel> {
-    const cached = this.cache.get(specId(spec));
+  /** One model per spec, and per temperature when one is asked. */
+  async build(
+    spec: LlmProviderSpec,
+    temperature?: number,
+  ): Promise<BaseChatModel> {
+    const id =
+      temperature === undefined
+        ? specId(spec)
+        : `${specId(spec)}@${temperature}`;
+    const cached = this.cache.get(id);
     if (cached) return cached;
 
     if (!this.hasCredential(spec)) {
@@ -84,8 +134,8 @@ export class LlmModelFactory {
       PROVIDER_API_KEY_ENV[spec.provider],
     ) as string;
 
-    const model = await this.construct(spec, apiKey.trim());
-    this.cache.set(specId(spec), model);
+    const model = await this.construct(spec, apiKey.trim(), temperature);
+    this.cache.set(id, model);
     this.logger.debug(`Built chat model ${specId(spec)}`);
     return model;
   }
@@ -104,6 +154,7 @@ export class LlmModelFactory {
   private async construct(
     spec: LlmProviderSpec,
     apiKey: string,
+    temperature?: number,
   ): Promise<BaseChatModel> {
     /**
      * Shared across vendors.
@@ -116,7 +167,8 @@ export class LlmModelFactory {
      */
     const shared = {
       apiKey,
-      temperature: readNumber(this.config, 'VOVA_TEMPERATURE', 0.2),
+      temperature:
+        temperature ?? readNumber(this.config, 'VOVA_TEMPERATURE', 0.2),
       maxRetries: 0,
     };
 
@@ -130,6 +182,7 @@ export class LlmModelFactory {
         const { ChatAnthropic } = await import('@langchain/anthropic');
         return new ChatAnthropic({
           ...shared,
+          ...anthropicParams(spec.model, shared.temperature),
           model: spec.model,
         }) as unknown as BaseChatModel;
       }
@@ -153,6 +206,7 @@ export class LlmModelFactory {
         const { ChatOpenAI } = await import('@langchain/openai');
         return new ChatOpenAI({
           ...shared,
+          ...openAiParams(spec.model, shared.temperature),
           model: spec.model,
         }) as unknown as BaseChatModel;
       }

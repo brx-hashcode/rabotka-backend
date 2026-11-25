@@ -33,6 +33,8 @@ export type CvCandidate = {
   experienceMonths?: number | null;
   /** Full-time months related to the post. */
   relevantMonths?: number | null;
+  /** Of those, in the same work. */
+  directMonths?: number | null;
 };
 
 export type CvAssessment = {
@@ -173,6 +175,7 @@ export function parseAssessment(
     experiences,
     experienceMonths: months?.total ?? null,
     relevantMonths: months?.relevant ?? null,
+    directMonths: months?.direct ?? null,
     // Counted from the dates when there are any: the model adds up jobs held
     // at the same time.
     yearsExperience: months
@@ -266,6 +269,8 @@ export type ApplicationAnswerNote = {
   answer: string;
   /** An « éliminatoire » question whose answer is not the one accepted. */
   knockoutFailed?: boolean;
+  /** An « éliminatoire » question whose answer is accepted. */
+  knockoutPassed?: boolean;
 };
 
 /** The answers kept on a CV (`application_answers`), read back safely. */
@@ -273,9 +278,19 @@ export function readApplicationAnswers(json: unknown): ApplicationAnswerNote[] {
   if (!Array.isArray(json)) return [];
   return json.flatMap((x) => {
     if (!x || typeof x !== 'object') return [];
-    const { question, answer, knockoutFailed } = x as Record<string, unknown>;
+    const { question, answer, knockoutFailed, knockoutPassed } = x as Record<
+      string,
+      unknown
+    >;
     return typeof question === 'string' && typeof answer === 'string'
-      ? [{ question, answer, knockoutFailed: knockoutFailed === true }]
+      ? [
+          {
+            question,
+            answer,
+            knockoutFailed: knockoutFailed === true,
+            ...(knockoutPassed === true ? { knockoutPassed: true } : {}),
+          },
+        ]
       : [];
   });
 }

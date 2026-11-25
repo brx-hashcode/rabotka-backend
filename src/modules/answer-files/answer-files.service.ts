@@ -198,7 +198,14 @@ export class AnswerFilesService {
       value: string;
       passed?: boolean | null;
     }[],
-  ): Promise<{ question: string; answer: string; knockoutFailed: boolean }[]> {
+  ): Promise<
+    {
+      question: string;
+      answer: string;
+      knockoutFailed: boolean;
+      knockoutPassed?: boolean;
+    }[]
+  > {
     const ids = rows.flatMap((r) => {
       const f = r.kind === OfferQuestionKind.FILE ? fileAnswer(r.value) : null;
       return f ? [f.id] : [];
@@ -219,7 +226,12 @@ export class AnswerFilesService {
           ? `Fichier « ${f.name} » :\n${body}`
           : `Fichier « ${f.name} » (photo ou fichier sans texte lisible)`;
       }
-      return { question: r.label, answer, knockoutFailed: r.passed === false };
+      return {
+        question: r.label,
+        answer,
+        knockoutFailed: r.passed === false,
+        ...(r.passed === true ? { knockoutPassed: true } : {}),
+      };
     });
   }
 

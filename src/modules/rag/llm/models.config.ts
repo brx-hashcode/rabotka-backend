@@ -69,22 +69,21 @@ export const TIER_CHAINS: Record<LlmTier, LlmProviderSpec[]> = {
   //
   // Hence:
   //
-  //   1. openai/gpt-4o-mini      — non-thinking, so it cannot stall the way
+  //   1. anthropic/claude-haiku-5-5
+  //                              — asked for (November 2026), with OpenAI right
+  //                                behind it for the day its key has no credit
+  //                                left (`error-classification.ts`). Thinking
+  //                                is turned off (`anthropicParams`); explicit
+  //                                cache breakpoints take the repeated prefix
+  //                                to ~10% of input cost.
+  //   2. openai/gpt-4o-mini      — non-thinking, so it cannot stall the way
   //                                3.6-flash did; OpenAI caches any prefix over
   //                                1024 tokens automatically, with no code and
   //                                no `cache_control` key to get wrong.
-  //   2. google/gemini-flash-lite-latest
+  //   3. google/gemini-flash-lite-latest
   //                              — ~1.4s median on a tool-calling turn (the
-  //                                number measured for the cheap tier below),
-  //                                and a DIFFERENT VENDOR from position 1, which
-  //                                is what makes the default race pair fail
-  //                                independently. Same credential as position 4.
-  //   3. anthropic/claude-haiku-4-5
-  //                              — the only provider with explicit cache
-  //                                breakpoints wired (PROVIDERS_SUPPORTING_CACHE_CONTROL),
-  //                                taking the repeated prefix to ~10% of input
-  //                                cost. The credential now exists; the comment
-  //                                that used to say otherwise was stale.
+  //                                number measured for the cheap tier below).
+  //                                Same credential as position 4.
   //   4. google/gemini-3.6-flash — demoted from the lead, kept for capability.
   //
   // Positions 5-7 are unchanged and stay ordered by measured tool-calling
@@ -102,6 +101,10 @@ export const TIER_CHAINS: Record<LlmTier, LlmProviderSpec[]> = {
   // deploy that introduced it. That is the trade taken here.
   standard: [
     {
+      provider: 'anthropic',
+      model: modelId('VOVA_MODEL_STANDARD_ANTHROPIC', 'claude-haiku-5-5'),
+    },
+    {
       provider: 'openai',
       model: modelId('VOVA_MODEL_STANDARD_OPENAI', 'gpt-4o-mini'),
     },
@@ -114,10 +117,6 @@ export const TIER_CHAINS: Record<LlmTier, LlmProviderSpec[]> = {
         'VOVA_MODEL_STANDARD_GOOGLE_FAST',
         'gemini-flash-lite-latest',
       ),
-    },
-    {
-      provider: 'anthropic',
-      model: modelId('VOVA_MODEL_STANDARD_ANTHROPIC', 'claude-haiku-4-5'),
     },
     {
       provider: 'google',
@@ -187,23 +186,23 @@ export const TIER_CHAINS: Record<LlmTier, LlmProviderSpec[]> = {
   // « Rédiger avec l'IA ». Text only (the CV arrives as its extracted text),
   // streamed, and judged on substance: Flash-Lite, right for scoring CVs in
   // the background, answered these in two thin lines and ranked a candidate
-  // with no skill for the post first. So the chain leads with the stronger
-  // writers and keeps Flash-Lite only as the last resort. 3.6-flash wrote
-  // both test answers well in 5–9 s (slow for background scoring, fine for a
-  // reply being read); gpt-4o-mini, older, comes after it. A provider without
+  // with no skill for the post first. So the chain leads with Claude, then
+  // Luna for the day Claude's key has no credit left (both keep nearly every
+  // fact of an offer, in ~3 s: scripts/offer-eval.ts), then 3.6-flash (good,
+  // in 5–9 s), and keeps Flash-Lite as the last resort. A provider without
   // its key is skipped, so the chain starts wherever credentials do.
   writing: [
     {
       provider: 'anthropic',
-      model: modelId('WRITING_MODEL_ANTHROPIC', 'claude-haiku-4-5'),
+      model: modelId('WRITING_MODEL_ANTHROPIC', 'claude-haiku-5-5'),
+    },
+    {
+      provider: 'openai',
+      model: modelId('WRITING_MODEL_OPENAI', 'gpt-6-luna'),
     },
     {
       provider: 'google',
       model: modelId('WRITING_MODEL_GOOGLE', 'gemini-3.6-flash'),
-    },
-    {
-      provider: 'openai',
-      model: modelId('WRITING_MODEL_OPENAI', 'gpt-4o-mini'),
     },
     {
       provider: 'google',
@@ -305,4 +304,25 @@ export function logResolvedChains(
         (skipped.length ? ` (no credential: ${skipped.join(', ')})` : ''),
     );
   }
+}
+
+/**
+ * The one model that marks CVs on a grid (`provider:model`), and proposes the
+ * grid. Kept on each grid when it is made: changing this moves new offers, and
+ * the others when they are re-analysed.
+ */
+export function cvScoringModel(): string {
+  return modelId('CV_MODEL_SCORING', 'openai:gpt-6-luna');
+}
+
+/** `openai:gpt-6-luna` as a spec; null when it is not one. */
+export function parseSpec(id: string): LlmProviderSpec | null {
+  const at = id.indexOf(':');
+  const provider = id.slice(0, at);
+  return at > 0 && at < id.length - 1 && provider in PROVIDER_API_KEY_ENV
+    ? {
+        provider: provider as LlmProviderSpec['provider'],
+        model: id.slice(at + 1),
+      }
+    : null;
 }

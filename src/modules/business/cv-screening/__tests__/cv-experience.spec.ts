@@ -79,7 +79,7 @@ describe('cv-experience', () => {
       NOW,
     );
     // 36 distinct months; related: 24 full + 12 × 0.5 part time.
-    expect(months).toEqual({ total: 36, relevant: 30 });
+    expect(months).toEqual({ total: 36, relevant: 30, direct: 30 });
   });
 
   it('weighs partial relevance, internships and volunteering down', () => {
@@ -93,7 +93,7 @@ describe('cv-experience', () => {
         ],
         NOW,
       ),
-    ).toEqual({ total: 24, relevant: 12 }); // 6 + 3 + 3 + 0
+    ).toEqual({ total: 24, relevant: 12, direct: 6 }); // 6 + 3 + 3 + 0; direct: 3 + 3
   });
 
   it('leaves out jobs it cannot place, and is null with none', () => {

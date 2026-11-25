@@ -2,17 +2,14 @@ import type {
   ApplicationStatus,
   EmploymentType,
   ExternalApplicationStatus,
-  JobOfferStatus,
   PaymentFlow,
 } from '@prisma/client';
-import { OFFER_STATUS_LABEL } from '../report/business-report';
 import type { DataTable } from '../report/table-files';
 import { EMPLOYMENT_LABEL } from '../../job-offer/utils/employment-type.util';
 
 /**
  * The HR exports as tables: who applied to an offer, the staff register of
- * the hires, the offers to declare to the ACPE. Pure, so the files' content
- * is tested without a database.
+ * the hires. Pure, so the files' content is tested without a database.
  */
 
 const CONTRACT: Record<EmploymentType, string> = EMPLOYMENT_LABEL;
@@ -148,65 +145,6 @@ export function staffTable(rows: HireRow[]): DataTable {
       r.origin,
       r.phone,
       r.email,
-    ]),
-  };
-}
-
-export type DeclaredOffer = {
-  reference: string;
-  title: string;
-  category: string | null;
-  contract: EmploymentType;
-  quantity: number;
-  city: string | null;
-  countryName: string | null;
-  address: string | null;
-  publishedAt: Date;
-  scheduledAt: Date | null;
-  amount: number | null;
-  paymentFlow: PaymentFlow | null;
-  description: string;
-  status: JobOfferStatus;
-};
-
-/**
- * The offers as the ACPE asks to declare them, with an empty column for the
- * receipt number it gives back (to show on each publication).
- */
-export function acpeTable(rows: DeclaredOffer[]): DataTable {
-  return {
-    name: 'Offres à déclarer',
-    header: [
-      'Référence',
-      'Intitulé du poste',
-      'Métier',
-      'Type de contrat',
-      'Nombre de postes',
-      'Ville',
-      'Pays',
-      'Adresse',
-      'Date de publication',
-      'Date de la mission ou limite de candidature',
-      'Rémunération',
-      'Description',
-      'Statut',
-      'N° de récépissé ACPE',
-    ],
-    rows: rows.map((o) => [
-      o.reference,
-      o.title,
-      o.category,
-      CONTRACT[o.contract],
-      o.quantity,
-      o.city,
-      o.countryName,
-      o.address,
-      day(o.publishedAt),
-      day(o.scheduledAt),
-      pay(o.amount, o.paymentFlow),
-      o.description.replace(/\s+/g, ' ').trim(),
-      OFFER_STATUS_LABEL[o.status],
-      null,
     ]),
   };
 }

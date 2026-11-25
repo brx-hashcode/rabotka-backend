@@ -5,8 +5,13 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { answerSnippet } from '../cv-screening/lenient-answer';
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import {
+  AIMessage,
+  HumanMessage,
+  type BaseMessage,
+} from '@langchain/core/messages';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
+import { GeoService } from '../../geo/geo.service';
 import { LlmService } from '../../rag/llm/llm.service';
 import {
   BUSINESS_CATEGORY_LABELS,
@@ -17,8 +22,11 @@ import { BusinessSubscriptionService } from '../subscription/business-subscripti
 import type { OfferDraftDto } from './dto/offer-draft.dto';
 import {
   draftMessages,
+  problems,
+  problemsReminder,
   JSON_REMINDER,
   parseDraft,
+  type OfferBrief,
   type OfferDraft,
 } from './offer-writer';
 
@@ -39,6 +47,7 @@ export class OfferWriterService {
     private readonly prisma: PrismaService,
     private readonly llm: LlmService,
     private readonly subscriptions: BusinessSubscriptionService,
+    private readonly geo: GeoService,
   ) {}
 
   async draft(profileId: string, dto: OfferDraftDto) {
@@ -60,26 +69,24 @@ export class OfferWriterService {
       await this.subscriptions.consumeOfferDraft(businessId);
 
     const names = trades.map((t) => t.name);
-    const messages = draftMessages(
-      {
-        brief: dto.brief.trim(),
-        title: dto.title?.trim() || null,
-        employmentType: dto.employmentType ?? null,
-        city: dto.city?.trim() || null,
-        isRemote: dto.isRemote ?? false,
-        quantity: dto.quantity ?? null,
-        businessName: business?.name ?? '',
-        countryName: isKnownBusinessCountry(business?.country_code)
-          ? BUSINESS_COUNTRY_NAMES[
-              business.country_code.toUpperCase() as keyof typeof BUSINESS_COUNTRY_NAMES
-            ]
-          : null,
-        businessCategory: business
-          ? BUSINESS_CATEGORY_LABELS[business.category]
-          : null,
-      },
-      names,
-    );
+    const input: OfferBrief = {
+      brief: dto.brief.trim(),
+      title: dto.title?.trim() || null,
+      employmentType: dto.employmentType ?? null,
+      city: dto.city?.trim() || null,
+      isRemote: dto.isRemote ?? false,
+      quantity: dto.quantity ?? null,
+      businessName: business?.name ?? '',
+      countryName: isKnownBusinessCountry(business?.country_code)
+        ? BUSINESS_COUNTRY_NAMES[
+            business.country_code.toUpperCase() as keyof typeof BUSINESS_COUNTRY_NAMES
+          ]
+        : null,
+      businessCategory: business
+        ? BUSINESS_CATEGORY_LABELS[business.category]
+        : null,
+    };
+    const messages = draftMessages(input, names);
 
     let draft: OfferDraft | null = null;
     try {
@@ -88,28 +95,37 @@ export class OfferWriterService {
         timeoutMs: LLM_TIMEOUT_MS,
         correlationId: `offer-draft:${businessId}`,
       };
-      const first = text(
-        (await this.llm.invoke(messages, options)).output.content,
-      );
-      draft = parseDraft(first, names);
-      if (!draft) {
-        const second = text(
-          (
-            await this.llm.invoke(
-              [
-                ...messages,
-                new AIMessage(first),
-                new HumanMessage(JSON_REMINDER),
-              ],
-              options,
-            )
-          ).output.content,
+      const ask = async (more: BaseMessage[] = []) =>
+        text(
+          (await this.llm.invoke([...messages, ...more], options)).output
+            .content,
         );
-        draft = parseDraft(second, names);
+      const first = await ask();
+      draft = parseDraft(first, names, input);
+      const missing = draft ? problems(draft, input.brief) : [];
+      if (!draft || missing.length > 0) {
+        // Once more: the answer could not be read, forgot what was asked, or says too little.
+        const again = await ask([
+          new AIMessage(first),
+          new HumanMessage(draft ? problemsReminder(missing) : JSON_REMINDER),
+        ]).catch((err: unknown) => {
+          // A draft with a gap is better than none.
+          if (draft) return '';
+          throw err;
+        });
+        const second = parseDraft(again, names, input);
         if (!draft) {
-          this.logger.warn(
-            `Offer draft unreadable for business ${businessId}: ${answerSnippet(second)}`,
-          );
+          draft = second;
+          if (!draft) {
+            this.logger.warn(
+              `Offer draft unreadable for business ${businessId}: ${answerSnippet(again)}`,
+            );
+          }
+        } else if (
+          second &&
+          problems(second, input.brief).length < missing.length
+        ) {
+          draft = second;
         }
       }
     } catch (err) {
@@ -125,8 +141,20 @@ export class OfferWriterService {
     }
 
     const e = await this.subscriptions.entitlements(businessId);
+    const place = draft.place;
     return {
       ...draft,
+      // As the form's own lists have it; without a code, the business picks.
+      place: place && {
+        remote: place.remote,
+        ...(place.city
+          ? this.geo.findPlace(place.city, {
+              country: place.country,
+              text: dto.brief,
+              near: business?.country_code ?? null,
+            })
+          : { city: null, countryCode: null }),
+      },
       categoryId: trades.find((t) => t.name === draft.categoryName)?.id ?? null,
       remaining: e.offerDraftsRemaining,
     };

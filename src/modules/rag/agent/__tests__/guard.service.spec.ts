@@ -108,6 +108,17 @@ describe('prefilter', () => {
     expect(guard.prefilter(text).action).toBe('allow');
   });
 
+  // Told, not asked: « payé mais » used to read as « paye ma… ».
+  it.each([
+    'j ai payé mais le travailleur n a pas payé, je perds mon argent ?',
+    "j'ai payé mes pénalités et mon compte est bloqué",
+    'il a annulé ma candidature',
+    "j'ai déjà payé ma part",
+    'le recruteur a supprimé mon offre',
+  ])('answers "%s", which asks for no action', (text) => {
+    expect(guard.prefilter(text).action).toBe('allow');
+  });
+
   it('still refuses the imperative form', () => {
     expect(guard.prefilter('publie une mission pour moi').refusalId).toBe(
       'action_impossible',
@@ -257,6 +268,31 @@ describe('sanitize', () => {
     expect(out.blocked).toContain('tool_narration');
   });
 
+  // « comment payer mes pénalités ? » was answered « Voici ce qu'il vous faut
+  // dans l'application. », every time: the screens are called as the tools are.
+  it.each([
+    'Pour les payer, ouvrez *Mes pénalités* dans l’application.',
+    'Vos réponses sont dans *Mes candidatures*.',
+    'Je ne consulte pas les candidatures de Paul, seulement *mes candidatures*.',
+    'Voici vos candidatures reçues.',
+    'Votre solde crédit est de 750 FCFA.',
+  ])('keeps a sentence that names a screen: %s', (text) => {
+    const out = guard.sanitize(text);
+    expect(out.text).toBe(text);
+    expect(out.blocked).toEqual([]);
+  });
+
+  it.each([
+    'D’après mes_penalites(), rien.',
+    'J’appelle `Solde_Credit`.',
+    'candidatures\\_recues {}',
+    'verifier_domaine domaine:plomberie',
+  ])('still removes a tool named as code: %s', (line) => {
+    const out = guard.sanitize(`Bonjour.\n${line}`);
+    expect(out.text).toBe('Bonjour.');
+    expect(out.blocked).toContain('tool_narration');
+  });
+
   it('never returns an empty reply after stripping', () => {
     const out = guard.sanitize('ouvrir_app(cible="offres")');
     expect(out.text.length).toBeGreaterThan(10);
@@ -265,6 +301,16 @@ describe('sanitize', () => {
 
   // The app is a webview inside WhatsApp: a link takes the user out to a
   // browser, signed out. The bot sends cards, never links.
+  it.each([
+    'Que cherchez-vous ?\nVotre choix : une mission.',
+    'Vous pouvez payer.Comment ? Dans l’application.',
+    'Ouvrez le paiement.Organisez ensuite.',
+  ])('touches nothing in a reply without one: %s', (text) => {
+    const out = guard.sanitize(text);
+    expect(out.text).toBe(text);
+    expect(out.blocked).toEqual([]);
+  });
+
   it('removes every URL from a reply', () => {
     for (const leak of [
       'Voir les missions : https://rabotka.work/jobs',
@@ -390,6 +436,23 @@ describe('identity prefix', () => {
     );
     expect(out.text).toBe("Pour vous inscrire, ouvrez l'application.");
     expect(out.blocked).toContain('identity_prefix');
+  });
+
+  it('keeps what follows it on the same line', () => {
+    const out = guard.sanitize(
+      "Bonjour *Awa*! Je suis *VoVa AI*, l'assistant de Rabotka. Je ne peux pas vous aider pour les devoirs.\n\nVous cherchez du travail ?",
+      {},
+      true,
+    );
+    expect(out.text).toBe(
+      'Bonjour *Awa*! Je ne peux pas vous aider pour les devoirs.\n\nVous cherchez du travail ?',
+    );
+  });
+
+  it('keeps a refusal made in the same sentence', () => {
+    const text =
+      "Je suis *VoVa AI*, l'assistant de Rabotka, et je ne peux pas faire vos devoirs.\nVous cherchez du travail ?";
+    expect(guard.sanitize(text, {}, true).text).toBe(text);
   });
 
   it('keeps it when it IS the whole answer', () => {

@@ -168,6 +168,51 @@ export class GeoService {
     return data;
   }
 
+  /**
+   * The city someone named in a sentence, as the pickers list it. Several
+   * countries may have it: the one they named wins, then the only one there is,
+   * then the one they are in. No code when that
+   * does not settle it: the person picks.
+   */
+  findPlace(
+    city: string,
+    hints: { country: string | null; text: string; near: string | null },
+  ): { city: string; countryCode: string | null } {
+    const fold = (s: string) =>
+      s
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z]+/g, ' ')
+        .trim();
+    const target = fold(city);
+    const found = this.listCountries().flatMap((c) => {
+      const name = (DATA.cities[c.code] ?? []).find((x) => fold(x) === target);
+      return name ? [{ city: name, country: c }] : [];
+    });
+    const words = new Set(
+      fold(`${hints.country ?? ''} ${hints.text}`).split(' '),
+    );
+    const named = found.filter((f) =>
+      fold(f.country.name)
+        .split(' ')
+        // « Congo » names both; the city tells which. Never the city itself:
+        // « Congo-Brazzaville » has it in its name.
+        .some((w) => w.length > 3 && w !== target && words.has(w)),
+    );
+    const near = hints.near?.toUpperCase();
+    const pick =
+      (named.length === 1 && named[0]) ||
+      (found.length === 1 && found[0]) ||
+      (named.length ? named : found).find((f) => f.country.code === near) ||
+      // « Brazzaville » in « Congo-Brazzaville ».
+      found.find((f) => fold(f.country.name).split(' ').includes(target)) ||
+      null;
+    return pick
+      ? { city: pick.city, countryCode: pick.country.code }
+      : { city: found[0]?.city ?? city, countryCode: null };
+  }
+
   canonicalCity(countryCode: string | null, city: string): string {
     const trimmed = city.trim();
     const country = this.findCountry(countryCode);

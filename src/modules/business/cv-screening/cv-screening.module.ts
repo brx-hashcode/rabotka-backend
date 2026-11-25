@@ -7,6 +7,9 @@ import { BusinessSubscriptionModule } from '../subscription/business-subscriptio
 import { MailboxModule } from '../mailbox/mailbox.module';
 import { CvScreeningController } from './cv-screening.controller';
 import { MailModule } from '../../mail/mail.module';
+import { CvGridController } from './cv-grid.controller';
+import { CvGridService } from './cv-grid.service';
+import { CvRescoreService } from './cv-rescore.service';
 import { CvRemovalController } from './cv-removal.controller';
 import { CvRemovalService } from './cv-removal.service';
 import { CvRestoreService } from './cv-restore.service';
@@ -28,10 +31,12 @@ import { CvCompareService } from './cv-compare.service';
     AnswerFilesModule,
     MailModule,
   ],
-  controllers: [CvScreeningController, CvRemovalController],
-  exports: [CvScreeningService],
+  controllers: [CvScreeningController, CvRemovalController, CvGridController],
+  exports: [CvScreeningService, CvGridService],
   providers: [
     CvScreeningService,
+    CvGridService,
+    CvRescoreService,
     CvScreeningScheduler,
     CvChatService,
     CvCompareService,

@@ -84,6 +84,7 @@ import {
 import type { ApplyDto } from './dto/apply.dto';
 import { AnswerFilesService } from '../../answer-files/answer-files.service';
 import { businessEmailRecipientsOfProfile } from '../team/business-recipients';
+import { scoreView } from '../cv-screening/cv-marking';
 
 const OPEN: JobOfferStatus[] = [
   JobOfferStatus.ACTIVE,
@@ -765,6 +766,8 @@ export class CareersService {
             strengths: true,
             gaps: true,
             criteria: true,
+            reading: true,
+            grid: { select: { id: true, version: true, items: true } },
             screening_id: true,
           },
         },
@@ -825,6 +828,8 @@ export class CareersService {
         strengths: a.cv_resume.strengths,
         gaps: a.cv_resume.gaps,
         criteria: a.cv_resume.criteria,
+        /** Marked on the offer's grid; null on the previous formula. */
+        scoring: scoreView(a.cv_resume),
       },
     }));
   }

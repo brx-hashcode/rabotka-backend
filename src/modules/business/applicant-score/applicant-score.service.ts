@@ -43,6 +43,13 @@ import {
 import { TEXT_MIME } from '../cv-screening/cv-files';
 import { applicantCvText } from './applicant-cv-text';
 import { applicantFacts } from './applicant-facts';
+import { CvGridService, type Grid } from '../cv-screening/cv-grid.service';
+import { evaluate, scoreView } from '../cv-screening/cv-marking';
+import {
+  CV_GRID_RESCORE,
+  type CvGridRescore,
+} from '../cv-screening/cv-screening.events';
+import { offerBrief } from '../cv-screening/offer-brief';
 import { cvForApplication } from '../../profile-cv/profile-cv.rules';
 import {
   applicantMessages,
@@ -88,6 +95,8 @@ export class ApplicantScoreService {
     private readonly careers: CareersService,
     // Optional: the specs build it without; answers then read as plain text.
     @Optional() private readonly answerFiles?: AnswerFilesService,
+    // Optional: the specs build it without; profiles then score as before.
+    @Optional() private readonly grids?: CvGridService,
   ) {}
 
   /** Scores the applications that have none yet; returns how many were scored. */
@@ -157,11 +166,12 @@ export class ApplicantScoreService {
     if (!loaded) return false;
     const { offer, applicant } = loaded;
     const w = loaded.app.worker;
-    const messages = applicantMessages(offer, applicant);
 
     let read: ApplicantAssessment | null;
     try {
-      read = await this.ask(messages, applicationId);
+      const grid = await this.gridOf(loaded.app.job_offer);
+      if (grid) return await this.assessOnGrid(grid, loaded);
+      read = await this.ask(applicantMessages(offer, applicant), applicationId);
     } catch (err) {
       this.logger.warn(
         `Applicant score failed for ${applicationId}: ${err instanceof Error ? err.message : String(err)}`,
@@ -201,6 +211,73 @@ export class ApplicantScoreService {
       update: data,
     });
     return true;
+  }
+
+  /** The offer's grid; null: it uses the previous formula. */
+  private async gridOf(
+    offer: NonNullable<
+      Awaited<ReturnType<typeof applicantFacts>>
+    >['app']['job_offer'],
+  ): Promise<Grid | null> {
+    if (!this.grids) return null;
+    const businessId = await this.subscriptions.businessOf(offer.employer_id);
+    return businessId
+      ? this.grids.forJob(businessId, { offerId: offer.id }, offerBrief(offer))
+      : null;
+  }
+
+  /**
+   * The profile marked on the offer's grid, as a CV is: the two compare, and
+   * the analysis that comes later takes over without changing the formula. The
+   * reliability and the ratings stay beside the score: a candidate from the
+   * careers page has none.
+   */
+  private async assessOnGrid(
+    grid: Grid,
+    loaded: NonNullable<Awaited<ReturnType<typeof applicantFacts>>>,
+  ): Promise<boolean> {
+    const { app, applicant } = loaded;
+    // Nothing of who they are: the name is not theirs to be judged on.
+    const text = applicantCvText('Candidat', applicant);
+    const read = await this.screenings.mark(
+      grid,
+      offerBrief(app.job_offer),
+      { kind: 'text', text },
+      `applicant-score:${app.id}`,
+      applicant.answers ?? [],
+    );
+    const e = read && evaluate(grid.items, read.reading);
+    const data = e
+      ? {
+          score: e.score,
+          criteria: Prisma.DbNull,
+          grid_id: grid.id,
+          reading: read.reading as unknown as Prisma.InputJsonObject,
+          musts_missing: e.missing,
+          summary: read.summary,
+          strengths: read.strengths,
+          gaps: read.gaps,
+          failed: false,
+        }
+      : { failed: true };
+    await this.prisma.applicationAssessment.upsert({
+      where: { application_id: app.id },
+      create: { application_id: app.id, ...data },
+      update: data,
+    });
+    return true;
+  }
+
+  /** « Ré-analyser »: the profiles, in the background, one at a time. */
+  @OnEvent(CV_GRID_RESCORE)
+  async onRescore({ applicationIds }: CvGridRescore): Promise<void> {
+    for (const id of applicationIds) {
+      await this.assess(id).catch((err) =>
+        this.logger.warn(
+          `Applicant ${id} not scored again: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      );
+    }
   }
 
   /**
@@ -657,7 +734,14 @@ export class ApplicantScoreService {
     if (!offer) throw new NotFoundException('Offre introuvable.');
     const apps = await this.prisma.application.findMany({
       where: { job_offer_id: offer.id },
-      select: { id: true, assessment: true },
+      select: {
+        id: true,
+        assessment: {
+          include: {
+            grid: { select: { id: true, version: true, items: true } },
+          },
+        },
+      },
     });
     return {
       assessments: apps
@@ -669,6 +753,8 @@ export class ApplicantScoreService {
           summary: a.assessment!.summary,
           strengths: a.assessment!.strengths,
           gaps: a.assessment!.gaps,
+          /** Marked on the offer's grid; null on the previous formula. */
+          scoring: scoreView(a.assessment!),
         })),
       /** Applications still waiting for their score (a sweep runs every 2 minutes). */
       pending: apps.filter((a) => !a.assessment).length,

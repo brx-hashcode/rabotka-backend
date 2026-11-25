@@ -4,7 +4,7 @@ import { BusinessSubscriptionModule } from '../subscription/business-subscriptio
 import { HrExportsController } from './hr-exports.controller';
 import { HrExportsService } from './hr-exports.service';
 
-/** « Exports RH »: candidates, staff register, ACPE declaration. */
+/** « Exports RH »: candidates, staff register. */
 @Module({
   imports: [AuthModule, BusinessSubscriptionModule],
   controllers: [HrExportsController],

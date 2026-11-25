@@ -7,3 +7,8 @@ export type CvScreeningProgress = {
   done: number;
   total: number;
 };
+
+/** « Ré-analyser »: applicants scored on their profile, to score again. */
+export const CV_GRID_RESCORE = 'cv-grid.rescore';
+
+export type CvGridRescore = { applicationIds: string[] };

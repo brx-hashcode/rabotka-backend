@@ -220,7 +220,7 @@ export type BusinessEntitlements = {
   priorityVisibility: boolean;
   /** « Publier sur LinkedIn » from Rabotka (the share link is open to all). */
   linkedinPosting: boolean;
-  /** « Exports RH »: candidates, staff register, ACPE declaration. */
+  /** « Exports RH »: candidates, staff register. */
   hrExports: boolean;
   /** « Visio dans Rabotka »: a link made in Rabotka, guests, transcription. */
   videoInterviews: boolean;

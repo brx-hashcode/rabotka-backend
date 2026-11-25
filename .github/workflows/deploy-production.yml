@@ -330,33 +330,43 @@ jobs:
           ARCJET_ENV=development
           API_DOMAIN=${{ secrets.PROD_API_DOMAIN }}
           # --- Vova assistant: model ids and budgets ---
-          # Not secrets, so they are static here rather than Vault entries.
+          # The model names come from Vault; the name written here is used when
+          # Vault has none. A change in Vault applies at the next deploy. The
+          # budgets below are static.
           #
           # Safe to blank, unlike WHATSAPP_CLOUD_API_VERSION above: every VOVA_*
           # reader (modelId, readNumber) treats an empty string as "use the
           # built-in default", so an empty line falls back instead of failing
           # the boot.
           #
-          # Pinned here rather than left to the code defaults so that a vendor
-          # renaming or retiring an id is a workflow edit and a redeploy, not a
+          # Set here rather than left to the code defaults so that a vendor
+          # renaming or retiring an id is a Vault edit and a redeploy, not a
           # release — which is the failure this chain has already hit once, when
           # Google retired gemini-2.0-flash out from under the build spec.
-          #
-          # CHEAP deliberately overrides the code default of
-          # gemini-flash-lite-latest.
-          VOVA_MODEL_STANDARD_ANTHROPIC=claude-haiku-4-5
-          VOVA_MODEL_CHEAP_GOOGLE=gemini-flash-lite-latest
+          VOVA_MODEL_STANDARD_ANTHROPIC=$(echo "$VAULT_SECRET" | jq -r '.VOVA_MODEL_STANDARD_ANTHROPIC // "claude-haiku-5-5"')
+          VOVA_MODEL_CHEAP_GOOGLE=$(echo "$VAULT_SECRET" | jq -r '.VOVA_MODEL_CHEAP_GOOGLE // "gemini-flash-lite-latest"')
           # Two Google entries. FAST leads the pair (~1.4s median on a
           # tool-calling turn); the capable one sits behind it. Separate breaker
           # keys, so one failing does not pull the other out of rotation.
-          VOVA_MODEL_STANDARD_GOOGLE_FAST=gemini-flash-lite-latest
-          VOVA_MODEL_STANDARD_GOOGLE=gemini-3.6-flash
-          VOVA_MODEL_STANDARD_MISTRAL=mistral-small-latest
-          VOVA_MODEL_STANDARD_OPENAI=gpt-4o-mini
+          VOVA_MODEL_STANDARD_GOOGLE_FAST=$(echo "$VAULT_SECRET" | jq -r '.VOVA_MODEL_STANDARD_GOOGLE_FAST // "gemini-flash-lite-latest"')
+          VOVA_MODEL_STANDARD_GOOGLE=$(echo "$VAULT_SECRET" | jq -r '.VOVA_MODEL_STANDARD_GOOGLE // "gemini-3.6-flash"')
+          VOVA_MODEL_STANDARD_MISTRAL=$(echo "$VAULT_SECRET" | jq -r '.VOVA_MODEL_STANDARD_MISTRAL // "mistral-small-latest"')
+          VOVA_MODEL_STANDARD_OPENAI=$(echo "$VAULT_SECRET" | jq -r '.VOVA_MODEL_STANDARD_OPENAI // "gpt-4o-mini"')
           # Groq publishes no -latest alias and retires ids on a short cycle,
           # so this pin matters more here than anywhere else in the list.
-          VOVA_MODEL_STANDARD_GROQ=llama-3.3-70b-versatile
-          VOVA_MODEL_STANDARD_DEEPSEEK=deepseek-chat
+          VOVA_MODEL_STANDARD_GROQ=$(echo "$VAULT_SECRET" | jq -r '.VOVA_MODEL_STANDARD_GROQ // "llama-3.3-70b-versatile"')
+          VOVA_MODEL_STANDARD_DEEPSEEK=$(echo "$VAULT_SECRET" | jq -r '.VOVA_MODEL_STANDARD_DEEPSEEK // "deepseek-chat"')
+          # Business: reading and scoring CVs, and the texts a business reads.
+          # Empty when Vault has none: the code default (models.config.ts).
+          # CV_MODEL_SCORING is provider:model, the others a model name alone.
+          CV_MODEL_SCORING=$(echo "$VAULT_SECRET" | jq -r '.CV_MODEL_SCORING // empty')
+          CV_MODEL_DOCUMENT_GOOGLE_FAST=$(echo "$VAULT_SECRET" | jq -r '.CV_MODEL_DOCUMENT_GOOGLE_FAST // empty')
+          CV_MODEL_DOCUMENT_GOOGLE=$(echo "$VAULT_SECRET" | jq -r '.CV_MODEL_DOCUMENT_GOOGLE // empty')
+          CV_MODEL_DOCUMENT_OPENAI=$(echo "$VAULT_SECRET" | jq -r '.CV_MODEL_DOCUMENT_OPENAI // empty')
+          WRITING_MODEL_ANTHROPIC=$(echo "$VAULT_SECRET" | jq -r '.WRITING_MODEL_ANTHROPIC // empty')
+          WRITING_MODEL_GOOGLE=$(echo "$VAULT_SECRET" | jq -r '.WRITING_MODEL_GOOGLE // empty')
+          WRITING_MODEL_OPENAI=$(echo "$VAULT_SECRET" | jq -r '.WRITING_MODEL_OPENAI // empty')
+          WRITING_MODEL_GOOGLE_FAST=$(echo "$VAULT_SECRET" | jq -r '.WRITING_MODEL_GOOGLE_FAST // empty')
           # Per-attempt CEILING, now clamped by the turn deadline rather than
           # standing alone. 20000 here against a 25000ms vova.timeout_ms left
           # 5000ms for everything else, so the fallback chain was unreachable by
@@ -398,7 +408,7 @@ jobs:
           # updated by the deploy step below) instead of in each API: prod and
           # develop each held a ~2.2GB copy, half the VPS's RAM.
           VOVA_EMBEDDER_URL=http://rabotka_embedder:3100
-          VOVA_WARMUP_PROVIDERS=google,openai
+          VOVA_WARMUP_PROVIDERS=anthropic,openai
           VOVA_HEDGE_ENABLED=false
           # Head start for the leading provider; 0 races everyone at once.
           VOVA_HEDGE_MS=3500

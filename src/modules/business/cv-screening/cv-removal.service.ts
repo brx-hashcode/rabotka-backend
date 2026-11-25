@@ -23,6 +23,7 @@ const RESUME = {
     storage_key: true,
     storage_bucket: true,
     candidate: true,
+    reading: true,
   },
 } as const;
 
@@ -32,6 +33,7 @@ type Resume = {
   storage_key: string | null;
   storage_bucket: string | null;
   candidate: Parameters<typeof forgetCv>[3]['candidate'];
+  reading?: Parameters<typeof forgetCv>[3]['reading'];
 };
 
 /**

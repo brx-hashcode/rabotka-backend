@@ -1,10 +1,10 @@
-import { EMPLOYMENT_LABEL } from '../../job-offer/utils/employment-type.util';
 import {
   BadRequestException,
   ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { answerSnippet } from './lenient-answer';
 import { ConfigService } from '@nestjs/config';
@@ -52,6 +52,17 @@ import {
   type CvCandidate,
   type CvSource,
 } from './cv-assessment';
+import { type GridItem } from './cv-grid';
+import { CvGridService, type Grid } from './cv-grid.service';
+import {
+  evaluate,
+  markingMessages,
+  parseMarking,
+  scoreView,
+  type MarkedCv,
+} from './cv-marking';
+import { offerBrief, OFFER_BRIEF } from './offer-brief';
+import { cvScoringModel, parseSpec } from '../../rag/llm/models.config';
 import { addMonthsClamped } from '../subscription/subscription-rules';
 import { deleteCvObjects, forgetCv } from './cv-forget';
 import { fillImportedContact } from '../careers/imported-contact';
@@ -60,7 +71,17 @@ import {
   type CvScreeningProgress,
 } from './cv-screening.events';
 
-export type CvScreeningJob = { resumeId: string };
+export type CvScreeningJob = {
+  resumeId: string;
+  /** Already scored: read again on the grid in use (`CvRescoreService`). */
+  rescore?: boolean;
+};
+
+/**
+ * A CV waits for its grid's model rather than being marked by another: tried
+ * again after 30 s, then 1, 2, 4 and 8 minutes.
+ */
+export const CV_READING_RETRY = { attempts: 6, backoffMs: 30_000 };
 
 /** One uploaded file, as multer hands it over. */
 export type CvUpload = {
@@ -91,10 +112,22 @@ const LLM_TIMEOUT_MS = 45_000;
 const MAX_TRANSCRIPT_CHARS = 15_000;
 
 const DETAIL = {
-  resumes: true,
+  resumes: {
+    include: { grid: { select: { id: true, version: true, items: true } } },
+  },
   // Whether its CVs can expire yet.
   offer: { select: { status: true, deleted_at: true } },
 } satisfies Prisma.CvScreeningInclude;
+
+/** An assessment, and the score when it was made on a grid. */
+type Assessed = CvAssessment & {
+  onGrid?: {
+    score: number;
+    grid_id: string;
+    musts_missing: number;
+    reading: Prisma.InputJsonObject;
+  };
+};
 
 type ScreeningRow = Prisma.CvScreeningGetPayload<{ include: typeof DETAIL }>;
 type ResumeRow = ScreeningRow['resumes'][number];
@@ -119,6 +152,8 @@ export class CvScreeningService {
     private readonly systemConfig: SystemConfigService,
     private readonly config: ConfigService,
     private readonly events: EventEmitter2,
+    // Optional: the specs build it without; CVs then read on the previous formula.
+    @Optional() private readonly grids?: CvGridService,
   ) {}
 
   // ── Creating ─────────────────────────────────────────────────────────
@@ -270,9 +305,11 @@ export class CvScreeningService {
     for (const resume of screening.resumes) {
       if (!resume.storage_key || !fresh.has(resume.storage_key)) continue;
       try {
-        await this.queue.addJob<CvScreeningJob>(CV_SCREENING_QUEUE, {
-          resumeId: resume.id,
-        });
+        await this.queue.addJob<CvScreeningJob>(
+          CV_SCREENING_QUEUE,
+          { resumeId: resume.id },
+          CV_READING_RETRY,
+        );
       } catch (err) {
         // Never queued, never read: settled (and given back) now, rather
         // than « en cours » until the stuck sweep two hours later.
@@ -355,25 +392,21 @@ export class CvScreeningService {
     files: (CvUpload & { tag: string })[],
   ): Promise<{ screeningId: string; resumeIds: Map<string, string> }> {
     const businessId = await this.requireBusiness(profileId);
-    // Always the same one, purged or not: a second one split the candidates
-    // into two groups that could not be compared.
-    const open = await this.prisma.cvScreening.findFirst({
-      where: { business_id: businessId, offer_id: offerId, external: true },
-      orderBy: { created_at: 'desc' },
-      select: { id: true },
-    });
+    const shared = await this.sharedScreening(profileId, businessId, offerId);
     const screening = await this.create(
       profileId,
       files,
       { offerId },
-      open?.id,
-    );
-    if (!open) {
-      await this.prisma.cvScreening.update({
-        where: { id: screening.id },
-        data: { external: true },
-      });
-    }
+      shared.id,
+    ).catch(async (err: unknown) => {
+      // Opened for nothing (no « CV inclus » left, a file refused): not left empty.
+      if (shared.opened) {
+        await this.prisma.cvScreening
+          .deleteMany({ where: { id: shared.id, resumes: { none: {} } } })
+          .catch(() => undefined);
+      }
+      throw err;
+    });
     const resumeIds = new Map<string, string>();
     for (const file of files) {
       const resume = screening.resumes.find((r) =>
@@ -389,6 +422,51 @@ export class CvScreeningService {
     return { screeningId: screening.id, resumeIds };
   }
 
+  /**
+   * The offer's one shared screening, purged or not, opened if there is none.
+   * One at a time per offer: two CVs read at once each opened their own, and
+   * the candidates of one could not be compared with those of the other.
+   */
+  private async sharedScreening(
+    profileId: string,
+    businessId: string,
+    offerId: string,
+  ): Promise<{ id: string; opened: boolean }> {
+    const where = {
+      business_id: businessId,
+      offer_id: offerId,
+      external: true,
+    };
+    const find = (db: Pick<Prisma.TransactionClient, 'cvScreening'>) =>
+      db.cvScreening.findFirst({
+        where,
+        orderBy: { created_at: 'desc' },
+        select: { id: true },
+      });
+    const open = await find(this.prisma);
+    if (open) return { id: open.id, opened: false };
+    const brief = await this.jobBrief(profileId, { offerId });
+    const expiresAt = addMonthsClamped(
+      new Date(),
+      await this.systemConfig.getCvLimitMonths(),
+    );
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`cv-screening:${offerId}`}))`;
+      const other = await find(tx);
+      if (other) return { id: other.id, opened: false };
+      const made = await tx.cvScreening.create({
+        data: {
+          ...where,
+          job_title: brief.title,
+          job_text: brief.text,
+          expires_at: expiresAt,
+        },
+        select: { id: true },
+      });
+      return { id: made.id, opened: true };
+    });
+  }
+
   /** The job the CVs are measured against: an offer of the business, or one described by hand. */
   private async jobBrief(
     profileId: string,
@@ -397,35 +475,11 @@ export class CvScreeningService {
     if (job.offerId) {
       const offer = await this.prisma.jobOffer.findFirst({
         where: { id: job.offerId, employer_id: profileId, deleted_at: null },
-        select: {
-          id: true,
-          title: true,
-          description: true,
-          employment_type: true,
-          city: true,
-          country_name: true,
-          is_remote: true,
-          note: true,
-          category: { select: { name: true } },
-        },
+        select: OFFER_BRIEF,
       });
       if (!offer) throw new NotFoundException('Offre introuvable.');
-      const place = offer.is_remote
-        ? 'À distance'
-        : [offer.city, offer.country_name].filter(Boolean).join(', ');
-      const lines = [
-        `Type : ${EMPLOYMENT_LABEL[offer.employment_type] ?? offer.employment_type}`,
-        offer.category?.name ? `Métier : ${offer.category.name}` : null,
-        place ? `Lieu : ${place}` : null,
-        '',
-        offer.description,
-        offer.note ? `\n${offer.note}` : null,
-      ].filter((l) => l !== null);
-      return {
-        offerId: offer.id,
-        title: offer.title,
-        text: lines.join('\n').slice(0, 8000),
-      };
+      const { title, text } = offerBrief(offer);
+      return { offerId: offer.id, title, text };
     }
     const title = job.jobTitle?.trim() ?? '';
     const text = job.jobText?.trim() ?? '';
@@ -540,7 +594,7 @@ export class CvScreeningService {
   // ── The queue's work ─────────────────────────────────────────────────
 
   /** Reads and scores one CV. Idempotent: a CV already decided is left alone. */
-  async process(resumeId: string): Promise<void> {
+  async process(resumeId: string, last = true): Promise<void> {
     const resume = await this.prisma.cvScreeningResume.findUnique({
       where: { id: resumeId },
       include: { screening: true },
@@ -548,8 +602,9 @@ export class CvScreeningService {
     if (!resume || resume.status !== CvScreeningResumeStatus.QUEUED) return;
 
     let outcome:
-      | { status: 'SCORED'; assessment: CvAssessment; text: string | null }
+      | { status: 'SCORED'; assessment: Assessed; text: string | null }
       | { status: 'UNREADABLE' | 'FAILED'; error: string };
+    let onGrid = false;
     try {
       const source = await this.sourceOf(resume);
       if (!source) {
@@ -558,31 +613,47 @@ export class CvScreeningService {
           error: 'Aucun texte lisible dans ce fichier.',
         };
       } else {
-        const assessment = await this.assess(
-          {
-            title: resume.screening.job_title,
-            text: resume.screening.job_text,
-          },
-          source,
-          resume.id,
-          readApplicationAnswers(resume.application_answers),
-        );
-        outcome = !assessment
-          ? { status: 'FAILED', error: "L'analyse n'a pas abouti." }
-          : !assessment.isCv
+        const job = {
+          title: resume.screening.job_title,
+          text: resume.screening.job_text,
+        };
+        const answers = readApplicationAnswers(resume.application_answers);
+        const grid = await this.gridOf(resume.screening, job);
+        onGrid = grid !== null;
+        // On a grid the quotes are looked up in the CV: a scan is written out
+        // first, whoever reads it; the marks come from the grid's model.
+        const text = grid ? await this.transcribe(source, resume.id) : null;
+        const read: CvSource = text ? { kind: 'text', text } : source;
+        const assessment: Assessed | null | 'illegible' = !grid
+          ? await this.assess(job, source, resume.id, answers)
+          : text
+            ? await this.onGrid(grid, job, read, resume.id, answers)
+            : 'illegible';
+        outcome =
+          assessment === 'illegible'
             ? {
                 status: 'UNREADABLE',
-                error:
-                  'Ce document ne ressemble pas à un CV, ou il est illisible.',
+                error: 'Aucun texte lisible dans ce fichier.',
               }
-            : {
-                status: 'SCORED',
-                assessment,
-                // Kept for the CV's chat: no download per question.
-                text: source.kind === 'text' ? source.text : null,
-              };
+            : !assessment
+              ? { status: 'FAILED', error: "L'analyse n'a pas abouti." }
+              : !assessment.isCv
+                ? {
+                    status: 'UNREADABLE',
+                    error:
+                      'Ce document ne ressemble pas à un CV, ou il est illisible.',
+                  }
+                : {
+                    status: 'SCORED',
+                    assessment,
+                    // Kept for the CV's chat: no download per question.
+                    text: read.kind === 'text' ? read.text : null,
+                  };
       }
     } catch (err) {
+      // Its grid's model is down: tried again later rather than by another
+      // one, whose marks would not compare.
+      if (onGrid && !last) throw err;
       this.logger.warn(
         `CV ${resume.id} failed: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -594,19 +665,26 @@ export class CvScreeningService {
 
   /** Records a CV's outcome, gives back what was not read, and closes the screening after its last CV. */
   private async settle(
-    resume: ResumeRow & {
+    resume: Pick<ResumeRow, 'id' | 'subscription_id'> & {
       screening: { id: string; subscription_id: string | null };
     },
     outcome:
-      | { status: 'SCORED'; assessment: CvAssessment; text: string | null }
+      | { status: 'SCORED'; assessment: Assessed; text: string | null }
       | { status: 'UNREADABLE' | 'FAILED'; error: string },
   ): Promise<void> {
     const data: Prisma.CvScreeningResumeUpdateManyMutationInput =
       outcome.status === 'SCORED'
         ? {
             status: CvScreeningResumeStatus.SCORED,
-            score: overallScore(outcome.assessment.criteria),
-            criteria: outcome.assessment.criteria,
+            ...(outcome.assessment.onGrid
+              ? {
+                  ...outcome.assessment.onGrid,
+                  criteria: Prisma.DbNull,
+                }
+              : {
+                  score: overallScore(outcome.assessment.criteria),
+                  criteria: outcome.assessment.criteria,
+                }),
             summary: outcome.assessment.summary,
             strengths: outcome.assessment.strengths,
             gaps: outcome.assessment.gaps,
@@ -640,6 +718,114 @@ export class CvScreeningService {
       await this.subscriptions.releaseCv(charged, 1);
     }
     await this.afterProgress(resume.screening.id);
+  }
+
+  /** The grid this screening's CVs are marked on; null: the previous formula. */
+  private async gridOf(
+    screening: {
+      id: string;
+      business_id: string;
+      offer_id: string | null;
+    },
+    job: { title: string; text: string },
+  ): Promise<Grid | null> {
+    if (!this.grids) return null;
+    const offer = screening.offer_id
+      ? await this.prisma.jobOffer.findUnique({
+          where: { id: screening.offer_id },
+          select: { is_remote: true },
+        })
+      : null;
+    return this.grids.forJob(
+      screening.business_id,
+      screening.offer_id
+        ? { offerId: screening.offer_id }
+        : { screeningId: screening.id },
+      { ...job, remote: offer?.is_remote ?? false },
+    );
+  }
+
+  private async onGrid(
+    grid: Grid,
+    job: { title: string; text: string },
+    source: CvSource,
+    resumeId: string,
+    answers: ApplicationAnswerNote[],
+  ): Promise<Assessed | null> {
+    const read = await this.mark(grid, job, source, resumeId, answers);
+    if (!read) return null;
+    const e = evaluate(grid.items, read.reading);
+    return {
+      ...read,
+      onGrid: {
+        score: e.score,
+        grid_id: grid.id,
+        musts_missing: e.missing,
+        reading: read.reading as unknown as Prisma.InputJsonObject,
+      },
+    };
+  }
+
+  /**
+   * One CV marked on a grid, by the grid's model and no other; null when it
+   * never answers usably. Throws when it cannot be reached.
+   */
+  async mark(
+    { items, model }: { items: GridItem[]; model: string | null },
+    job: { title: string; text: string },
+    source: CvSource,
+    correlationId: string,
+    answers: ApplicationAnswerNote[] = [],
+  ): Promise<MarkedCv | null> {
+    const messages: BaseMessage[] = markingMessages(
+      job,
+      items,
+      source,
+      answers,
+    );
+    const text = source.kind === 'text' ? source.text : null;
+    const parse = (raw: string) => parseMarking(raw, items, text, answers);
+    const spec = parseSpec(model ?? cvScoringModel());
+    const ask = async (input: BaseMessage[]) => {
+      const options = {
+        tier: 'document' as const,
+        timeoutMs: LLM_TIMEOUT_MS,
+        correlationId,
+        temperature: 0,
+      };
+      const { output, telemetry } = spec
+        ? await this.llm.invokeWith(spec, input, options)
+        : await this.llm.invoke(input, options);
+      return {
+        raw: contentText(output.content),
+        by: `${telemetry.provider}:${telemetry.model}`,
+      };
+    };
+    const signed = (read: MarkedCv, by: string): MarkedCv => ({
+      ...read,
+      reading: { ...read.reading, model: by },
+    });
+    const first = await ask(messages);
+    const read = parse(first.raw);
+    if (read) return signed(read, first.by);
+    const second = await ask([
+      ...messages,
+      new AIMessage(first.raw),
+      new HumanMessage(JSON_REMINDER),
+    ]);
+    const again = parse(second.raw);
+    if (!again) {
+      this.logger.warn(
+        `CV ${correlationId} marking unreadable: ${answerSnippet(second.raw)}`,
+      );
+      return null;
+    }
+    return signed(again, second.by);
+  }
+
+  /** A CV read again: whoever looks at the screening sees it move. */
+  async progressed(screeningId: string): Promise<void> {
+    await this.afterProgress(screeningId);
   }
 
   private async afterProgress(screeningId: string): Promise<void> {
@@ -989,6 +1175,7 @@ export class CvScreeningService {
         storage_key: true,
         storage_bucket: true,
         candidate: true,
+        reading: true,
       },
       take: 300,
     });
@@ -1092,9 +1279,15 @@ const STATUS_ORDER: Record<CvScreeningResumeStatus, number> = {
 
 /** A screening with its CVs best first: scored by score, then waiting, then the ones not read. */
 export function screeningDetail(s: ScreeningRow) {
+  const version = Math.max(0, ...s.resumes.map((r) => r.grid?.version ?? 0));
+  const isStale = (r: ResumeRow) =>
+    version > 0 && (r.grid?.version ?? 0) < version;
   const resumes = [...s.resumes].sort(
     (a, b) =>
       STATUS_ORDER[a.status] - STATUS_ORDER[b.status] ||
+      // On other criteria than the grid in use: after those that are.
+      Number(isStale(a)) - Number(isStale(b)) ||
+      a.musts_missing - b.musts_missing ||
       (b.score ?? -1) - (a.score ?? -1) ||
       a.created_at.getTime() - b.created_at.getTime(),
   );
@@ -1114,6 +1307,9 @@ export function screeningDetail(s: ScreeningRow) {
       status: r.status,
       score: r.score,
       criteria: r.criteria as Record<string, number> | null,
+      /** Marked on a grid: the points of each criterion, the must-haves. */
+      scoring: r.grid ? scoreView(r) : null,
+      stale: r.status === CvScreeningResumeStatus.SCORED && isStale(r),
       summary: r.summary,
       strengths: r.strengths,
       gaps: r.gaps,
