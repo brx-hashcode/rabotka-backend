@@ -306,3 +306,24 @@ export function logResolvedChains(
     );
   }
 }
+
+/**
+ * The one model that marks CVs on a grid (`provider:model`), and proposes the
+ * grid. Kept on each grid when it is made: changing this moves new offers, and
+ * the others when they are re-analysed.
+ */
+export function cvScoringModel(): string {
+  return modelId('CV_MODEL_SCORING', 'openai:gpt-6-luna');
+}
+
+/** `openai:gpt-6-luna` as a spec; null when it is not one. */
+export function parseSpec(id: string): LlmProviderSpec | null {
+  const at = id.indexOf(':');
+  const provider = id.slice(0, at);
+  return at > 0 && at < id.length - 1 && provider in PROVIDER_API_KEY_ENV
+    ? {
+        provider: provider as LlmProviderSpec['provider'],
+        model: id.slice(at + 1),
+      }
+    : null;
+}

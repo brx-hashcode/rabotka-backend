@@ -39,7 +39,13 @@ import type { OutputLanguage } from '../output-language';
 import { CvRestoreService, type CvAvailability } from './cv-restore.service';
 import { answersBlock, readApplicationAnswers } from './cv-assessment';
 import type { ChatReportInput } from './cv-chat-report';
-import { chartTools, criteriaLine, type ChartResume } from './cv-chart';
+import {
+  chartTools,
+  criteriaLine,
+  WITH_GRID,
+  type ChartResume,
+  type OnGrid,
+} from './cv-chart';
 
 export const MIN_COMPARED = 2;
 export const MAX_COMPARED = 5;
@@ -157,7 +163,10 @@ export class CvCompareService {
       where: { id: { in: comparison.resume_ids } },
     });
     // Best first, as the analysis lists them.
-    resumes.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+    resumes.sort(
+      (a, b) =>
+        a.musts_missing - b.musts_missing || (b.score ?? -1) - (a.score ?? -1),
+    );
     return {
       businessName: comparison.screening.business.name,
       jobTitle: comparison.screening.job_title,
@@ -208,7 +217,13 @@ export class CvCompareService {
 
     const all = await this.prisma.cvScreeningResume.findMany({
       where: { id: { in: comparison.resume_ids }, screening_id: screeningId },
-      orderBy: [{ score: 'desc' }, { created_at: 'asc' }],
+      // As the pages rank them: the must-haves before the score.
+      orderBy: [
+        { musts_missing: 'asc' },
+        { score: 'desc' },
+        { created_at: 'asc' },
+      ],
+      include: WITH_GRID,
     });
     const gone = new Set((await this.missing(all)).map((m) => m.resumeId));
     const read = await Promise.all(
@@ -218,7 +233,8 @@ export class CvCompareService {
     );
     // One that cannot be read after all is left out, like the missing ones.
     const compared = read.filter(
-      (c): c is { resume: CvScreeningResume; text: string } => c.text !== null,
+      (c): c is { resume: (typeof all)[number]; text: string } =>
+        c.text !== null,
     );
     if (compared.length < MIN_COMPARED) {
       const left = new Set(compared.map((c) => c.resume.id));
@@ -393,7 +409,7 @@ export class CvCompareService {
 /** The job, then each candidate: name, score, what the analysis found, and the CV. */
 function contextText(
   job: { title: string; text: string; country: string | null },
-  candidates: { resume: CvScreeningResume; text: string }[],
+  candidates: { resume: CvScreeningResume & OnGrid; text: string }[],
 ): string {
   const blocks = candidates.map(({ resume, text }, i) => {
     const name = candidateName(resume) ?? `Candidat ${i + 1}`;

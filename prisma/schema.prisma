@@ -1431,6 +1431,7 @@ model JobOffer {
   saved_by                SavedJob[]
   agent_leads             AgentLead[]
   cv_screenings           CvScreening[]
+  cv_grids                CvGrid[]
   interviews              Interview[]
   linkedin_posts          JobOfferLinkedinPost[]
   deleted_at              DateTime?              @db.Timestamptz
@@ -3552,6 +3553,7 @@ model Business {
   /// Plans made for it alone (« sur mesure »).
   custom_plans  BusinessPlan[]
   cv_screenings CvScreening[]
+  cv_grids      CvGrid[]
   interviews    Interview[]
   interview_reports InterviewReport[]
   mailboxes     BusinessMailbox[]
@@ -3758,17 +3760,54 @@ model CvScreening {
   purged_at       DateTime?         @db.Timestamptz
   /// The business was told its CVs go soon.
   cv_notice_at    DateTime?         @db.Timestamptz
+  /// Free re-analyses made after its grid changed (business.cv_rescore_limit);
+  /// the first move from the previous formula is not counted.
+  rescores        Int               @default(0)
 
   business     Business              @relation(fields: [business_id], references: [id], onDelete: Cascade)
   subscription BusinessSubscription? @relation(fields: [subscription_id], references: [id], onDelete: SetNull)
   offer        JobOffer?             @relation(fields: [offer_id], references: [id], onDelete: SetNull)
   resumes      CvScreeningResume[]
   comparisons  CvComparison[]
+  grids        CvGrid[]
 
   @@index([business_id, created_at], name: "idx_cv_screening_business_created")
   @@index([offer_id, external], name: "idx_cv_screening_offer_external")
   @@index([expires_at], name: "idx_cv_screening_expires")
   @@map("cv_screenings")
+}
+
+/// What an offer's candidates (or a hand-made analysis's CVs) are marked on. A
+/// row is never edited: a change is a new version, so a score always says what
+/// it was made of. Belongs to an offer or, without one, to a screening.
+model CvGrid {
+  id           String   @id @default(uuid()) @db.Uuid
+  created_at   DateTime @default(now())
+  business_id  String   @db.Uuid
+  offer_id     String?  @db.Uuid
+  screening_id String?  @db.Uuid
+  version      Int
+  /// GridItem[] (cv-grid.ts).
+  items        Json
+  /// The offer's text it was made for: another one, and the grid may be stale.
+  job_hash     String
+  /// PROPOSED by the model, DEFAULT when it could not, EDITED by the business.
+  source       String
+  /// `provider:model` that marks every candidate of it: two do not mark alike.
+  model        String?
+  /// The member who edited it; null for the account holder or the model.
+  created_by   String?  @db.Uuid
+
+  business    Business                @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  offer       JobOffer?               @relation(fields: [offer_id], references: [id], onDelete: Cascade)
+  screening   CvScreening?            @relation(fields: [screening_id], references: [id], onDelete: Cascade)
+  resumes     CvScreeningResume[]
+  assessments ApplicationAssessment[]
+
+  @@unique([offer_id, version])
+  @@unique([screening_id, version])
+  @@index([business_id], name: "idx_cv_grid_business")
+  @@map("cv_grids")
 }
 
 /// One CV of a screening, in the private KYC bucket, and what the AI made of it.
@@ -3788,8 +3827,16 @@ model CvScreeningResume {
   status         CvScreeningResumeStatus @default(QUEUED)
   /// 0–100 against the job.
   score          Int?
-  /// Sub-scores (skills, experience, training, location, languages), 0–100.
+  /// Sub-scores (skills, experience, training, location, languages), 0–100:
+  /// the formula before the grids; null for a CV marked on one.
   criteria       Json?
+  /// The grid it was marked on; null for the previous formula.
+  grid_id        String?                 @db.Uuid
+  /// What was read for each item of the grid (marks, found, quotes), from
+  /// which the score is computed again when only importances change.
+  reading        Json?
+  /// Must-haves known to be missing, for the ranking.
+  musts_missing  Int                     @default(0)
   summary        String?                 @db.Text
   strengths      String[]                @default([])
   gaps           String[]                @default([])
@@ -3815,11 +3862,13 @@ model CvScreeningResume {
   subscription         BusinessSubscription? @relation(fields: [subscription_id], references: [id], onDelete: SetNull)
   external_application ExternalApplication?
   application          Application?
+  grid      CvGrid?              @relation(fields: [grid_id], references: [id], onDelete: SetNull)
   screening CvScreening          @relation(fields: [screening_id], references: [id], onDelete: Cascade)
   messages  CvResumeMessage[]
   interviews Interview[]
 
   @@index([screening_id], name: "idx_cv_screening_resume_screening")
+  @@index([grid_id], name: "idx_cv_screening_resume_grid")
   @@map("cv_screening_resumes")
   kept_by BusinessTalent[]
 }
@@ -4092,7 +4141,12 @@ model ApplicationAssessment {
   gaps           String[] @default([])
   /// The model never answered usably: not tried again.
   failed         Boolean  @default(false)
+  /// As on a CV: the grid it was marked on, and what was read.
+  grid_id        String?  @db.Uuid
+  reading        Json?
+  musts_missing  Int      @default(0)
 
+  grid        CvGrid?     @relation(fields: [grid_id], references: [id], onDelete: SetNull)
   application Application @relation(fields: [application_id], references: [id], onDelete: Cascade)
 
   @@map("application_assessments")

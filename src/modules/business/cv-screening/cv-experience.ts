@@ -160,15 +160,17 @@ export function normaliseExperiences(
  * The career in months: every month worked once (`total`), and the
  * full-time months related to the post (`relevant`, each month at the best
  * weight of the jobs covering it: part-time and internships count half,
- * volunteering a quarter, a partly related job half). Null when no job can
+ * volunteering a quarter, a partly related job half), and of those the ones in
+ * the same work (`direct`). Null when no job can
  * be placed in time.
  */
 export function experienceMonths(
   experiences: CvExperience[],
   now = new Date(),
-): { total: number; relevant: number } | null {
+): { total: number; relevant: number; direct: number } | null {
   const total = new Set<number>();
   const relevant = new Map<number, number>();
+  const direct = new Map<number, number>();
   for (const e of experiences) {
     const s = span(e, now);
     if (!s) continue;
@@ -177,12 +179,15 @@ export function experienceMonths(
       // Volunteering alone is not a career month.
       if (e.type !== 'VOLUNTEER') total.add(m);
       if (weight > (relevant.get(m) ?? 0)) relevant.set(m, weight);
+      if (e.relevance === 'HIGH' && weight > (direct.get(m) ?? 0)) {
+        direct.set(m, weight);
+      }
     }
   }
   if (total.size === 0 && relevant.size === 0) return null;
-  let sum = 0;
-  for (const w of relevant.values()) sum += w;
-  return { total: total.size, relevant: Math.round(sum) };
+  const sum = (months: Map<number, number>) =>
+    Math.round([...months.values()].reduce((n, w) => n + w, 0));
+  return { total: total.size, relevant: sum(relevant), direct: sum(direct) };
 }
 
 const TYPE_LABEL: Record<EmploymentType, string> = {

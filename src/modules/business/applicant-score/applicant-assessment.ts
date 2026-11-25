@@ -35,7 +35,12 @@ export type ApplicantFacts = {
   missions: { title: string; trade: string | null; completedAt: Date | null }[];
   portfolio: string[];
   /** Its answers to the offer's questions (« Questions aux candidats »). */
-  answers?: { question: string; answer: string; knockoutFailed?: boolean }[];
+  answers?: {
+    question: string;
+    answer: string;
+    knockoutFailed?: boolean;
+    knockoutPassed?: boolean;
+  }[];
   /** « Mon CV »: the text of the CV it sent, contacts removed. */
   cvText?: string;
 };

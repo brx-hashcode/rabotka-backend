@@ -3,6 +3,7 @@ import type { StructuredToolInterface } from '@langchain/core/tools';
 import type { CvScreeningResume } from '@prisma/client';
 import { z } from 'zod';
 import { CRITERIA_WEIGHTS, type CvCriterion } from './cv-assessment';
+import { scoreView } from './cv-marking';
 import type { OutputLanguage } from '../output-language';
 
 /**
@@ -33,7 +34,19 @@ export type ChartKind = 'scores' | 'criteres' | 'experience';
 export type ChartResume = Pick<
   CvScreeningResume,
   'score' | 'criteria' | 'candidate'
->;
+> &
+  OnGrid;
+
+/** Loaded with a CV marked on a grid; absent or null on the previous formula. */
+export type OnGrid = {
+  reading?: CvScreeningResume['reading'];
+  grid?: { id: string; version: number; items: unknown } | null;
+};
+
+/** What a chat loads with a CV, so its criteria are the grid's. */
+export const WITH_GRID = {
+  grid: { select: { id: true, version: true, items: true } },
+} as const;
 
 /** What the chats bind and run: the tool, and the chart (or why not) for a call. */
 export type ChartTools = {
@@ -136,28 +149,72 @@ function fullName(
     : WORDS[language].candidate(i + 1);
 }
 
-/** The criterion marks the analysis gave, null for one the job does not ask about. */
+const onGrid = (resume: OnGrid) =>
+  resume.grid
+    ? scoreView({ grid: resume.grid, reading: resume.reading })
+    : null;
+
+/** The marks the analysis gave, by criterion; null for one it does not have. */
 export function criteriaOf(
-  resume: Pick<CvScreeningResume, 'criteria'>,
-): Partial<Record<CvCriterion, number | null>> {
-  const c = resume.criteria;
-  if (!c || typeof c !== 'object' || Array.isArray(c)) return {};
-  const out: Partial<Record<CvCriterion, number | null>> = {};
-  for (const key of Object.keys(CRITERIA_WEIGHTS) as CvCriterion[]) {
-    const v = (c as Record<string, unknown>)[key];
-    out[key] = typeof v === 'number' && Number.isFinite(v) ? v : null;
+  resume: Pick<CvScreeningResume, 'criteria'> & OnGrid,
+  language: OutputLanguage = 'fr',
+): { key: string; label: string; mark: number | null }[] {
+  const scoring = onGrid(resume);
+  if (scoring) {
+    return scoring.criteria.map((c) => ({
+      key: c.key,
+      label: c.label,
+      mark: c.mark,
+    }));
   }
-  return out;
+  const c = resume.criteria;
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return [];
+  return (Object.keys(CRITERIA_WEIGHTS) as CvCriterion[]).map((key) => {
+    const v = (c as Record<string, unknown>)[key];
+    return {
+      key,
+      label: CRITERION_LABELS[language][key],
+      mark: typeof v === 'number' && Number.isFinite(v) ? v : null,
+    };
+  });
 }
 
-/** « Compétences 90, Expérience 85, … » for the chats' context; null when there are none. */
+const MUST_WORDS = {
+  MET: 'remplie',
+  MISSING: 'manquante',
+  UNCLEAR: 'à vérifier',
+} as const;
+
+/**
+ * The score's making, for the chats' context: the model explains these
+ * numbers and makes none. « Compétences 90, Expérience 85, … » on the
+ * previous formula; null when there are none.
+ */
 export function criteriaLine(
-  resume: Pick<CvScreeningResume, 'criteria'>,
+  resume: Pick<CvScreeningResume, 'criteria'> & OnGrid,
 ): string | null {
-  const marks = criteriaOf(resume);
-  const parts = (Object.keys(CRITERIA_WEIGHTS) as CvCriterion[])
-    .filter((k) => typeof marks[k] === 'number')
-    .map((k) => `${CRITERION_LABELS.fr[k]} ${marks[k]}`);
+  const scoring = onGrid(resume);
+  if (scoring) {
+    const parts = scoring.criteria.map((c) =>
+      c.mark === null
+        ? `${c.label} : non indiqué, 0 point sur ${c.max}`
+        : `${c.label} : ${c.mark}/100, ${c.points} point${c.points > 1 ? 's' : ''} sur ${c.max}`,
+    );
+    const musts = scoring.musts.map(
+      (m) => `${m.label} : ${MUST_WORDS[m.status]}`,
+    );
+    return [
+      `Points par critère (leur somme fait le score) : ${parts.join(' ; ')}`,
+      musts.length
+        ? `Exigences (elles passent avant le score dans le classement) : ${musts.join(' ; ')}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+  const parts = criteriaOf(resume).flatMap((c) =>
+    c.mark === null ? [] : [`${c.label} ${c.mark}`],
+  );
   return parts.length ? `Scores par critère : ${parts.join(', ')}` : null;
 }
 
@@ -191,12 +248,17 @@ export function criteriaChart(
   resumes: ChartResume[],
   language: OutputLanguage,
 ): ChartSpec | null {
-  const marks = resumes.map(criteriaOf);
+  const marks = resumes.map((r) => criteriaOf(r, language));
   // A criterion the job asks of nobody is not drawn.
-  const shown = (Object.keys(CRITERIA_WEIGHTS) as CvCriterion[]).filter((k) =>
-    marks.some((m) => typeof m[k] === 'number'),
+  const shown = new Map<string, string>();
+  for (const m of marks.flat()) {
+    if (m.mark !== null && !shown.has(m.key)) shown.set(m.key, m.label);
+  }
+  if (!shown.size) return null;
+  // In the grid's order, not in that of the first candidate who has each.
+  const order = [...new Set(marks.flat().map((m) => m.key))].filter((k) =>
+    shown.has(k),
   );
-  if (!shown.length) return null;
   const names = labelled(resumes, language);
   return {
     v: 1,
@@ -204,10 +266,10 @@ export function criteriaChart(
     layout: 'vertical',
     title: WORDS[language].criteria,
     unit: '/100',
-    categories: shown.map((k) => CRITERION_LABELS[language][k]),
-    series: resumes.map((_, i) => ({
+    categories: order.map((k) => shown.get(k) as string),
+    series: marks.map((own, i) => ({
       name: names[i],
-      values: shown.map((k) => marks[i][k] ?? null),
+      values: order.map((k) => own.find((m) => m.key === k)?.mark ?? null),
     })),
   };
 }

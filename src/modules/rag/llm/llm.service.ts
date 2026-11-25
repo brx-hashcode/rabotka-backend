@@ -71,6 +71,8 @@ export interface LlmInvokeOptions {
   tier: LlmTier;
   /** Bound with `bindTools` when present. A provider without tool support fails fatal. */
   tools?: BindToolsInput[];
+  /** Over the shared `VOVA_TEMPERATURE`: 0 for what must come out the same twice. */
+  temperature?: number;
   /** Per-attempt CEILING. The deadline can lower it; it can never raise it. */
   timeoutMs?: number;
   /** `requestIdMiddleware`'s id, so one conversation is greppable end to end. */
@@ -737,7 +739,7 @@ export class LlmService {
     // when a cold provider gets reached at all.
     const budget = this.budgetFor(options);
 
-    const model = await this.factory.build(spec);
+    const model = await this.factory.build(spec, options.temperature);
     let runnable: Runnable<BaseLanguageModelInput, AIMessage>;
 
     if (options.tools?.length) {
