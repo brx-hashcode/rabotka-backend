@@ -421,20 +421,42 @@ describe('CvScreeningService', () => {
       resumes: [{ id: 'r-a1', fileName: 'Awa Ngoma a1.txt' }],
     });
 
-    it('opens the offer’s screening, marks it shared and links each file to its resume', async () => {
-      const { service, prisma } = make();
-      prisma.cvScreening.findFirst = jest.fn().mockResolvedValue(null);
+    /** No screening yet; the second look is the one under the lock. */
+    const none = (under: { id: string } | null = null) => {
+      const made = make();
+      const { prisma, service } = made;
+      prisma.cvScreening.findFirst = jest
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(under);
+      prisma.cvScreening.create = jest.fn().mockResolvedValue({ id: 's1' });
+      prisma.cvScreening.deleteMany = jest.fn().mockResolvedValue({ count: 1 });
+      prisma.$executeRaw = jest.fn();
+      prisma.$transaction = jest.fn((run: any) => run(prisma));
+      jest.spyOn(service as any, 'jobBrief').mockResolvedValue({
+        offerId: 'o1',
+        title: 'Caissier',
+        text: 'Tenir la caisse.',
+      });
+      return made;
+    };
+
+    it('opens the offer’s screening, shared, and links each file to its resume', async () => {
+      const { service, prisma } = none();
       const create = jest
         .spyOn(service, 'create')
         .mockResolvedValue(created('s1') as never);
 
       const out = await service.addToOffer('p1', 'o1', files);
 
-      expect(create.mock.calls[0][3]).toBeUndefined();
-      expect(prisma.cvScreening.update).toHaveBeenCalledWith({
-        where: { id: 's1' },
-        data: { external: true },
+      expect(prisma.$executeRaw).toHaveBeenCalled();
+      expect(prisma.cvScreening.create.mock.calls[0][0].data).toMatchObject({
+        business_id: 'b1',
+        offer_id: 'o1',
+        external: true,
+        job_title: 'Caissier',
       });
+      expect(create.mock.calls[0][3]).toBe('s1');
       expect(prisma.cvScreeningResume.update).toHaveBeenCalledWith({
         where: { id: 'r-a1' },
         data: { file_name: 'Awa Ngoma.txt' },
@@ -443,6 +465,36 @@ describe('CvScreeningService', () => {
         screeningId: 's1',
         resumeIds: new Map([['a1', 'r-a1']]),
       });
+    });
+
+    it('opens one only when two CVs are read at once', async () => {
+      const { service, prisma } = none({ id: 'theirs' });
+      const create = jest
+        .spyOn(service, 'create')
+        .mockResolvedValue(created('theirs') as never);
+      await service.addToOffer('p1', 'o1', files);
+      expect(prisma.cvScreening.create).not.toHaveBeenCalled();
+      expect(create.mock.calls[0][3]).toBe('theirs');
+    });
+
+    it('leaves no empty one when the CV is refused', async () => {
+      const { service, prisma } = none();
+      jest.spyOn(service, 'create').mockRejectedValue(new Error('refused'));
+      await expect(service.addToOffer('p1', 'o1', files)).rejects.toThrow(
+        'refused',
+      );
+      expect(prisma.cvScreening.deleteMany).toHaveBeenCalledWith({
+        where: { id: 's1', resumes: { none: {} } },
+      });
+      // Not one that was there before.
+      const joined = none({ id: 'theirs' });
+      jest
+        .spyOn(joined.service, 'create')
+        .mockRejectedValue(new Error('refused'));
+      await expect(
+        joined.service.addToOffer('p1', 'o1', files),
+      ).rejects.toThrow('refused');
+      expect(joined.prisma.cvScreening.deleteMany).not.toHaveBeenCalled();
     });
 
     it('joins the one already open, so every candidate can be compared', async () => {
