@@ -458,7 +458,13 @@ jobs:
           # RAM: docker-compose.prod.yml sets no memory cap on api, so
           # overshooting means the kernel OOM-killer, which can take neighbouring
           # containers with it.
+          # Remote since 2026-11-24 (see VOVA_EMBEDDER_URL): warming now waits
+          # for the shared embedder and prebuilds the category vectors.
           VOVA_WARMUP=true
+          # The e5 model lives in ONE shared container (docker-compose.embedder.yml)
+          # instead of in each API: prod and develop each held a ~2.2GB copy,
+          # half the VPS's RAM. The production deploy owns and updates it.
+          VOVA_EMBEDDER_URL=http://rabotka_embedder:3100
           VOVA_HEDGE_ENABLED=false
           # Head start for the leading provider; 0 races everyone at once.
           VOVA_HEDGE_MS=3500
@@ -747,6 +753,17 @@ jobs:
             sed -i \"s|BACKEND_IMAGE=.*|BACKEND_IMAGE=$NEW_IMAGE|\" .env
 
             timeout 600 docker compose -f docker-compose.prod.yml up -d --remove-orphans || rollback
+
+            # The shared e5 embedder (VOVA_EMBEDDER_URL). The production deploy
+            # owns its version, so develop only starts it when it is missing —
+            # the first rollout, or after someone removed it — and never
+            # replaces prod's with a develop build. After the API swap: the old API
+            # still holds its own ~2.2GB copy until then, next to prod's.
+            if ! docker inspect rabotka_embedder >/dev/null 2>&1; then
+              docker compose -p rabotka-embedder -f docker-compose.embedder.yml up -d \
+                || echo 'WARNING: shared embedder failed to start; VoVa semantic search is degraded'
+            fi
+
             # Reclaim disk: drop old sha-tagged images so /var/lib/docker
             # doesn't fill the root FS over many deploys (running image kept).
             docker image prune -af || true

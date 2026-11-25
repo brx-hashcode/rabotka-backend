@@ -7,6 +7,10 @@ import { randomUUID } from 'node:crypto';
 import { ContactRecordOrigin } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { CONTACTABLE_WORKER } from '../recommendation/contactable-worker';
+import {
+  openApplicants,
+  openApplications,
+} from './subscription/applicant-access';
 import { BusinessSubscriptionService } from './subscription/business-subscription.service';
 
 /**
@@ -68,15 +72,40 @@ export class BusinessContactsService {
     return [...byWorker.values()];
   }
 
+  /** The applicants whose contact opens without spending one (a plan runs). */
+  async applicants(profileId: string): Promise<string[]> {
+    return [...(await openApplicants(this.prisma, profileId))];
+  }
+
   /**
-   * Reveals a worker found in the business's search, on its plan's contact
-   * quota — no fee, no WhatsApp: the details come back here. A worker already
-   * unlocked by this business comes back as is, without spending a unit.
+   * Reveals a worker — no fee, no WhatsApp: the details come back here. With a
+   * plan running, one of the business's applicants comes free; a profile found
+   * in its search spends a contact of the plan. A worker already unlocked by
+   * this business comes back as is, without spending a unit.
    * Only an active, verified worker (the rule every paid unlock follows).
    */
   async unlock(profileId: string, workerId: string) {
     const [existing] = await this.list(profileId, workerId);
     if (existing) return { contact: existing, spent: false };
+    const application = (
+      await openApplications(this.prisma, profileId, [workerId])
+    ).get(workerId);
+    if (application) {
+      // Kept, so the contact stays theirs once the plan ends.
+      await this.prisma.contactRecord.create({
+        data: {
+          employer_id: profileId,
+          worker_id: workerId,
+          origin: ContactRecordOrigin.DIRECT,
+          amount: 0,
+          unlocked_at: new Date(),
+          application_id: application.id,
+          job_offer_id: application.job_offer_id,
+        },
+      });
+      const [contact] = await this.list(profileId, workerId);
+      return { contact, spent: false };
+    }
     // The search it comes from is a plan feature; so is reaching out from it.
     await this.subscriptions.assertFeature(profileId, 'preselection');
 

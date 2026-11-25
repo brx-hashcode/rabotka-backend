@@ -13,7 +13,6 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import {
   ApplicationStatus,
-  AssignmentStatus,
   CvScreeningResumeStatus,
   ExternalApplicationStatus,
   JobOfferStatus,
@@ -33,7 +32,6 @@ import {
   BusinessSubscriptionService,
   cvBatchRoom,
 } from '../subscription/business-subscription.service';
-import { answerText } from '../../job-offer/offer-questions';
 import {
   APPLICATION_SUBMITTED,
   type ApplicationSubmitted,
@@ -44,6 +42,7 @@ import {
 } from '../cv-screening/cv-screening.service';
 import { TEXT_MIME } from '../cv-screening/cv-files';
 import { applicantCvText } from './applicant-cv-text';
+import { applicantFacts } from './applicant-facts';
 import { cvForApplication } from '../../profile-cv/profile-cv.rules';
 import {
   applicantMessages,
@@ -52,8 +51,6 @@ import {
   parseApplicantAssessment,
   reliabilityMark,
   type ApplicantAssessment,
-  type ApplicantFacts,
-  type OfferFacts,
 } from './applicant-assessment';
 
 /** Longest wait for one answer before the next model gets its turn. */
@@ -62,8 +59,6 @@ const LLM_TIMEOUT_MS = 45_000;
 const PER_SWEEP = 20;
 /** Older applications are not worth scoring any more. */
 const RECENT_DAYS = 120;
-const MAX_MISSIONS = 15;
-const MAX_PORTFOLIO = 8;
 /** How many waiting applications of each source a sweep looks at. */
 const CATCH_UP_SCAN = 200;
 /** A failed analysis is tried again after this: not at every sweep. */
@@ -152,90 +147,8 @@ export class ApplicantScoreService {
    * candidate as Rabotka knows them (trades, missions, publications, answers,
    * and the text of « Mon CV » when they sent it, contacts removed).
    */
-  async facts(applicationId: string) {
-    const app = await this.prisma.application.findUnique({
-      where: { id: applicationId },
-      include: {
-        job_offer: { include: { category: { select: { name: true } } } },
-        answers: {
-          select: { label: true, kind: true, value: true, passed: true },
-          orderBy: { created_at: 'asc' },
-        },
-        profile_cv: { select: { cv_text: true } },
-        worker: {
-          include: {
-            category: { select: { name: true } },
-            categories: {
-              include: { category: { select: { name: true } } },
-            },
-          },
-        },
-      },
-    });
-    if (!app) return null;
-    const [missions, portfolio] = await Promise.all([
-      this.prisma.assignment.findMany({
-        where: { worker_id: app.worker_id, status: AssignmentStatus.COMPLETED },
-        orderBy: { completed_at: 'desc' },
-        take: MAX_MISSIONS,
-        select: {
-          completed_at: true,
-          job_offer: {
-            select: { title: true, category: { select: { name: true } } },
-          },
-        },
-      }),
-      this.prisma.portfolioItem.findMany({
-        where: { profile_id: app.worker_id, description: { not: null } },
-        orderBy: { position: 'asc' },
-        take: MAX_PORTFOLIO,
-        select: { description: true },
-      }),
-    ]);
-    const w = app.worker;
-    const trades = [
-      ...new Set(
-        [w.category?.name, ...w.categories.map((c) => c.category.name)].filter(
-          (t): t is string => !!t,
-        ),
-      ),
-    ];
-    const o = app.job_offer;
-    const offer: OfferFacts = {
-      title: o.title,
-      description: o.description,
-      trade: o.category?.name ?? null,
-      city: o.city,
-      country: o.country_name,
-      isRemote: o.is_remote,
-      note: o.note,
-    };
-    const applicant: ApplicantFacts = {
-      trades,
-      description: w.description,
-      city: w.city,
-      country: w.country_name ?? null,
-      memberSince: w.created_at,
-      reliabilityScore: w.reliability_score,
-      ratingAvg: w.rating_avg,
-      ratingCount: w.rating_count,
-      missions: missions.map((m) => ({
-        title: m.job_offer.title,
-        trade: m.job_offer.category?.name ?? null,
-        completedAt: m.completed_at,
-      })),
-      portfolio: portfolio.map((p) => (p.description ?? '').slice(0, 200)),
-      // A « Fichier » answer by the text of its file.
-      answers: this.answerFiles
-        ? await this.answerFiles.notes(app.answers ?? [])
-        : (app.answers ?? []).map((x) => ({
-            question: x.label,
-            answer: answerText(x),
-            knockoutFailed: x.passed === false,
-          })),
-      cvText: app.profile_cv?.cv_text || undefined,
-    };
-    return { app, offer, applicant };
+  facts(applicationId: string) {
+    return applicantFacts(this.prisma, this.answerFiles, applicationId);
   }
 
   /** One application; false when the provider failed (tried again next sweep). */
@@ -320,6 +233,7 @@ export class ApplicantScoreService {
             },
           ],
           deleted_at: null,
+          cv_removed_at: null,
           status: { in: [ApplicationStatus.PENDING, ApplicationStatus.VIEWED] },
           created_at: { gte: since },
           job_offer: recruiting,
@@ -349,6 +263,7 @@ export class ApplicantScoreService {
             },
           ],
           cv_storage_key: { not: null },
+          cv_removed_at: null,
           status: ExternalApplicationStatus.PENDING,
           created_at: { gte: since },
           job_offer: recruiting,
@@ -524,6 +439,8 @@ export class ApplicantScoreService {
         },
       },
       deleted_at: null,
+      // « Supprimer le CV »: only a new CV, asked for, is read again.
+      ...(again ? {} : { cv_removed_at: null }),
       OR: [
         { cv_resume_id: null },
         ...(again && applicationId ? [{ id: applicationId }] : []),
@@ -632,7 +549,8 @@ export class ApplicantScoreService {
     }
     await this.prisma.application.update({
       where: { id: applicationId },
-      data: { profile_cv_id: cvId },
+      // A new CV: the one the business deleted is not this one.
+      data: { profile_cv_id: cvId, cv_removed_at: null },
     });
 
     // The score: in the background (a model call, up to twice), so the page

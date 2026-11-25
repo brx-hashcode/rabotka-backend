@@ -5,6 +5,7 @@ import {
   CV_SCREENING_SWEEP_QUEUE,
 } from '../../../common/services/queue/queue.module';
 import { QueueService } from '../../../common/services/queue/queue.service';
+import { CvRetentionService } from './cv-retention.service';
 import {
   CvScreeningService,
   type CvScreeningJob,
@@ -26,6 +27,7 @@ export class CvScreeningScheduler implements OnModuleInit {
   constructor(
     private readonly queueService: QueueService,
     private readonly screenings: CvScreeningService,
+    private readonly retention: CvRetentionService,
     // « Fichier » answers follow the CVs' retention, on the same hourly sweep.
     @Optional() private readonly answerFiles?: AnswerFilesService,
   ) {}
@@ -40,6 +42,8 @@ export class CvScreeningScheduler implements OnModuleInit {
     this.queueService.createWorker(
       CV_SCREENING_SWEEP_QUEUE,
       async () => {
+        // First, and failing the run if it fails: the purge reads these dates.
+        await this.retention.refresh();
         const result = await this.screenings.sweep();
         if (result.stuck > 0 || result.purged > 0) {
           this.logger.log(
@@ -49,6 +53,10 @@ export class CvScreeningScheduler implements OnModuleInit {
         const files = (await this.answerFiles?.sweep()) ?? 0;
         if (files > 0) {
           this.logger.log(`Answer files: ${files} purged`);
+        }
+        const told = await this.retention.announce();
+        if (told > 0) {
+          this.logger.log(`CV expiry: ${told} businesses told`);
         }
         const careers = await this.screenings.backfillCareers();
         if (careers > 0) {

@@ -23,7 +23,12 @@ const msg = (role: 'USER' | 'ASSISTANT', content: string) => ({
 });
 
 function make(
-  opts: { limit?: number; found?: unknown; past?: unknown[] } = {},
+  opts: {
+    limit?: number;
+    found?: unknown;
+    past?: unknown[];
+    gone?: string;
+  } = {},
 ) {
   const prisma: any = {
     business: {
@@ -81,8 +86,28 @@ function make(
       yield { type: 'end', message: { tool_calls: [], content: '' } };
     })(),
   );
-  const service = new CvChatService(prisma, llm, subscriptions, screenings);
-  return { service, prisma, llm, screenings };
+  // Ready while its file or text is there; else what the test says.
+  const restores: any = {
+    restore: jest.fn().mockResolvedValue(null),
+    availability: jest.fn((rows: any[]) =>
+      Promise.resolve(
+        new Map(
+          rows.map((r) => [
+            r.id,
+            r.storage_key || r.cv_text ? 'ready' : (opts.gone ?? 'expired'),
+          ]),
+        ),
+      ),
+    ),
+  };
+  const service = new CvChatService(
+    prisma,
+    llm,
+    subscriptions,
+    screenings,
+    restores,
+  );
+  return { service, prisma, llm, screenings, restores };
 }
 
 async function drain(gen: AsyncGenerator<string>) {
@@ -164,6 +189,26 @@ describe('CvChatService', () => {
         service.prepare('p1', 's1', 'r1', 'Encore ?'),
       ).rejects.toThrow('Vous avez posé les 2 questions prévues pour ce CV.');
       expect(prisma.cvResumeMessage.create).not.toHaveBeenCalled();
+    });
+
+    it('rebuilds a CV purged before they were kept, and asks about it', async () => {
+      const { service, restores } = make({
+        found: resume({ storage_key: null, cv_text: null }),
+        gone: 'restorable',
+      });
+      restores.restore.mockResolvedValue('CV rebâti.');
+      const turn = await service.prepare('p1', 's1', 'r1', 'Ses forces ?');
+      expect(turn.messages[1].content).toContain('CV rebâti.');
+    });
+
+    it('says who deleted a CV, and when nothing is left of one', async () => {
+      const ask = (gone: string) =>
+        make({
+          found: resume({ storage_key: null, cv_text: null }),
+          gone,
+        }).service.prepare('p1', 's1', 'r1', 'Q ?');
+      await expect(ask('removed')).rejects.toThrow('par votre équipe');
+      await expect(ask('expired')).rejects.toThrow('conservation');
     });
 
     it('refuses a purged CV, one never read, and a plan without chat', async () => {

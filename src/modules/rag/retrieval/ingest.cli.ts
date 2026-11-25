@@ -35,6 +35,13 @@ import { HelpDocsStore } from './help-docs.store';
 import { HelpIngestService } from './ingest.service';
 import { HELP_DOCS_COLLECTION } from './help-docs.config';
 
+// L'ingestion charge TOUJOURS son propre modèle, à 512 positions : les chunks
+// font jusqu'à 350 mots, et l'embedder partagé (VOVA_EMBEDDER_URL, hérité du
+// conteneur api) tourne à 256 — il tronquerait chaque chunk sans rien dire.
+// Même réglage que scripts/vova-ingest.ts.
+delete process.env.VOVA_EMBEDDER_URL;
+process.env.VOVA_EMBED_MAX_LENGTH ??= '512';
+
 async function main(): Promise<void> {
   const config = new ConfigService();
 

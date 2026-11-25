@@ -29,6 +29,7 @@ import {
   BUSINESS_COUNTRY_NAMES,
   isKnownBusinessCountry,
 } from '../business-catalog';
+import { CvRestoreService, type CvAvailability } from './cv-restore.service';
 import { CvScreeningService } from './cv-screening.service';
 import type { ChatReportCandidate, ChatReportInput } from './cv-chat-report';
 import { experiencesText, type CvExperience } from './cv-experience';
@@ -190,7 +191,7 @@ export const UNREADABLE_CV_TEXT = '';
 
 /**
  * Chat with one analysed CV: the business asks, the AI answers from the CV,
- * the job and the analysis, streamed. Kept per CV until the retention purge;
+ * the job and the analysis, streamed. Kept per CV until it is deleted;
  * the plan sets how many questions one CV allows.
  */
 @Injectable()
@@ -202,6 +203,7 @@ export class CvChatService {
     private readonly llm: LlmService,
     private readonly subscriptions: BusinessSubscriptionService,
     private readonly screenings: CvScreeningService,
+    private readonly restores: CvRestoreService,
   ) {}
 
   /** The organisation's country, by its French name: the context of the hire. */
@@ -228,11 +230,14 @@ export class CvChatService {
       orderBy: { created_at: 'asc' },
     });
     const asked = rows.filter((m) => m.role === CvChatRole.USER).length;
+    const state = await this.availabilityOf(resume);
     return {
       messages: rows.map(view),
       limit,
       remaining: Math.max(0, limit - asked),
-      available: resume.storage_key !== null,
+      available: usable(state),
+      /** Why not, when it is not. */
+      reason: usable(state) ? null : state,
     };
   }
 
@@ -295,11 +300,8 @@ export class CvChatService {
         'Ce CV n’a pas pu être lu : il n’y a rien à en dire.',
       );
     }
-    if (!resume.storage_key) {
-      throw new ForbiddenException(
-        'Ce CV a été supprimé à la fin de sa durée de conservation : la conversation n’est plus possible.',
-      );
-    }
+    const state = await this.availabilityOf(resume);
+    if (!usable(state)) throw new ForbiddenException(GONE[state]);
 
     const past = await this.prisma.cvResumeMessage.findMany({
       where: { resume_id: resume.id },
@@ -517,13 +519,19 @@ export class CvChatService {
   /**
    * A CV's text: the one read at analysis, else read now and kept, from the
    * PDF or Word file, or written out by the model once for a scan or a photo.
-   * After that a question never downloads the file again.
+   * After that a question never downloads the file again. A CV purged before
+   * they were kept is rebuilt, when it can be.
    */
   async cvTextOf(resume: CvScreeningResume): Promise<string> {
     if (resume.cv_text === UNREADABLE_CV_TEXT) {
       throw new BadRequestException('Ce CV ne peut plus être lu.');
     }
     if (resume.cv_text) return resume.cv_text;
+    if (!resume.storage_key || resume.removed_at) {
+      const rebuilt = await this.restores.restore(resume);
+      if (!rebuilt) throw new ForbiddenException(GONE.expired);
+      return rebuilt;
+    }
     const source = await this.screenings.sourceOf(resume);
     const text = source
       ? await this.screenings.transcribe(source, resume.id)
@@ -543,6 +551,13 @@ export class CvChatService {
       data: { cv_text: text },
     });
     return text;
+  }
+
+  private async availabilityOf(
+    resume: CvScreeningResume,
+  ): Promise<CvAvailability> {
+    const all = await this.restores.availability([resume]);
+    return all.get(resume.id) ?? 'expired';
   }
 
   private async owned(
@@ -572,6 +587,19 @@ export class CvChatService {
     };
   }
 }
+
+/** Whether a CV can be asked about. */
+export function usable(state: CvAvailability): state is 'ready' | 'restorable' {
+  return state === 'ready' || state === 'restorable';
+}
+
+const GONE = {
+  removed:
+    'Ce CV a été supprimé par votre équipe : la conversation n’est plus possible.',
+  expired:
+    'Ce CV a été supprimé à la fin de sa durée de conservation : la conversation n’est plus possible.',
+  unreadable: 'Ce CV ne peut plus être lu.',
+} as const;
 
 /** The career the analysis read, counted, for the chats' context; null for a CV read before. */
 export function careerOf(

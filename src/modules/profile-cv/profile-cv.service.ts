@@ -196,7 +196,8 @@ export class ProfileCvService {
 
   /**
    * A business reading the CV sent with an application to one of its offers:
-   * once the contact is unlocked or the application retained.
+   * once the contact is unlocked or the application retained, or while its
+   * plan runs.
    */
   async fileForEmployer(employerId: string, applicationId: string) {
     const application = await this.prisma.application.findFirst({
@@ -208,9 +209,13 @@ export class ProfileCvService {
       select: {
         status: true,
         worker_id: true,
+        cv_removed_at: true,
         profile_cv: true,
       },
     });
+    if (application?.cv_removed_at) {
+      throw new NotFoundException('Ce CV a été supprimé par votre équipe.');
+    }
     if (!application?.profile_cv || application.profile_cv.purged_at) {
       throw new NotFoundException('Aucun CV joint à cette candidature.');
     }
@@ -233,8 +238,9 @@ export class ProfileCvService {
   /**
    * The CV on a candidate's profile, as a business sees it: their live « Mon
    * CV » while they chose to send it, and whether it opens (the contact
-   * unlocked, or one of their applications to this business retained — the
-   * file has their phone and e-mail on it). Null when there is none.
+   * unlocked, one of their applications to this business retained, or an
+   * applicant while its plan runs — the file has their phone and e-mail on
+   * it). Null when there is none.
    */
   async forCandidate(
     employerId: string,

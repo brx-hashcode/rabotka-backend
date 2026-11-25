@@ -20,12 +20,20 @@ import { readNumber } from '../shared/config';
  * Using the wrong side is not an error anyone sees; it is a quiet loss of
  * recall that looks like "the corpus just isn't very good", which is why the
  * two paths here are separate methods and never one shared helper.
+ *
+ * **Local or remote.** With `VOVA_EMBEDDER_URL` set, the model is not loaded
+ * here at all: both sides go over HTTP to the shared embedder (`src/embedder.ts`,
+ * container `rabotka_embedder`). The model is ~2.2GB of native memory once
+ * loaded, and the prod and develop APIs each holding their own copy was half
+ * the VPS's RAM for identical vectors. Unset — local dev, the ingest CLI, the
+ * embedder process itself — it loads in-process as before.
  */
 @Injectable()
 export class HelpEmbeddingsService {
   private readonly logger = new Logger(HelpEmbeddingsService.name);
   private embedder: FlagEmbedding | undefined;
   private loading: Promise<FlagEmbedding> | null = null;
+  private remoteReady: Promise<void> | null = null;
 
   constructor(
     private readonly config: ConfigService,
@@ -122,10 +130,87 @@ export class HelpEmbeddingsService {
     return this.loading;
   }
 
+  private remoteUrl(): string | undefined {
+    const url = this.config.get<string>('VOVA_EMBEDDER_URL')?.trim();
+    return url ? url.replace(/\/+$/, '') : undefined;
+  }
+
+  /**
+   * The remote counterpart of `ensure()`: the first call waits for the
+   * embedder's /health, the way the first local call waits for the model load.
+   *
+   * Needed because the embedder and the API boot independently — a prod deploy
+   * recreates both, and the model takes seconds to load (18.8s measured cold)
+   * while the category prebuild starts the moment the API is up. A failure
+   * clears the promise, so an embedder restart later is waited out again
+   * rather than failing every call until the API restarts too.
+   */
+  private waitForRemote(url: string): Promise<void> {
+    this.remoteReady ??= (async () => {
+      const deadline =
+        Date.now() + readNumber(this.config, 'VOVA_EMBEDDER_WAIT_MS', 120_000);
+      for (;;) {
+        try {
+          const res = await fetch(`${url}/health`, {
+            signal: AbortSignal.timeout(2_000),
+          });
+          if (res.ok) return;
+        } catch {
+          // Not up yet (ECONNREFUSED while the container starts).
+        }
+        if (Date.now() >= deadline) {
+          throw new Error(`Embedder at ${url} is not ready`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+      }
+    })().catch((err: unknown) => {
+      this.remoteReady = null;
+      throw err;
+    });
+    return this.remoteReady;
+  }
+
+  private async remote(
+    url: string,
+    kind: 'query' | 'passage',
+    texts: string[],
+  ): Promise<number[][]> {
+    await this.waitForRemote(url);
+    let res: Response;
+    try {
+      res = await fetch(`${url}/embed`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kind, texts }),
+        signal: AbortSignal.timeout(
+          readNumber(this.config, 'VOVA_EMBEDDER_TIMEOUT_MS', 30_000),
+        ),
+      });
+    } catch (err) {
+      this.remoteReady = null;
+      throw err;
+    }
+    if (!res.ok) {
+      if (res.status === 503) this.remoteReady = null;
+      throw new Error(
+        `Embedder ${kind} request failed: ${res.status} ${await res.text()}`,
+      );
+    }
+    const { vectors } = (await res.json()) as { vectors: number[][] };
+    if (vectors?.length !== texts.length) {
+      throw new Error(
+        `Embedder returned ${vectors?.length} vectors for ${texts.length} texts`,
+      );
+    }
+    return vectors;
+  }
+
   /** Document side. Applies the `passage: ` prefix e5 expects. */
   async embedPassages(texts: string[]): Promise<number[][]> {
     if (texts.length === 0) return [];
     for (const text of texts) this.guardLength('passage', text);
+    const url = this.remoteUrl();
+    if (url) return this.remote(url, 'passage', texts);
     const embedder = await this.ensure();
     const vectors: number[][] = [];
     for await (const batch of embedder.passageEmbed(texts)) {
@@ -137,6 +222,8 @@ export class HelpEmbeddingsService {
   /** Question side. Applies the `query: ` prefix e5 expects. */
   async embedQuery(text: string): Promise<number[]> {
     this.guardLength('query', text);
+    const url = this.remoteUrl();
+    if (url) return (await this.remote(url, 'query', [text]))[0];
     const embedder = await this.ensure();
     return Array.from(await embedder.queryEmbed(text));
   }
@@ -154,9 +241,13 @@ export class HelpEmbeddingsService {
    * app past its 150MB terminus limit once, which made /health answer 503 and
    * failed the deploy smoke test. Turn it on once the memory headroom is
    * measured on the target host.
+   *
+   * Remote, there is nothing to load: it waits for the shared embedder instead.
    */
   async warmUp(): Promise<void> {
-    await this.ensure();
+    const url = this.remoteUrl();
+    if (url) await this.waitForRemote(url);
+    else await this.ensure();
   }
 
   /** Lexical leg — the same SPLADE model the matching index already loaded. */

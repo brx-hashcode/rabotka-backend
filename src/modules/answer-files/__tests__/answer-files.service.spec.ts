@@ -84,6 +84,35 @@ describe('AnswerFilesService', () => {
     ).rejects.toThrow('ajoutez-le à nouveau');
   });
 
+  it('sweeps attached files by their date, and unused uploads after a day', async () => {
+    const { service, prisma } = setup();
+    const now = new Date('2026-12-02T00:00:00Z');
+    await service.sweep(now);
+    expect(prisma.answerFile.findMany.mock.calls[0][0].where.OR).toEqual([
+      {
+        attached_at: null,
+        created_at: { lt: new Date('2026-12-01T00:00:00Z') },
+      },
+      { expires_at: { lte: now } },
+    ]);
+  });
+
+  it('deletes the files the business removes, due now if the storage fails', async () => {
+    const { service, prisma, storage } = setup();
+    prisma.answerFile.findMany.mockResolvedValue([
+      { id: 'f1', storage_key: 'k', storage_bucket: 'b' },
+    ]);
+    storage.delete.mockRejectedValueOnce(new Error('S3 down'));
+    const now = new Date();
+    await service.remove(['f1'], now);
+    expect(prisma.answerFile.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['f1'] } },
+      data: { removed_at: now, expires_at: now, text: null },
+    });
+    // Its key stays: the sweep tries again.
+    expect(prisma.answerFile.update).not.toHaveBeenCalled();
+  });
+
   it('gives the analysis a file’s text in place of its id', async () => {
     const { prisma, service } = setup();
     const id = '3f2b8a1e-1c2d-4e5f-8a9b-0c1d2e3f4a5b';

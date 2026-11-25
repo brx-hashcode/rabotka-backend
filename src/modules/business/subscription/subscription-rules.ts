@@ -39,7 +39,7 @@ export function counterWindow(
   };
 }
 
-function addMonthsClamped(date: Date, months: number): Date {
+export function addMonthsClamped(date: Date, months: number): Date {
   const d = new Date(date.getTime());
   const day = d.getUTCDate();
   d.setUTCDate(1);

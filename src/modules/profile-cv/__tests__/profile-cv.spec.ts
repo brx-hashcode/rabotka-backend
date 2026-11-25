@@ -64,6 +64,8 @@ function setup(
     profile: {
       findUnique: jest.fn().mockResolvedValue(profile),
       update: jest.fn(),
+      // No plan running: nothing opens by itself.
+      findFirst: jest.fn().mockResolvedValue(null),
     },
     profileCv: {
       findFirst: jest.fn().mockResolvedValue(live),
@@ -71,7 +73,10 @@ function setup(
       updateMany: jest.fn(),
       update: jest.fn(),
     },
-    application: { findFirst: jest.fn() },
+    application: {
+      findFirst: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     contactRecord: { findMany: jest.fn().mockResolvedValue([]) },
     $transaction: jest.fn((arg: unknown) =>
       typeof arg === 'function'
@@ -324,6 +329,28 @@ describe('ProfileCvService — the candidate sheet and the admin', () => {
     ).resolves.toMatchObject({
       available: true,
     });
+  });
+
+  it('opens an applicant’s while a plan runs', async () => {
+    const { service, prisma } = candidate();
+    prisma.profile.findFirst.mockResolvedValue({ id: 'e1' });
+    prisma.application.findMany.mockResolvedValue([
+      { id: 'a1', worker_id: 'w1', job_offer_id: 'o1' },
+    ]);
+    await expect(service.forCandidate('e1', 'w1')).resolves.toMatchObject({
+      available: true,
+    });
+    await expect(service.candidateFile('e1', 'w1')).resolves.toMatchObject({
+      contentType: 'application/pdf',
+    });
+  });
+
+  it('keeps it shut for a profile that never applied, plan or not', async () => {
+    const { service, prisma } = candidate();
+    prisma.profile.findFirst.mockResolvedValue({ id: 'e1' });
+    await expect(service.candidateFile('e1', 'w1')).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 
   it('has nothing to show when the candidate sends the Rabotka CV', async () => {

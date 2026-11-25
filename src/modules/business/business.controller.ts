@@ -180,14 +180,24 @@ export class BusinessController {
     return this.contacts.list(req.user.profileId);
   }
 
+  @Get('me/contacts/applicants')
+  @ApiOperation({
+    summary: 'The applicants whose contact opens without spending one',
+    description:
+      'Worker ids. With a plan running (trial included): whoever applied to one of its offers. Empty otherwise.',
+  })
+  applicantContacts(@Req() req: ProfileAuthenticatedRequest) {
+    return this.contacts.applicants(req.user.profileId);
+  }
+
   @Post('me/contacts/:workerId')
   // Reaches candidates or uses the plan: only once the organisation is approved.
   @UseGuards(KycVerifiedGuard)
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
-    summary: 'Reveal a worker from the search, on the plan quota',
+    summary: 'Reveal a worker: an applicant, or one from the search',
     description:
-      'No fee and no WhatsApp: the details come back in the response. Free for a worker already unlocked; 403 once the quota is used up.',
+      'No fee and no WhatsApp: the details come back in the response. Free for a worker already unlocked, and for an applicant while a plan runs; otherwise spends a contact of the plan, 403 once they are used up.',
   })
   unlockContact(
     @Req() req: ProfileAuthenticatedRequest,

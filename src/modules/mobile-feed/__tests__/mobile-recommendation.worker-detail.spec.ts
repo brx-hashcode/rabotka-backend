@@ -90,6 +90,41 @@ describe('MobileRecommendationController — workerDetail()', () => {
     expect(result.worker.portfolioSlug).toBe('awa-menagere-a1b2c3');
   });
 
+  describe('for a business whose plan leaves the search out', () => {
+    const business = (applied: boolean) => {
+      build();
+      const assertFeature = jest.fn().mockRejectedValue(new Error('plan'));
+      Object.assign(controller, { subscriptions: { assertFeature } });
+      Object.assign(prisma.profile, {
+        findFirst: jest.fn().mockResolvedValue({ id: EMPLOYER_ID }),
+      });
+      Object.assign(prisma.application, {
+        findMany: jest
+          .fn()
+          .mockResolvedValue(
+            applied
+              ? [{ id: 'a1', worker_id: WORKER_ID, job_offer_id: 'o1' }]
+              : [],
+          ),
+      });
+    };
+
+    it('opens the profile of one of its applicants', async () => {
+      business(true);
+      const result = await controller.workerDetail(req as never, WORKER_ID);
+      expect(result.worker.id).toBe(WORKER_ID);
+    });
+
+    it('refuses anyone else, and the search', async () => {
+      business(false);
+      await expect(
+        controller.workerDetail(req as never, WORKER_ID),
+      ).rejects.toThrow('plan');
+      business(true);
+      await expect(controller.workerFeed(req as never)).rejects.toThrow('plan');
+    });
+  });
+
   it('leaves an existing slug alone', async () => {
     build(workerRow({ portfolio_slug: 'already-there' }));
 
