@@ -23,10 +23,6 @@ import {
 const format = (value: string | undefined): ExportFormat =>
   value === 'csv' ? 'csv' : 'xlsx';
 
-/** 30, 90 or 365 days; anything else (or nothing) means every offer. */
-const days = (value: string | undefined): number | null =>
-  ['30', '90', '365'].includes(value ?? '') ? Number(value) : null;
-
 function send(res: Response, file: ExportedFile): void {
   res.setHeader(
     'Content-Disposition',
@@ -79,20 +75,5 @@ export class HrExportsController {
     @Res() res: Response,
   ): Promise<void> {
     send(res, await this.exports.staffRegister(req.user.profileId, format(f)));
-  }
-
-  @Get('acpe')
-  @Throttle({ default: { limit: 20, ttl: 60_000 } })
-  @ApiOperation({
-    summary:
-      'Offers to declare to the ACPE (last `days`: 30, 90, 365; else all)',
-  })
-  async acpe(
-    @Req() req: ProfileAuthenticatedRequest,
-    @Query('days') d: string | undefined,
-    @Query('format') f: string | undefined,
-    @Res() res: Response,
-  ): Promise<void> {
-    send(res, await this.exports.acpe(req.user.profileId, days(d), format(f)));
   }
 }

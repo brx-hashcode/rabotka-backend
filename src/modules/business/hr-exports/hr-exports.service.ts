@@ -13,7 +13,6 @@ import { sourceLabel } from '../report/business-report-sheets';
 import { tablesCsv, tablesXlsx, type TableFile } from '../report/table-files';
 import { BusinessSubscriptionService } from '../subscription/business-subscription.service';
 import {
-  acpeTable,
   candidatesTable,
   day,
   staffTable,
@@ -43,8 +42,8 @@ function careersOrigin(source: string | null): string {
 
 /**
  * « Exports RH », a plan service: an offer's candidates, the staff register of
- * the hires, the offers to declare to the ACPE — as Excel or CSV. A Rabotka
- * candidate's phone and e-mail are in only once its contact was obtained.
+ * the hires — as Excel or CSV. A Rabotka candidate's phone and e-mail are in
+ * only once its contact was obtained.
  */
 @Injectable()
 export class HrExportsService {
@@ -242,65 +241,6 @@ export class HrExportsService {
       tables: [staffTable(rows)],
       generatedAt: new Date(),
       empty: 'Personne n’a encore été recruté.',
-    });
-  }
-
-  /** The offers published in the last `days` (all of them when null). */
-  async acpe(profileId: string, days: number | null, format: ExportFormat) {
-    const business = await this.business(profileId);
-    const since = days ? new Date(Date.now() - days * 86_400_000) : null;
-    const offers = await this.prisma.jobOffer.findMany({
-      where: {
-        employer_id: business.profile_id,
-        deleted_at: null,
-        ...(since ? { created_at: { gte: since } } : {}),
-      },
-      orderBy: { created_at: 'desc' },
-      select: {
-        reference: true,
-        title: true,
-        employment_type: true,
-        quantity: true,
-        city: true,
-        country_name: true,
-        address: true,
-        created_at: true,
-        scheduled_at: true,
-        amount: true,
-        payment_flow: true,
-        description: true,
-        status: true,
-        category: { select: { name: true } },
-      },
-    });
-    const today = day(new Date());
-    return this.file(format, `offres-acpe-${today}`, {
-      title: `Offres à déclarer à l’ACPE — ${business.name}`,
-      subtitle: since
-        ? `Publiées depuis le ${day(since)} · exporté le ${today}`
-        : `Toutes les offres · exporté le ${today}`,
-      tables: [
-        acpeTable(
-          offers.map((o) => ({
-            reference: o.reference,
-            title: o.title,
-            category: o.category?.name ?? null,
-            contract: o.employment_type,
-            quantity: o.quantity,
-            city: o.city,
-            countryName: o.country_name,
-            address: o.address,
-            publishedAt: o.created_at,
-            scheduledAt: o.scheduled_at,
-            amount: o.amount === null ? null : Number(o.amount),
-            paymentFlow: o.payment_flow,
-            description: o.description,
-            status: o.status,
-          })),
-        ),
-      ],
-      generatedAt: new Date(),
-      empty: 'Aucune offre sur la période.',
     });
   }
 
