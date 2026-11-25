@@ -98,7 +98,7 @@ const CASES: Case[] = [
     id: 'unfair',
     brief:
       'Jeune femme de moins de 30 ans pour accueillir les clients à Abidjan, permis B exigé',
-    has: [/Abidjan/, /permis B/i],
+    has: [/Abidjan/, /permis (de conduire )?(de )?(cat[ée]gorie |type )?B/i],
     not: [/Kinshasa/, /30 ans/, /jeune/i, /femme/i],
   },
   {

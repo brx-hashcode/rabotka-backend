@@ -222,6 +222,14 @@ const ACTION_REQUEST_PATTERNS = [
   'modifie mon',
   'supprime mon',
 ];
+/**
+ * Whole words: « payé mais » folds to `paye mais`, which holds `paye ma`. And
+ * not after an auxiliary: « j'ai payé mes pénalités », « il a annulé ma
+ * candidature » tell what happened and ask for nothing.
+ */
+const ACTION_REQUEST = new RegExp(
+  `(?<!\\b(?:ai|as|a|avons|avez|ont|avais|avait|aviez|avaient)(?: (?:deja|bien|pas|tout))? )\\b(?:${ACTION_REQUEST_PATTERNS.join('|')})s?\\b`,
+);
 
 /**
  * Tool names, which must never appear in a reply.
@@ -229,11 +237,13 @@ const ACTION_REQUEST_PATTERNS = [
  * Models narrate the call instead of making it — an employer received the
  * literal line «ouvrir_app cible:publier_mission libelle:Publier une mission».
  * The prompt forbids it and the prompt is what gets ignored, so the sanitiser
- * removes any line that mentions one.
+ * removes any line that mentions one. The name as written, underscore included:
+ * « Mes pénalités » and « Mes candidatures » are screens a reply must name.
  */
 const TOOL_NAMES = [
   'ouvrir_app',
   'rechercher_aide',
+  'verifier_domaine',
   'rechercher_offres',
   'offre_par_reference',
   'etat_du_profil',
@@ -244,7 +254,14 @@ const TOOL_NAMES = [
   'etat_deblocage',
   'carte_support',
   'demander_assistance',
+  'mes_missions_publiees',
+  'candidatures_recues',
 ];
+/** A Markdown reply may escape the underscore: `mes\_penalites`. */
+const TOOL_NAME_PATTERN = new RegExp(
+  `\\b(?:${TOOL_NAMES.map((name) => name.replaceAll('_', '\\\\?_')).join('|')})\\b`,
+  'i',
+);
 
 /**
  * General knowledge and arithmetic, which are not Rabotka's business.
@@ -377,7 +394,7 @@ export class GuardService {
     // exists to answer exactly that. Only the imperative is refused: the action
     // patterns match verb stems, so without this an explanation request was
     // turned away with « je ne peux rien publier à votre place ».
-    if (!isHowQuestion(folded) && hits(ACTION_REQUEST_PATTERNS)) {
+    if (!isHowQuestion(folded) && ACTION_REQUEST.test(folded)) {
       return {
         action: 'refuse',
         refusalId: 'action_impossible',
@@ -652,9 +669,16 @@ export function capLength(text: string, max = REPLY_MAX_CHARS): string {
  * decided to write.
  */
 export function stripUrls(text: string): string {
-  return text
+  const without = text
     .replace(/\b(?:https?:\/\/|www\.)\S+/gi, '')
-    .replace(/\b[a-z0-9-]+\.(?:work|com|cg|net|org|app|io)(?:\/\S*)?/gi, '')
+    // Whole: « paiement.Comment » is a missing space, not a .com.
+    .replace(
+      /\b[a-z0-9-]+\.(?:work|com|cg|net|org|app|io)(?![\p{L}\p{N}_])(?:\/\S*)?/giu,
+      '',
+    );
+  // The tidying is for the hole a link leaves; French puts a space before « : ».
+  if (without === text) return text;
+  return without
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/[ \t]+([.,;:!?])/g, '$1')
     .replace(/\n{3,}/g, '\n\n')
@@ -665,10 +689,7 @@ export function stripUrls(text: string): string {
 export function stripToolNarration(text: string): string {
   return text
     .split('\n')
-    .filter((line) => {
-      const folded = foldText(line);
-      return !TOOL_NAMES.some((name) => folded.includes(foldText(name)));
-    })
+    .filter((line) => !TOOL_NAME_PATTERN.test(line))
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -708,5 +729,15 @@ export function removeIdentityOpening(text: string): string {
     (first.includes('assistant') || first.length < 60);
 
   if (!isIdentityLine || lines.length < 2) return text;
-  return lines.slice(1).join('\n').trim();
+  // The sentence, not the line: what follows it on the line may be the answer
+  // (« Je suis VoVa AI, … . Je ne peux pas vous aider pour les devoirs. »). One
+  // that refuses something in the same breath stays whole.
+  const kept = (lines[0] ?? '')
+    .split(/(?<=[.!?])\s+/)
+    .filter((sentence) => {
+      const folded = foldText(sentence);
+      return !folded.includes('vova ai') || /\b(pas|not|can t)\b/.test(folded);
+    })
+    .join(' ');
+  return [kept, ...lines.slice(1)].join('\n').trim();
 }
