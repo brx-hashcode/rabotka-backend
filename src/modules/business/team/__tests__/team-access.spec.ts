@@ -1,4 +1,4 @@
-import { memberMayCall, routePattern } from '../team-access';
+import { holderOnlyRefusal, memberMayCall, routePattern } from '../team-access';
 
 /** Routes the business space calls (rabotka-business/src/lib/api), as the API matches them. */
 const may = (
@@ -111,5 +111,20 @@ describe('team access', () => {
       }),
     ).toBe('/job-offers/:id/close');
     expect(routePattern({ path: '/api/v1/business/me/' })).toBe('/business/me');
+  });
+});
+
+describe('the holder’s own fields', () => {
+  it('keeps the login e-mail and the name to the holder', () => {
+    expect(holderOnlyRefusal('m-2', { email: 'me@x.cg' })).toMatch(
+      /Seul le responsable du compte/,
+    );
+    expect(holderOnlyRefusal('m-2', { firstName: 'Awa' })).not.toBeNull();
+    expect(holderOnlyRefusal('m-2', { lastName: 'M' })).not.toBeNull();
+  });
+
+  it('lets a member change the rest, and the holder everything', () => {
+    expect(holderOnlyRefusal('m-2', {})).toBeNull();
+    expect(holderOnlyRefusal(undefined, { email: 'me@x.cg' })).toBeNull();
   });
 });

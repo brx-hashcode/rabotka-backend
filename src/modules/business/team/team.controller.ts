@@ -33,7 +33,8 @@ import { ProfileAuthGuard } from '../../auth/guards/profile-auth.guard';
 import { INVITED_ROLES, TeamService, type InvitedRole } from './team.service';
 
 const ROLE_MESSAGE = {
-  message: 'Rôle : RECRUITER (recruteur) ou REVIEWER (évaluateur).',
+  message:
+    'Rôle : ADMIN (administrateur), RECRUITER (recruteur) ou REVIEWER (évaluateur).',
 };
 
 class InviteMemberDto {
@@ -45,7 +46,7 @@ class InviteMemberDto {
   @MaxLength(120)
   name!: string;
 
-  /** The holder is the one administrator: members are recruiters or reviewers. */
+  /** Administrator (the holder only gives it), recruiter or reviewer. */
   @IsIn(INVITED_ROLES, ROLE_MESSAGE)
   role!: InvitedRole;
 }
