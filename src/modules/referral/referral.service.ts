@@ -356,7 +356,11 @@ export class ReferralService {
       // this feature invites.
       .sort((a, b) => a.walletId.localeCompare(b.walletId));
 
-    await this.prisma.$transaction(async (tx) => {
+    // Whether THIS call won the claim. The loser used to return from the
+    // transaction only, then went on to the log and the referrer's e-mail: the
+    // KYC approval and the payment both settling one referral sent the parrain
+    // « Vous avez gagné » twice.
+    const won = await this.prisma.$transaction(async (tx) => {
       // Atomic claim, same shape as WalletService.grantWelcomeCredit: only one
       // caller can move the row out of PENDING/QUALIFIED_ON_HOLD, and the loser
       // writes nothing. This is also what makes "first qualifying payment"
@@ -377,7 +381,7 @@ export class ReferralService {
           settlement_note: null,
         },
       });
-      if (claim.count === 0) return;
+      if (claim.count === 0) return false;
 
       for (const credit of credits) {
         await tx.walletTransaction.create({
@@ -394,7 +398,9 @@ export class ReferralService {
           data: { balance: { increment: credit.amount } },
         });
       }
+      return true;
     });
+    if (!won) return;
 
     await Promise.all([
       this.adminCache.invalidate('referrals'),

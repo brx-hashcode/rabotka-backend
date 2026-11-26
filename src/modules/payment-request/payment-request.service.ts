@@ -40,13 +40,17 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { ContactRecordService } from '../contact-unlock/contact-record.service';
 import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import { SystemConfigService } from '../system-config/system-config.service';
-import { WalletService } from '../wallet/wallet.service';
+import {
+  MOBILE_NETWORKS,
+  networkOf,
+  WalletService,
+} from '../wallet/wallet.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { WhatsAppFeedbackService } from '../whatsapp/feedback/whatsapp-feedback.service';
 import { ReferralService } from '../referral/referral.service';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
-import { invoiceEmail, paymentSuccessEmail } from '../mail/templates';
+import { paymentReceiptEmail, paymentReceiptSubject } from '../mail/templates';
 import { audienceOf, productOf } from '../mail/audience';
 import { PaymentGatewayService } from '../../common/services/payment/payment-gateway.service';
 import type {
@@ -881,11 +885,8 @@ export class PaymentRequestService {
     // Compute unlock result first (needed for the confirmation message text).
     const unlockResult = await this.handleContactUnlockPostPayment(request);
 
-    // 1. Confirmation by email (the app already showed it on screen).
-    await this.sendPaymentSuccessNotifications(request, context);
-
-    // 2. Contact details (regular unlock) — this is what the user is waiting
-    // for after paying, so send it before the invoice, not after.
+    // 1. Contact details (regular unlock) — this is what the user is waiting
+    // for after paying, so send it before the receipt, not after.
     for (const id of unlockResult.unlockedAttemptIds) {
       await this.botNotification
         .sendContactUnlockedNotification(id)
@@ -897,13 +898,16 @@ export class PaymentRequestService {
         );
     }
 
-    // 3. Contact details (recommendation unlock)
+    // 2. Contact details (recommendation unlock)
     await this.handleRecommendationContactPostPayment(request, context);
 
-    // 4. Invoice PDF (email only) — fire-and-forget. PDF generation + email are
-    // relatively slow and the invoice isn't needed to complete the unlock, so
-    // we don't await it: the user gets their contact immediately while the
-    // invoice is produced in the background of this worker process.
+    // 3. The receipt: ONE e-mail, the confirmation with the invoice PDF
+    // attached — fire-and-forget. A payment used to send two, « Paiement
+    // confirmé » then « Votre facture », a minute apart and saying the same
+    // thing. PDF generation is slow and the invoice isn't needed to complete
+    // the unlock, so we don't await it: the user gets their contact first.
+    // Once per payment: this whole method runs only for the caller that won
+    // persistApprovedPayment's claim.
     void this.createAndSendInvoice(request, context).catch((err) =>
       this.logger.error(
         `Invoice creation/sending failed for payment ${request.id}:`,
@@ -1184,40 +1188,6 @@ export class PaymentRequestService {
     });
   }
 
-  private async sendPaymentSuccessNotifications(
-    request: PaymentRequestWithProfile,
-    context: PaymentProcessingContext,
-  ): Promise<void> {
-    const profileName = this.fullName(request.profile);
-
-    // No WhatsApp "Paiement confirmé" here: every payment is confirmed on
-    // screen (the payment page or the in-app result), and the message only
-    // repeated it. What the payer actually needs on WhatsApp follows on its
-    // own — the unlocked contact, and the receipt when they ask for it.
-    if (request.profile.email) {
-      await this.mailService
-        .sendMail({
-          to: request.profile.email,
-          subject: `Paiement confirmé — ${context.paymentDescription}`,
-          html: await this.layoutService.wrap(
-            paymentSuccessEmail(
-              profileName,
-              context.paymentDescription,
-              context.amount,
-              audienceOf(request.profile),
-            ),
-            { product: productOf(audienceOf(request.profile)) },
-          ),
-        })
-        .catch((err) =>
-          this.logger.warn(
-            `Email notification failed for ${request.profile.email}:`,
-            err,
-          ),
-        );
-    }
-  }
-
   private async createAndSendInvoice(
     request: PaymentRequestWithProfile,
     context: PaymentProcessingContext,
@@ -1235,69 +1205,99 @@ export class PaymentRequestService {
         ? { type: 'worker' as const, id: request.recommendation_worker_id }
         : null;
 
-    const invoice = await this.invoiceService.create({
-      profileId: request.profile_id,
-      paymentRequestId: request.id,
-      amount: context.amount,
-      reason:
-        context.isContactUnlock || context.isRecommendationContact
-          ? InvoiceReason.CONTACT_UNLOCK
-          : request.request_type === PaymentRequestType.WALLET_TOP_UP
-            ? InvoiceReason.WALLET_TOP_UP
-            : request.request_type === PaymentRequestType.BUSINESS_SUBSCRIPTION
-              ? InvoiceReason.BUSINESS_SUBSCRIPTION
-              : request.request_type === PaymentRequestType.BUSINESS_CREDIT_PACK
-                ? InvoiceReason.BUSINESS_CREDIT_PACK
-                : InvoiceReason.PENALTY,
-      relatedEntityType: relatedEntity?.type,
-      relatedEntityId: relatedEntity?.id,
-    });
-
-    // 2. Generate PDF — but only if there is somewhere to send it. The invoice
-    // record above is a financial record and is always written; rendering its
-    // PDF is pure work for the email, and most profiles have no email address.
-    // It stays available on demand in the app's invoice list either way.
-    if (!request.profile.email) return;
-
-    const { buffer, filename } = await this.invoiceService.downloadAsAdmin(
-      invoice.id,
-    );
-
-    // 3. Send the invoice by email only. We intentionally do NOT send it over
-    // WhatsApp: that path uploads the PDF to storage and then calls
-    // sendMediaMessage (two slow network round-trips), and this whole method is
-    // awaited before the contact-details notification — so sending the invoice
-    // on WhatsApp made the user wait longer for the contact they just paid for.
-    // The PDF stays available in the app (invoice list) and by email.
-    if (request.profile.email) {
-      await this.mailService
-        .sendMail({
-          to: request.profile.email,
-          subject: `Votre facture — ${context.paymentDescription}`,
-          html: await this.layoutService.wrap(
-            invoiceEmail(
-              request.profile.first_name,
-              context.paymentDescription,
-              context.amount,
-              audienceOf(request.profile),
-            ),
-            { product: productOf(audienceOf(request.profile)) },
-          ),
-          attachments: [
-            {
-              filename,
-              content: buffer,
-              contentType: 'application/pdf',
-            },
-          ],
-        })
-        .catch((err) =>
-          this.logger.warn(
-            `Invoice email failed for ${request.profile.email}:`,
-            err,
-          ),
+    // A failure here is logged and costs the PDF, never the receipt: the payer
+    // still needs to hear their payment went through.
+    const invoice = await this.invoiceService
+      .create({
+        profileId: request.profile_id,
+        paymentRequestId: request.id,
+        amount: context.amount,
+        reason:
+          context.isContactUnlock || context.isRecommendationContact
+            ? InvoiceReason.CONTACT_UNLOCK
+            : request.request_type === PaymentRequestType.WALLET_TOP_UP
+              ? InvoiceReason.WALLET_TOP_UP
+              : request.request_type ===
+                  PaymentRequestType.BUSINESS_SUBSCRIPTION
+                ? InvoiceReason.BUSINESS_SUBSCRIPTION
+                : request.request_type ===
+                    PaymentRequestType.BUSINESS_CREDIT_PACK
+                  ? InvoiceReason.BUSINESS_CREDIT_PACK
+                  : InvoiceReason.PENALTY,
+        relatedEntityType: relatedEntity?.type,
+        relatedEntityId: relatedEntity?.id,
+      })
+      .catch((err: unknown) => {
+        this.logger.error(
+          `Invoice creation failed for payment ${request.id}:`,
+          err instanceof Error ? err.message : String(err),
         );
-    }
+        return null;
+      });
+
+    // 2. The receipt e-mail, with the PDF. The invoice record above is a
+    // financial record and is always written; rendering its PDF is pure work
+    // for the e-mail, and most profiles have no e-mail address. It stays
+    // available on demand in the app's invoice list either way.
+    //
+    // E-mail only, never WhatsApp: that path uploaded the PDF to storage and
+    // then called sendMediaMessage — two slow round-trips — before the contact
+    // the user had just paid for.
+    const email = request.profile.email;
+    if (!email) return;
+
+    // A PDF that fails costs the attachment, not the receipt.
+    const pdf = invoice
+      ? await this.invoiceService
+          .downloadAsAdmin(invoice.id)
+          .catch((err: unknown) => {
+            this.logger.warn(
+              `Invoice PDF failed for payment ${request.id}; receipt sent without it`,
+              err instanceof Error ? err.message : String(err),
+            );
+            return null;
+          })
+      : null;
+
+    const audience = audienceOf(request.profile);
+    const network = networkOf(request.operator, request.gateway);
+    await this.mailService
+      .sendMail({
+        to: email,
+        subject: paymentReceiptSubject(context.paymentDescription),
+        html: await this.layoutService.wrap(
+          paymentReceiptEmail(
+            request.profile.first_name,
+            {
+              description: context.paymentDescription,
+              amount: context.amount,
+              paidAt: new Date(),
+              method:
+                MOBILE_NETWORKS.find((n) => n.key === network)?.label ??
+                'Mobile money',
+              reference: context.transactionRef,
+              invoiceAttached: pdf !== null,
+            },
+            audience,
+          ),
+          {
+            previewText: paymentReceiptSubject(context.paymentDescription),
+            product: productOf(audience),
+          },
+        ),
+        attachments: pdf
+          ? [
+              {
+                filename: pdf.filename,
+                content: pdf.buffer,
+                contentType: 'application/pdf',
+              },
+            ]
+          : undefined,
+      })
+      .catch((err) =>
+        this.logger.warn(`Payment receipt e-mail failed for ${email}:`, err),
+      );
   }
 
   private async handleContactUnlockPostPayment(

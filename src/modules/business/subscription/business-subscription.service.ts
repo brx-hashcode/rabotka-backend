@@ -733,6 +733,7 @@ export class BusinessSubscriptionService implements OnModuleInit {
           endsAt: created.ends_at,
           url: this.subscriptionUrl(),
         }),
+      { paidByHolder: true },
     );
     return created;
   }
@@ -817,6 +818,7 @@ export class BusinessSubscriptionService implements OnModuleInit {
           expiresAt: credit.expires_at,
           url: this.subscriptionUrl(),
         }),
+      { paidByHolder: true },
     );
     return credit;
   }
@@ -2037,6 +2039,11 @@ export class BusinessSubscriptionService implements OnModuleInit {
   /**
    * In-app to the business, and email to its administrator — the account
    * holder — unless it switched its e-mails off. Never throws.
+   *
+   * `paidByHolder`: the payment's own e-mail — the receipt with the invoice —
+   * already went to the holder, who paid. Sending this one too gave them two
+   * mails a minute apart for one payment; the admin members, who get no
+   * receipt, still have it.
    */
   private async tell(
     businessId: string,
@@ -2047,6 +2054,7 @@ export class BusinessSubscriptionService implements OnModuleInit {
       businessName: string,
       language: MailLanguage,
     ) => string,
+    options: { paidByHolder?: boolean } = {},
   ): Promise<void> {
     try {
       const business = await this.prisma.business.findUnique({
@@ -2058,11 +2066,10 @@ export class BusinessSubscriptionService implements OnModuleInit {
       });
       if (!business) return;
       notifyProfile(this.events, { recipientId: business.profile.id, input });
-      const recipients = await businessEmailRecipients(
-        this.prisma,
-        businessId,
-        'billing',
-      );
+      const holder = business.profile.email?.trim().toLowerCase();
+      const recipients = (
+        await businessEmailRecipients(this.prisma, businessId, 'billing')
+      ).filter((r) => !(options.paidByHolder && r.email === holder));
       for (const r of recipients) {
         await this.mail.sendMail({
           to: r.email,

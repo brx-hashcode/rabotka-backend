@@ -5,7 +5,7 @@ import { accountSuspendedEmail } from '../account-suspended';
 import { kycRejectedEmail } from '../kyc-rejected';
 import { kycReviewRequestedEmail } from '../kyc-review-requested';
 import { paymentRejectedEmail } from '../payment-rejected';
-import { paymentSuccessEmail } from '../payment-success';
+import { paymentReceiptEmail, paymentReceiptSubject } from '../payment-success';
 
 describe('Mail Templates', () => {
   describe('eventCreatedEmail', () => {
@@ -183,11 +183,50 @@ describe('Mail Templates', () => {
     });
   });
 
-  describe('paymentSuccessEmail', () => {
-    it('generates payment success email', () => {
-      const html = paymentSuccessEmail('Alice', 'Paiement de service', 5000);
+  describe('paymentReceiptEmail', () => {
+    const receipt = {
+      description: 'Déblocage <du contact>',
+      amount: 1500,
+      paidAt: new Date('2026-11-26T09:42:00Z'),
+      method: 'MTN Mobile Money',
+      reference: 'PAY-7F3K2Q',
+      invoiceAttached: true,
+    };
+
+    it('is the confirmation and the invoice in one', () => {
+      const html = paymentReceiptEmail('Alice', receipt);
       expect(html).toContain('Alice');
-      expect(html).toContain('Paiement de service');
+      expect(html).toContain('Déblocage &lt;du contact&gt;');
+      expect(html).toContain('1\u202f500 FCFA');
+      expect(html).toContain('MTN Mobile Money');
+      expect(html).toContain('PAY-7F3K2Q');
+      expect(html).toContain('26 nov. 2026, 10:42');
+      expect(html).toContain('Votre facture est jointe à ce message');
+    });
+
+    it('still confirms the payment when the PDF could not be made', () => {
+      const html = paymentReceiptEmail('Alice', {
+        ...receipt,
+        invoiceAttached: false,
+        method: null,
+      });
+      expect(html).not.toContain('jointe');
+      expect(html).toContain(
+        "Votre facture sera disponible dans l'application",
+      );
+      expect(html).not.toContain('>Paiement<');
+    });
+
+    it('writes a plain hyphen, not a long dash', () => {
+      const html = paymentReceiptEmail('Alice', {
+        ...receipt,
+        description: 'Pack Rabotka Business — 4 CV à analyser',
+      });
+      expect(html).toContain('Pack Rabotka Business - 4 CV à analyser');
+      expect(html).not.toContain('—');
+      expect(paymentReceiptSubject('Déblocage — Saisie')).toBe(
+        'Paiement confirmé - Déblocage - Saisie',
+      );
     });
   });
 

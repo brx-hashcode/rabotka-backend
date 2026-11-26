@@ -112,7 +112,7 @@ export function businessSubscriptionActiveEmail(
       until <strong>${enDate(p.endsAt)}</strong>.
     </p>
 
-    <p>Your invoice is sent to you in a separate email.</p>
+    <p>The invoice is in your dashboard.</p>
 
     ${emailButton(p.url, 'View my subscription')}
     ${SIGN_OFF_EN}
@@ -132,7 +132,7 @@ export function businessSubscriptionActiveEmail(
       jusqu'au <strong>${frDate(p.endsAt)}</strong>.
     </p>
 
-    <p>Votre facture vous est envoyée dans un e-mail séparé.</p>
+    <p>La facture est disponible dans votre espace.</p>
 
     ${emailButton(p.url, 'Voir mon abonnement')}
     ${SIGN_OFF}
@@ -160,8 +160,8 @@ export function businessCreditsAddedEmail(
     </p>
 
     <p>
-      They are used once those of your plan are exhausted for the period. Your
-      invoice is sent to you in a separate email.
+      They are used once those of your plan are exhausted for the period. The invoice
+      is in your dashboard.
     </p>
 
     ${emailButton(p.url, 'View my subscription')}
@@ -179,7 +179,7 @@ export function businessCreditsAddedEmail(
 
     <p>
       Ils servent une fois ceux de votre formule épuisés pour la période.
-      Votre facture vous est envoyée dans un e-mail séparé.
+      La facture est disponible dans votre espace.
     </p>
 
     ${emailButton(p.url, 'Voir mon abonnement')}
