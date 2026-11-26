@@ -126,7 +126,17 @@ export class CreateBusinessPlanDto {
   @ApiPropertyOptional({
     nullable: true,
     description:
-      'Recruteurs a business may invite (its account holder is the only administrator). Null: unlimited; 0: none',
+      'Administrateurs a business may add besides its account holder. Null: unlimited; 0: none',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(500)
+  adminsLimit?: number | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Recruteurs a business may invite. Null: unlimited; 0: none',
   })
   @IsOptional()
   @IsInt()

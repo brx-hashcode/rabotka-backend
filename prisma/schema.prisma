@@ -3652,7 +3652,9 @@ model BusinessPlan {
   cv_chat_questions     Int      @default(20)
   /// Offers the AI writes per period (« Rédiger avec l'IA »). Null: unlimited; 0: not included.
   offer_drafts_per_period Int?   @default(20)
-  /// Recruteurs a business may invite (the account holder is its only administrator). Null: unlimited; 0: none.
+  /// Administrateurs a business may add besides its account holder. Null: unlimited; 0: none.
+  admins_limit          Int?     @default(0)
+  /// Recruteurs a business may invite. Null: unlimited; 0: none.
   recruiters_limit      Int?     @default(0)
   /// Évaluateurs a business may invite. Null: unlimited; 0: none.
   reviewers_limit       Int?     @default(0)
@@ -4286,9 +4288,11 @@ model AdminBusinessNote {
   @@map("admin_business_notes")
 }
 
-/// What a member may do in the business space. ADMIN is the account holder
-/// only: a business has one administrator, and invites Recruteurs and
-/// Évaluateurs, each up to its plan's limit.
+/// What a member may do in the business space. The account holder — who
+/// created it — is an ADMIN and stays the one holder; it may add other
+/// administrators (only it manages them), and any administrator invites
+/// Recruteurs and Évaluateurs. Each takes a seat of its plan, the holder
+/// aside: the plan sets how many administrators, recruiters and evaluators.
 enum BusinessMemberRole {
   /// Everything, including the plan, invoices, the organisation and the team.
   ADMIN

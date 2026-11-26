@@ -569,10 +569,28 @@ describe('BusinessSubscriptionService', () => {
         business_id: 'b1',
         is_owner: false,
         status: { in: ['INVITED', 'ACTIVE'] },
-        role: { in: ['RECRUITER', 'REVIEWER'] },
       });
       // Nothing is counted up any more: a new period frees no place.
       expect(prisma.businessSubscription.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('counts administrators against their own limit, the holder aside', async () => {
+      const { service, prisma } = make({
+        sub: running({
+          plan: plan({ admins_limit: 1, recruiters_limit: 2 }),
+        }),
+      });
+      prisma.businessMember.groupBy = jest.fn().mockResolvedValue([
+        { role: 'RECRUITER', _count: { _all: 1 } },
+        { role: 'ADMIN', _count: { _all: 1 } },
+      ]);
+      await expect(service.consumeSeat('b1', 'ADMIN', message)).rejects.toThrow(
+        'limit 1',
+      );
+      // A recruiter's seat is not an administrator's.
+      await expect(
+        service.consumeSeat('b1', 'RECRUITER', message),
+      ).resolves.toEqual({ subscriptionId: 'sub-1' });
     });
 
     it('leaves the member changing role out of the count', async () => {

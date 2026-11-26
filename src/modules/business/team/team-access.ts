@@ -83,3 +83,22 @@ export function routePattern(req: {
   const path = raw.replace(/^\/api\/v1/, '') || '/';
   return path.length > 1 ? path.replace(/\/$/, '') : path;
 }
+
+/** The account's fields only its holder changes: its login e-mail, its name. */
+const HOLDER_ONLY_FIELDS = ['email', 'firstName', 'lastName'] as const;
+
+/**
+ * The holder's identity is the business profile's: an administrator, signed
+ * in as that profile with its `mid`, could otherwise set the login e-mail to
+ * its own and take the account. Its holder (no `mid`) changes them freely.
+ * Returns the refusal, or null.
+ */
+export function holderOnlyRefusal(
+  memberId: string | undefined,
+  dto: Partial<Record<(typeof HOLDER_ONLY_FIELDS)[number], unknown>>,
+): string | null {
+  if (!memberId) return null;
+  return HOLDER_ONLY_FIELDS.some((f) => dto[f] !== undefined)
+    ? 'Seul le responsable du compte peut modifier ces informations.'
+    : null;
+}

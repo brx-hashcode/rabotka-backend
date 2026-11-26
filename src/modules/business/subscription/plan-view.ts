@@ -34,6 +34,7 @@ export function planView(
     cvRetentionDays: p.cv_retention_days,
     cvChatQuestions: p.cv_chat_questions,
     offerDraftsPerPeriod: p.offer_drafts_per_period,
+    adminsLimit: p.admins_limit,
     recruitersLimit: p.recruiters_limit,
     reviewersLimit: p.reviewers_limit,
     includesPreselection: p.includes_preselection,
@@ -61,6 +62,7 @@ export function planData(dto: {
   cvRetentionDays?: number;
   cvChatQuestions?: number;
   offerDraftsPerPeriod?: number | null;
+  adminsLimit?: number | null;
   recruitersLimit?: number | null;
   reviewersLimit?: number | null;
   includesPreselection?: boolean;
@@ -86,6 +88,7 @@ export function planData(dto: {
     cv_retention_days: dto.cvRetentionDays,
     cv_chat_questions: dto.cvChatQuestions,
     offer_drafts_per_period: dto.offerDraftsPerPeriod,
+    admins_limit: dto.adminsLimit,
     recruiters_limit: dto.recruitersLimit,
     reviewers_limit: dto.reviewersLimit,
     includes_preselection: dto.includesPreselection,
