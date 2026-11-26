@@ -24,6 +24,12 @@ export interface AnswerCase {
   mustMention?: string[];
   /** Reply language the turn must keep. */
   language?: 'fr' | 'en';
+  /** What the person said before, in order: VoVa answers each, then `text` is scored. */
+  before?: string[];
+  /** Facts that must NOT be in the reply (names VoVa may not give, wrong figures). */
+  mustNotMention?: string[];
+  /** The screen the reply's card must open, as its path ends. */
+  destination?: string;
 }
 
 export const ANSWER_CASES: AnswerCase[] = [
@@ -225,5 +231,122 @@ export const ANSWER_CASES: AnswerCase[] = [
     text: 'cmt jfai pr retiré mon argen',
     refusal: null,
     language: 'fr',
+  },
+
+  // Conversations, from what people really ask (reworded, names invented).
+  // The fixtures: a recruiter with 5 applications (1 retained, 1 seen, 2
+  // refused, 1 finished, none waiting) and 3 offers (1 active, 2 expired); a
+  // worker with 3 applications, a refused verification and an unpaid penalty.
+  {
+    id: 'conv-received-retained',
+    as: 'employer',
+    before: [
+      'Bonjour, est-ce que j’ai des candidatures en cours ?',
+      'Lesquelles sont traitées ?',
+    ],
+    text: 'Est-ce que je n’ai pas une candidature retenue ?',
+    tools: ['candidatures_recues'],
+    refusal: null,
+    mustMention: ['Josué'],
+  },
+  {
+    id: 'conv-received-open',
+    as: 'employer',
+    before: ['Est-ce que j’ai des candidatures ?'],
+    text: 'Ouvre l’application',
+    destination: 'candidatures',
+  },
+  {
+    id: 'conv-received-which',
+    as: 'employer',
+    before: ['Est-ce qu’il y a des candidatures ?'],
+    text: 'C’est quel profil ? Quelle mission ?',
+    tools: ['candidatures_recues'],
+    refusal: null,
+    mustMention: ['Nettoyage des vêtements'],
+  },
+  {
+    id: 'emp-received-count',
+    as: 'employer',
+    text: 'J’ai combien de candidatures en attente ?',
+    tools: ['candidatures_recues'],
+    refusal: null,
+    mustNotMention: ['10 candidatures'],
+  },
+  {
+    id: 'emp-active-offers',
+    as: 'employer',
+    text: 'Tu peux voir si j’ai des offres actives ?',
+    tools: ['mes_missions_publiees'],
+    refusal: null,
+    mustMention: ['Nettoyage des vêtements'],
+  },
+  {
+    id: 'conv-expired-republish',
+    as: 'employer',
+    before: ['J’ai deux de mes offres qui ont expiré'],
+    text: 'Je veux republier la première',
+    refusal: null,
+  },
+  {
+    id: 'emp-find-profiles',
+    as: 'employer',
+    text: 'Est-ce que je peux trouver des profils coiffeurs actuellement ?',
+    refusal: null,
+  },
+  {
+    id: 'conv-worker-which-mission',
+    as: 'worker',
+    before: ['Est-ce que j’ai des candidatures en attente ?'],
+    text: 'C’est quelle mission ?',
+    tools: ['mes_candidatures'],
+    refusal: null,
+    mustMention: ['Aide-comptable'],
+  },
+  {
+    id: 'worker-retained',
+    as: 'worker',
+    text: 'Est-ce qu’une de mes candidatures a été acceptée ?',
+    tools: ['mes_candidatures'],
+    refusal: null,
+    mustMention: ['Saisie de factures'],
+  },
+  {
+    id: 'worker-penalty-unpaid',
+    as: 'worker',
+    text: 'Est-ce que j’ai une pénalité à payer ?',
+    tools: ['mes_penalites'],
+    refusal: null,
+    mustMention: ['2000'],
+  },
+  {
+    id: 'worker-kyc-reason',
+    as: 'worker',
+    text: 'Bonjour, ma vérification d’identité a été refusée.',
+    tools: ['etat_du_profil'],
+    refusal: null,
+    mustMention: ['floue'],
+  },
+  {
+    id: 'worker-cash-out',
+    as: 'worker',
+    text: 'Si j’ai 5000 F dans mon portefeuille, je le retire comment pour l’avoir en cash ?',
+    refusal: null,
+  },
+  {
+    id: 'worker-job-for-me',
+    as: 'worker',
+    text: 'T’as quoi comme job pour moi aujourd’hui ?',
+    tools: ['rechercher_offres'],
+    refusal: null,
+  },
+  {
+    id: 'conv-en-employer',
+    as: 'employer',
+    before: ['And how many applications do I have?'],
+    text: 'What are their status?',
+    tools: ['candidatures_recues'],
+    refusal: null,
+    language: 'en',
   },
 ];

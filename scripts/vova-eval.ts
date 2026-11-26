@@ -25,6 +25,8 @@ import { ConfigService } from '@nestjs/config';
 import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
 import { createVovaContext } from './vova-context';
 import { SUITE } from './vova-suite';
+import * as F from './vova-eval-fixtures';
+import type { HistoryTurn } from '../src/modules/rag/agent/history.service';
 import { ANSWER_CASES, type AnswerCase } from './vova-eval-cases';
 import { VovaAgentService } from '../src/modules/rag/agent/agent.service';
 import { GuardService } from '../src/modules/rag/agent/guard.service';
@@ -94,15 +96,6 @@ function retrievalEvaluator({
 const FIXTURES = {
   fees: { employerFeeFcfa: 750, workerFeeFcfa: 500, expiryHours: 48 },
   walletBalance: 750,
-  profile: {
-    verification_status: 'REJECTED',
-    kyc_rejection_reason: 'Photo de la pièce floue',
-    reliability_score: 62,
-    average_rating: 4.1,
-    city: 'Brazzaville',
-  },
-  penalties: [] as unknown[],
-  applications: { data: [] as unknown[], total: 0 },
   contact: { email: 'contact@rabotka.co', phone: '', address: 'Brazzaville' },
 };
 
@@ -118,6 +111,9 @@ function unavailable(name: string): unknown {
     },
   );
 }
+
+/** The turns before the one scored, for the case running now (`recent()`). */
+const conversation: HistoryTurn[] = [];
 
 function buildAgent(retrieve: unknown): {
   agent: VovaAgentService;
@@ -148,15 +144,13 @@ function buildAgent(retrieve: unknown): {
       getProfileWalletBalance: () => Promise.resolve(FIXTURES.walletBalance),
     },
     profiles: {
-      findById: () => Promise.resolve(FIXTURES.profile),
-      getPenaltiesByProfileId: () => Promise.resolve(FIXTURES.penalties),
-      getApplicationsByProfileId: () => Promise.resolve(FIXTURES.applications),
+      findById: F.findById,
+      getPenaltiesByProfileId: F.getPenaltiesByProfileId,
+      getApplicationsByProfileId: F.getApplicationsByProfileId,
     },
-    applications: {
-      findByEmployer: () => Promise.resolve({ data: [], total: 0 }),
-    },
+    applications: { findByEmployer: F.findByEmployer },
     jobOffers: {
-      findByEmployerId: () => Promise.resolve([]),
+      findByEmployerId: F.findByEmployerId,
       countOpenOffers: () => Promise.resolve(12),
       findActive: () => Promise.resolve({ data: [], total: 0 }),
       findByReference: () => Promise.resolve(null),
@@ -172,10 +166,20 @@ function buildAgent(retrieve: unknown): {
     llm,
     new LlmRouterService(),
     new GuardService(),
-    { slugs: () => Promise.resolve([]) } as never,
     {
-      recent: () => Promise.resolve([]),
-      priorInboundTexts: () => Promise.resolve([]),
+      slugs: () => Promise.resolve([]),
+      // The trades on the profile, as the registry reads them.
+      namesForProfile: (id: string) =>
+        Promise.resolve(
+          id === F.WORKER_ID ? F.WORKER_PROFILE.categoryNames : [],
+        ),
+    } as never,
+    {
+      recent: () => Promise.resolve([...conversation]),
+      priorInboundTexts: () =>
+        Promise.resolve(
+          conversation.filter((t) => t.role === 'user').map((t) => t.text),
+        ),
     } as never,
     { read: () => Promise.resolve([]) } as never,
     // Both doors: `getForTurn` is the per-turn memo in front of `get`.
@@ -191,11 +195,16 @@ interface AnswerOut {
   refusalId: string | null;
   toolsCalled: string[];
   origin: string;
+  destination: string;
 }
+
+/** Words that tell the user about VoVa's own machinery instead of answering. */
+const MACHINERY =
+  /\b(mon outil|mes outils|l['’]outil|cet outil|ma liste|la liste (des|ne)|dix (derni|plus r)|my tool|the tool)\b/i;
 
 /** A decline in the model's own words, FR or EN. */
 const DECLINE =
-  /\b(je ne (peux|suis) pas|je n['’]ai pas acc[eè]s|ne peux pas vous aider|i can['’]?not|i can['’]t|i['’]m not able)\b/i;
+  /\b(je ne (peux|suis) pas|je n['’]ai pas acc[eè]s|ne peux pas vous aider|pas quelque chose que je (peux|sais)|pas mon rayon|i can['’]?not|i can['’]t|i['’]m not able)\b/i;
 
 /** Compare facts loosely: case, accents and spaces inside numbers do not matter. */
 function norm(s: string): string {
@@ -230,10 +239,13 @@ function answerEvaluator({
     // The guard tags its refusals with an id; the model declining in its own
     // words carries none. Both are a refusal — how WELL it declined is for the
     // LLM judge in Langfuse, not for a regex.
+    // « Je ne peux pas le confirmer » inside an answer is not a refusal: an
+    // answer the eval expects only fails when the guard turned it away, or
+    // when all it says is no.
     const declined = output.refusalId === null && DECLINE.test(output.text);
     const ok =
       c.refusal === null
-        ? output.refusalId === null && !declined
+        ? output.refusalId === null && !(declined && output.text.length < 160)
         : output.refusalId === c.refusal || declined;
     scores.push({
       name: 'refusal_correct',
@@ -262,6 +274,34 @@ function answerEvaluator({
       comment: got && got !== c.language ? `replied in ${got}` : undefined,
     });
   }
+
+  if (c.mustNotMention?.length) {
+    const text = norm(output.text);
+    const found = c.mustNotMention.filter((f) => text.includes(norm(f)));
+    scores.push({
+      name: 'nothing_forbidden',
+      value: found.length === 0 ? 1 : 0,
+      comment: found.length ? `said ${found.join(', ')}` : undefined,
+    });
+  }
+
+  if (c.destination) {
+    const ok = output.destination.endsWith(c.destination);
+    scores.push({
+      name: 'right_screen',
+      value: ok ? 1 : 0,
+      comment: ok
+        ? undefined
+        : `expected …${c.destination}, got ${output.destination}`,
+    });
+  }
+
+  const machinery = MACHINERY.exec(output.text);
+  scores.push({
+    name: 'no_machinery',
+    value: machinery ? 0 : 1,
+    comment: machinery ? `said « ${machinery[0]} »` : undefined,
+  });
 
   scores.push({
     name: 'no_error',
@@ -413,22 +453,63 @@ async function main() {
     const { agent, close } = buildAgent(ctx.retrieve);
     closers.push(close);
     const cases = ANSWER_CASES.filter((c) => !only || only.includes(c.id));
-    await run<{ as: string; text: string }, AnswerOut, AnswerCase>(
+    await run<
+      { as: string; text: string; before: string[] },
+      AnswerOut,
+      AnswerCase
+    >(
       'vova-answers',
       'Whole VoVa turns on fixture data: required tools, refusals, facts, language.',
       cases.map((c) => ({
         id: c.id,
-        input: { as: c.as, text: c.text },
+        input: { as: c.as, text: c.text, before: c.before ?? [] },
         expectedOutput: c,
       })),
-      async ({ as, text }) => {
-        const deadline = Deadline.start(45_000, 'vova-eval');
+      async ({ as, text, before }) => {
+        // The production budget: a turn has 25 s, not the eval's old 45.
+        const ask = async (message: string) => {
+          const deadline = Deadline.start(25_000, 'vova-eval');
+          try {
+            return await agent.handle({
+              profileId: as === 'employer' ? F.EMPLOYER_ID : F.WORKER_ID,
+              profileType:
+                as === 'employer' ? ProfileType.EMPLOYER : ProfileType.WORKER,
+              firstName:
+                as === 'employer'
+                  ? F.EMPLOYER_PROFILE.firstName
+                  : F.WORKER_PROFILE.firstName,
+              verificationStatus: VerificationStatus.VERIFIED,
+              accountStatus: AccountStatus.ACTIVE,
+              categorySlugs: [],
+              text: message,
+              correlationId: 'vova-eval',
+              deadline,
+            });
+          } finally {
+            deadline.dispose();
+          }
+        };
+        // The conversation so far, answered by VoVa itself, as it would have been.
+        conversation.length = 0;
+        for (const earlier of before) {
+          const r = await ask(earlier);
+          if (process.argv.includes('--verbose'))
+            console.log(`\n  » ${earlier}\n  « ${r.text}`);
+          conversation.push(
+            { role: 'user', text: earlier },
+            { role: 'assistant', text: r.text },
+          );
+        }
+        const deadline = Deadline.start(25_000, 'vova-eval');
         try {
           const reply = await agent.handle({
-            profileId: '00000000-0000-4000-8000-00000000e7a1',
+            profileId: as === 'employer' ? F.EMPLOYER_ID : F.WORKER_ID,
             profileType:
               as === 'employer' ? ProfileType.EMPLOYER : ProfileType.WORKER,
-            firstName: 'Awa',
+            firstName:
+              as === 'employer'
+                ? F.EMPLOYER_PROFILE.firstName
+                : F.WORKER_PROFILE.firstName,
             verificationStatus: VerificationStatus.VERIFIED,
             accountStatus: AccountStatus.ACTIVE,
             categorySlugs: [],
@@ -438,7 +519,7 @@ async function main() {
           });
           if (process.argv.includes('--verbose')) {
             console.log(
-              `\n» ${text}\n« ${reply.text}\n  tools=[${(reply.toolsCalled ?? []).join(', ')}] refusal=${reply.refusalId ?? '—'}`,
+              `\n» ${text}\n« ${reply.text}\n  tools=[${(reply.toolsCalled ?? []).join(', ')}] refusal=${reply.refusalId ?? '—'} screen=${reply.destination}`,
             );
           }
           return {
@@ -446,6 +527,7 @@ async function main() {
             refusalId: reply.refusalId ?? null,
             toolsCalled: reply.toolsCalled ?? [],
             origin: reply.origin,
+            destination: reply.destination,
           };
         } finally {
           deadline.dispose();

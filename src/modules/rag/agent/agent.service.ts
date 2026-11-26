@@ -35,6 +35,7 @@ import { buildAnonymousTools, buildTools } from './tools';
 import { ToolDepsProvider } from './tool-deps.provider';
 import { readNumber } from '../shared/config';
 import { destinationFor } from './destination';
+import { searchQuery } from './search-query';
 import { resolveLanguage } from './language';
 import { VovaHistoryService } from './history.service';
 import { VovaMemoryService } from './memory.service';
@@ -794,7 +795,7 @@ export class VovaAgentService {
       this.assertTime(request.deadline, 'retrieval');
       const grounding = await this.ground(request.deadline, () =>
         deps.help.search(
-          request.text,
+          searchQuery(request.text, request.history),
           undefined,
           'anonymous',
           language !== 'fr',
@@ -994,7 +995,7 @@ export class VovaAgentService {
       this.assertTime(request.deadline, 'retrieval');
       const grounding = await this.ground(request.deadline, () =>
         deps.help.search(
-          request.text,
+          searchQuery(request.text, past),
           undefined,
           request.profileType === ProfileType.WORKER ? 'worker' : 'employer',
           language !== 'fr',
@@ -1028,7 +1029,11 @@ export class VovaAgentService {
               section: hit.section,
               text: hit.text,
             })),
-            requiredTools: grounding.requiredTools,
+            // Only tools this person has: the corpus is shared, and a recruiter
+            // was told to call the worker's `mes_candidatures`.
+            requiredTools: grounding.requiredTools.filter((name) =>
+              tools.some((t) => t.name === name),
+            ),
           }),
         ),
         ...past.map((turn) =>

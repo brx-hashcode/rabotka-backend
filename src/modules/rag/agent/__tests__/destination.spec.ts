@@ -87,4 +87,36 @@ describe('destinationFor — falling back to the reply', () => {
       destinationFor('merci !', ProfileType.EMPLOYER, 'Avec plaisir.'),
     ).toBe('dashboard');
   });
+
+  // A recruiter's « oui » to « je vous ouvre *Candidatures reçues* » opened the
+  // missions page: the question had said « offre ».
+  it('opens the screen the reply offered, whatever the question said', () => {
+    expect(
+      destinationFor(
+        'mes offres ont des candidatures ?',
+        ProfileType.EMPLOYER,
+        'Oui, 5. Je vous ouvre *Candidatures reçues* ?',
+      ),
+    ).toBe('candidatures');
+  });
+
+  it('gives a recruiter his received applications for « mes candidatures »', () => {
+    expect(
+      destinationFor(
+        'ouvre l’application',
+        ProfileType.EMPLOYER,
+        'Je vous ouvre *Mes candidatures*.',
+      ),
+    ).toBe('candidatures');
+  });
+
+  it('never sends a worker to a recruiter screen', () => {
+    expect(
+      destinationFor(
+        'ouvre l’application',
+        ProfileType.WORKER,
+        'Je vous ouvre *Trouver des profils*.',
+      ),
+    ).not.toBe('recherche');
+  });
 });

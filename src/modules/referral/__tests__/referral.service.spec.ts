@@ -430,6 +430,20 @@ describe('ReferralService', () => {
       expect(tx.wallet.update).not.toHaveBeenCalled();
     });
 
+    it('does not e-mail the parrain when it lost the claim — the winner does', async () => {
+      givenPendingReferral();
+      givenQualifyingPayment(1000);
+      prisma.profile.findUnique
+        .mockResolvedValueOnce(ELIGIBLE_REFERRER)
+        .mockResolvedValue({ first_name: 'Jean', email: 'jean@x.cg' });
+      tx.referral.updateMany.mockResolvedValue({ count: 0 });
+
+      await service.settleForReferee(REFEREE_ID);
+      await flushPromises();
+
+      expect(mail.sendMail).not.toHaveBeenCalled();
+    });
+
     it('is a no-op once the referral is already REWARDED', async () => {
       givenPendingReferral({ status: ReferralStatus.REWARDED });
 

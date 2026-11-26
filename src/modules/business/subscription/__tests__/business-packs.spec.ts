@@ -364,6 +364,15 @@ describe('BusinessSubscriptionService with packs', () => {
     it('adds its credits for twelve months and tells the business', async () => {
       const { service, prisma, events, mail } = make(running());
       prisma.paymentRequest.findUnique.mockResolvedValue(paid);
+      // The holder paid and got the receipt; an admin member gets this one.
+      prisma.businessMember.findMany.mockResolvedValue([
+        {
+          email: 'admin@b.c',
+          name: 'Jo Admin',
+          is_owner: false,
+          language: 'fr',
+        },
+      ]);
       prisma.businessCredit.create.mockImplementation(({ data }: any) =>
         Promise.resolve({ ...data, id: 'c9' }),
       );
@@ -387,8 +396,12 @@ describe('BusinessSubscriptionService with packs', () => {
           }),
         }),
       );
+      expect(mail.sendMail).toHaveBeenCalledTimes(1);
       expect(mail.sendMail).toHaveBeenCalledWith(
-        expect.objectContaining({ subject: 'Pack ajouté : 100 CV à analyser' }),
+        expect.objectContaining({
+          to: 'admin@b.c',
+          subject: 'Pack ajouté : 100 CV à analyser',
+        }),
       );
     });
 

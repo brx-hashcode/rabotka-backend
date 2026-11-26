@@ -34,6 +34,7 @@ export class HelpRetrieveService {
   private readonly logger = new Logger(HelpRetrieveService.name);
   private readonly defaultLimit: number;
   private readonly gapScore: number;
+  private readonly minScore: number;
 
   constructor(
     private readonly store: HelpDocsStore,
@@ -43,6 +44,11 @@ export class HelpRetrieveService {
     // RRF scores are ordinal, not probabilities: the top hit of a good match
     // sits near 0.75 and a poor one near 0.5. Tuned from the live suite.
     this.gapScore = readNumber(config, 'VOVA_GAP_SCORE', 0.55);
+    // Below this a passage is the fusion's filler, whatever the question:
+    // « Merci bien » brought five unrelated articles, all under 0.54, and the
+    // prompt then made them the only allowed source. Measured on real
+    // questions: the right passages sit at 0.5 and above.
+    this.minScore = readNumber(config, 'VOVA_RETRIEVAL_MIN_SCORE', 0.45);
   }
 
   async search(
@@ -62,7 +68,7 @@ export class HelpRetrieveService {
     if (!question?.trim()) return empty;
 
     try {
-      const hits = await this.store.search(
+      const found = await this.store.search(
         expandedQuery,
         limit ?? this.defaultLimit,
         audience,
@@ -75,18 +81,19 @@ export class HelpRetrieveService {
       // This is as close to "learning" as the system gets, and deliberately so
       // — see the note in `docs/` on why model answers must never be fed back
       // into the corpus automatically.
-      const best = hits[0]?.score ?? 0;
+      const hits = found.filter((h) => h.score >= this.minScore);
+      const best = found[0]?.score ?? 0;
       if (hits.length === 0 || best < this.gapScore) {
         this.logger.warn(
           `vova.gap score=${best.toFixed(3)} question=${JSON.stringify(question)} ` +
-            `best=${hits[0]?.source ?? 'none'}`,
+            `best=${found[0]?.source ?? 'none'}`,
         );
         // The same signal on the turn's trace, so gaps can be listed and
         // grouped in Langfuse rather than grepped out of the log.
         scoreActiveTurn(
           'retrieval_gap',
           1,
-          `best=${hits[0]?.source ?? 'none'} score=${best.toFixed(3)}`,
+          `best=${found[0]?.source ?? 'none'} score=${best.toFixed(3)}`,
         );
       }
 
