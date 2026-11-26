@@ -326,6 +326,26 @@ describe('CareersService', () => {
     expect(JSON.stringify(shown)).not.toContain('knockout');
   });
 
+  it('says the language the offer is written in, for its page to speak it', async () => {
+    const { service } = serviceWith(business, [], {
+      ...offer,
+      title: 'Delivery driver',
+      description:
+        'We are looking for a delivery driver to bring orders to our customers. You will drive around the city.',
+    });
+    const { offer: english } = await service.offer('kamoa', 'RBT-AC5LF');
+    expect(english.language).toBe('en');
+
+    const { service: fr } = serviceWith(business, [], {
+      ...offer,
+      title: 'Livreur',
+      description:
+        'Nous recherchons un livreur pour apporter les commandes à nos clients dans la ville.',
+    });
+    const { offer: french } = await fr.offer('kamoa', 'RBT-AC5LF');
+    expect(french.language).toBe('fr');
+  });
+
   it('never puts the name a candidate gave their file in a header', async () => {
     const { prisma, service } = serviceWith(business);
     prisma.externalApplication.findFirst.mockResolvedValue({
