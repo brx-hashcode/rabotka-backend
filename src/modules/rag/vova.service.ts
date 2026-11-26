@@ -24,7 +24,7 @@ import { Deadline } from './llm/deadline';
 import { correctSalutation, isWalled } from './agent/prompts';
 import { VOVA_CONFIG_KEYS } from './vova.constants';
 import { acknowledgementReply, refusal } from './agent/refusals';
-import { welcomePlatformMessage } from '../bot/messages/welcome.messages';
+import { screenCardMessage } from '../bot/messages/welcome.messages';
 import { vovaUnavailableMessage } from '../bot/messages/menu.messages';
 import {
   anonymousTraceUser,
@@ -139,7 +139,7 @@ export class VovaService {
    * the bot had moved to the free-form card.
    */
   private card(destination: string): string {
-    return welcomePlatformMessage(destination);
+    return screenCardMessage(destination);
   }
 
   /**

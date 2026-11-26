@@ -1,5 +1,6 @@
 import { ProfileType } from '@prisma/client';
 import { foldText } from '../shared/text';
+import { offersNavigation } from './offer';
 
 /**
  * Which app screen a message should offer, decided in code.
@@ -36,7 +37,8 @@ const EMPLOYER_ROUTES: ReadonlyArray<
   ['candidatures', ['candidature', 'candidat', 'postulant']],
   ['profils-contactes', ['contact debloque', 'profils contactes']],
   ['recherche', ['chercher un profil', 'voir les profils', 'rechercher']],
-  ['profile', ['profil', 'verification', 'kyc', 'score']],
+  // « mon profil », not « profil »: to a recruiter « quel profil ? » is a candidate.
+  ['profile', ['mon profil', 'verification', 'kyc']],
   [
     'job-offers/new',
     [
@@ -66,14 +68,28 @@ const SCREEN_LABELS: ReadonlyArray<readonly [suffix: string, label: string]> = [
   ['profile/portfolio', 'mes realisations'],
   ['mes-candidatures', 'mes candidatures'],
   ['candidatures', 'candidatures recues'],
+  ['profils-contactes', 'profils contactes'],
+  ['recherche', 'trouver des profils'],
   ['penalites/paiement', 'penalites'],
   ['portefeuille', 'portefeuille'],
-  ['claims/new', 'reclamations'],
+  ['claims/new', 'reclamation'],
   ['recherche-offres', 'recherche'],
   ['profile', 'profil'],
   ['missions', 'mes missions'],
   ['dashboard', 'tableau de bord'],
 ];
+
+/** The screens each role has: a recruiter naming « Mes candidatures » means his received ones. */
+const ROLE_SCREENS: Record<ProfileType, ReadonlySet<string>> = {
+  [ProfileType.WORKER]: new Set([
+    ...WORKER_ROUTES.map(([s]) => s),
+    'profile/portfolio',
+  ]),
+  [ProfileType.EMPLOYER]: new Set([
+    ...EMPLOYER_ROUTES.map(([s]) => s),
+    'dashboard',
+  ]),
+};
 
 /** Where to send someone whose message matched nothing in particular. */
 const DEFAULTS: Record<ProfileType, string> = {
@@ -115,10 +131,21 @@ export function destinationFor(
   const named = (candidate: string): string | null => {
     const folded = foldText(candidate);
     for (const [suffix, label] of SCREEN_LABELS) {
-      if (folded.includes(label)) return suffix;
+      if (folded.includes(label)) {
+        if (ROLE_SCREENS[profileType].has(suffix)) return suffix;
+        // « mes candidatures » from a recruiter: his received ones.
+        if (suffix === 'mes-candidatures') return 'candidatures';
+      }
     }
     return null;
   };
 
+  // A reply that proposes a screen by name decides: a « oui » to « je vous
+  // ouvre *Candidatures reçues* ? » opened the missions page, because the
+  // question had said « offre ».
+  if (reply && offersNavigation(reply)) {
+    const offered = named(reply);
+    if (offered) return offered;
+  }
   return match(text) ?? (reply ? named(reply) : null) ?? DEFAULTS[profileType];
 }

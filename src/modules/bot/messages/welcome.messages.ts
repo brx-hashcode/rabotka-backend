@@ -76,6 +76,100 @@ const appUrlFor = (path: string): string =>
  * so a bucket hiccup costs the picture rather than falling through to the
  * approved MARKETING template, which is billed.
  */
+/**
+ * VoVa's screens, as the card names them: a title, a line, a button. The
+ * welcome card said « La première marketplace d'emploi… » under every reply,
+ * whatever VoVa had just offered to open — « Je vous ouvre *Candidatures
+ * reçues* », then the brand card. Keyed by the path suffix of
+ * `rag/agent/destination.ts`.
+ */
+const SCREENS: Record<string, { title: string; line: string; button: string }> =
+  {
+    jobs: {
+      title: 'Missions disponibles',
+      line: 'Les offres ouvertes, près de chez vous et dans vos domaines.',
+      button: 'Voir les missions',
+    },
+    'recherche-offres': {
+      title: 'Rechercher une offre',
+      line: 'Par domaine, par ville, par type de contrat.',
+      button: 'Rechercher',
+    },
+    'mes-candidatures': {
+      title: 'Mes candidatures',
+      line: 'Chacune avec son statut et la suite à donner.',
+      button: 'Mes candidatures',
+    },
+    'penalites/paiement': {
+      title: 'Mes pénalités',
+      line: 'Le détail, et le paiement en quelques instants.',
+      button: 'Voir mes pénalités',
+    },
+    portefeuille: {
+      title: 'Mon portefeuille',
+      line: 'Votre solde, vos mouvements et la recharge.',
+      button: 'Mon portefeuille',
+    },
+    'profile/portfolio': {
+      title: 'Mes réalisations',
+      line: 'Les photos de votre travail, sur votre profil.',
+      button: 'Mes réalisations',
+    },
+    profile: {
+      title: 'Mon profil',
+      line: 'Vos informations, vos domaines et votre vérification.',
+      button: 'Voir mon profil',
+    },
+    'claims/new': {
+      title: 'Nouvelle réclamation',
+      line: 'Expliquez le problème, l’équipe vous répond ici.',
+      button: 'Réclamation',
+    },
+    candidatures: {
+      title: 'Candidatures reçues',
+      line: 'Les candidatures à vos offres, avec leur statut.',
+      button: 'Voir candidatures',
+    },
+    'profils-contactes': {
+      title: 'Profils contactés',
+      line: 'Les personnes dont vous avez le contact.',
+      button: 'Voir les profils',
+    },
+    recherche: {
+      title: 'Trouver des profils',
+      line: 'Les travailleurs vérifiés, par métier et par ville.',
+      button: 'Chercher un profil',
+    },
+    'job-offers/new': {
+      title: 'Publier une mission',
+      line: 'Décrivez le besoin, les candidatures arrivent ici.',
+      button: 'Publier une mission',
+    },
+    missions: {
+      title: 'Mes missions',
+      line: 'Vos offres publiées, en cours et terminées.',
+      button: 'Voir mes missions',
+    },
+    dashboard: {
+      title: 'Mon espace',
+      line: 'Vos offres, vos candidatures et vos messages.',
+      button: 'Ouvrir mon espace',
+    },
+  };
+
+/** The card under a VoVa reply: the screen it named, not the brand card. */
+export function screenCardMessage(destination: string): string {
+  const screen = SCREENS[destination.replace(/^\/+/u, '')];
+  if (!screen) return welcomePlatformMessage(destination);
+  const body = `*${screen.title}*\n${screen.line}`;
+  return ctaReply({
+    body,
+    buttonText: screen.button,
+    path: destination,
+    fallbackText: `${body}\n\n${appUrlFor(destination)}`,
+  });
+}
+
 export function welcomePlatformMessage(
   destination: string = WELCOME_PATH,
 ): string {

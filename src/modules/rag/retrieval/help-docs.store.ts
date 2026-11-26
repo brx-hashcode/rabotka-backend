@@ -219,15 +219,16 @@ export class HelpDocsStore {
      */
     denseOnly = false,
   ): Promise<HelpHit[]> {
+    // The lexical leg runs in the API process: not computed when unused.
     const [dense, sparse] = await Promise.all([
       this.embeddings.embedQuery(query),
-      this.embeddings.sparse(query),
+      denseOnly ? Promise.resolve(null) : this.embeddings.sparse(query),
     ]);
 
     const result = await retryTransient(() =>
       // The fast client: this is the only Qdrant call a person is waiting on.
       this.fastClient().query(HELP_DOCS_COLLECTION, {
-        prefetch: denseOnly
+        prefetch: !sparse
           ? [{ query: dense, using: 'dense', limit: PREFETCH_LIMIT }]
           : [
               { query: dense, using: 'dense', limit: PREFETCH_LIMIT },
