@@ -1,4 +1,5 @@
 import {
+  screenCardMessage,
   welcomePlatformMessage,
   welcomeUnregisteredMessage,
 } from '../welcome.messages';
@@ -57,5 +58,39 @@ describe('the welcome cards', () => {
     const body = String(card(welcomePlatformMessage()).body);
     expect(body).toContain('Rabotka');
     expect(body.split('\n').length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('the screen cards', () => {
+  it('names the screen VoVa offered, not the brand', () => {
+    const c = card(screenCardMessage('candidatures'));
+    expect(c.body).toContain('*Candidatures reçues*');
+    expect(c.body).not.toContain('marketplace');
+    expect(c.path).toBe('candidatures');
+  });
+
+  it.each([
+    'jobs',
+    'recherche-offres',
+    'mes-candidatures',
+    'penalites/paiement',
+    'portefeuille',
+    'profile/portfolio',
+    'profile',
+    'claims/new',
+    'candidatures',
+    'profils-contactes',
+    'recherche',
+    'job-offers/new',
+    'missions',
+    'dashboard',
+  ])('keeps the %s button under WhatsApp’s 20 characters', (screen) => {
+    expect(
+      [...(card(screenCardMessage(screen)).buttonText as string)].length,
+    ).toBeLessThanOrEqual(20);
+  });
+
+  it('falls back to the brand card for a screen it does not know', () => {
+    expect(card(screenCardMessage('ailleurs')).body).toContain('marketplace');
   });
 });

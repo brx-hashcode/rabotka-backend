@@ -28,12 +28,17 @@ import { readNumber } from '../shared/config';
  * the VPS's RAM for identical vectors. Unset — local dev, the ingest CLI, the
  * embedder process itself — it loads in-process as before.
  */
+/** Query vectors kept in memory, oldest out first. */
+const QUERY_CACHE_SIZE = 500;
+
 @Injectable()
 export class HelpEmbeddingsService {
   private readonly logger = new Logger(HelpEmbeddingsService.name);
   private embedder: FlagEmbedding | undefined;
   private loading: Promise<FlagEmbedding> | null = null;
   private remoteReady: Promise<void> | null = null;
+  /** Recent query vectors: « Bonjour » and its kind are asked all day. */
+  private readonly queryCache = new Map<string, number[]>();
 
   constructor(
     private readonly config: ConfigService,
@@ -182,8 +187,12 @@ export class HelpEmbeddingsService {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ kind, texts }),
+        // A person is waiting on a query; a passage is a background rebuild.
+        // At 30 s a slow embedder held a turn far past its 4 s search budget.
         signal: AbortSignal.timeout(
-          readNumber(this.config, 'VOVA_EMBEDDER_TIMEOUT_MS', 30_000),
+          kind === 'query'
+            ? readNumber(this.config, 'VOVA_EMBEDDER_QUERY_TIMEOUT_MS', 4_000)
+            : readNumber(this.config, 'VOVA_EMBEDDER_TIMEOUT_MS', 30_000),
         ),
       });
     } catch (err) {
@@ -222,10 +231,17 @@ export class HelpEmbeddingsService {
   /** Question side. Applies the `query: ` prefix e5 expects. */
   async embedQuery(text: string): Promise<number[]> {
     this.guardLength('query', text);
+    const cached = this.queryCache.get(text);
+    if (cached) return cached;
     const url = this.remoteUrl();
-    if (url) return (await this.remote(url, 'query', [text]))[0];
-    const embedder = await this.ensure();
-    return Array.from(await embedder.queryEmbed(text));
+    const vector = url
+      ? (await this.remote(url, 'query', [text]))[0]
+      : Array.from(await (await this.ensure()).queryEmbed(text));
+    if (this.queryCache.size >= QUERY_CACHE_SIZE) {
+      this.queryCache.delete(this.queryCache.keys().next().value as string);
+    }
+    this.queryCache.set(text, vector);
+    return vector;
   }
 
   /**

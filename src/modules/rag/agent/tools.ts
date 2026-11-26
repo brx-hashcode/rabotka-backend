@@ -22,6 +22,12 @@ import {
   UNLOCK_STATE,
 } from '../intents/dto';
 import { project, projectMany } from '../intents/projections';
+import {
+  RETAINED,
+  applicationStatusWords,
+  dayWords,
+  offerStatusWords,
+} from './statuses';
 
 export const APP_DESTINATIONS = {
   accueil: '/home',
@@ -393,28 +399,22 @@ export function buildTools(
   const mesCandidatures = tool(
     async () => {
       try {
+        // Pages from 1 (`skip = (page - 1) * limit`).
         const result = await deps.profiles.getApplicationsByProfileId(
           ctx.profileId,
           1,
           10,
         );
-        const paged = result as unknown as {
-          data?: unknown[];
-          total?: number;
-        };
-        const rows = paged.data ?? [];
+        // Named field by field: a projection list in snake_case met this
+        // camelCase result and kept only `id` and `status` — no mission, no date.
         return ok({
-          // Le service renvoyait déjà `total` et l'outil le jetait. Le modèle
-          // ne voyait donc que dix lignes, alors que le prompt lui demande
-          // d'être concret (« *4 candidatures, 2 en attente* ») : il comptait
-          // les lignes et annonçait « 10 » à quelqu'un qui en avait trente.
-          nombre: paged.total ?? rows.length,
-          candidatures: projectMany(
-            rows as Record<string, unknown>[],
-            APPLICATION_SUMMARY,
-            'owner',
-            'APPLICATION_SUMMARY',
-          ),
+          nombre: result.total,
+          candidatures: result.data.map((a) => ({
+            mission: a.jobOffer.title,
+            ville: a.jobOffer.isRemote ? 'à distance' : a.jobOffer.city,
+            envoyee_le: dayWords(a.createdAt),
+            statut: applicationStatusWords(a.status, 'worker'),
+          })),
         });
       } catch (err) {
         return fail('mes_candidatures', err);
@@ -423,10 +423,9 @@ export function buildTools(
     {
       name: 'mes_candidatures',
       description:
-        "Les candidatures de l'utilisateur et leur statut. `nombre` est le vrai total " +
-        '— utilise-le tel quel et ne compte JAMAIS les lignes de `candidatures`, qui ' +
-        'ne sont que les dix plus récentes. Traduire les statuts en français courant, ' +
-        'ne jamais renvoyer le code brut.',
+        "Les candidatures de l'utilisateur : la mission, la date, le statut en clair. " +
+        '`nombre` est son total ; la liste donne les plus récentes. Pour une ' +
+        'candidature acceptée, en attente ou refusée, réponds avec le nom de la mission.',
       schema: z.object({}),
     },
   );
@@ -437,13 +436,17 @@ export function buildTools(
         const penalties = await deps.profiles.getPenaltiesByProfileId(
           ctx.profileId,
         );
+        const unpaid = penalties.filter((p) => !p.paidAt);
         return ok({
-          penalites: projectMany(
-            penalties as unknown as Record<string, unknown>[],
-            PENALTY_SUMMARY,
-            'owner',
-            'PENALTY_SUMMARY',
-          ),
+          impayees: unpaid.length,
+          montant_impaye_fcfa: unpaid.reduce((sum, p) => sum + p.amount, 0),
+          penalites: penalties.slice(0, 10).map((p) => ({
+            montant_fcfa: p.amount,
+            motif: p.reason,
+            mission: p.jobOfferTitle ?? null,
+            le: dayWords(p.appliedAt),
+            payee: p.paidAt ? `oui, le ${dayWords(p.paidAt)}` : 'non',
+          })),
         });
       } catch (err) {
         return fail('mes_penalites', err);
@@ -452,8 +455,8 @@ export function buildTools(
     {
       name: 'mes_penalites',
       description:
-        "Les pénalités de l'utilisateur, payées et impayées. Toujours nommer la sortie : " +
-        "elles se règlent dans l'application, sur l'écran *Régler mes pénalités*, que le bouton *Payer mes pénalités* ouvre directement.",
+        "Les pénalités de l'utilisateur, payées et impayées, avec le montant encore dû. " +
+        "Elles se règlent dans l'application, sur l'écran *Régler mes pénalités*.",
       schema: z.object({}),
     },
   );
@@ -628,14 +631,21 @@ export function buildTools(
     async () => {
       try {
         const offers = await deps.jobOffers.findByEmployerId(ctx.profileId);
+        const by = (statuses: string[]) =>
+          offers.filter((o) => statuses.includes(o.status)).length;
         return ok({
           nombre: offers.length,
-          missions: projectMany(
-            offers as unknown as Record<string, unknown>[],
-            JOB_OFFER_SUMMARY,
-            'owner',
-            'JOB_OFFER_SUMMARY',
-          ).slice(0, 10),
+          en_ligne: by(['ACTIVE', 'PARTIALLY_FILLED']),
+          expirees: by(['EXPIRED']),
+          missions: offers.slice(0, 10).map((o) => ({
+            reference: o.reference,
+            titre: o.title,
+            statut: offerStatusWords(o.status),
+            postes: `${o.acceptedCount}/${o.quantity} pourvu(s)`,
+            date: dayWords(o.scheduled_at),
+            ville: o.is_remote ? 'à distance' : o.city,
+            publiee_le: dayWords(o.created_at),
+          })),
         });
       } catch (err) {
         return fail('mes_missions_publiees', err);
@@ -644,9 +654,9 @@ export function buildTools(
     {
       name: 'mes_missions_publiees',
       description:
-        'Les missions que CE recruteur a publiées, avec leur statut et leur nombre. ' +
-        "À appeler dès qu'il demande combien d'offres il a créées, où en est une " +
-        "annonce, ou ce qu'il a publié.",
+        'Les offres que ce recruteur a publiées : en ligne, expirées, pourvues, avec leur ' +
+        'statut en clair et les postes pourvus. Une offre expirée se republie dans ' +
+        "l'application, sur *Mes missions*.",
       schema: z.object({}),
     },
   );
@@ -654,36 +664,37 @@ export function buildTools(
   const candidaturesRecues = tool(
     async () => {
       try {
-        // La surcharge PAGINÉE, pour ses `total`. La version `{ limit: 20 }`
-        // renvoyait un tableau plafonné dont on comptait la longueur : un
-        // recruteur avec 45 candidatures s'entendait répondre « vous en avez
-        // *20* ». Un chiffre faux et présenté avec autorité, sur la question
-        // même que cet outil existe pour trancher — « combien ? ».
-        //
-        // Deux requêtes plutôt qu'un filtre local, pour la même raison :
-        // compter les PENDING parmi les vingt ramenées donne le nombre de
-        // pending dans la page, pas le nombre de pending.
-        const [page, pendingPage] = await Promise.all([
-          deps.applications.findByEmployer(ctx.profileId, {
-            page: 1,
-            pageSize: 10,
-          }),
-          deps.applications.findByEmployer(ctx.profileId, {
-            status: ApplicationStatus.PENDING,
-            page: 1,
-            pageSize: 1,
-          }),
-        ]);
-
+        // `findByEmployer` pages from 0. Page 1 skipped the ten newest: a
+        // recruiter with five applications got « 5 » and an empty list.
+        const count = (statusIn: ApplicationStatus[]) =>
+          deps.applications
+            .findByEmployer(ctx.profileId, { statusIn, page: 0, pageSize: 1 })
+            .then((r) => r.total);
+        const [page, nouvelles, lues, retenues, refusees, missions] =
+          await Promise.all([
+            deps.applications.findByEmployer(ctx.profileId, {
+              page: 0,
+              pageSize: 10,
+            }),
+            count([ApplicationStatus.PENDING]),
+            count([ApplicationStatus.VIEWED]),
+            count(RETAINED),
+            count([ApplicationStatus.REJECTED]),
+            count([ApplicationStatus.STARTED, ApplicationStatus.END]),
+          ]);
         return ok({
           total: page.total,
-          en_attente: pendingPage.total,
-          candidatures: projectMany(
-            page.items as unknown as Record<string, unknown>[],
-            APPLICATION_SUMMARY,
-            'owner',
-            'APPLICATION_SUMMARY',
-          ),
+          nouvelles_non_lues: nouvelles,
+          lues_sans_reponse: lues,
+          retenues,
+          refusees,
+          missions_en_cours_ou_terminees: missions,
+          candidatures: page.items.map((a) => ({
+            candidat: a.worker?.first_name ?? null,
+            mission: a.job_offer.title,
+            recue_le: dayWords(a.created_at),
+            statut: applicationStatusWords(a.status, 'employer'),
+          })),
         });
       } catch (err) {
         return fail('candidatures_recues', err);
@@ -692,11 +703,11 @@ export function buildTools(
     {
       name: 'candidatures_recues',
       description:
-        'Les candidatures reçues par CE recruteur. `total` et `en_attente` sont les ' +
-        'vrais comptes, sur toute la base — utilise-les tels quels et ne compte JAMAIS ' +
-        'les lignes de `candidatures`, qui ne sont que les dix plus récentes. ' +
-        "À appeler dès qu'il demande s'il a des candidatures, combien, ou où " +
-        'elles en sont. Ne jamais répondre par un solde ni par un autre chiffre.',
+        'Les candidatures reçues par ce recruteur : les nombres par statut (nouvelles, ' +
+        'ouvertes sans réponse, retenues, refusées, missions en cours ou terminées) sur toutes ses offres, et les plus récentes avec le ' +
+        'prénom du candidat, la mission et le statut en clair. À appeler dès qu’il ' +
+        'demande s’il a des candidatures, lesquelles, qui, pour quelle mission, ou ' +
+        'lesquelles sont retenues.',
       schema: z.object({}),
     },
   );

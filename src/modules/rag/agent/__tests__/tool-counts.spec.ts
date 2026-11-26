@@ -2,15 +2,13 @@ import { ApplicationStatus, ProfileType } from '@prisma/client';
 import { buildTools } from '../tools';
 
 /**
- * Les CHIFFRES que les outils renvoient.
+ * What the data tools hand the model: the right rows, counted over the whole
+ * base, statuses in words.
  *
- * Le prompt interdit au modèle d'inventer un nombre et lui demande d'être
- * concret (« *4 candidatures, 2 en attente* »). Il rapporte donc fidèlement ce
- * que l'outil lui donne — ce qui rend un outil qui compte mal pire qu'un outil
- * qui ne compte pas : le chiffre arrive avec toute l'autorité de la base, et
- * personne côté utilisateur ne peut le contredire.
- *
- * Deux outils comptaient la longueur d'une page paginée.
+ * The fakes page as the real services do — `findByEmployer` from 0,
+ * `getApplicationsByProfileId` from 1. The old mocks answered any page with
+ * the same rows, which is how `candidatures_recues` asked for page 1, skipped
+ * the ten newest applications in production, and passed here.
  */
 const parse = (raw: unknown) =>
   JSON.parse(String(raw)) as Record<string, unknown>;
@@ -36,101 +34,177 @@ function toolsFor(
   );
 }
 
-const pick = (tools: ReturnType<typeof buildTools>, name: string) => {
+const run = async (
+  tools: ReturnType<typeof buildTools>,
+  name: string,
+): Promise<Record<string, unknown>> => {
   const t = tools.find((x) => x.name === name);
   if (!t) throw new Error(`${name} introuvable`);
-  return t;
+  return parse(await t.invoke({}));
 };
 
-describe('candidatures_recues', () => {
-  it('annonce le vrai total, pas la taille de la page', async () => {
-    // 45 candidatures, dont 12 en attente, page de 10.
-    const findByEmployer = jest
-      .fn()
-      .mockImplementation((_id: string, opts: { status?: string }) =>
-        Promise.resolve(
-          opts?.status === ApplicationStatus.PENDING
-            ? { items: [], total: 12 }
-            : { items: new Array(10).fill({ status: 'PENDING' }), total: 45 },
-        ),
+const received = (n: number, status: ApplicationStatus, first: string) => ({
+  id: `a-${n}`,
+  status,
+  created_at: new Date('2026-11-24T10:00:00Z'),
+  job_offer: { title: 'Nettoyage des vêtements' },
+  worker: { first_name: first, last_name: 'X' },
+});
+
+/** As `ApplicationService.findByEmployer`: pages from 0, filters on `statusIn`. */
+function employerFake(rows: ReturnType<typeof received>[]) {
+  return jest.fn(
+    (
+      _id: string,
+      o: { statusIn?: string[]; page: number; pageSize: number },
+    ) => {
+      const kept = rows.filter(
+        (r) => !o.statusIn || o.statusIn.includes(r.status),
       );
+      return Promise.resolve({
+        items: kept.slice(o.page * o.pageSize, (o.page + 1) * o.pageSize),
+        total: kept.length,
+      });
+    },
+  );
+}
 
-    const payload = parse(
-      await pick(
-        toolsFor(ProfileType.EMPLOYER, {
-          applications: { findByEmployer } as never,
-        }),
-        'candidatures_recues',
-      ).invoke({}),
+describe('candidatures_recues', () => {
+  // The conversation of 2026-11-25: five applications, none waiting.
+  const FIVE = [
+    received(1, ApplicationStatus.WAITING_PAYMENT, 'Josué'),
+    received(2, ApplicationStatus.REJECTED, 'Clarisse'),
+    received(3, ApplicationStatus.VIEWED, 'Patrick'),
+    received(4, ApplicationStatus.REJECTED, 'Ornella'),
+    received(5, ApplicationStatus.END, 'Dieudonné'),
+  ];
+
+  it('lists the newest applications, not the page after them', async () => {
+    const payload = await run(
+      toolsFor(ProfileType.EMPLOYER, {
+        applications: { findByEmployer: employerFake(FIVE) },
+      }),
+      'candidatures_recues',
     );
-
-    expect(payload.total).toBe(45);
-    expect(payload.en_attente).toBe(12);
+    expect(payload.total).toBe(5);
+    expect(payload.candidatures).toHaveLength(5);
   });
 
-  it('compte les en-attente sur toute la base, pas dans la page', async () => {
-    // Piège : aucune PENDING dans la page ramenée, mais 7 au total. Un filtre
-    // local aurait répondu « 0 en attente ».
-    const findByEmployer = jest
-      .fn()
-      .mockImplementation((_id: string, opts: { status?: string }) =>
-        Promise.resolve(
-          opts?.status === ApplicationStatus.PENDING
-            ? { items: [], total: 7 }
-            : { items: [{ status: 'ACCEPTED' }], total: 30 },
-        ),
-      );
-
-    const payload = parse(
-      await pick(
-        toolsFor(ProfileType.EMPLOYER, {
-          applications: { findByEmployer } as never,
-        }),
-        'candidatures_recues',
-      ).invoke({}),
+  it('counts each status over the whole base', async () => {
+    const payload = await run(
+      toolsFor(ProfileType.EMPLOYER, {
+        applications: { findByEmployer: employerFake(FIVE) },
+      }),
+      'candidatures_recues',
     );
+    expect(payload).toMatchObject({
+      nouvelles_non_lues: 0,
+      lues_sans_reponse: 1,
+      retenues: 1,
+      missions_en_cours_ou_terminees: 1,
+      refusees: 2,
+    });
+  });
 
-    expect(payload.en_attente).toBe(7);
+  it('names the candidate and says the status in words', async () => {
+    const payload = await run(
+      toolsFor(ProfileType.EMPLOYER, {
+        applications: { findByEmployer: employerFake(FIVE) },
+      }),
+      'candidatures_recues',
+    );
+    expect((payload.candidatures as Record<string, unknown>[])[0]).toEqual({
+      candidat: 'Josué',
+      mission: 'Nettoyage des vêtements',
+      recue_le: expect.any(String),
+      statut: 'retenue : le paiement du déblocage du contact est en attente',
+    });
+  });
+
+  it('counts past the first page', async () => {
+    const many = Array.from({ length: 45 }, (_, i) =>
+      received(i, ApplicationStatus.PENDING, `C${i}`),
+    );
+    const payload = await run(
+      toolsFor(ProfileType.EMPLOYER, {
+        applications: { findByEmployer: employerFake(many) },
+      }),
+      'candidatures_recues',
+    );
+    expect(payload.total).toBe(45);
+    expect(payload.nouvelles_non_lues).toBe(45);
+    expect(payload.candidatures).toHaveLength(10);
   });
 });
 
 describe('mes_candidatures', () => {
-  it('transmet le total que le service donnait déjà', async () => {
-    const getApplicationsByProfileId = jest.fn().mockResolvedValue({
-      data: new Array(10).fill({ status: 'PENDING' }),
-      total: 30,
-      page: 1,
-      limit: 10,
-    });
-
-    const payload = parse(
-      await pick(
-        toolsFor(ProfileType.WORKER, {
-          profiles: { getApplicationsByProfileId } as never,
-        }),
-        'mes_candidatures',
-      ).invoke({}),
-    );
-
-    // Dix lignes remontées, trente candidatures réelles.
-    expect(payload.nombre).toBe(30);
-    expect((payload.candidatures as unknown[]).length).toBe(10);
+  // As `ProfileService.getApplicationsByProfileId`: camelCase, pages from 1.
+  const mine = (title: string, status: ApplicationStatus) => ({
+    id: title,
+    status,
+    createdAt: new Date('2026-11-20T10:00:00Z'),
+    contractId: null,
+    jobOffer: { title, isRemote: false, city: 'Brazzaville' },
   });
 
-  it('retombe sur le nombre de lignes si le total manque', async () => {
-    const getApplicationsByProfileId = jest
-      .fn()
-      .mockResolvedValue({ data: [{ status: 'PENDING' }] });
-
-    const payload = parse(
-      await pick(
-        toolsFor(ProfileType.WORKER, {
-          profiles: { getApplicationsByProfileId } as never,
+  it('keeps the mission and the date, and the true total', async () => {
+    const getApplicationsByProfileId = jest.fn(
+      (_id: string, page: number, limit: number) =>
+        Promise.resolve({
+          data: [mine('Saisie de factures', ApplicationStatus.ACCEPTED)].slice(
+            (page - 1) * limit,
+          ),
+          total: 30,
+          page,
+          limit,
         }),
-        'mes_candidatures',
-      ).invoke({}),
     );
+    const payload = await run(
+      toolsFor(ProfileType.WORKER, {
+        profiles: { getApplicationsByProfileId },
+      }),
+      'mes_candidatures',
+    );
+    expect(getApplicationsByProfileId).toHaveBeenCalledWith('p-1', 1, 10);
+    expect(payload.nombre).toBe(30);
+    expect(
+      (payload.candidatures as Record<string, unknown>[])[0],
+    ).toMatchObject({
+      mission: 'Saisie de factures',
+      ville: 'Brazzaville',
+      statut: 'acceptée',
+    });
+  });
+});
 
-    expect(payload.nombre).toBe(1);
+describe('mes_penalites', () => {
+  it('tells paid from unpaid, and the amount still due', async () => {
+    const getPenaltiesByProfileId = jest.fn().mockResolvedValue([
+      {
+        id: '1',
+        amount: 2000,
+        reason: 'Absence',
+        appliedAt: new Date(),
+        paidAt: null,
+        jobOfferTitle: 'Inventaire',
+      },
+      {
+        id: '2',
+        amount: 1000,
+        reason: 'Retard',
+        appliedAt: new Date(),
+        paidAt: new Date(),
+        jobOfferTitle: null,
+      },
+    ]);
+    const payload = await run(
+      toolsFor(ProfileType.WORKER, { profiles: { getPenaltiesByProfileId } }),
+      'mes_penalites',
+    );
+    expect(payload).toMatchObject({ impayees: 1, montant_impaye_fcfa: 2000 });
+    expect((payload.penalites as Record<string, unknown>[])[0]).toMatchObject({
+      payee: 'non',
+      mission: 'Inventaire',
+    });
   });
 });
