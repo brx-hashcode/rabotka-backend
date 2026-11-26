@@ -51,7 +51,12 @@ export {
   type KycReviewKind,
 } from './kyc-review-requested';
 export { paymentRejectedEmail } from './payment-rejected';
-export { invoiceEmail, paymentSuccessEmail } from './payment-success';
+export {
+  paymentReceiptEmail,
+  paymentReceiptSubject,
+  plainDashes,
+  type PaymentReceipt,
+} from './payment-success';
 export { accountSuspendedEmail } from './account-suspended';
 export { claimCreatedEmail } from './claim-created';
 export { claimInProgressEmail } from './claim-in-progress';

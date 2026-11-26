@@ -5,7 +5,7 @@ import {
   businessDocumentRejectedEmail,
   businessRejectedEmail,
 } from '../business-review';
-import { invoiceEmail, paymentSuccessEmail } from '../payment-success';
+import { paymentReceiptEmail } from '../payment-success';
 import { referralRewardedEmail } from '../referral-rewarded';
 import { businessWelcomeEmail } from '../welcome';
 
@@ -13,6 +13,15 @@ import { businessWelcomeEmail } from '../welcome';
  * Nothing sent to a business may point to WhatsApp or the client app: it
  * works from its dashboard, by email only.
  */
+const RECEIPT = {
+  description: 'Déblocage',
+  amount: 5000,
+  paidAt: new Date('2026-11-26T09:42:00Z'),
+  method: 'Airtel Money',
+  reference: 'PAY-1',
+  invoiceAttached: true,
+};
+
 describe('emails to a business', () => {
   const env = { ...process.env };
   beforeEach(() => {
@@ -40,8 +49,15 @@ describe('emails to a business', () => {
       businessDocumentRejectedEmail('Awa', 'Akieni', 'RCCM', 'Illisible', org),
     ],
     ['suspended', accountSuspendedEmail('Awa', 'Fraude', 'business')],
-    ['payment', paymentSuccessEmail('Awa', 'Déblocage', 5000, 'business')],
-    ['invoice', invoiceEmail('Awa', 'Déblocage', 5000, 'business')],
+    ['receipt', paymentReceiptEmail('Awa', RECEIPT, 'business')],
+    [
+      'receipt without its PDF',
+      paymentReceiptEmail(
+        'Awa',
+        { ...RECEIPT, invoiceAttached: false },
+        'business',
+      ),
+    ],
     [
       'referral',
       referralRewardedEmail('Awa', {

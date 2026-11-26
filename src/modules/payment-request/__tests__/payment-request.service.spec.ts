@@ -1489,7 +1489,25 @@ describe('PaymentRequestService', () => {
     });
   });
 
-  describe('sendPaymentSuccessNotifications() branches', () => {
+  describe('the payment receipt', () => {
+    /** The receipt goes out after the contact, not awaited: let it land. */
+    const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+    /** ONE e-mail for the payment: the confirmation, with the invoice PDF. */
+    const expectOneReceipt = () => {
+      const sendMail = (service as any).mailService.sendMail as jest.Mock;
+      const toPayer = sendMail.mock.calls.filter(
+        ([m]) => m.to === 'alice@test.com',
+      );
+      expect(toPayer).toHaveLength(1);
+      expect(toPayer[0][0]).toMatchObject({
+        subject: expect.stringContaining('Paiement confirmé'),
+        attachments: [
+          expect.objectContaining({ contentType: 'application/pdf' }),
+        ],
+      });
+    };
+
     function setupProcessApproval(
       requestOverrides: Record<string, unknown> = {},
     ) {
@@ -1552,9 +1570,8 @@ describe('PaymentRequestService', () => {
           String(text).includes('Paiement confirmé'),
         ),
       ).toBe(false);
-      expect((service as any).mailService.sendMail).toHaveBeenCalledWith(
-        expect.objectContaining({ to: 'alice@test.com' }),
-      );
+      await settle();
+      expectOneReceipt();
     });
 
     it('sends no WhatsApp confirmation for CONTACT_UNLOCK nowUnlocked=false, only the email', async () => {
@@ -1585,9 +1602,8 @@ describe('PaymentRequestService', () => {
           String(text).includes('Paiement confirmé'),
         ),
       ).toBe(false);
-      expect((service as any).mailService.sendMail).toHaveBeenCalledWith(
-        expect.objectContaining({ to: 'alice@test.com' }),
-      );
+      await settle();
+      expectOneReceipt();
     });
 
     it('sends no WhatsApp confirmation for CONTACT_UNLOCK nowUnlocked=true, only the email', async () => {
@@ -1626,9 +1642,8 @@ describe('PaymentRequestService', () => {
           String(text).includes('Paiement confirmé'),
         ),
       ).toBe(false);
-      expect((service as any).mailService.sendMail).toHaveBeenCalledWith(
-        expect.objectContaining({ to: 'alice@test.com' }),
-      );
+      await settle();
+      expectOneReceipt();
     });
 
     it('handles null email (skips email notification)', async () => {
@@ -1636,8 +1651,45 @@ describe('PaymentRequestService', () => {
         profile: { ...mockProfile, phone: '+242000001', email: null },
       });
       await service.processApprovedPaymentById(REQUEST_ID);
-      // Should not throw
-      expect(true).toBe(true);
+      await settle();
+      expect((service as any).mailService.sendMail).not.toHaveBeenCalled();
+      // The invoice is a financial record: written with or without an e-mail.
+      expect((service as any).invoiceService.create).toHaveBeenCalled();
+    });
+
+    it('still sends the receipt when the PDF fails, without the attachment', async () => {
+      setupProcessApproval();
+      (
+        (service as any).invoiceService.downloadAsAdmin as jest.Mock
+      ).mockRejectedValueOnce(new Error('pdf down'));
+      await service.processApprovedPaymentById(REQUEST_ID);
+      await settle();
+      const sendMail = (service as any).mailService.sendMail as jest.Mock;
+      expect(sendMail).toHaveBeenCalledTimes(1);
+      expect(sendMail.mock.calls[0][0].attachments).toBeUndefined();
+      expect(sendMail.mock.calls[0][0].html).toContain(
+        'Votre facture sera disponible',
+      );
+    });
+
+    it('sends nothing the second time the same payment is confirmed', async () => {
+      setupProcessApproval();
+      await service.processApprovedPaymentById(REQUEST_ID);
+      await settle();
+      // The webhook and the poller both confirm it: the claim is lost.
+      setupProcessApproval();
+      (prisma.$transaction as jest.Mock).mockImplementation((cb) =>
+        typeof cb === 'function'
+          ? cb({
+              paymentRequest: {
+                updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+              },
+            })
+          : Promise.resolve([]),
+      );
+      await service.processApprovedPaymentById(REQUEST_ID).catch(() => {});
+      await settle();
+      expectOneReceipt();
     });
   });
 
