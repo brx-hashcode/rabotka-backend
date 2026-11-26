@@ -65,6 +65,7 @@ import { takenSeats } from '../../job-offer/utils/offer-seats';
 import { feedSite, jobsFeedXml } from './job-feed';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { BUSINESS_CATEGORY_LABELS } from '../business-catalog';
+import { writtenIn } from '../output-language';
 import {
   CvScreeningService,
   type CvUpload,
@@ -365,6 +366,12 @@ export class CareersService {
         paymentFlow: offer.payment_flow,
         categoryName: offer.category?.name ?? null,
         questions: offer.questions.map(candidateQuestion),
+        /**
+         * The offer's own language, read from its text: its page and its
+         * application form speak it, whatever the visitor's browser says. The
+         * text first, longer than a title like « Delivery driver ».
+         */
+        language: writtenIn(offer.description, offer.title),
       },
     };
   }

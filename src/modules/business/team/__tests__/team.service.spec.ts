@@ -85,8 +85,8 @@ describe('TeamService', () => {
       $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
     };
     (prisma.business as any).update = jest.fn().mockResolvedValue({});
-    limits = { RECRUITER: 2, REVIEWER: 0 };
-    taken = { RECRUITER: 0, REVIEWER: 0 };
+    limits = { ADMIN: 1, RECRUITER: 2, REVIEWER: 0 };
+    taken = { ADMIN: 0, RECRUITER: 0, REVIEWER: 0 };
     subscriptions = {
       businessOf: jest.fn().mockResolvedValue(BUSINESS),
       consumeSeat: jest
@@ -181,9 +181,40 @@ describe('TeamService', () => {
       await expect(service.invite(admin, dto)).rejects.toThrow('db');
     });
 
-    it('never makes a second administrator', async () => {
+    it('lets the holder invite an administrator, within the plan’s own limit', async () => {
+      const m = await service.invite(admin, { ...dto, role: 'ADMIN' });
+      expect(m.role).toBe('ADMIN');
+      expect(subscriptions.consumeSeat).toHaveBeenLastCalledWith(
+        BUSINESS,
+        'ADMIN',
+        expect.any(Function),
+        undefined,
+      );
+      taken.ADMIN = 1;
       await expect(
-        service.invite(admin, { ...dto, role: 'ADMIN' as any }),
+        service.invite(admin, { ...dto, role: 'ADMIN' }),
+      ).rejects.toThrow(/permet 1 administrateur dans l’équipe, déjà atteint/);
+      limits.ADMIN = 0;
+      await expect(
+        service.invite(admin, { ...dto, role: 'ADMIN' }),
+      ).rejects.toThrow(/n’inclut pas d’administrateurs/);
+    });
+
+    it('lets only the holder invite an administrator', async () => {
+      const otherAdmin = {
+        ...admin,
+        member: row({ id: 'a-2', role: 'ADMIN' }),
+      };
+      await expect(
+        service.invite(otherAdmin, { ...dto, role: 'ADMIN' }),
+      ).rejects.toThrow(/Seul le responsable du compte/);
+      // A recruiter, though, any administrator invites.
+      await expect(service.invite(otherAdmin, dto)).resolves.toBeDefined();
+    });
+
+    it('refuses a role that does not exist', async () => {
+      await expect(
+        service.invite(admin, { ...dto, role: 'OWNER' as any }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
@@ -288,6 +319,50 @@ describe('TeamService', () => {
         expect.any(Function),
         'm-2',
       );
+    });
+
+    it('lets the holder make someone an administrator, and back', async () => {
+      await service.setRole(admin, 'm-2', 'ADMIN');
+      expect(prisma.businessMember.update).toHaveBeenLastCalledWith({
+        where: { id: 'm-2' },
+        data: { role: 'ADMIN', seat_subscription_id: 'sub-1' },
+      });
+      prisma.businessMember.findFirst.mockResolvedValue(
+        row({ id: 'm-2', role: 'ADMIN' }),
+      );
+      await service.setRole(admin, 'm-2', 'RECRUITER');
+      expect(prisma.businessMember.update).toHaveBeenLastCalledWith({
+        where: { id: 'm-2' },
+        data: { role: 'RECRUITER', seat_subscription_id: 'sub-1' },
+      });
+    });
+
+    it('keeps administrators the holder’s to manage', async () => {
+      const otherAdmin = {
+        ...admin,
+        member: row({ id: 'a-2', role: 'ADMIN' }),
+      };
+      await expect(service.setRole(otherAdmin, 'm-2', 'ADMIN')).rejects.toThrow(
+        /Seul le responsable du compte/,
+      );
+      prisma.businessMember.findFirst.mockResolvedValue(
+        row({ id: 'm-3', role: 'ADMIN' }),
+      );
+      await expect(
+        service.setRole(otherAdmin, 'm-3', 'RECRUITER'),
+      ).rejects.toThrow(/Seul le responsable du compte/);
+      await expect(service.remove(otherAdmin, 'm-3')).rejects.toThrow(
+        /Seul le responsable du compte/,
+      );
+      // Recruiters and evaluators stay any administrator's to run.
+      prisma.businessMember.findFirst.mockResolvedValue(row({ id: 'm-2' }));
+      limits.REVIEWER = 1;
+      await expect(
+        service.setRole(otherAdmin, 'm-2', 'REVIEWER'),
+      ).resolves.toBeDefined();
+      await expect(service.remove(otherAdmin, 'm-2')).resolves.toEqual({
+        removed: true,
+      });
     });
 
     it('never touches the holder', async () => {

@@ -12,6 +12,7 @@ import {
   Res,
   Query,
   BadRequestException,
+  ForbiddenException,
   Inject,
   Param,
   Logger,
@@ -62,6 +63,7 @@ import {
   WELCOME_EMAIL_PREVIEW_NO_DOCUMENTS,
 } from '../mail/templates';
 import { businessOrganisationUrl } from '../mail/audience';
+import { holderOnlyRefusal } from '../business/team/team-access';
 import { setAuthCookie } from '../auth/auth-cookie.util';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
@@ -602,6 +604,8 @@ export class ProfileController {
     @Req() req: ProfileAuthenticatedRequest,
     @Body() updateProfileDto: UpdateProfileDto,
   ): Promise<ProfileMeResponse> {
+    const refusal = holderOnlyRefusal(req.user.memberId, updateProfileDto);
+    if (refusal) throw new ForbiddenException(refusal);
     return this.profileService.updateProfile(
       req.user.profileId,
       updateProfileDto,

@@ -10,6 +10,7 @@ import {
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import {
   BusinessBillingPeriod,
+  type BusinessMemberRole,
   type BusinessCredit,
   BusinessCreditKind,
   BusinessSubscriptionStatus,
@@ -224,10 +225,14 @@ export type BusinessEntitlements = {
   hrExports: boolean;
   /** « Visio dans Rabotka »: a link made in Rabotka, guests, transcription. */
   videoInterviews: boolean;
-  /** Recruteurs the business may have (the holder is its one administrator). Null: unlimited; 0: none. */
+  /** Administrateurs the business may add besides its holder. Null: unlimited; 0: none. */
+  adminsLimit: number | null;
+  /** Recruteurs the business may have. Null: unlimited; 0: none. */
   recruitersLimit: number | null;
   /** Évaluateurs the business may have. Null: unlimited; 0: none. */
   reviewersLimit: number | null;
+  /** Administrateurs invited or active now, the holder aside. */
+  admins: number;
   /** Recruteurs invited or active now. */
   recruiters: number;
   /** Évaluateurs invited or active now. */
@@ -395,7 +400,7 @@ export class BusinessSubscriptionService implements OnModuleInit {
       : false;
     // The people in the team now, invited or active: a plan's places are a
     // team size, freed when someone leaves.
-    const { recruiters, reviewers } = await this.seatsInUse(businessId);
+    const { admins, recruiters, reviewers } = await this.seatsInUse(businessId);
     const balance = await creditBalance(this.prisma, businessId);
     const credits = {
       cv: balance.CV,
@@ -431,8 +436,10 @@ export class BusinessSubscriptionService implements OnModuleInit {
         linkedinPosting: false,
         hrExports: false,
         videoInterviews: false,
+        adminsLimit: 0,
         recruitersLimit: 0,
         reviewersLimit: 0,
+        admins,
         recruiters,
         reviewers,
         trialLocked: [],
@@ -496,8 +503,10 @@ export class BusinessSubscriptionService implements OnModuleInit {
       linkedinPosting: sub.plan.linkedin_posting,
       hrExports: sub.plan.hr_exports,
       videoInterviews: sub.plan.video_interviews,
+      adminsLimit: sub.plan.admins_limit,
       recruitersLimit: sub.plan.recruiters_limit,
       reviewersLimit: sub.plan.reviewers_limit,
+      admins,
       recruiters,
       reviewers,
       trialLocked: [...locked],
@@ -1657,27 +1666,31 @@ export class BusinessSubscriptionService implements OnModuleInit {
 
   /**
    * The team's invited and active members per role, the account holder
-   * aside: what a plan's « recruteurs » and « évaluateurs » limit.
+   * aside: what a plan's « administrateurs », « recruteurs » and
+   * « évaluateurs » limit.
    */
   async seatsInUse(
     businessId: string,
     db: Db = this.prisma,
     excludeMemberId?: string,
-  ): Promise<{ recruiters: number; reviewers: number }> {
+  ): Promise<{ admins: number; recruiters: number; reviewers: number }> {
     const rows = await db.businessMember.groupBy({
       by: ['role'],
       where: {
         business_id: businessId,
         is_owner: false,
         status: { in: ['INVITED', 'ACTIVE'] },
-        role: { in: ['RECRUITER', 'REVIEWER'] },
         ...(excludeMemberId ? { id: { not: excludeMemberId } } : {}),
       },
       _count: { _all: true },
     });
     const of = (role: string) =>
       rows.find((r) => r.role === role)?._count._all ?? 0;
-    return { recruiters: of('RECRUITER'), reviewers: of('REVIEWER') };
+    return {
+      admins: of('ADMIN'),
+      recruiters: of('RECRUITER'),
+      reviewers: of('REVIEWER'),
+    };
   }
 
   /**
@@ -1690,16 +1703,18 @@ export class BusinessSubscriptionService implements OnModuleInit {
    */
   async consumeSeat(
     businessId: string,
-    role: 'RECRUITER' | 'REVIEWER',
+    role: BusinessMemberRole,
     message: (limit: number) => string,
     excludeMemberId?: string,
   ): Promise<{ subscriptionId: string }> {
     const sub = await this.current(businessId);
     const limit = !sub
       ? 0
-      : role === 'RECRUITER'
-        ? sub.plan.recruiters_limit
-        : sub.plan.reviewers_limit;
+      : {
+          ADMIN: sub.plan.admins_limit,
+          RECRUITER: sub.plan.recruiters_limit,
+          REVIEWER: sub.plan.reviewers_limit,
+        }[role];
     if (!sub || limit === 0) throw new ForbiddenException(message(0));
     if (limit !== null) {
       const used = await this.seatsInUse(
@@ -1707,7 +1722,11 @@ export class BusinessSubscriptionService implements OnModuleInit {
         this.prisma,
         excludeMemberId,
       );
-      const taken = role === 'RECRUITER' ? used.recruiters : used.reviewers;
+      const taken = {
+        ADMIN: used.admins,
+        RECRUITER: used.recruiters,
+        REVIEWER: used.reviewers,
+      }[role];
       if (taken >= limit) throw new ForbiddenException(message(limit));
     }
     return { subscriptionId: sub.id };

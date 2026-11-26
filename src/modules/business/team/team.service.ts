@@ -35,11 +35,19 @@ export type TeamActor = {
 
 const RESEND_AFTER_MS = 60_000;
 
-/** The roles a business invites: its account holder is its one administrator. */
-export type InvitedRole = Extract<BusinessMemberRole, 'RECRUITER' | 'REVIEWER'>;
-export const INVITED_ROLES: InvitedRole[] = ['RECRUITER', 'REVIEWER'];
+/**
+ * The roles a business invites. The account holder — who created it — stays
+ * its one holder, and may add administrators beside it: only the holder
+ * manages them (`assertHolderFor`).
+ */
+export type InvitedRole = Extract<
+  BusinessMemberRole,
+  'ADMIN' | 'RECRUITER' | 'REVIEWER'
+>;
+export const INVITED_ROLES: InvitedRole[] = ['ADMIN', 'RECRUITER', 'REVIEWER'];
 
 const ROLE_PLURAL: Record<InvitedRole, [string, string]> = {
+  ADMIN: ['administrateur', 'administrateurs'],
   RECRUITER: ['recruteur', 'recruteurs'],
   REVIEWER: ['évaluateur', 'évaluateurs'],
 };
@@ -62,8 +70,8 @@ export function memberView(m: BusinessMember) {
 }
 
 /**
- * The people of a business: the account holder — its one administrator — and
- * the Recruteurs and Évaluateurs it invites, each up to its plan's limit, and
+ * The people of a business: the account holder, the administrators it adds,
+ * and the Recruteurs and Évaluateurs they invite, each up to its plan's limit, and
  * who did what. A member signs in with its own e-mail and
  * acts as the business's profile (see AuthService.verifyBusinessOtp); what it
  * may do is `team-access.ts`.
@@ -203,6 +211,10 @@ export class TeamService {
     return {
       members: rows.map(memberView),
       seats: {
+        ADMIN: {
+          used: entitlements.admins,
+          limit: entitlements.adminsLimit,
+        },
         RECRUITER: {
           used: entitlements.recruiters,
           limit: entitlements.recruitersLimit,
@@ -220,6 +232,7 @@ export class TeamService {
     dto: { email: string; name: string; role: InvitedRole },
   ) {
     this.assertAdmin(actor);
+    this.assertHolderFor(actor, dto.role);
     const email = dto.email.trim().toLowerCase();
     const name = dto.name.trim();
     if (!name) throw new BadRequestException('Indiquez le nom de la personne.');
@@ -319,6 +332,7 @@ export class TeamService {
     this.assertInvitedRole(role);
     const member = await this.ownIn(actor.businessId, id);
     this.assertNotHolderOrSelf(actor, member);
+    this.assertHolderFor(actor, role, member);
     if (member.role === role) return memberView(member);
     // Its old place is freed by the move itself: the team counts people.
     const seat = await this.takeSeat(actor.businessId, role, member.id);
@@ -333,6 +347,7 @@ export class TeamService {
     this.assertAdmin(actor);
     const member = await this.ownIn(actor.businessId, id);
     this.assertNotHolderOrSelf(actor, member);
+    this.assertHolderFor(actor, null, member);
     await this.markRemoved(member);
     return { removed: true };
   }
@@ -396,6 +411,10 @@ export class TeamService {
         removedAt: m.removed_at?.toISOString() ?? null,
       })),
       seats: {
+        ADMIN: {
+          used: entitlements.admins,
+          limit: entitlements.adminsLimit,
+        },
         RECRUITER: {
           used: entitlements.recruiters,
           limit: entitlements.recruitersLimit,
@@ -467,9 +486,9 @@ export class TeamService {
   // ── Helpers ──────────────────────────────────────────────────────────
 
   private assertInvitedRole(role: BusinessMemberRole) {
-    if (!INVITED_ROLES.includes(role as InvitedRole)) {
+    if (!INVITED_ROLES.includes(role)) {
       throw new BadRequestException(
-        'Le responsable du compte est le seul administrateur : invitez un recruteur ou un évaluateur.',
+        'Choisissez un rôle : administrateur, recruteur ou évaluateur.',
       );
     }
   }
@@ -522,6 +541,25 @@ export class TeamService {
     if (actor.member.role !== 'ADMIN') {
       throw new ForbiddenException(
         'Réservé aux administrateurs de votre organisation.',
+      );
+    }
+  }
+
+  /**
+   * Administrators are the holder's to manage: only the one who created the
+   * account invites one, makes someone one, or changes or removes one. Other
+   * administrators run the recruiters and evaluators. `role`: the role being
+   * given (null when removing); `member`: the person changed, if any.
+   */
+  private assertHolderFor(
+    actor: TeamActor,
+    role: BusinessMemberRole | null,
+    member?: BusinessMember,
+  ) {
+    if (actor.member.is_owner) return;
+    if (role === 'ADMIN' || member?.role === 'ADMIN') {
+      throw new ForbiddenException(
+        'Seul le responsable du compte peut gérer les administrateurs.',
       );
     }
   }
