@@ -60,18 +60,12 @@ export class DemoRequestListener {
       subject: DEMO_REQUEST_RECEIVED_SUBJECT,
       html: await this.layout.wrap(
         demoRequestReceivedEmail({
-          firstName: demo.first_name,
-          lastName: demo.last_name,
-          jobTitle: demo.job_title,
           email: demo.email,
-          company: demo.company,
           country,
           companySize: demo.company_size,
-          phone: demo.phone,
           interests: demo.interests.map(
             (i) => DEMO_INTEREST_LABELS[i as DemoInterest] ?? i,
           ),
-          message: demo.message,
           siteUrl: businessSiteUrl(),
         }),
         {

@@ -1,5 +1,6 @@
 import { ApplicationStatus, CvChoice, type PrismaClient } from '@prisma/client';
 import { openApplicants } from '../business/subscription/applicant-access';
+import { KEPT_CONTACT } from '../recommendation/contactable-worker';
 
 type Db = Pick<PrismaClient, 'profile' | 'profileCv'>;
 
@@ -49,7 +50,7 @@ export async function unlockedWorkers(
   workerIds: readonly string[],
 ): Promise<Set<string>> {
   if (workerIds.length === 0) return new Set();
-  const [held, applicants] = await Promise.all([
+  const [held, applicants, kept] = await Promise.all([
     db.contactRecord.findMany({
       where: {
         employer_id: employerId,
@@ -58,8 +59,18 @@ export async function unlockedWorkers(
       select: { worker_id: true },
     }),
     openApplicants(db, employerId, workerIds),
+    // An archived or banned worker opens to nobody, contact held or not.
+    db.profile.findMany({
+      where: { id: { in: [...new Set(workerIds)] }, ...KEPT_CONTACT },
+      select: { id: true },
+    }),
   ]);
-  return new Set([...held.map((r) => r.worker_id), ...applicants]);
+  const reachable = new Set(kept.map((p) => p.id));
+  return new Set(
+    [...held.map((r) => r.worker_id), ...applicants].filter((id) =>
+      reachable.has(id),
+    ),
+  );
 }
 
 export function cvOpen(

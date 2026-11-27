@@ -56,6 +56,7 @@ import {
   isSessionRevoked,
   JWT_BLOCKLIST_PREFIX,
 } from './session-revocation';
+import { isActiveMember } from './socket-session';
 import { adminSessionHours } from './auth-cookie.util';
 import {
   assertCanSendOtp,
@@ -795,19 +796,8 @@ export class AuthService {
   }
 
   /** The member still has access to this business's profile. */
-  private async activeMemberOf(memberId: string, profileId: string) {
-    const member = await this.prisma.businessMember.findUnique({
-      where: { id: memberId },
-      select: {
-        status: true,
-        business: { select: { profile_id: true, deleted_at: true } },
-      },
-    });
-    return (
-      member?.status === 'ACTIVE' &&
-      member.business.profile_id === profileId &&
-      !member.business.deleted_at
-    );
+  private activeMemberOf(memberId: string, profileId: string) {
+    return isActiveMember(this.prisma, memberId, profileId);
   }
 
   /** The sign-in code for the business space (`auth/business/send-otp`). */

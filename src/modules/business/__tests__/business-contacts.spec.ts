@@ -50,7 +50,11 @@ describe('BusinessContactsService', () => {
 
     const list = await service.list('biz');
 
-    expect(findMany.mock.calls[0][0].where).toEqual({ employer_id: 'biz' });
+    // A worker archived or banned leaves the list; a suspended one stays.
+    expect(findMany.mock.calls[0][0].where).toEqual({
+      employer_id: 'biz',
+      worker: { deleted_at: null, status: { not: 'BANNED' } },
+    });
     expect(list.map((c) => c.workerId)).toEqual(['w1', 'w2']);
     expect(list[0].unlockedAt).toBe('2026-10-20T00:00:00.000Z');
     expect(list[0].offers.map((o) => o.id)).toEqual(['o2', 'o1']);

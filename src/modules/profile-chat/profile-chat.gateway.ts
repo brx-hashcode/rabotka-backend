@@ -9,7 +9,7 @@ import {
 } from '@nestjs/websockets';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
-import { isSessionRevoked } from '../auth/session-revocation';
+import { memberRoom, socketProfile } from '../auth/socket-session';
 import {
   Logger,
   OnModuleDestroy,
@@ -315,14 +315,10 @@ export class ProfileChatGateway
         secret: this.configService.get<string>('JWT_SECRET'),
       });
 
-      // Admins have their own namespaces; a staff token must not land in a
-      // profile room and receive two users' private messages.
-      if ((payload.type ?? 'profile') !== 'profile') return null;
-
-      // A session the user signed out of must not keep its sockets either.
-      if (await isSessionRevoked(this.redis, payload.jti)) return null;
-
-      return payload.sub || null;
+      // The same questions as the HTTP guards: see socket-session.ts.
+      const profileId = await socketProfile(this.redis, this.prisma, payload);
+      if (profileId && payload.mid) void client.join(memberRoom(payload.mid));
+      return profileId;
     } catch {
       return null;
     }
@@ -350,6 +346,11 @@ export class ProfileChatGateway
   /** Disconnects the sockets of a session that just ended (#864). */
   @OnEvent(SESSION_ENDED)
   evictEndedSession(event: SessionEndedEvent): void {
+    if (event.kind === 'member') {
+      // A removed team member: only their sockets, not the holder's.
+      this.server?.in(memberRoom(event.id)).disconnectSockets(true);
+      return;
+    }
     if (event.kind !== 'profile') return;
     this.server?.in(`profile:${event.id}`).disconnectSockets(true);
   }

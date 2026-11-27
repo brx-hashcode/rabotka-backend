@@ -926,6 +926,7 @@ export class BotNotificationService {
             status: true,
             profile_type: true,
             marketing_opt_out_at: true,
+            deleted_at: true,
           },
         }),
         this.prisma.jobOffer.findUnique({
@@ -940,7 +941,13 @@ export class BotNotificationService {
         }),
       ]);
       if (!profile?.phone || !offer) return false;
-      if (profile.profile_type !== 'WORKER' || profile.status !== 'ACTIVE')
+      // Checked here, at the send, whatever ranked the worker: the legacy
+      // index can still hold an archived profile (security audit run 2).
+      if (
+        profile.profile_type !== 'WORKER' ||
+        profile.status !== 'ACTIVE' ||
+        profile.deleted_at
+      )
         return false;
       // The STOP reply promises that job suggestions stop too, so they do. The
       // in-app notification the caller writes afterwards is unaffected: the

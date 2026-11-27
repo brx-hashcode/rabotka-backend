@@ -3,6 +3,7 @@ import { REDIS_CONNECTION } from '../../../../common/services/redis/redis.consta
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { AdInboxGateway } from '../ad-inbox.gateway';
+import { PrismaService } from '../../../../common/services/prisma/prisma.service';
 
 const makeClient = (
   handshake: Partial<{
@@ -31,6 +32,7 @@ describe('AdInboxGateway', () => {
       providers: [
         AdInboxGateway,
         { provide: JwtService, useValue: jwtService },
+        { provide: PrismaService, useValue: {} },
         {
           provide: REDIS_CONNECTION,
           useValue: { get: jest.fn().mockResolvedValue(null) },

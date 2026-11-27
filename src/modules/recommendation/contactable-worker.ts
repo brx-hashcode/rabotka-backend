@@ -22,3 +22,14 @@ export const CONTACTABLE_WORKER: Prisma.ProfileWhereInput = {
   verification_status: VerificationStatus.VERIFIED,
   deleted_at: null,
 };
+
+/**
+ * A worker whose contact an employer that holds it may still read: not
+ * archived, not banned. A suspension is temporary and keeps the contact.
+ * Paying once is not a permanent window onto someone the platform removed
+ * (pentest A2-NV04, #880; security audit run 2 for the business routes).
+ */
+export const KEPT_CONTACT: Prisma.ProfileWhereInput = {
+  deleted_at: null,
+  status: { not: AccountStatus.BANNED },
+};

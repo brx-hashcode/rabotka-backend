@@ -280,6 +280,23 @@ describe('TeamService', () => {
       ).rejects.toThrow(/introuvable/);
     });
 
+    it('closes the removed member\'s open sockets, not the holder\'s', async () => {
+      const events = { emit: jest.fn() };
+      const withEvents = new TeamService(
+        prisma,
+        subscriptions,
+        mail,
+        {} as any,
+        events as any,
+      );
+      prisma.businessMember.findFirst.mockResolvedValueOnce(row({ id: 'm-2' }));
+      await withEvents.removeByAdmin(BUSINESS, 'm-2');
+      expect(events.emit).toHaveBeenCalledWith('session.ended', {
+        kind: 'member',
+        id: 'm-2',
+      });
+    });
+
     it("resends an invitation in the organisation's name", async () => {
       prisma.businessMember.findFirst.mockResolvedValueOnce(
         row({

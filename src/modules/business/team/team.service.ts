@@ -7,8 +7,14 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  SESSION_ENDED,
+  type SessionEndedEvent,
+} from '../../../common/events/session-ended.events';
 import { mailLanguage, type MailLanguage } from '../../mail/templates/layout';
 import {
   Prisma,
@@ -85,6 +91,7 @@ export class TeamService {
     private readonly subscriptions: BusinessSubscriptionService,
     private readonly mail: MailService,
     private readonly layout: LayoutService,
+    @Optional() private readonly events?: EventEmitter2,
   ) {}
 
   /** The business, and the token's member or else the account holder. */
@@ -535,6 +542,11 @@ export class TeamService {
         data: { calendar_token: null },
       }),
     ]);
+    // Their HTTP calls stop at the next request; their open sockets now.
+    this.events?.emit(SESSION_ENDED, {
+      kind: 'member',
+      id: member.id,
+    } satisfies SessionEndedEvent);
   }
 
   private assertAdmin(actor: TeamActor) {
