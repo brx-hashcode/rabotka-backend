@@ -30,7 +30,13 @@ export const SIGNUP_MAX_UPLOADS = 12;
  * and nothing sent later in a request body can change which.
  */
 export type SignupIdentity =
-  { entry: 'whatsapp'; phone: string } | { entry: 'business'; email: string };
+  | { entry: 'whatsapp'; phone: string }
+  /**
+   * `phone`: the organisation's number, once a WhatsApp code sent to it was
+   * entered (`proveSignupPhone`). The account is created only with it: an
+   * unproven number would take the WhatsApp sign-in of whoever owns it.
+   */
+  | { entry: 'business'; email: string; phone?: string };
 
 const tokenKey = (token: string) =>
   `${REDIS_KEY_PREFIX}signup:token:${createHash('sha256').update(token).digest('hex')}`;
@@ -71,7 +77,9 @@ export async function readSignupToken(
       email: string;
     }>;
     if (parsed.entry === 'business' && typeof parsed.email === 'string') {
-      return { entry: 'business', email: parsed.email };
+      return typeof parsed.phone === 'string'
+        ? { entry: 'business', email: parsed.email, phone: parsed.phone }
+        : { entry: 'business', email: parsed.email };
     }
     if (parsed.entry === 'whatsapp' && typeof parsed.phone === 'string') {
       return { entry: 'whatsapp', phone: parsed.phone };
@@ -80,6 +88,26 @@ export async function readSignupToken(
     // Not ours: unreadable is unknown.
   }
   return null;
+}
+
+/**
+ * Records on a business sign-up's token the number its code was just
+ * entered for. The token keeps its expiry. False when the token is unknown
+ * or is not a business sign-up.
+ */
+export async function proveSignupPhone(
+  redis: Redis,
+  token: string,
+  phone: string,
+): Promise<boolean> {
+  const identity = await readSignupToken(redis, token);
+  if (identity?.entry !== 'business') return false;
+  await redis.set(
+    tokenKey(token),
+    JSON.stringify({ ...identity, phone }),
+    'KEEPTTL',
+  );
+  return true;
 }
 
 /**

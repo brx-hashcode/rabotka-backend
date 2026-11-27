@@ -424,6 +424,93 @@ describe('AuthService', () => {
     });
   });
 
+  describe('business sign-up phone', () => {
+    const businessToken = JSON.stringify({
+      entry: 'business',
+      email: 'contact@ecole.cg',
+    });
+
+    it('sends a WhatsApp code to a free number of a business sign-up', async () => {
+      redis.get.mockImplementation((key: string) =>
+        Promise.resolve(key.includes('signup:token:') ? businessToken : null),
+      );
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.sendBusinessSignupPhoneOtp('tok', '+242 06 123 45 67'),
+      ).resolves.toEqual({ success: true });
+      expect(whatsAppService.sendTemplateMessage).toHaveBeenCalledWith(
+        '+242061234567',
+        'otp',
+        expect.any(String),
+        undefined,
+      );
+    });
+
+    it('refuses without a business sign-up token', async () => {
+      for (const stored of [
+        null,
+        JSON.stringify({ entry: 'whatsapp', phone: '+242061234567' }),
+      ]) {
+        redis.get.mockResolvedValue(stored);
+        await expect(
+          service.sendBusinessSignupPhoneOtp('tok', '+242061234567'),
+        ).rejects.toThrow('avant de créer votre compte');
+      }
+      expect(whatsAppService.sendTemplateMessage).not.toHaveBeenCalled();
+    });
+
+    it('refuses a number in use, and one that is not international', async () => {
+      redis.get.mockImplementation((key: string) =>
+        Promise.resolve(key.includes('signup:token:') ? businessToken : null),
+      );
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({ id: 'w-1' });
+      await expect(
+        service.sendBusinessSignupPhoneOtp('tok', '+242061234567'),
+      ).rejects.toThrow('utilise déjà ce numéro');
+      await expect(
+        service.sendBusinessSignupPhoneOtp('tok', '06 123 45 67'),
+      ).rejects.toThrow('Numéro de téléphone invalide');
+      expect(whatsAppService.sendTemplateMessage).not.toHaveBeenCalled();
+    });
+
+    it('records the number on the token once the code checks out', async () => {
+      redis.get.mockImplementation((key: string) =>
+        Promise.resolve(key.includes('signup:token:') ? businessToken : null),
+      );
+      redis.eval.mockResolvedValue(1);
+
+      await expect(
+        service.verifyBusinessSignupPhoneOtp('tok', '+242061234567', '123456'),
+      ).resolves.toEqual({ success: true });
+      expect(redis.set).toHaveBeenCalledWith(
+        expect.stringContaining('signup:token:'),
+        JSON.stringify({
+          entry: 'business',
+          email: 'contact@ecole.cg',
+          phone: '+242061234567',
+        }),
+        'KEEPTTL',
+      );
+    });
+
+    it('records nothing on a wrong code', async () => {
+      redis.get.mockImplementation((key: string) =>
+        Promise.resolve(key.includes('signup:token:') ? businessToken : null),
+      );
+      redis.eval.mockResolvedValue(0);
+
+      await expect(
+        service.verifyBusinessSignupPhoneOtp('tok', '+242061234567', '000000'),
+      ).rejects.toThrow('Code incorrect');
+      expect(redis.set).not.toHaveBeenCalledWith(
+        expect.stringContaining('signup:token:'),
+        expect.anything(),
+        'KEEPTTL',
+      );
+    });
+  });
+
   describe('resolveSessionProfile()', () => {
     // Answers "is this visitor already signed in?" on public routes, where a
     // missing or dead token is an ordinary outcome rather than an error.
@@ -486,6 +573,36 @@ describe('AuthService', () => {
       await expect(service.resolveSessionProfile('legacy')).resolves.toBe(
         'p-1',
       );
+    });
+
+    it("never takes a team member's token for the account holder", async () => {
+      // A member token carries the business's id; at a partner app it would
+      // sign the member in as the holder.
+      (jwtService.verify as jest.Mock).mockReturnValue({
+        sub: 'biz-1',
+        type: 'profile',
+        jti: 'j-1',
+        mid: 'member-1',
+      });
+
+      await expect(
+        service.resolveSessionProfile('member-jwt'),
+      ).resolves.toBeNull();
+    });
+
+    it('refuses the session of an archived profile, as the guard does', async () => {
+      (jwtService.verify as jest.Mock).mockReturnValue({
+        sub: 'p-1',
+        type: 'profile',
+        jti: 'j-1',
+      });
+      redis.get.mockImplementation((key: string) =>
+        Promise.resolve(key.includes('profile-archived:p-1') ? '1' : null),
+      );
+
+      await expect(
+        service.resolveSessionProfile('archived-jwt'),
+      ).resolves.toBeNull();
     });
   });
 

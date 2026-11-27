@@ -1,11 +1,27 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
+import { OpenToBlockedBusiness } from '../../decorators/open-to-blocked-business.decorator';
 import { BusinessProfileGuard } from '../business-profile.guard';
 
-function contextFor(profileId?: string): ExecutionContext {
+class Routes {
+  write() {}
+  @OpenToBlockedBusiness()
+  open() {}
+}
+
+function contextFor(
+  profileId?: string,
+  method = 'GET',
+  handler: keyof Routes = 'write',
+): ExecutionContext {
   return {
     switchToHttp: () => ({
-      getRequest: () => ({ user: profileId ? { profileId } : undefined }),
+      getRequest: () => ({
+        method,
+        user: profileId ? { profileId } : undefined,
+      }),
     }),
+    getHandler: () => Routes.prototype[handler],
+    getClass: () => Routes,
   } as unknown as ExecutionContext;
 }
 
@@ -17,6 +33,8 @@ function guardWith(profile: unknown) {
 }
 
 const business = {
+  status: 'ACTIVE',
+  suspension_reason: null,
   profile_type: 'EMPLOYER',
   is_business: true,
   deleted_at: null,
@@ -50,5 +68,46 @@ describe('BusinessProfileGuard', () => {
     await expect(guardWith(business).canActivate(contextFor())).rejects.toThrow(
       ForbiddenException,
     );
+  });
+
+  describe('a suspended or banned business', () => {
+    it.each(['SUSPENDED', 'BANNED'])(
+      'makes no write when %s, its team included',
+      async (status) => {
+        for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+          await expect(
+            guardWith({ ...business, status }).canActivate(
+              contextFor('p1', method),
+            ),
+          ).rejects.toMatchObject({
+            response: { code: 'ACCOUNT_NOT_ACTIVE', accountStatus: status },
+          });
+        }
+      },
+    );
+
+    it('still reads its space', async () => {
+      await expect(
+        guardWith({ ...business, status: 'SUSPENDED' }).canActivate(
+          contextFor('p1', 'GET'),
+        ),
+      ).resolves.toBe(true);
+    });
+
+    it('may make a write marked open to it', async () => {
+      await expect(
+        guardWith({ ...business, status: 'BANNED' }).canActivate(
+          contextFor('p1', 'DELETE', 'open'),
+        ),
+      ).resolves.toBe(true);
+    });
+
+    it('lets a pending business write: it completes its file', async () => {
+      await expect(
+        guardWith({ ...business, status: 'PENDING_ACTIVATION' }).canActivate(
+          contextFor('p1', 'POST'),
+        ),
+      ).resolves.toBe(true);
+    });
   });
 });

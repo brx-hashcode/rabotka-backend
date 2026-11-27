@@ -25,9 +25,13 @@ import { assertBusinessIsEmployer } from './business-rules';
  * has to agree with it:
  *
  * - a WhatsApp token must match `phone`, and may not carry a `business`;
- * - a business token must match `email`, must carry a `business`, and may not
- *   ask for a worker account.
+ * - a business token must match `email` and the `phone` its WhatsApp code
+ *   proved, must carry a `business`, and may not ask for a worker account.
  */
+/** Told apart by the business app, which then asks for the WhatsApp code. */
+export const BUSINESS_PHONE_UNPROVEN =
+  'Confirmez le numéro de votre organisation avec le code reçu sur WhatsApp.';
+
 export function signupEntryFor(
   identity: SignupIdentity | null,
   body: {
@@ -47,6 +51,11 @@ export function signupEntryFor(
       throw new BadRequestException(
         'Renseignez les informations de votre entreprise.',
       );
+    }
+    // The number becomes the account's phone, which is also a WhatsApp
+    // sign-in: only the one whose code was entered.
+    if (!identity.phone || identity.phone !== body.phone) {
+      throw new ForbiddenException(BUSINESS_PHONE_UNPROVEN);
     }
     assertBusinessIsEmployer(body.profileType, true);
     return 'business';

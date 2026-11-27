@@ -12,6 +12,7 @@ import {
   openApplications,
 } from './subscription/applicant-access';
 import { BusinessSubscriptionService } from './subscription/business-subscription.service';
+import { assertAccountNotBlocked } from '../../common/exceptions/account-not-active.exception';
 
 /**
  * The workers whose contact a business unlocked, with the details that unlock
@@ -87,6 +88,14 @@ export class BusinessContactsService {
   async unlock(profileId: string, workerId: string) {
     const [existing] = await this.list(profileId, workerId);
     if (existing) return { contact: existing, spent: false };
+    // A new contact is a disclosure: never for a suspended or banned
+    // business, whichever caller reaches this.
+    const employer = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { status: true, suspension_reason: true },
+    });
+    if (!employer) throw new NotFoundException('Profil introuvable');
+    assertAccountNotBlocked(employer.status, employer.suspension_reason);
     const application = (
       await openApplications(this.prisma, profileId, [workerId])
     ).get(workerId);

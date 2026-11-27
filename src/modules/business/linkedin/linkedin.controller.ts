@@ -30,6 +30,7 @@ import {
   type LinkedinCallbackStatus,
 } from './linkedin-callback-page';
 import { LinkedinService } from './linkedin.service';
+import { OpenToBlockedBusiness } from '../../auth/decorators/open-to-blocked-business.decorator';
 
 /**
  * The signed-in person's own LinkedIn, and the offers posted on it. An
@@ -58,6 +59,7 @@ export class LinkedinController {
   }
 
   @Delete()
+  @OpenToBlockedBusiness()
   @ApiOperation({ summary: 'Disconnect its LinkedIn account' })
   disconnect(@Req() req: ProfileAuthenticatedRequest) {
     return this.linkedin.disconnect(req.user.profileId, req.user.memberId);
