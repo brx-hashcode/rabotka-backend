@@ -28,6 +28,7 @@ import {
   PROVIDER_OF,
   type ProviderSlug,
 } from './mailbox.service';
+import { OpenToBlockedBusiness } from '../../auth/decorators/open-to-blocked-business.decorator';
 
 function slug(value: string): ProviderSlug {
   if (value in PROVIDER_OF) return value as ProviderSlug;
@@ -105,6 +106,7 @@ export class MailboxController {
   }
 
   @Delete(':id')
+  @OpenToBlockedBusiness()
   @ApiOperation({ summary: 'Disconnect a mailbox (its tokens are revoked)' })
   disconnect(
     @Req() req: ProfileAuthenticatedRequest,

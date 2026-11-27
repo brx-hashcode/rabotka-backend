@@ -45,6 +45,8 @@ import {
   WhatsAppSessionDto,
   SignupSendOtpDto,
   SignupVerifyOtpDto,
+  BusinessSignupPhoneDto,
+  BusinessSignupPhoneVerifyDto,
   SignupProgressDto,
   BusinessSendOtpDto,
   BusinessVerifyOtpDto,
@@ -129,6 +131,51 @@ export class AuthController {
   @ApiResponse({ status: 400, description: 'Wrong or expired code' })
   async verifySignupOtp(@Body() dto: SignupVerifyOtpDto) {
     return this.authService.verifySignupOtp(signupTarget(dto), dto.code);
+  }
+
+  @Public()
+  @Post('signup/phone/send-otp')
+  @HttpCode(HttpStatus.OK)
+  // A paid WhatsApp template per call, like signup/send-otp.
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({
+    summary:
+      'Business sign-up: send a WhatsApp code to the organisation number',
+    description:
+      'Needs the `X-Signup-Token` header from the e-mail code (signup/verify-otp). Refused (409) when a Rabotka account already uses the number. The account is created only with a number proven here.',
+  })
+  @ApiBody({ type: BusinessSignupPhoneDto })
+  @ApiResponse({ status: 200, description: 'Code sent' })
+  @ApiResponse({ status: 403, description: 'No business sign-up token' })
+  @ApiResponse({ status: 409, description: 'An account already uses it' })
+  async sendBusinessSignupPhoneOtp(
+    @Body() dto: BusinessSignupPhoneDto,
+    @Headers(SIGNUP_TOKEN_HEADER) token?: string,
+  ) {
+    return this.authService.sendBusinessSignupPhoneOtp(token, dto.phone);
+  }
+
+  @Public()
+  @Post('signup/phone/verify-otp')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Business sign-up: confirm the organisation number',
+    description:
+      'Needs the `X-Signup-Token` header; on success the token carries the number, and POST /profile accepts it as the account phone.',
+  })
+  @ApiBody({ type: BusinessSignupPhoneVerifyDto })
+  @ApiResponse({ status: 200, description: 'Number proven' })
+  @ApiResponse({ status: 400, description: 'Wrong or expired code' })
+  async verifyBusinessSignupPhoneOtp(
+    @Body() dto: BusinessSignupPhoneVerifyDto,
+    @Headers(SIGNUP_TOKEN_HEADER) token?: string,
+  ) {
+    return this.authService.verifyBusinessSignupPhoneOtp(
+      token,
+      dto.phone,
+      dto.code,
+    );
   }
 
   @Public()

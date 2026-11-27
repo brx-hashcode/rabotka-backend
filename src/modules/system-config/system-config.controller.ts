@@ -110,7 +110,7 @@ export class SystemConfigController {
             key,
             oldValue:
               (existing[i] as { value?: unknown } | null)?.value ?? null,
-            newValue: dto.values[key],
+            newValue: auditedValue(existing[i], dto.values[key]),
           },
           ...meta,
         }),
@@ -141,9 +141,21 @@ export class SystemConfigController {
       entityType: 'system_config',
       entityId: key,
       userId: req.user?.userId,
-      metadata: { key, oldValue, newValue: dto.value },
+      metadata: { key, oldValue, newValue: auditedValue(entry, dto.value) },
       ...extractRequestMeta(req),
     });
     return { success: true };
   }
+}
+
+/**
+ * The value an audit row may keep. A secret (a storage key, a provider
+ * token) is masked like `getOne` masks it: the audit log is read by roles
+ * that may not read the secret itself.
+ */
+export function auditedValue(
+  entry: { isSecret?: boolean } | null,
+  value: unknown,
+): unknown {
+  return entry?.isSecret ? '***' : value;
 }

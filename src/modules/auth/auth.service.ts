@@ -1,6 +1,7 @@
 import {
   issueSignupToken,
   readSignupToken,
+  proveSignupPhone,
   SIGNUP_TOKEN_TTL_SECONDS,
 } from './signup-token';
 import {
@@ -14,6 +15,7 @@ import {
   Logger,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   UnauthorizedException,
   NotFoundException,
   HttpException,
@@ -49,7 +51,11 @@ import {
   type WhatsAppLoginGrant,
 } from './whatsapp-login-link.service';
 import * as otplib from 'otplib';
-import { JWT_BLOCKLIST_PREFIX } from './session-revocation';
+import {
+  isProfileArchived,
+  isSessionRevoked,
+  JWT_BLOCKLIST_PREFIX,
+} from './session-revocation';
 import { adminSessionHours } from './auth-cookie.util';
 import {
   assertCanSendOtp,
@@ -92,6 +98,19 @@ const ADMIN_OTP_SENDS_KEY_PREFIX = `${REDIS_KEY_PREFIX}admin:otp-sends:`;
 const SIGNUP_OTP_KEY_PREFIX = `${REDIS_KEY_PREFIX}signup:otp:`;
 const SIGNUP_OTP_ATTEMPTS_KEY_PREFIX = `${REDIS_KEY_PREFIX}signup:otp-attempts:`;
 const SIGNUP_OTP_SENDS_KEY_PREFIX = `${REDIS_KEY_PREFIX}signup:otp-sends:`;
+// The organisation's number in a business sign-up: its own codes, so one
+// can never stand for the other.
+const BUSINESS_PHONE_OTP_KEY_PREFIX = `${REDIS_KEY_PREFIX}signup:business-phone:otp:`;
+const BUSINESS_PHONE_OTP_ATTEMPTS_KEY_PREFIX = `${REDIS_KEY_PREFIX}signup:business-phone:otp-attempts:`;
+const BUSINESS_PHONE_OTP_SENDS_KEY_PREFIX = `${REDIS_KEY_PREFIX}signup:business-phone:otp-sends:`;
+/**
+ * Same sentence as an expired sign-up at creation (signupEntryFor), so the
+ * business app sends a new e-mail code either way.
+ */
+const BUSINESS_SIGNUP_EXPIRED =
+  'Vérifiez votre adresse e-mail avant de créer votre compte.';
+/** An international number: the business app sends it formatted (+242…). */
+const INTERNATIONAL_PHONE = /^\+\d{8,15}$/;
 
 const TOTP_MAX_ATTEMPTS = 5;
 const TOTP_ATTEMPTS_PREFIX = `${REDIS_KEY_PREFIX}admin:totp:attempts:`;
@@ -337,6 +356,71 @@ export class AuthService {
     };
   }
 
+  /**
+   * A business sign-up proves its number too: it becomes the account's
+   * phone, which is also a WhatsApp sign-in, and taken unproven it locked
+   * its owner out (security audit run 2). The one WhatsApp message a
+   * business ever receives. Needs the token its e-mail code gave.
+   */
+  async sendBusinessSignupPhoneOtp(
+    signupToken: string | undefined,
+    phone: string,
+  ): Promise<{ success: boolean }> {
+    await this.businessSignup(signupToken);
+    const number = this.internationalPhone(phone);
+    if (await this.findProfileByPhone(number)) {
+      throw new ConflictException(
+        'Un compte Rabotka utilise déjà ce numéro. Donnez un autre numéro de votre organisation.',
+      );
+    }
+    await this.assertCanSendOtp(BUSINESS_PHONE_OTP_SENDS_KEY_PREFIX, number);
+    const otp = this.generateOtp();
+    this.logOtp('send', number, otp);
+    await this.storeOtp(
+      `${BUSINESS_PHONE_OTP_KEY_PREFIX}${number}`,
+      `${BUSINESS_PHONE_OTP_ATTEMPTS_KEY_PREFIX}${number}`,
+      otp,
+    );
+    await this.sendOtpByWhatsApp(number, otp);
+    return { success: true };
+  }
+
+  /** The code checks out: the sign-up's token now carries the number. */
+  async verifyBusinessSignupPhoneOtp(
+    signupToken: string | undefined,
+    phone: string,
+    code: string,
+  ): Promise<{ success: boolean }> {
+    await this.businessSignup(signupToken);
+    const number = this.internationalPhone(phone);
+    const matched = await this.consumeOtp(
+      `${BUSINESS_PHONE_OTP_KEY_PREFIX}${number}`,
+      `${BUSINESS_PHONE_OTP_ATTEMPTS_KEY_PREFIX}${number}`,
+      code.trim(),
+    );
+    if (!matched) throw new BadRequestException('Code incorrect ou expiré');
+    if (!(await proveSignupPhone(this.redis, signupToken as string, number))) {
+      throw new ForbiddenException(BUSINESS_SIGNUP_EXPIRED);
+    }
+    return { success: true };
+  }
+
+  private async businessSignup(signupToken: string | undefined) {
+    const identity = await readSignupToken(this.redis, signupToken);
+    if (identity?.entry !== 'business') {
+      throw new ForbiddenException(BUSINESS_SIGNUP_EXPIRED);
+    }
+    return identity;
+  }
+
+  private internationalPhone(phone: string): string {
+    const number = phone.replaceAll(/[\s.-]/g, '');
+    if (!INTERNATIONAL_PHONE.test(number)) {
+      throw new BadRequestException('Numéro de téléphone invalide');
+    }
+    return number;
+  }
+
   async sendOtp(emailOrPhone: string): Promise<{ success: boolean }> {
     const normalized = this.normalize(emailOrPhone);
     const isEmail = this.isEmail(normalized);
@@ -556,6 +640,7 @@ export class AuthService {
         sub: string;
         type?: string;
         jti?: string;
+        mid?: string;
       }>(token, {
         secret: this.configService.get<string>('JWT_SECRET'),
       });
@@ -564,12 +649,15 @@ export class AuthService {
       // profile session token may stand in for a WhatsApp login link.
       if ((payload.type ?? 'profile') !== 'profile') return null;
 
-      if (payload.jti) {
-        const blocked = await this.redis.get(
-          `${JWT_BLOCKLIST_PREFIX}${payload.jti}`,
-        );
-        if (blocked) return null;
-      }
+      // A team member's token carries the business's id (`sub`) but acts as
+      // the business only inside the member role gate. It never proves the
+      // account holder: a partner app would otherwise sign the member in as
+      // the holder. Only non-holder members carry `mid`.
+      if (payload.mid) return null;
+
+      if (await isSessionRevoked(this.redis, payload.jti)) return null;
+      // As the HTTP guard: an archived profile holds no session.
+      if (await isProfileArchived(this.redis, payload.sub)) return null;
 
       return payload.sub ?? null;
     } catch {
