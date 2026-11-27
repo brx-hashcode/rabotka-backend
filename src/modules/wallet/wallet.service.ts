@@ -257,19 +257,25 @@ export class WalletService {
     };
   }
 
+  /**
+   * `tx`: the caller's transaction, so a credit commits (or rolls back) with
+   * the state change that justifies it, e.g. an unlock attempt claimed as
+   * closed. Without it, the credit is its own transaction.
+   */
   async creditProfileWallet(
     profileId: string,
     amount: number,
     type: WalletTransactionType,
     referenceType?: string,
     referenceId?: string,
+    tx?: Prisma.TransactionClient,
   ): Promise<void> {
     if (amount <= 0) {
       throw new BadRequestException('Credit amount must be positive');
     }
     const wallet = await this.getOrCreateProfileWallet(profileId);
-    await this.prisma.$transaction(async (tx) => {
-      await tx.walletTransaction.create({
+    const write = async (db: Prisma.TransactionClient) => {
+      await db.walletTransaction.create({
         data: {
           wallet_id: wallet.id,
           type,
@@ -278,11 +284,13 @@ export class WalletService {
           reference_id: referenceId ?? null,
         },
       });
-      await tx.wallet.update({
+      await db.wallet.update({
         where: { id: wallet.id },
         data: { balance: { increment: amount } },
       });
-    });
+    };
+    if (tx) await write(tx);
+    else await this.prisma.$transaction(write);
   }
 
   // Alias for automated refunds (payment failed, unlock aborted, etc.)
@@ -293,6 +301,7 @@ export class WalletService {
     type: WalletTransactionType,
     referenceType?: string,
     referenceId?: string,
+    tx?: Prisma.TransactionClient,
   ): Promise<void> {
     return this.creditProfileWallet(
       profileId,
@@ -300,6 +309,7 @@ export class WalletService {
       type,
       referenceType,
       referenceId,
+      tx,
     );
   }
 

@@ -79,6 +79,13 @@ type UnlockParties = {
   job_offer_id: string;
 };
 
+/** An attempt still waiting on a payment: the only ones a close may claim. */
+const PENDING_UNLOCK_STATUSES: ContactUnlockStatus[] = [
+  ContactUnlockStatus.PENDING_BOTH,
+  ContactUnlockStatus.PENDING_EMPLOYER,
+  ContactUnlockStatus.PENDING_WORKER,
+];
+
 @Injectable()
 export class ContactUnlockService {
   private readonly logger = new Logger(ContactUnlockService.name);
@@ -117,8 +124,49 @@ export class ContactUnlockService {
       WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
       'contact_unlock_attempt',
       attempt.id,
+      tx,
     );
     return amount;
+  }
+
+  private refundWorkerSide(
+    attempt: { id: string; worker_id: string; worker_amount: unknown },
+    tx: Prisma.TransactionClient,
+  ): Promise<void> {
+    return this.walletService.refundProfileWallet(
+      attempt.worker_id,
+      Number(attempt.worker_amount),
+      WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
+      'contact_unlock_attempt',
+      attempt.id,
+      tx,
+    );
+  }
+
+  /**
+   * Closes a pending attempt only if it is still exactly as it was read:
+   * pending, with the same paid flags. Money moves after this, on the same
+   * transaction, and only when it returns true. Without it, the expiry scan
+   * and a worker's cancellation both refunded the same payment, and a close
+   * racing a payment refunded a contact that was then unlocked (security
+   * audit run 2).
+   */
+  private async claimClosing(
+    tx: Prisma.TransactionClient,
+    attempt: { id: string; employer_paid: boolean; worker_paid: boolean },
+    status: ContactUnlockStatus,
+    now: Date,
+  ): Promise<boolean> {
+    const { count } = await tx.contactUnlockAttempt.updateMany({
+      where: {
+        id: attempt.id,
+        status: { in: PENDING_UNLOCK_STATUSES },
+        employer_paid: attempt.employer_paid,
+        worker_paid: attempt.worker_paid,
+      },
+      data: { status, converted_at: now },
+    });
+    return count === 1;
   }
 
   /**
@@ -320,16 +368,28 @@ export class ContactUnlockService {
     // Atomic idempotency guard: only update if the party has not already paid.
     // This prevents a double-charge if two concurrent requests both pass the
     // in-memory assertPayUnlockPartyNotAlreadyPaid check.
+    // It also holds the attempt to the status and other side it was read
+    // with: a close (expiry, cancellation) racing this payment refunded the
+    // other side while the contact was then unlocked (security audit run 2).
     const guardCondition = isEmployer
-      ? { employer_paid: false }
-      : { worker_paid: false };
+      ? { employer_paid: false, worker_paid: attempt.worker_paid }
+      : { worker_paid: false, employer_paid: attempt.employer_paid };
     const guardResult = await this.prisma.contactUnlockAttempt.updateMany({
-      where: { id: attemptId, ...guardCondition },
+      where: { id: attemptId, status: attempt.status, ...guardCondition },
       data: updatedData,
     });
     if (guardResult.count === 0) {
+      const current = await this.prisma.contactUnlockAttempt.findUnique({
+        where: { id: attemptId },
+        select: { employer_paid: true, worker_paid: true },
+      });
+      const alreadyPaid = isEmployer
+        ? current?.employer_paid
+        : current?.worker_paid;
       throw new BadRequestException(
-        'Ce paiement a déjà été enregistré pour cette partie',
+        alreadyPaid
+          ? 'Ce paiement a déjà été enregistré pour cette partie'
+          : 'Cette mise en relation a été close entre-temps : ce paiement ne peut plus être enregistré.',
       );
     }
     const updated = await this.prisma.contactUnlockAttempt.findUniqueOrThrow({
@@ -1064,26 +1124,22 @@ export class ContactUnlockService {
     );
 
     await this.prisma.$transaction(async (tx) => {
+      const claimed = await this.claimClosing(
+        tx,
+        attempt,
+        ContactUnlockStatus.CONVERTED_TO_CREDIT,
+        now,
+      );
+      if (!claimed) {
+        throw new BadRequestException(
+          'Cette tentative ne peut plus être rejetée',
+        );
+      }
       if (attempt.employer_paid && !employerPaidAtJobLevel) {
         await this.refundEmployerSide(attempt, tx);
       }
-      if (attempt.worker_paid) {
-        await this.walletService.refundProfileWallet(
-          attempt.worker_id,
-          Number(attempt.worker_amount),
-          WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
-          'contact_unlock_attempt',
-          attempt.id,
-        );
-      }
+      if (attempt.worker_paid) await this.refundWorkerSide(attempt, tx);
 
-      await tx.contactUnlockAttempt.update({
-        where: { id: attempt.id },
-        data: {
-          status: ContactUnlockStatus.CONVERTED_TO_CREDIT,
-          converted_at: now,
-        },
-      });
       await tx.application.update({
         where: { id: applicationId },
         data: {
@@ -1206,25 +1262,18 @@ export class ContactUnlockService {
       attempt.job_offer.employer_unlock_paid,
     );
     await this.prisma.$transaction(async (tx) => {
+      // Already closed by the expiry scan or a payment: nothing to give back.
+      const claimed = await this.claimClosing(
+        tx,
+        attempt,
+        ContactUnlockStatus.CONVERTED_TO_CREDIT,
+        now,
+      );
+      if (!claimed) return;
       if (attempt.employer_paid && !employerPaidAtJobLevel) {
         await this.refundEmployerSide(attempt, tx);
       }
-      if (attempt.worker_paid) {
-        await this.walletService.refundProfileWallet(
-          attempt.worker_id,
-          Number(attempt.worker_amount),
-          WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
-          'contact_unlock_attempt',
-          attempt.id,
-        );
-      }
-      await tx.contactUnlockAttempt.update({
-        where: { id: attempt.id },
-        data: {
-          status: ContactUnlockStatus.CONVERTED_TO_CREDIT,
-          converted_at: now,
-        },
-      });
+      if (attempt.worker_paid) await this.refundWorkerSide(attempt, tx);
     });
   }
 
@@ -1318,7 +1367,6 @@ export class ContactUnlockService {
     for (const attempt of expired) {
       try {
         const now = new Date();
-        let newStatus: ContactUnlockStatus = ContactUnlockStatus.EXPIRED;
 
         const isMultiPerson = (attempt.job_offer.quantity ?? 1) > 1;
         const employerPaidAtJobLevel = isEmployerCoveredAtJobLevel(
@@ -1326,63 +1374,49 @@ export class ContactUnlockService {
           attempt.job_offer.employer_unlock_paid,
         );
 
-        if (!isMultiPerson && attempt.employer_paid && attempt.worker_paid) {
-          // Standard job — both paid but unlock expired: refund both.
-          const employerAmount = await this.refundEmployerSide(attempt);
-          const workerAmount = Number(attempt.worker_amount);
-          await this.walletService.refundProfileWallet(
-            attempt.worker_id,
-            workerAmount,
-            WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
-            'contact_unlock_attempt',
-            attempt.id,
-          );
-          newStatus = ContactUnlockStatus.CONVERTED_TO_CREDIT;
-          // A quota unit given back is not a conversion to credit.
-          if (employerAmount > 0) {
-            conversions.push({
-              profileId: attempt.employer_id,
-              amount: employerAmount,
+        // Standard job, both paid: refund both. Worker paid and the employer
+        // did not (or paid at job level): the worker. Employer paid per
+        // attempt and the worker did not: the employer. Neither: EXPIRED.
+        const bothPaid =
+          !isMultiPerson && attempt.employer_paid && attempt.worker_paid;
+        const refundWorker =
+          bothPaid ||
+          (attempt.worker_paid &&
+            (employerPaidAtJobLevel || !attempt.employer_paid));
+        const refundEmployer =
+          bothPaid ||
+          (!employerPaidAtJobLevel &&
+            attempt.employer_paid &&
+            !attempt.worker_paid);
+        const newStatus: ContactUnlockStatus =
+          refundWorker || refundEmployer
+            ? ContactUnlockStatus.CONVERTED_TO_CREDIT
+            : ContactUnlockStatus.EXPIRED;
+
+        const credited = await this.prisma.$transaction(async (tx) => {
+          if (!(await this.claimClosing(tx, attempt, newStatus, now))) {
+            return null;
+          }
+          const out: ExpiredConversionEvent[] = [];
+          if (refundEmployer) {
+            const amount = await this.refundEmployerSide(attempt, tx);
+            // A quota unit given back is not a conversion to credit.
+            if (amount > 0) {
+              out.push({ profileId: attempt.employer_id, amount });
+            }
+          }
+          if (refundWorker) {
+            await this.refundWorkerSide(attempt, tx);
+            out.push({
+              profileId: attempt.worker_id,
+              amount: Number(attempt.worker_amount),
             });
           }
-          conversions.push({
-            profileId: attempt.worker_id,
-            amount: workerAmount,
-          });
-        } else if (
-          attempt.worker_paid &&
-          (employerPaidAtJobLevel || !attempt.employer_paid)
-        ) {
-          // Multi-person: employer paid at job level — refund worker only.
-          // Standard: worker paid, employer did not — refund worker.
-          const amount = Number(attempt.worker_amount);
-          await this.walletService.refundProfileWallet(
-            attempt.worker_id,
-            amount,
-            WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
-            'contact_unlock_attempt',
-            attempt.id,
-          );
-          newStatus = ContactUnlockStatus.CONVERTED_TO_CREDIT;
-          conversions.push({ profileId: attempt.worker_id, amount });
-        } else if (
-          !employerPaidAtJobLevel &&
-          attempt.employer_paid &&
-          !attempt.worker_paid
-        ) {
-          // Standard: employer paid, worker did not — refund employer.
-          const amount = await this.refundEmployerSide(attempt);
-          newStatus = ContactUnlockStatus.CONVERTED_TO_CREDIT;
-          if (amount > 0) {
-            conversions.push({ profileId: attempt.employer_id, amount });
-          }
-        }
-        // Neither paid → newStatus stays EXPIRED, no money moved.
-
-        await this.prisma.contactUnlockAttempt.update({
-          where: { id: attempt.id },
-          data: { status: newStatus, converted_at: now },
+          return out;
         });
+        // Closed meanwhile (a cancellation, a payment): it is not ours.
+        if (!credited) continue;
+        conversions.push(...credited);
 
         await this.syncWaitingPaymentApplicationAfterUnlockExpiry({
           applicationId: attempt.application_id,

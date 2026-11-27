@@ -416,6 +416,88 @@ describe('PaymentRequestService', () => {
     });
   });
 
+  describe('a contact-unlock payment for a closed attempt', () => {
+    const attempt = (over: Record<string, unknown> = {}) => ({
+      status: 'PENDING_EMPLOYER',
+      expires_at: new Date(Date.now() + 3_600_000),
+      employer_id: PROFILE_ID,
+      employer_paid: false,
+      worker_paid: false,
+      job_offer: { deleted_at: null },
+      ...over,
+    });
+
+    it.each([
+      ['closed', { status: 'CONVERTED_TO_CREDIT' }],
+      ['expired', { expires_at: new Date(Date.now() - 1000) }],
+      ['already paid by this side', { employer_paid: true }],
+      ['for an archived offer', { job_offer: { deleted_at: new Date() } }],
+    ])('is never charged when %s', async (_label, over) => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING, {
+          amount: 500,
+          contact_unlock_attempt_id: 'att-1',
+        }),
+      );
+      (prisma as any).contactUnlockAttempt = {
+        findUnique: jest.fn().mockResolvedValue(attempt(over)),
+      };
+      await expect(
+        service.initiatePayment(TOKEN, '+242061234567', 'MTN_MOMO_COG'),
+      ).rejects.toThrow('n’attend plus de paiement');
+      expect(prisma.paymentRequest.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('gives a captured payment back once when the unlock refuses it', async () => {
+      const wallet = (service as any).walletService;
+      wallet.refundProfileWallet = jest.fn().mockResolvedValue(undefined);
+      (service as any).contactUnlockService.payUnlock = jest
+        .fn()
+        .mockRejectedValue(
+          new BadRequestException('Cette tentative de déverrouillage a expiré'),
+        );
+      const findFirst = jest
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'wt-1' });
+      (prisma as any).walletTransaction = { findFirst };
+      const request = makeRequest(PaymentRequestStatus.APPROVED, {
+        amount: 500,
+        contact_unlock_attempt_id: 'att-1',
+      });
+
+      await (service as any).handleContactUnlockPostPayment(request);
+      await (service as any).handleContactUnlockPostPayment(request);
+
+      expect(wallet.refundProfileWallet).toHaveBeenCalledTimes(1);
+      expect(wallet.refundProfileWallet).toHaveBeenCalledWith(
+        PROFILE_ID,
+        500,
+        'CONTACT_UNLOCK_CREDIT_CONVERSION',
+        'payment_request',
+        REQUEST_ID,
+      );
+      expect(log.create).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'CONTACT_UNLOCK_PAYMENT_REFUNDED' }),
+      );
+    });
+
+    it('keeps a payment on a transient failure, for the retry', async () => {
+      const wallet = (service as any).walletService;
+      wallet.refundProfileWallet = jest.fn();
+      (service as any).contactUnlockService.payUnlock = jest
+        .fn()
+        .mockRejectedValue(new Error('connection reset'));
+      await (service as any).handleContactUnlockPostPayment(
+        makeRequest(PaymentRequestStatus.APPROVED, {
+          amount: 500,
+          contact_unlock_attempt_id: 'att-1',
+        }),
+      );
+      expect(wallet.refundProfileWallet).not.toHaveBeenCalled();
+    });
+  });
+
   describe('handlePaymentCallback()', () => {
     it('returns early when payment ref not found', async () => {
       (prisma.paymentRequest.findFirst as jest.Mock).mockResolvedValue(null);

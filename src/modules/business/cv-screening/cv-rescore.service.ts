@@ -10,12 +10,7 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { CV_SCREENING_QUEUE } from '../../../common/services/queue/queue.module';
 import { QueueService } from '../../../common/services/queue/queue.service';
 import { readApplicationAnswers } from './cv-assessment';
-import {
-  CvGridService,
-  jobHash,
-  type GridOf,
-  type GridOwner,
-} from './cv-grid.service';
+import { CvGridService, jobHash, type GridOf } from './cv-grid.service';
 import { evaluate } from './cv-marking';
 import { CvRestoreService } from './cv-restore.service';
 import { CV_GRID_RESCORE, type CvGridRescore } from './cv-screening.events';
@@ -57,7 +52,7 @@ export class CvRescoreService {
     }
     // From the previous formula only: that move is not counted.
     const moving = !before || due.every((r) => r.gridId === null);
-    if (!moving) await this.take(found.owner);
+    if (!moving) await this.take(found);
     const grid =
       before ??
       (await this.grids.create(found.businessId, found.owner, found.job));
@@ -98,9 +93,20 @@ export class CvRescoreService {
   }
 
   /** One of the free re-analyses, atomically. */
-  private async take(owner: GridOwner): Promise<void> {
-    const { limit, used, counted } = await this.grids.rescores(owner);
-    // Profiles only, no CV read yet: nothing to count on, and little to pay.
+  private async take(found: GridOf): Promise<void> {
+    const { owner } = found;
+    let { limit, used, counted } = await this.grids.rescores(owner);
+    // Profiles only, no CV read yet: the count still applies, each press
+    // re-scores every applicant with the model (security audit run 2). The
+    // offer's screening holds it, so it is opened first.
+    if (!counted && owner.offerId !== undefined) {
+      await this.screenings.offerScreening(
+        found.businessId,
+        owner.offerId,
+        () => Promise.resolve(found.job),
+      );
+      ({ limit, used, counted } = await this.grids.rescores(owner));
+    }
     if (!counted) return;
     const { count } = await this.prisma.cvScreening.updateMany({
       where: {

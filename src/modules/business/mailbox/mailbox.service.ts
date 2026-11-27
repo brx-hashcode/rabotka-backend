@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -22,8 +23,17 @@ import { MailboxCrypto } from './mailbox-crypto';
 import { GmailProvider } from './providers/gmail.provider';
 import {
   MailboxAuthError,
+  MailboxConnectError,
   type MailProviderClient,
 } from './providers/mail-provider';
+import type Redis from 'ioredis';
+import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
+import {
+  type CallbackSession,
+  connectMatches,
+  rememberConnect,
+  takeConnect,
+} from '../connect-session';
 
 /** How a provider is named in urls: `gmail`. */
 export type ProviderSlug = 'gmail';
@@ -63,6 +73,7 @@ export class MailboxService {
     private readonly jwt: JwtService,
     private readonly subscriptions: BusinessSubscriptionService,
     config: ConfigService,
+    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
   ) {
     this.crypto = null;
     const key = config.get<string>('MAILBOX_TOKEN_KEY');
@@ -115,7 +126,7 @@ export class MailboxService {
   }
 
   /** The consent screen's address; `state` brings the business back to us. */
-  async connectUrl(profileId: string, slug: ProviderSlug) {
+  async connectUrl(profileId: string, slug: ProviderSlug, memberId?: string) {
     const provider = PROVIDER_OF[slug];
     if (!this.available(provider)) {
       throw new ServiceUnavailableException(
@@ -123,8 +134,16 @@ export class MailboxService {
       );
     }
     const businessId = await this.businessId(profileId);
+    const n = randomUUID();
+    // One-time, and only for whoever asked (connect-session.ts).
+    await rememberConnect(this.redis, n, {
+      b: businessId,
+      p: profileId,
+      m: memberId ?? null,
+      v: slug,
+    });
     const state = await this.jwt.signAsync(
-      { b: businessId, p: profileId, v: slug, n: randomUUID() } satisfies State,
+      { b: businessId, p: profileId, v: slug, n } satisfies State,
       { audience: STATE_AUDIENCE, expiresIn: '10m' },
     );
     return {
@@ -136,7 +155,12 @@ export class MailboxService {
    * Back from the consent screen: the code becomes tokens, kept sealed.
    * Connecting the same address again replaces its tokens.
    */
-  async complete(slug: ProviderSlug, code: string, state: string) {
+  async complete(
+    slug: ProviderSlug,
+    code: string,
+    state: string,
+    session: CallbackSession | null,
+  ) {
     const provider = PROVIDER_OF[slug];
     if (!this.available(provider) || !this.crypto) {
       throw new ServiceUnavailableException('Mailbox provider not configured');
@@ -151,6 +175,15 @@ export class MailboxService {
     }
     if (s.v !== slug)
       throw new BadRequestException('State for another provider');
+    // Taken before the code is used, so a link works once, and only in the
+    // session that asked for it.
+    const record = await takeConnect(this.redis, s.n);
+    if (!connectMatches(record, session, s.b, slug)) {
+      throw new MailboxConnectError(
+        'session',
+        'consent link not opened by the session that asked for it',
+      );
+    }
 
     const t = await this.providers[provider].exchange(code, redirectUri(slug));
     if (!t.email) throw new BadRequestException('No address for this account');

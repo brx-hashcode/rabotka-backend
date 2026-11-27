@@ -427,10 +427,25 @@ export class CvScreeningService {
    * One at a time per offer: two CVs read at once each opened their own, and
    * the candidates of one could not be compared with those of the other.
    */
-  private async sharedScreening(
+  private sharedScreening(
     profileId: string,
     businessId: string,
     offerId: string,
+  ): Promise<{ id: string; opened: boolean }> {
+    return this.offerScreening(businessId, offerId, () =>
+      this.jobBrief(profileId, { offerId }),
+    );
+  }
+
+  /**
+   * The offer's shared screening, opened from `brief` if there is none. Also
+   * where the offer's re-analysis count lives, so the CV rescore opens it
+   * for an offer with only profile applicants.
+   */
+  async offerScreening(
+    businessId: string,
+    offerId: string,
+    brief: () => Promise<{ title: string; text: string }>,
   ): Promise<{ id: string; opened: boolean }> {
     const where = {
       business_id: businessId,
@@ -445,7 +460,7 @@ export class CvScreeningService {
       });
     const open = await find(this.prisma);
     if (open) return { id: open.id, opened: false };
-    const brief = await this.jobBrief(profileId, { offerId });
+    const job = await brief();
     const expiresAt = addMonthsClamped(
       new Date(),
       await this.systemConfig.getCvLimitMonths(),
@@ -457,8 +472,8 @@ export class CvScreeningService {
       const made = await tx.cvScreening.create({
         data: {
           ...where,
-          job_title: brief.title,
-          job_text: brief.text,
+          job_title: job.title,
+          job_text: job.text,
           expires_at: expiresAt,
         },
         select: { id: true },

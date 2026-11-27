@@ -452,6 +452,11 @@ model Profile {
   first_name                        String
   last_name                         String
   phone                             String             @unique
+  /// When THIS phone number was proven by a WhatsApp code: at a WhatsApp
+  /// sign-up, a business sign-up, or a confirmed phone change. Null when it
+  /// was set any other way (an admin edit) or never proven. OIDC derives
+  /// `phone_number_verified` from it.
+  phone_verified_at                 DateTime?
   /// A second number to be reached on, when the WhatsApp number is not one the
   /// person actually answers calls on — a shared handset, a business line, a
   /// number that only runs WhatsApp over data.

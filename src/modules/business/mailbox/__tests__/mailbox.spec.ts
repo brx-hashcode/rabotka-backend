@@ -16,6 +16,23 @@ import { minimalDocx } from '../../../../common/utils/__tests__/zip-fixture';
 
 const KEY = randomBytes(32).toString('base64');
 
+/** Redis as connect-session uses it: SET with a TTL, and GET-and-DEL. */
+function connectRedis() {
+  const data = new Map<string, string>();
+  return {
+    data,
+    set: jest.fn((k: string, v: string) => {
+      data.set(k, v);
+      return Promise.resolve('OK');
+    }),
+    eval: jest.fn((_lua: string, _n: number, k: string) => {
+      const v = data.get(k) ?? null;
+      data.delete(k);
+      return Promise.resolve(v);
+    }),
+  };
+}
+
 describe('MailboxCrypto', () => {
   it('opens what it sealed, and nothing altered', () => {
     const c = new MailboxCrypto(KEY);
@@ -104,14 +121,16 @@ describe('MailboxService', () => {
     const subscriptions: any = {
       businessOf: jest.fn().mockResolvedValue('biz-1'),
     };
+    const redis = connectRedis();
     const service = new MailboxService(
       prisma,
       jwt,
       subscriptions,
       config as any,
+      redis as any,
     );
     const gmail = (service as any).providers.GMAIL;
-    return { service, prisma, subscriptions, gmail };
+    return { service, prisma, subscriptions, gmail, redis };
   }
 
   const box = (over: Record<string, unknown> = {}) => ({
@@ -159,9 +178,10 @@ describe('MailboxService', () => {
       expiresAt: new Date(),
       email: 'RH@ZuaFood.cg',
     });
-    await expect(service.complete('gmail', 'code', state)).resolves.toEqual({
-      email: 'rh@zuafood.cg',
-    });
+    const holder = { profileId: 'p-1', memberId: null };
+    await expect(
+      service.complete('gmail', 'code', state, holder),
+    ).resolves.toEqual({ email: 'rh@zuafood.cg' });
     const arg = prisma.businessMailbox.upsert.mock.calls[0][0];
     expect(arg.where.business_id_provider_email).toEqual({
       business_id: 'biz-1',
@@ -173,22 +193,57 @@ describe('MailboxService', () => {
     expect(crypto.open(arg.create.refresh_token_enc)).toBe('refresh-new');
   });
 
+  it('connects only for the session that asked, and only once', async () => {
+    const { service, prisma, gmail } = make();
+    gmail.exchange = jest.fn().mockResolvedValue({
+      access: 'a',
+      refresh: 'r',
+      expiresAt: new Date(),
+      email: 'victim@example.com',
+    });
+    const stateOf = async (memberId?: string) =>
+      new URL(
+        (await service.connectUrl('p-1', 'gmail', memberId)).url,
+      ).searchParams.get('state')!;
+
+    // Sent to someone else: no session, or another one, in their browser.
+    for (const session of [
+      null,
+      { profileId: 'p-other', memberId: null },
+      { profileId: 'p-1', memberId: 'm-9' },
+    ]) {
+      await expect(
+        service.complete('gmail', 'code', await stateOf(), session),
+      ).rejects.toMatchObject({ reason: 'session' });
+    }
+    expect(gmail.exchange).not.toHaveBeenCalled();
+
+    // A member's link, back in that member's session; then never again.
+    const state = await stateOf('m-7');
+    const member = { profileId: 'p-1', memberId: 'm-7' };
+    await service.complete('gmail', 'code', state, member);
+    await expect(
+      service.complete('gmail', 'code', state, member),
+    ).rejects.toMatchObject({ reason: 'session' });
+    expect(prisma.businessMailbox.upsert).toHaveBeenCalledTimes(1);
+  });
+
   it('refuses a forged, foreign or expired state', async () => {
     const { service, prisma } = make();
     await expect(
-      service.complete('gmail', 'code', 'not-a-jwt'),
+      service.complete('gmail', 'code', 'not-a-jwt', null),
     ).rejects.toBeInstanceOf(BadRequestException);
     // Signed for another purpose (no mailbox audience).
     const other = await jwt.signAsync({ b: 'biz-1', p: 'p-1', v: 'gmail' });
     await expect(
-      service.complete('gmail', 'code', other),
+      service.complete('gmail', 'code', other, null),
     ).rejects.toBeInstanceOf(BadRequestException);
     const expired = await jwt.signAsync(
       { b: 'biz-1', p: 'p-1', v: 'gmail', n: 'x' },
       { audience: 'rabotka-mailbox-connect', expiresIn: -10 },
     );
     await expect(
-      service.complete('gmail', 'code', expired),
+      service.complete('gmail', 'code', expired, null),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.businessMailbox.upsert).not.toHaveBeenCalled();
   });
