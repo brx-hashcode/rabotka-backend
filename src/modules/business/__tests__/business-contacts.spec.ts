@@ -50,7 +50,11 @@ describe('BusinessContactsService', () => {
 
     const list = await service.list('biz');
 
-    expect(findMany.mock.calls[0][0].where).toEqual({ employer_id: 'biz' });
+    // A worker archived or banned leaves the list; a suspended one stays.
+    expect(findMany.mock.calls[0][0].where).toEqual({
+      employer_id: 'biz',
+      worker: { deleted_at: null, status: { not: 'BANNED' } },
+    });
     expect(list.map((c) => c.workerId)).toEqual(['w1', 'w2']);
     expect(list[0].unlockedAt).toBe('2026-10-20T00:00:00.000Z');
     expect(list[0].offers.map((o) => o.id)).toEqual(['o2', 'o1']);
@@ -122,6 +126,7 @@ describe('BusinessContactsService', () => {
       covered?: boolean;
       worker?: boolean;
       applicant?: boolean;
+      status?: string;
     }) => {
       const findMany = jest
         .fn()
@@ -131,6 +136,10 @@ describe('BusinessContactsService', () => {
       const prisma = {
         contactRecord: { findMany, create },
         profile: {
+          findUnique: jest.fn().mockResolvedValue({
+            status: opts.status ?? 'ACTIVE',
+            suspension_reason: null,
+          }),
           findFirst: jest
             .fn()
             .mockResolvedValue(opts.worker === false ? null : { id: 'w1' }),
@@ -203,6 +212,24 @@ describe('BusinessContactsService', () => {
       expect(await service.unlock('biz', 'w1')).toMatchObject({ spent: false });
       expect(create).not.toHaveBeenCalled();
       expect(subs.assertFeature).not.toHaveBeenCalled();
+    });
+
+    it.each(['SUSPENDED', 'BANNED'])(
+      'reveals nobody new to a %s business, applicant or not',
+      async (status) => {
+        for (const applicant of [false, true]) {
+          const { service, create } = setup({ status, applicant });
+          await expect(service.unlock('biz', 'w1')).rejects.toMatchObject({
+            response: { code: 'ACCOUNT_NOT_ACTIVE', accountStatus: status },
+          });
+          expect(create).not.toHaveBeenCalled();
+        }
+      },
+    );
+
+    it('still gives a blocked business the contacts it already has', async () => {
+      const { service } = setup({ existing: true, status: 'SUSPENDED' });
+      expect(await service.unlock('biz', 'w1')).toMatchObject({ spent: false });
     });
 
     it('refuses past the quota, and an inactive worker', async () => {

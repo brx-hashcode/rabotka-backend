@@ -3,6 +3,7 @@ import {
   consumeSignupToken,
   countSignupUpload,
   issueSignupToken,
+  proveSignupPhone,
   readSignupToken,
   SIGNUP_MAX_UPLOADS,
 } from '../signup-token';
@@ -150,5 +151,38 @@ describe('sniffFileType', () => {
     ['too short', Buffer.from([0xff, 0xd8])],
   ])('recognises nothing in %s', (_name, buffer) => {
     expect(sniffFileType(buffer)).toBeNull();
+  });
+});
+
+describe('a business sign-up proving its number', () => {
+  const BUSINESS = { entry: 'business', email: 'contact@ecole.cg' } as const;
+
+  it('adds the number to the token, which keeps its expiry', async () => {
+    const redis = fakeRedis();
+    const token = await issueSignupToken(redis as never, BUSINESS);
+    expect(await proveSignupPhone(redis as never, token, '+242061234567')).toBe(
+      true,
+    );
+    expect(await readSignupToken(redis as never, token)).toEqual({
+      ...BUSINESS,
+      phone: '+242061234567',
+    });
+    expect(redis.set).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.any(String),
+      'KEEPTTL',
+    );
+  });
+
+  it('proves nothing on a WhatsApp or unknown token', async () => {
+    const redis = fakeRedis();
+    const token = await issueSignupToken(redis as never, WHATSAPP);
+    expect(await proveSignupPhone(redis as never, token, '+242000000000')).toBe(
+      false,
+    );
+    expect(await readSignupToken(redis as never, token)).toEqual(WHATSAPP);
+    expect(
+      await proveSignupPhone(redis as never, 'nope', '+242000000000'),
+    ).toBe(false);
   });
 });

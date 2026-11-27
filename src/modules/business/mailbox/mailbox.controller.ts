@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Inject,
   Logger,
   Param,
   ParseUUIDPipe,
@@ -14,7 +15,13 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
+import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
+import type Redis from 'ioredis';
+import { PrismaService } from '../../../common/services/prisma/prisma.service';
+import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
+import { callbackSession } from '../connect-session';
 import { ProfileAuthGuard } from '../../auth/guards/profile-auth.guard';
 import { BusinessProfileGuard } from '../../auth/guards/business-profile.guard';
 import { KycVerifiedGuard } from '../../auth/guards/kyc-verified.guard';
@@ -28,6 +35,7 @@ import {
   PROVIDER_OF,
   type ProviderSlug,
 } from './mailbox.service';
+import { OpenToBlockedBusiness } from '../../auth/decorators/open-to-blocked-business.decorator';
 
 function slug(value: string): ProviderSlug {
   if (value in PROVIDER_OF) return value as ProviderSlug;
@@ -59,7 +67,11 @@ export class MailboxController {
     @Req() req: ProfileAuthenticatedRequest,
     @Param('provider') provider: string,
   ) {
-    return this.mailboxes.connectUrl(req.user.profileId, slug(provider));
+    return this.mailboxes.connectUrl(
+      req.user.profileId,
+      slug(provider),
+      req.user.memberId,
+    );
   }
 
   @Get(':id/mails')
@@ -105,6 +117,7 @@ export class MailboxController {
   }
 
   @Delete(':id')
+  @OpenToBlockedBusiness()
   @ApiOperation({ summary: 'Disconnect a mailbox (its tokens are revoked)' })
   disconnect(
     @Req() req: ProfileAuthenticatedRequest,
@@ -120,7 +133,13 @@ export class MailboxController {
 export class MailboxCallbackController {
   private readonly logger = new Logger(MailboxCallbackController.name);
 
-  constructor(private readonly mailboxes: MailboxService) {}
+  constructor(
+    private readonly mailboxes: MailboxService,
+    private readonly jwt: JwtService,
+    private readonly config: ConfigService,
+    private readonly prisma: PrismaService,
+    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
+  ) {}
 
   @Public()
   @Get('callback/:provider')
@@ -131,6 +150,7 @@ export class MailboxCallbackController {
     @Query('code') code: string | undefined,
     @Query('state') state: string | undefined,
     @Query('error') error: string | undefined,
+    @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
     let status: CallbackStatus = 'error';
@@ -138,7 +158,16 @@ export class MailboxCallbackController {
       status = 'denied';
     } else if (code && state && !error) {
       try {
-        await this.mailboxes.complete(slug(provider), code, state);
+        const session = await callbackSession(
+          {
+            jwt: this.jwt,
+            config: this.config,
+            redis: this.redis,
+            prisma: this.prisma,
+          },
+          req,
+        );
+        await this.mailboxes.complete(slug(provider), code, state, session);
         status = 'connected';
       } catch (err) {
         if (err instanceof MailboxConnectError) status = err.reason;

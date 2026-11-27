@@ -7,6 +7,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  HttpException,
   Logger,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -17,6 +18,7 @@ import {
   BillingStatus,
   BusinessBillingPeriod,
   ContactRecordOrigin,
+  ContactUnlockStatus,
   InvoiceReason,
   PaymentMethod,
   PaymentRequestStatus,
@@ -536,6 +538,7 @@ export class PaymentRequestService {
     }
 
     await this.assertPenaltiesStillOwed(request);
+    await this.assertUnlockStillPayable(request);
 
     const network = await this.assertOperatorMatchesGateway(operator, phone);
     const charge = await this.chargeFor(Number(request.amount), network);
@@ -1329,6 +1332,17 @@ export class PaymentRequestService {
         `Contact unlock processing failed for attempt ${String(request.contact_unlock_attempt_id)}:`,
         err,
       );
+      // A refusal (closed, expired, already paid) is final: the captured
+      // amount must not stay with Rabotka.
+      if (err instanceof HttpException && err.getStatus() < 500) {
+        await this.refundRefusedUnlockPayment(request, err).catch(
+          (refundErr: unknown) =>
+            this.logger.error(
+              `Refund of refused unlock payment ${request.id} failed`,
+              refundErr,
+            ),
+        );
+      }
       return { nowUnlocked: false, unlockedAttemptIds: [] };
     }
   }
@@ -1644,6 +1658,93 @@ export class PaymentRequestService {
    * owed — one of its penalties paid another way or archived since. Charging
    * the stored amount then would take money for nothing.
    */
+  /**
+   * A contact-unlock payment is charged only while its attempt waits on this
+   * payer: pending, not expired, their side unpaid, the offer live. A closed
+   * attempt's payment was captured and kept (security audit run 2).
+   */
+  private async assertUnlockStillPayable(request: {
+    contact_unlock_attempt_id: string | null;
+    profile_id: string;
+  }): Promise<void> {
+    if (!request.contact_unlock_attempt_id) return;
+    const attempt = await this.prisma.contactUnlockAttempt.findUnique({
+      where: { id: request.contact_unlock_attempt_id },
+      select: {
+        status: true,
+        expires_at: true,
+        employer_id: true,
+        employer_paid: true,
+        worker_paid: true,
+        job_offer: { select: { deleted_at: true } },
+      },
+    });
+    const pending: ContactUnlockStatus[] = [
+      ContactUnlockStatus.PENDING_BOTH,
+      ContactUnlockStatus.PENDING_EMPLOYER,
+      ContactUnlockStatus.PENDING_WORKER,
+    ];
+    const paid =
+      attempt?.employer_id === request.profile_id
+        ? attempt.employer_paid
+        : attempt?.worker_paid;
+    if (
+      !attempt ||
+      !pending.includes(attempt.status) ||
+      (attempt.expires_at !== null && attempt.expires_at < new Date()) ||
+      paid ||
+      attempt.job_offer.deleted_at
+    ) {
+      throw new BadRequestException(
+        'Cette mise en relation n’attend plus de paiement : rien n’a été prélevé.',
+      );
+    }
+  }
+
+  /**
+   * The payment was captured but the unlock refused it for good (the attempt
+   * closed while the payment was in flight): the amount goes back to the
+   * payer's Rabotka wallet, once per payment request, and the refund is
+   * logged. A transient error is only logged, for the outbox to retry.
+   */
+  private async refundRefusedUnlockPayment(
+    request: PaymentRequestWithProfile,
+    err: unknown,
+  ): Promise<void> {
+    const amount = Number(request.amount ?? 0);
+    if (amount <= 0) return;
+    const already = await this.prisma.walletTransaction.findFirst({
+      where: { reference_type: 'payment_request', reference_id: request.id },
+      select: { id: true },
+    });
+    if (already) return;
+    await this.walletService.refundProfileWallet(
+      request.profile_id,
+      amount,
+      WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
+      'payment_request',
+      request.id,
+    );
+    await this.logService
+      .create({
+        action: 'CONTACT_UNLOCK_PAYMENT_REFUNDED',
+        entityType: 'payment_request',
+        entityId: request.id,
+        profileId: request.profile_id,
+        metadata: {
+          attemptId: request.contact_unlock_attempt_id,
+          amount,
+          reason: err instanceof Error ? err.message : String(err),
+        },
+      })
+      .catch((logErr: unknown) =>
+        this.logger.warn(
+          `Could not log the unlock refund for request ${request.id}`,
+          logErr,
+        ),
+      );
+  }
+
   private async assertPenaltiesStillOwed(request: {
     request_type: PaymentRequestType | null;
     penalty_ids: string[];

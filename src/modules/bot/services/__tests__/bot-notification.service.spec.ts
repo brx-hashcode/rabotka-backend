@@ -805,6 +805,29 @@ describe('BotNotificationService', () => {
       expect(deps.whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
 
+    it('never messages an archived worker, whatever ranked them', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        phone: '+242001',
+        first_name: 'Alice',
+        status: 'ACTIVE',
+        profile_type: 'WORKER',
+        deleted_at: new Date(),
+      });
+      (deps.prisma as any).jobOffer = {
+        findUnique: jest.fn().mockResolvedValue({
+          title: 'Plombier',
+          amount: 5000,
+          payment_flow: null,
+          address: '10 Rue Paris',
+          scheduled_at: new Date('2026-06-01T10:00:00Z'),
+        }),
+      };
+      await expect(
+        service.sendRecommendedJobNotification('worker-1', 'jo-1'),
+      ).resolves.toBe(false);
+      expect(deps.whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+    });
+
     it('sends message when profile and offer found', async () => {
       deps.prisma.profile.findUnique.mockResolvedValue({
         phone: '+242001',

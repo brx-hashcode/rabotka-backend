@@ -759,11 +759,26 @@ export class ProfileService {
         profile_type: true,
         // Needed to detect an address change and trigger a re-geocode.
         address: true,
+        email: true,
+        is_business: true,
       },
     });
 
     if (!existingProfile) {
       throw new NotFoundException('Profil non trouvé');
+    }
+
+    // A business signs in with this address, and so does its team's sign-in
+    // choice: set unproven, it could take over another business's member.
+    // It changes only through Rabotka's support.
+    if (
+      existingProfile.is_business &&
+      updateProfileDto.email !== undefined &&
+      updateProfileDto.email !== existingProfile.email
+    ) {
+      throw new ForbiddenException(
+        "L'adresse de connexion d'un compte entreprise ne se modifie pas ici : écrivez au support Rabotka.",
+      );
     }
 
     const dataToUpdate = this.buildProfileUpdateData(updateProfileDto);
@@ -1703,6 +1718,9 @@ export class ProfileService {
       dto.profileType ?? profile.profile_type,
       profile.is_business,
     );
+    if (profile.is_business && dto.email) {
+      await this.assertNotAnotherBusinessMember(profileId, dto.email);
+    }
 
     try {
       await this.prisma.profile.update({
@@ -1764,6 +1782,31 @@ export class ProfileService {
     return this.getProfileDetailForAdmin(profileId);
   }
 
+  /**
+   * A business's sign-in address may not be one another business has
+   * invited: the holder's profile wins the sign-in, so the member would land
+   * in this business instead of their own.
+   */
+  private async assertNotAnotherBusinessMember(
+    profileId: string,
+    email: string,
+  ): Promise<void> {
+    const member = await this.prisma.businessMember.findFirst({
+      where: {
+        email: email.trim().toLowerCase(),
+        is_owner: false,
+        status: { in: ['INVITED', 'ACTIVE'] },
+        business: { profile_id: { not: profileId } },
+      },
+      select: { id: true },
+    });
+    if (member) {
+      throw new ConflictException(
+        "Cette adresse est déjà celle d'un membre d'une autre entreprise.",
+      );
+    }
+  }
+
   private buildAdminProfileUpdateData(
     dto: AdminUpdateProfileDto,
   ): Prisma.ProfileUpdateInput {
@@ -1772,7 +1815,11 @@ export class ProfileService {
     if (dto.lastName !== undefined) data.last_name = dto.lastName;
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.address !== undefined) data.address = dto.address;
-    if (dto.phone !== undefined) data.phone = dto.phone;
+    if (dto.phone !== undefined) {
+      data.phone = dto.phone;
+      // Set by hand: nobody proved it.
+      data.phone_verified_at = null;
+    }
     // Empty string clears it, unlike `phone` above, which has no "absent"
     // state — a profile always has a WhatsApp number, and most have no second.
     if (dto.directPhone !== undefined) {
@@ -3523,6 +3570,9 @@ export class ProfileService {
         // column, but writing the intent down beats relying on that.
         email: createProfileDto.email ?? null,
         phone: createProfileDto.phone,
+        // Every sign-up proves its number by a WhatsApp code first (the
+        // signup token; a business's since its phone check).
+        phone_verified_at: new Date(),
         direct_phone: createProfileDto.directPhone ?? null,
         address: createProfileDto.address,
         ...this.geo.resolveLocation(createProfileDto),
@@ -3798,7 +3848,12 @@ export class ProfileService {
     try {
       await this.prisma.profile.update({
         where: { id: profileId },
-        data: { phone: pending.phone, whatsapp_connected: true },
+        data: {
+          phone: pending.phone,
+          whatsapp_connected: true,
+          // Its code was just typed back in.
+          phone_verified_at: new Date(),
+        },
       });
     } catch (err) {
       // Someone claimed the number in the five minutes since we checked.

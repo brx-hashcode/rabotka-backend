@@ -6,12 +6,16 @@ import {
 import { randomUUID } from 'node:crypto';
 import { ContactRecordOrigin } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
-import { CONTACTABLE_WORKER } from '../recommendation/contactable-worker';
+import {
+  CONTACTABLE_WORKER,
+  KEPT_CONTACT,
+} from '../recommendation/contactable-worker';
 import {
   openApplicants,
   openApplications,
 } from './subscription/applicant-access';
 import { BusinessSubscriptionService } from './subscription/business-subscription.service';
+import { assertAccountNotBlocked } from '../../common/exceptions/account-not-active.exception';
 
 /**
  * The workers whose contact a business unlocked, with the details that unlock
@@ -31,6 +35,7 @@ export class BusinessContactsService {
       where: {
         employer_id: profileId,
         ...(workerId ? { worker_id: workerId } : {}),
+        worker: KEPT_CONTACT,
       },
       // Every record, without a cap: a contact obtained stays the business's,
       // plan or no plan, and a cap would silently drop the oldest ones.
@@ -87,6 +92,14 @@ export class BusinessContactsService {
   async unlock(profileId: string, workerId: string) {
     const [existing] = await this.list(profileId, workerId);
     if (existing) return { contact: existing, spent: false };
+    // A new contact is a disclosure: never for a suspended or banned
+    // business, whichever caller reaches this.
+    const employer = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { status: true, suspension_reason: true },
+    });
+    if (!employer) throw new NotFoundException('Profil introuvable');
+    assertAccountNotBlocked(employer.status, employer.suspension_reason);
     const application = (
       await openApplications(this.prisma, profileId, [workerId])
     ).get(workerId);

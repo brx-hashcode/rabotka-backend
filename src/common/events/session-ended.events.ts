@@ -11,6 +11,10 @@
 export const SESSION_ENDED = 'session.ended';
 
 export interface SessionEndedEvent {
-  kind: 'profile' | 'admin';
+  /**
+   * `member`: a business team member was removed; `id` is the member's, and
+   * only the sockets of their sessions close, not the business holder's.
+   */
+  kind: 'profile' | 'admin' | 'member';
   id: string;
 }

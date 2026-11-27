@@ -142,4 +142,53 @@ describe('SystemConfigController', () => {
       expect(mockSystemConfigService.setMany).not.toHaveBeenCalled();
     });
   });
+
+  describe('the audit row of a secret', () => {
+    const req = {
+      user: { userId: 'admin-1' },
+      headers: {},
+      ip: '127.0.0.1',
+      get: () => undefined,
+    } as any;
+    const secret = {
+      key: 'storage.s3.secret_access_key',
+      value: '***',
+      isSecret: true,
+    };
+
+    it('keeps the value masked on a single update', async () => {
+      mockSystemConfigService.getOne.mockResolvedValueOnce(secret);
+      await controller.update(secret.key, { value: 'AKIA-real-secret' }, req);
+      expect(mockLogService.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: { key: secret.key, oldValue: '***', newValue: '***' },
+        }),
+      );
+      expect(JSON.stringify(mockLogService.create.mock.calls)).not.toContain(
+        'AKIA-real-secret',
+      );
+    });
+
+    it('keeps the value masked in a block save, not the others', async () => {
+      mockSystemConfigService.getOne
+        .mockResolvedValueOnce(secret)
+        .mockResolvedValueOnce({ key: 'ENABLE_SIMILARITY', value: 'true' });
+      await controller.updateMany(
+        {
+          values: {
+            [secret.key]: 'AKIA-real-secret',
+            ENABLE_SIMILARITY: 'false',
+          },
+        },
+        req,
+      );
+      const rows = mockLogService.create.mock.calls.map(
+        ([row]) => (row as { metadata: { newValue: unknown } }).metadata,
+      );
+      expect(rows).toEqual([
+        { key: secret.key, oldValue: '***', newValue: '***' },
+        { key: 'ENABLE_SIMILARITY', oldValue: 'true', newValue: 'false' },
+      ]);
+    });
+  });
 });

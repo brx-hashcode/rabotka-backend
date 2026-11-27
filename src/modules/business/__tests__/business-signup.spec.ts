@@ -21,10 +21,26 @@ describe('signupEntryFor', () => {
   it('is a business sign-up when the token proved the email', () => {
     expect(
       signupEntryFor(
-        { entry: 'business', email: body.email },
+        { entry: 'business', email: body.email, phone: body.phone },
         { ...body, business: {} },
       ),
     ).toBe('business');
+  });
+
+  it('holds a business to the number its WhatsApp code proved', () => {
+    // Unproven, the number would take its owner's WhatsApp sign-in.
+    expect(() =>
+      signupEntryFor(
+        { entry: 'business', email: body.email },
+        { ...body, business: {} },
+      ),
+    ).toThrow('code reçu sur WhatsApp');
+    expect(() =>
+      signupEntryFor(
+        { entry: 'business', email: body.email, phone: '+242069999999' },
+        { ...body, business: {} },
+      ),
+    ).toThrow('code reçu sur WhatsApp');
   });
 
   it('refuses without a token, or with one for another number', () => {
@@ -44,7 +60,11 @@ describe('signupEntryFor', () => {
   });
 
   it('holds a business token to its email, its business, and the employer role', () => {
-    const token = { entry: 'business', email: body.email } as const;
+    const token = {
+      entry: 'business',
+      email: body.email,
+      phone: body.phone,
+    } as const;
     expect(() =>
       signupEntryFor(token, { ...body, email: 'x@y.cg', business: {} }),
     ).toThrow(ForbiddenException);

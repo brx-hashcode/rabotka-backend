@@ -31,6 +31,7 @@ import {
   type CandidateViewed,
 } from '../application/application.events';
 import { stripContacts } from './strip-contacts';
+import { KEPT_CONTACT } from '../recommendation/contactable-worker';
 
 export const MAX_PROFILE_CV_BYTES = 10 * 1024 * 1024;
 
@@ -279,6 +280,11 @@ export class ProfileCvService {
   }
 
   private async candidateCv(workerId: string) {
+    // No preview of a worker the platform archived or banned.
+    const kept = await this.prisma.profile.count({
+      where: { id: workerId, ...KEPT_CONTACT },
+    });
+    if (kept === 0) return null;
     const id = (await sendableCvs(this.prisma, [workerId])).get(workerId);
     return id ? this.prisma.profileCv.findUnique({ where: { id } }) : null;
   }

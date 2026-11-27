@@ -25,6 +25,23 @@ import {
 
 const KEY = randomBytes(32).toString('base64');
 
+/** Redis as connect-session uses it: SET with a TTL, and GET-and-DEL. */
+function connectRedis() {
+  const data = new Map<string, string>();
+  return {
+    data,
+    set: jest.fn((k: string, v: string) => {
+      data.set(k, v);
+      return Promise.resolve('OK');
+    }),
+    eval: jest.fn((_lua: string, _n: number, k: string) => {
+      const v = data.get(k) ?? null;
+      data.delete(k);
+      return Promise.resolve(v);
+    }),
+  };
+}
+
 describe('LinkedIn API helpers', () => {
   it('asks for sign-in and member posts, with the state', () => {
     const url = new URL(linkedinAuthUrl('cid', 'https://b/cb', 'st'));
@@ -209,6 +226,7 @@ describe('LinkedinService', () => {
       queue,
       events,
       config as any,
+      connectRedis() as any,
       posters,
     );
     return { service, prisma, queue, events, subscriptions };
@@ -248,9 +266,9 @@ describe('LinkedinService', () => {
         ),
       ) as never;
 
-    await expect(service.complete('code-1', state)).resolves.toEqual({
-      name: 'Awa Mbemba',
-    });
+    await expect(
+      service.complete('code-1', state, { profileId: 'p-1', memberId: 'm-7' }),
+    ).resolves.toEqual({ name: 'Awa Mbemba' });
     const call = prisma.businessLinkedinAccount.upsert.mock.calls[0][0];
     expect(call.where).toEqual({
       business_id_person: { business_id: 'biz-1', person: 'm-7' },
@@ -259,13 +277,27 @@ describe('LinkedinService', () => {
     expect(crypto.open(call.create.access_token_enc)).toBe('li-token');
   });
 
+  it('connects only in the session that asked for the link', async () => {
+    const { service, prisma } = make();
+    const state = new URL(
+      (await service.connectUrl('p-1', 'm-7')).url,
+    ).searchParams.get('state')!;
+    global.fetch = jest.fn() as never;
+    // The holder's session, not the member who asked.
+    await expect(
+      service.complete('code-1', state, { profileId: 'p-1', memberId: null }),
+    ).rejects.toThrow('session that asked');
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(prisma.businessLinkedinAccount.upsert).not.toHaveBeenCalled();
+  });
+
   it('refuses a state that is not its own', async () => {
     const { service } = make();
     const forged = await jwt.signAsync(
       { b: 'biz-1', p: 'holder', n: 'x' },
       { audience: 'rabotka-mailbox-connect', expiresIn: '10m' },
     );
-    await expect(service.complete('code', forged)).rejects.toBeInstanceOf(
+    await expect(service.complete('code', forged, null)).rejects.toBeInstanceOf(
       BadRequestException,
     );
   });

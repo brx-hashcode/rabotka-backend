@@ -61,6 +61,7 @@ const POOL_KIND = new ParseEnumPipe({
   cv: 'cv',
 } as const);
 import { STATS_PERIODS } from './business-stats';
+import { OpenToBlockedBusiness } from '../auth/decorators/open-to-blocked-business.decorator';
 
 /**
  * The business dashboard's own routes. Guarded at class level, so no route
@@ -332,6 +333,7 @@ export class BusinessController {
   }
 
   @Post('me/documents')
+  @OpenToBlockedBusiness()
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @UseInterceptors(
     FileInterceptor('file', {

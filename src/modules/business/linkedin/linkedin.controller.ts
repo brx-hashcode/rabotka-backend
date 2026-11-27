@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Inject,
   Logger,
   Param,
   ParseUUIDPipe,
@@ -17,7 +18,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { ProfileAuthGuard } from '../../auth/guards/profile-auth.guard';
 import { BusinessProfileGuard } from '../../auth/guards/business-profile.guard';
 import { KycVerifiedGuard } from '../../auth/guards/kyc-verified.guard';
@@ -29,7 +30,14 @@ import {
   linkedinCallbackPage,
   type LinkedinCallbackStatus,
 } from './linkedin-callback-page';
-import { LinkedinService } from './linkedin.service';
+import { LINKEDIN_SESSION_MISMATCH, LinkedinService } from './linkedin.service';
+import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
+import type Redis from 'ioredis';
+import { PrismaService } from '../../../common/services/prisma/prisma.service';
+import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
+import { callbackSession } from '../connect-session';
+import { OpenToBlockedBusiness } from '../../auth/decorators/open-to-blocked-business.decorator';
 
 /**
  * The signed-in person's own LinkedIn, and the offers posted on it. An
@@ -58,6 +66,7 @@ export class LinkedinController {
   }
 
   @Delete()
+  @OpenToBlockedBusiness()
   @ApiOperation({ summary: 'Disconnect its LinkedIn account' })
   disconnect(@Req() req: ProfileAuthenticatedRequest) {
     return this.linkedin.disconnect(req.user.profileId, req.user.memberId);
@@ -106,7 +115,13 @@ export class LinkedinController {
 export class LinkedinCallbackController {
   private readonly logger = new Logger(LinkedinCallbackController.name);
 
-  constructor(private readonly linkedin: LinkedinService) {}
+  constructor(
+    private readonly linkedin: LinkedinService,
+    private readonly jwt: JwtService,
+    private readonly config: ConfigService,
+    private readonly prisma: PrismaService,
+    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
+  ) {}
 
   @Public()
   @Get('callback')
@@ -116,6 +131,7 @@ export class LinkedinCallbackController {
     @Query('code') code: string | undefined,
     @Query('state') state: string | undefined,
     @Query('error') error: string | undefined,
+    @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
     let status: LinkedinCallbackStatus = 'error';
@@ -126,9 +142,21 @@ export class LinkedinCallbackController {
       status = 'denied';
     } else if (code && state && !error) {
       try {
-        await this.linkedin.complete(code, state);
+        const session = await callbackSession(
+          {
+            jwt: this.jwt,
+            config: this.config,
+            redis: this.redis,
+            prisma: this.prisma,
+          },
+          req,
+        );
+        await this.linkedin.complete(code, state, session);
         status = 'connected';
       } catch (err) {
+        if (err instanceof Error && err.message === LINKEDIN_SESSION_MISMATCH) {
+          status = 'session';
+        }
         this.logger.warn(`LinkedIn connection failed: ${String(err)}`);
       }
     }

@@ -31,6 +31,7 @@ import { BusinessProfileGuard } from '../../auth/guards/business-profile.guard';
 import type { ProfileAuthenticatedRequest } from '../../auth/guards/jwt-auth.guard';
 import { ProfileAuthGuard } from '../../auth/guards/profile-auth.guard';
 import { INVITED_ROLES, TeamService, type InvitedRole } from './team.service';
+import { OpenToBlockedBusiness } from '../../auth/decorators/open-to-blocked-business.decorator';
 
 const ROLE_MESSAGE = {
   message:
@@ -152,6 +153,7 @@ export class TeamController {
   }
 
   @Delete('team/:id')
+  @OpenToBlockedBusiness()
   @ApiOperation({ summary: 'Remove a member: its sessions stop at once' })
   async remove(
     @Req() req: ProfileAuthenticatedRequest,

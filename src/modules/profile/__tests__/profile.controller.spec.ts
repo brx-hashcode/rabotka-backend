@@ -252,7 +252,11 @@ describe('ProfileController', () => {
       };
       beforeEach(() => {
         redis.get.mockResolvedValue(
-          JSON.stringify({ entry: 'business', email: 'contact@ecole.cg' }),
+          JSON.stringify({
+            entry: 'business',
+            email: 'contact@ecole.cg',
+            phone: businessDto.phone,
+          }),
         );
       });
 
@@ -276,6 +280,16 @@ describe('ProfileController', () => {
             mockRes(),
           ),
         ).rejects.toThrow(ForbiddenException);
+      });
+
+      it('refuses a number its WhatsApp code did not prove', async () => {
+        await expect(
+          controller.createProfile(
+            { ...businessDto, phone: '+242069999999' } as any,
+            mockRes(),
+          ),
+        ).rejects.toThrow('code reçu sur WhatsApp');
+        expect(profileService.createProfile).not.toHaveBeenCalled();
       });
 
       it('refuses without the business', async () => {

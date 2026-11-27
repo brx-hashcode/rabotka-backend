@@ -39,6 +39,7 @@ const CLAIM_SELECT = {
   first_name: true,
   last_name: true,
   phone: true,
+  phone_verified_at: true,
   email: true,
   avatar_url: true,
   city: true,

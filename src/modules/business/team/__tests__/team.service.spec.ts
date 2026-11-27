@@ -81,8 +81,14 @@ describe('TeamService', () => {
       },
       profile: { findFirst: jest.fn().mockResolvedValue(null) },
       businessActivity: { create: jest.fn().mockResolvedValue({}) },
-      // The writes of a removal run together.
-      $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+      // The writes of a removal run together; a seat is taken and written
+      // in one transaction, under the business's seat lock.
+      $transaction: jest.fn((arg: unknown) =>
+        typeof arg === 'function'
+          ? (arg as (tx: unknown) => Promise<unknown>)(prisma)
+          : Promise.all(arg as Promise<unknown>[]),
+      ),
+      $executeRaw: jest.fn().mockResolvedValue(1),
     };
     (prisma.business as any).update = jest.fn().mockResolvedValue({});
     limits = { ADMIN: 1, RECRUITER: 2, REVIEWER: 0 };
@@ -189,6 +195,7 @@ describe('TeamService', () => {
         'ADMIN',
         expect.any(Function),
         undefined,
+        expect.anything(),
       );
       taken.ADMIN = 1;
       await expect(
@@ -245,6 +252,23 @@ describe('TeamService', () => {
       );
     });
 
+    it("counts and takes a seat under the business's seat lock", async () => {
+      const order: string[] = [];
+      prisma.$executeRaw.mockImplementation(() => {
+        order.push('lock');
+        return Promise.resolve(1);
+      });
+      const consume = subscriptions.consumeSeat.getMockImplementation();
+      subscriptions.consumeSeat.mockImplementation((...args: unknown[]) => {
+        order.push('count');
+        return consume(...args);
+      });
+      await service.invite(admin, dto);
+      expect(order).toEqual(['lock', 'count']);
+      // The count reads through the transaction that writes the member.
+      expect(subscriptions.consumeSeat.mock.calls[0][4]).toBe(prisma);
+    });
+
     it('invites a removed member again on the same row', async () => {
       prisma.businessMember.findUnique.mockResolvedValueOnce(
         row({ id: 'old', status: 'REMOVED' }),
@@ -278,6 +302,23 @@ describe('TeamService', () => {
       await expect(
         service.removeByAdmin(BUSINESS, 'elsewhere'),
       ).rejects.toThrow(/introuvable/);
+    });
+
+    it("closes the removed member's open sockets, not the holder's", async () => {
+      const events = { emit: jest.fn() };
+      const withEvents = new TeamService(
+        prisma,
+        subscriptions,
+        mail,
+        {} as any,
+        events as any,
+      );
+      prisma.businessMember.findFirst.mockResolvedValueOnce(row({ id: 'm-2' }));
+      await withEvents.removeByAdmin(BUSINESS, 'm-2');
+      expect(events.emit).toHaveBeenCalledWith('session.ended', {
+        kind: 'member',
+        id: 'm-2',
+      });
     });
 
     it("resends an invitation in the organisation's name", async () => {
@@ -318,6 +359,7 @@ describe('TeamService', () => {
         'REVIEWER',
         expect.any(Function),
         'm-2',
+        expect.anything(),
       );
     });
 

@@ -5,7 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { ContactRecordOrigin, ProfileType } from '@prisma/client';
+import { AccountStatus, ContactRecordOrigin, ProfileType } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { StorageService } from '../../common/services/storage/storage.service';
@@ -298,6 +298,8 @@ export class PortfolioService {
         city: true,
         country_name: true,
         profile_type: true,
+        deleted_at: true,
+        status: true,
         portfolio_items: {
           orderBy: { created_at: 'desc' },
           include: { images: { orderBy: { position: 'asc' } } },
@@ -305,7 +307,16 @@ export class PortfolioService {
       },
     });
 
-    if (!profile || profile.profile_type !== ProfileType.WORKER) {
+    // An archived or banned worker has no public page; a suspended one keeps
+    // it, as businesses keep their contact through a suspension, and a
+    // pending one needs it while their account is checked. The slug stays,
+    // so a restore brings the link back.
+    if (
+      !profile ||
+      profile.profile_type !== ProfileType.WORKER ||
+      profile.deleted_at ||
+      profile.status === AccountStatus.BANNED
+    ) {
       throw new NotFoundException('Portfolio introuvable');
     }
 

@@ -12,6 +12,7 @@ import { BusinessProfileGuard } from '../../auth/guards/business-profile.guard';
 import type { ProfileAuthenticatedRequest } from '../../auth/guards/jwt-auth.guard';
 import { ProfileAuthGuard } from '../../auth/guards/profile-auth.guard';
 import { CvRemovalService } from './cv-removal.service';
+import { OpenToBlockedBusiness } from '../../auth/decorators/open-to-blocked-business.decorator';
 
 /**
  * « Supprimer le CV » of one candidate. Not for an Évaluateur (team-access.ts
@@ -22,6 +23,8 @@ import { CvRemovalService } from './cv-removal.service';
 @ApiBearerAuth()
 @Controller('business/me')
 @UseGuards(ProfileAuthGuard, BusinessProfileGuard)
+// Deleting a CV only takes data away: a blocked business may still do it.
+@OpenToBlockedBusiness()
 export class CvRemovalController {
   constructor(private readonly removal: CvRemovalService) {}
 

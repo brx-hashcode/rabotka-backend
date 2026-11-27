@@ -102,3 +102,22 @@ export class SignupVerifyOtpDto {
   @Matches(/^\d{6}$/, { message: 'Le code doit contenir 6 chiffres' })
   code: string;
 }
+
+/** A business sign-up's own number (code on WhatsApp); see signup/phone/*. */
+export class BusinessSignupPhoneDto {
+  @ApiProperty({
+    description: 'The organisation number, international (+242…)',
+    example: '+242069917686',
+  })
+  @IsString()
+  @MaxLength(30)
+  phone: string;
+}
+
+export class BusinessSignupPhoneVerifyDto extends BusinessSignupPhoneDto {
+  @ApiProperty({ description: '6-digit code received on WhatsApp' })
+  @IsString()
+  @Length(6, 6, { message: 'Le code doit contenir 6 chiffres' })
+  @Matches(/^\d{6}$/, { message: 'Le code doit contenir 6 chiffres' })
+  code: string;
+}

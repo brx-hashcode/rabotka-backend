@@ -34,7 +34,11 @@ function makePrisma() {
     },
     assignment: { updateMany: jest.fn() },
     jobOffer: { findUnique: jest.fn(), update: jest.fn() },
-    contactUnlockAttempt: { update: jest.fn() },
+    contactUnlockAttempt: {
+      update: jest.fn(),
+      // A close claims the attempt first: 1 = still pending as it was read.
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
     // The fill path locks the offer row before counting, so two concurrent
     // final payments cannot both decide the offer is full.
     $executeRaw: jest.fn().mockResolvedValue(0),
@@ -646,6 +650,21 @@ describe('ContactUnlockService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('refunds nothing when the attempt was closed while being rejected', async () => {
+      prisma.contactUnlockAttempt.findUnique.mockResolvedValue({
+        ...fullAttempt,
+        employer_paid: false,
+        worker_paid: true,
+      });
+      prisma._txMock.contactUnlockAttempt.updateMany.mockResolvedValueOnce({
+        count: 0,
+      });
+      await expect(
+        service.rejectPendingAttemptByApplication('app-1', 'emp-1'),
+      ).rejects.toThrow('ne peut plus être rejetée');
+      expect(walletService.refundProfileWallet).not.toHaveBeenCalled();
+    });
+
     it('rejects by employer and refunds worker', async () => {
       const attempt = {
         ...fullAttempt,
@@ -752,9 +771,11 @@ describe('ContactUnlockService', () => {
         expect.anything(),
         'contact_unlock_attempt',
         'attempt-1',
+        expect.anything(),
       );
       expect(walletService.refundProfileWallet).not.toHaveBeenCalledWith(
         'emp-1',
+        expect.anything(),
         expect.anything(),
         expect.anything(),
         expect.anything(),
@@ -794,11 +815,30 @@ describe('ContactUnlockService', () => {
         expect.anything(),
         'contact_unlock_attempt',
         'attempt-1',
+        expect.anything(),
       );
     });
   });
 
   describe('abortPendingUnlockByApplication()', () => {
+    it('gives nothing back once the attempt was closed meanwhile', async () => {
+      prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
+        makeAttempt({
+          employer_paid: true,
+          worker_paid: true,
+          job_offer: { quantity: 1, employer_unlock_paid: false },
+        }),
+      );
+      // The expiry scan (or a payment) got there first.
+      prisma._txMock.contactUnlockAttempt.updateMany.mockResolvedValueOnce({
+        count: 0,
+      });
+
+      await service.abortPendingUnlockByApplication('app-1');
+
+      expect(walletService.refundProfileWallet).not.toHaveBeenCalled();
+    });
+
     it('multi-person job: does not refund an employer fee paid at job level', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
         makeAttempt({
@@ -819,6 +859,7 @@ describe('ContactUnlockService', () => {
         expect.anything(),
         'contact_unlock_attempt',
         'attempt-1',
+        expect.anything(),
       );
     });
 
@@ -841,6 +882,7 @@ describe('ContactUnlockService', () => {
         expect.anything(),
         'contact_unlock_attempt',
         'attempt-1',
+        expect.anything(),
       );
     });
   });
@@ -937,6 +979,25 @@ describe('ContactUnlockService', () => {
       expect(result).toEqual([]);
     });
 
+    it('refunds nothing for an attempt a cancellation closed meanwhile', async () => {
+      const attempt = {
+        ...makeAttempt({ employer_paid: true, worker_paid: true }),
+        job_offer: { quantity: 1, employer_unlock_paid: false },
+      };
+      prisma.contactUnlockAttempt.findMany.mockResolvedValue([attempt]);
+      prisma.$transaction.mockImplementation((cb) => cb(prisma._txMock));
+      prisma._txMock.contactUnlockAttempt.updateMany.mockResolvedValueOnce({
+        count: 0,
+      });
+
+      const result = await service.processExpiredAttempts();
+
+      expect(walletService.refundProfileWallet).not.toHaveBeenCalled();
+      expect(result).toEqual([]);
+      // Not ours: its application is left to whoever closed it.
+      expect(prisma._txMock.application.update).not.toHaveBeenCalled();
+    });
+
     it('converts worker-paid, employer-not-paid to credit', async () => {
       const attempt = {
         ...makeAttempt({ employer_paid: false, worker_paid: true }),
@@ -963,6 +1024,7 @@ describe('ContactUnlockService', () => {
         WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
         'contact_unlock_attempt',
         'attempt-1',
+        expect.anything(),
       );
       expect(result).toHaveLength(1);
       expect(result[0].profileId).toBe('worker-1');
@@ -984,6 +1046,7 @@ describe('ContactUnlockService', () => {
         WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
         'contact_unlock_attempt',
         'attempt-1',
+        expect.anything(),
       );
       expect(result[0].profileId).toBe('emp-1');
     });
@@ -1000,8 +1063,14 @@ describe('ContactUnlockService', () => {
       const result = await service.processExpiredAttempts();
       expect(walletService.refundProfileWallet).not.toHaveBeenCalled();
       expect(result).toHaveLength(0);
-      expect(prisma.contactUnlockAttempt.update).toHaveBeenCalledWith(
+      // Claimed as EXPIRED only while still pending as read.
+      expect(
+        prisma._txMock.contactUnlockAttempt.updateMany,
+      ).toHaveBeenCalledWith(
         expect.objectContaining({
+          where: expect.objectContaining({
+            status: { in: expect.arrayContaining(['PENDING_BOTH']) },
+          }),
           data: expect.objectContaining({
             status: ContactUnlockStatus.EXPIRED,
           }),
@@ -1025,6 +1094,7 @@ describe('ContactUnlockService', () => {
         expect.any(String),
         expect.any(String),
         expect.any(String),
+        expect.anything(),
       );
       expect(result[0].profileId).toBe('worker-1');
     });

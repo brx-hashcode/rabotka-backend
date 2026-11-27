@@ -6,7 +6,7 @@ import {
 } from '@nestjs/websockets';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
-import { isSessionRevoked } from '../auth/session-revocation';
+import { memberRoom, socketProfile } from '../auth/socket-session';
 import { Logger, Inject } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -18,6 +18,7 @@ import {
   type SessionEndedEvent,
 } from '../../common/events/session-ended.events';
 import { OnEvent } from '@nestjs/event-emitter';
+import { PrismaService } from '../../common/services/prisma/prisma.service';
 
 /** What moved. The client turns this into the query keys it needs to drop. */
 export type JobEvent = {
@@ -65,6 +66,7 @@ export class JobEventsGateway
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     @Inject(REDIS_CONNECTION) private readonly redis: Redis,
+    private readonly prisma: PrismaService,
   ) {}
 
   async handleConnection(client: Socket): Promise<void> {
@@ -108,13 +110,10 @@ export class JobEventsGateway
         secret: this.configService.get<string>('JWT_SECRET'),
       });
 
-      // Admins have no missions — only profile tokens map to a room.
-      if ((payload.type ?? 'profile') !== 'profile') return null;
-
-      // A session the user signed out of must not keep its sockets either.
-      if (await isSessionRevoked(this.redis, payload.jti)) return null;
-
-      return payload.sub || null;
+      // The same questions as the HTTP guards: see socket-session.ts.
+      const profileId = await socketProfile(this.redis, this.prisma, payload);
+      if (profileId && payload.mid) void client.join(memberRoom(payload.mid));
+      return profileId;
     } catch {
       return null;
     }
@@ -142,6 +141,11 @@ export class JobEventsGateway
   /** Disconnects the sockets of a session that just ended (#864). */
   @OnEvent(SESSION_ENDED)
   evictEndedSession(event: SessionEndedEvent): void {
+    if (event.kind === 'member') {
+      // A removed team member: only their sockets, not the holder's.
+      this.server?.in(memberRoom(event.id)).disconnectSockets(true);
+      return;
+    }
     if (event.kind !== 'profile') return;
     this.server?.in(`profile:${event.id}`).disconnectSockets(true);
   }

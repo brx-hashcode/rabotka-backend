@@ -307,6 +307,40 @@ describe('ProfileService', () => {
       );
     });
 
+    describe("a business's sign-in address", () => {
+      const holder = {
+        ...baseProfile,
+        is_business: true,
+        email: 'boss@acme.cg',
+      };
+
+      it('is refused, unproven, even from the holder', async () => {
+        prisma.profile.findUnique.mockResolvedValueOnce(holder);
+        await expect(
+          service.updateProfile('p-1', { email: 'member@other.cg' }),
+        ).rejects.toThrow('support Rabotka');
+        expect(prisma.profile.update).not.toHaveBeenCalled();
+      });
+
+      it('lets the rest of the form through, the same address included', async () => {
+        prisma.profile.findUnique.mockResolvedValueOnce(holder);
+        await service.updateProfile('p-1', {
+          email: 'boss@acme.cg',
+          description: 'Recrute',
+        });
+        expect(prisma.profile.update).toHaveBeenCalled();
+      });
+
+      it('stays editable for a worker', async () => {
+        prisma.profile.findUnique.mockResolvedValueOnce({
+          ...baseProfile,
+          is_business: false,
+        });
+        await service.updateProfile('p-1', { email: 'new@example.com' });
+        expect(prisma.profile.update).toHaveBeenCalled();
+      });
+    });
+
     /**
      * The optional second number, unlike `phone`, which this DTO omits: the
      * WhatsApp number is the login identity and changing it needs an OTP
@@ -726,7 +760,11 @@ describe('ProfileService', () => {
         expect(result).toEqual({ success: true, phone: NEW });
         expect(prisma.profile.update).toHaveBeenCalledWith(
           expect.objectContaining({
-            data: { phone: NEW, whatsapp_connected: true },
+            data: {
+              phone: NEW,
+              whatsapp_connected: true,
+              phone_verified_at: expect.any(Date),
+            },
           }),
         );
       });
@@ -829,6 +867,42 @@ describe('ProfileService', () => {
       await expect(service.updateProfileByAdmin('missing', {})).rejects.toThrow(
         'Profil non trouvé',
       );
+    });
+
+    it('drops the proof of a number an admin types by hand', async () => {
+      await service.updateProfileByAdmin('p-1', { phone: '+242069999999' });
+      expect(prisma.profile.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            phone: '+242069999999',
+            phone_verified_at: null,
+          }),
+        }),
+      );
+    });
+
+    it("refuses another business's member as a business's sign-in address", async () => {
+      const findFirst = jest.fn().mockResolvedValue({ id: 'm-9' });
+      (prisma as unknown as Record<string, unknown>).businessMember = {
+        findFirst,
+      };
+      prisma.profile.findUnique.mockResolvedValueOnce({
+        ...baseProfile,
+        profile_type: 'EMPLOYER',
+        is_business: true,
+      });
+      await expect(
+        service.updateProfileByAdmin('p-1', { email: 'Member@Other.cg' }),
+      ).rejects.toThrow('autre entreprise');
+      expect(findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            email: 'member@other.cg',
+            business: { profile_id: { not: 'p-1' } },
+          }),
+        }),
+      );
+      expect(prisma.profile.update).not.toHaveBeenCalled();
     });
 
     it('throws ConflictException on P2002 with phone field (array target)', async () => {

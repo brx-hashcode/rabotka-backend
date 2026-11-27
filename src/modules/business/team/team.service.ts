@@ -7,8 +7,14 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  SESSION_ENDED,
+  type SessionEndedEvent,
+} from '../../../common/events/session-ended.events';
 import { mailLanguage, type MailLanguage } from '../../mail/templates/layout';
 import {
   Prisma,
@@ -76,6 +82,11 @@ export function memberView(m: BusinessMember) {
  * acts as the business's profile (see AuthService.verifyBusinessOtp); what it
  * may do is `team-access.ts`.
  */
+/** One business's seats are counted and taken one change at a time. */
+function lockSeats(tx: Prisma.TransactionClient, businessId: string) {
+  return tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`team-seats:${businessId}`}))`;
+}
+
 @Injectable()
 export class TeamService {
   private readonly logger = new Logger(TeamService.name);
@@ -85,6 +96,7 @@ export class TeamService {
     private readonly subscriptions: BusinessSubscriptionService,
     private readonly mail: MailService,
     private readonly layout: LayoutService,
+    @Optional() private readonly events?: EventEmitter2,
   ) {}
 
   /** The business, and the token's member or else the account holder. */
@@ -275,31 +287,38 @@ export class TeamService {
     }
 
     this.assertInvitedRole(dto.role);
-    const seat = await this.takeSeat(actor.businessId, dto.role);
 
-    const now = new Date();
-    const data = {
-      name,
-      role: dto.role,
-      status: 'INVITED' as const,
-      emails_on: dto.role !== 'REVIEWER',
-      // Until they open the app themselves: the language of who invites them.
-      language: mailLanguage(actor.member.language),
-      invited_by_member_id: actor.member.id,
-      invited_at: now,
-      joined_at: null,
-      last_seen_at: null,
-      removed_at: null,
-      seat_subscription_id: seat.subscriptionId,
-    };
-    const member = here
-      ? await this.prisma.businessMember.update({
-          where: { id: here.id },
-          data,
-        })
-      : await this.prisma.businessMember.create({
-          data: { ...data, business_id: actor.businessId, email },
-        });
+    const member = await this.prisma.$transaction(async (tx) => {
+      // Counted and written under the business's seat lock: two invitations
+      // sent together both saw a free seat and both took it.
+      await lockSeats(tx, actor.businessId);
+      const seat = await this.takeSeat(
+        actor.businessId,
+        dto.role,
+        undefined,
+        tx,
+      );
+      const now = new Date();
+      const data = {
+        name,
+        role: dto.role,
+        status: 'INVITED' as const,
+        emails_on: dto.role !== 'REVIEWER',
+        // Until they open the app themselves: the language of who invites them.
+        language: mailLanguage(actor.member.language),
+        invited_by_member_id: actor.member.id,
+        invited_at: now,
+        joined_at: null,
+        last_seen_at: null,
+        removed_at: null,
+        seat_subscription_id: seat.subscriptionId,
+      };
+      return here
+        ? tx.businessMember.update({ where: { id: here.id }, data })
+        : tx.businessMember.create({
+            data: { ...data, business_id: actor.businessId, email },
+          });
+    });
     await this.sendInvite(actor.businessId, member, actor.member.name);
     return memberView(member);
   }
@@ -335,10 +354,14 @@ export class TeamService {
     this.assertHolderFor(actor, role, member);
     if (member.role === role) return memberView(member);
     // Its old place is freed by the move itself: the team counts people.
-    const seat = await this.takeSeat(actor.businessId, role, member.id);
-    const updated = await this.prisma.businessMember.update({
-      where: { id },
-      data: { role, seat_subscription_id: seat.subscriptionId },
+    // Under the seat lock, like an invitation.
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await lockSeats(tx, actor.businessId);
+      const seat = await this.takeSeat(actor.businessId, role, member.id, tx);
+      return tx.businessMember.update({
+        where: { id },
+        data: { role, seat_subscription_id: seat.subscriptionId },
+      });
     });
     return memberView(updated);
   }
@@ -501,6 +524,7 @@ export class TeamService {
     businessId: string,
     role: InvitedRole,
     excludeMemberId?: string,
+    db?: Prisma.TransactionClient,
   ) {
     const [one, many] = ROLE_PLURAL[role];
     return this.subscriptions.consumeSeat(
@@ -511,6 +535,7 @@ export class TeamService {
           ? `Votre formule n’inclut pas d’${many}. Changez de formule pour en inviter.`
           : `Votre formule permet ${limit} ${limit > 1 ? many : one} dans l’équipe, déjà atteint. Retirez-en un ou changez de formule.`,
       excludeMemberId,
+      db,
     );
   }
 
@@ -535,6 +560,11 @@ export class TeamService {
         data: { calendar_token: null },
       }),
     ]);
+    // Their HTTP calls stop at the next request; their open sockets now.
+    this.events?.emit(SESSION_ENDED, {
+      kind: 'member',
+      id: member.id,
+    } satisfies SessionEndedEvent);
   }
 
   private assertAdmin(actor: TeamActor) {
