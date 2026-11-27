@@ -5,6 +5,10 @@ import {
   extractCvText,
   foldWhitespace,
 } from '../cv-files';
+import {
+  buildZip,
+  minimalDocx,
+} from '../../../../common/utils/__tests__/zip-fixture';
 
 const pad = (head: number[]) =>
   Buffer.concat([Buffer.from(head), Buffer.alloc(16)]);
@@ -20,9 +24,18 @@ describe('cvFileType', () => {
   });
 
   it('takes a zip as Word only when declared as Word', () => {
-    const zip = pad([0x50, 0x4b, 0x03, 0x04]);
+    const zip = minimalDocx();
     expect(cvFileType(zip, DOCX_MIME)).toBe(DOCX_MIME);
     expect(cvFileType(zip, 'application/zip')).toBeNull();
+  });
+
+  it('refuses a Word file that inflates past the parser bounds', () => {
+    const bomb = buildZip({
+      'word/document.xml': 'a'.repeat(10 * 1024 * 1024),
+    });
+    expect(cvFileType(bomb, DOCX_MIME)).toBeNull();
+    // Only a zip signature, no readable zip behind it.
+    expect(cvFileType(pad([0x50, 0x4b, 0x03, 0x04]), DOCX_MIME)).toBeNull();
   });
 
   it('refuses anything else', () => {
@@ -54,5 +67,20 @@ describe('the internal text CV', () => {
         TEXT_MIME,
       ),
     ).toBe('Awa Ngoma\ncomptable');
+  });
+});
+
+describe('extractCvText on Word files', () => {
+  it('reads an ordinary Word file', async () => {
+    expect(await extractCvText(minimalDocx('Awa Ngoma'), DOCX_MIME)).toBe(
+      'Awa Ngoma',
+    );
+  });
+
+  it('never hands an oversized one to mammoth', async () => {
+    const bomb = buildZip({
+      'word/document.xml': 'a'.repeat(10 * 1024 * 1024),
+    });
+    expect(await extractCvText(bomb, DOCX_MIME)).toBe('');
   });
 });

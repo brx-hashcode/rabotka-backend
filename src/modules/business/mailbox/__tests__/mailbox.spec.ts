@@ -12,6 +12,7 @@ import { cvKind, isCvAttachment, senderName } from '../cv-attachments';
 import { callbackPage } from '../mailbox-callback-page';
 import { MailboxService, redirectUri } from '../mailbox.service';
 import { MailboxAuthError } from '../providers/mail-provider';
+import { minimalDocx } from '../../../../common/utils/__tests__/zip-fixture';
 
 const KEY = randomBytes(32).toString('base64');
 
@@ -248,10 +249,7 @@ describe('MailboxService', () => {
     gmail.attachment.mockResolvedValue({
       name: 'cv.docx',
       mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      buffer: Buffer.concat([
-        Buffer.from([0x50, 0x4b, 0x03, 0x04]),
-        Buffer.alloc(30),
-      ]),
+      buffer: minimalDocx(),
     });
     await expect(
       service.preview('p-1', 'mb-1', 'm1', '3'),
