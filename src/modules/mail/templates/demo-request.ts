@@ -1,14 +1,10 @@
-import { displayPhone, emailButton, escapeHtml } from './layout';
+import { emailButton, escapeHtml } from './layout';
 
 export const DEMO_REQUEST_RECEIVED_SUBJECT =
   'Votre demande de démo Rabotka Business est bien reçue';
 
 /** The promise made to every requester, in the e-mail and its preview. */
 export const DEMO_REQUEST_DELAY = 'sous 24 à 48 h ouvrées';
-
-/** The form may send the prefix without its « + » (« 242 069917686 »). */
-const withPlus = (phone: string) =>
-  phone.trim().startsWith('+') ? phone.trim() : `+${phone.trim()}`;
 
 /** A headcount bracket (BUSINESS_SIZES) as people say it. */
 export function companySizeLabel(size: string): string {
@@ -52,43 +48,23 @@ function step(n: number, text: string): string {
 }
 
 /**
- * To the person who asked for a demo, right after the form: what was
+ * To the person who asked for a demo, right after the form: that it was
  * received, and what happens next. The only e-mail a demo request sends;
- * staff see it in the admin bell.
+ * staff see the whole request in the admin bell.
+ *
+ * Nothing the visitor typed goes in it: the address is not verified, and
+ * the form sent Rabotka-branded mail carrying anyone's words to anyone
+ * (security audit run 2). Only the address itself and what was chosen from
+ * fixed lists (country, size, features).
  */
 export function demoRequestReceivedEmail(params: {
-  firstName: string;
-  lastName: string;
-  jobTitle: string;
   email: string;
-  company: string;
   country: string;
   companySize: string;
-  phone: string;
   interests: string[];
-  message: string | null;
   siteUrl: string;
 }): string {
-  const contact = [
-    `${params.firstName} ${params.lastName}`.trim(),
-    params.jobTitle.trim(),
-  ]
-    .filter(Boolean)
-    .map(escapeHtml)
-    .join(' · ');
-  const message = params.message?.trim()
-    ? escapeHtml(params.message.trim()).replace(/\r?\n/g, '<br />')
-    : null;
-
-  // One field per line: side by side, a phone breaks « Congo-Brazzaville »
-  // and the number in two.
   const rows: Array<[string, string]> = [
-    ['Entreprise', escapeHtml(params.company)],
-    ['Contact', contact],
-    [
-      'Téléphone',
-      `<span style="white-space:nowrap;">${escapeHtml(displayPhone(withPlus(params.phone)))}</span>`,
-    ],
     ['E-mail', escapeHtml(params.email)],
     ['Pays', escapeHtml(params.country)],
     ['Effectif', escapeHtml(companySizeLabel(params.companySize))],
@@ -96,22 +72,16 @@ export function demoRequestReceivedEmail(params: {
   if (params.interests.length) {
     rows.push(['Ce que vous souhaitez voir', tags(params.interests)]);
   }
-  if (message) {
-    rows.push([
-      'Votre message',
-      `<span style="font-weight:400;">${message}</span>`,
-    ]);
-  }
   const recap = rows
     .map(([label, value], i) => recapRow(label, value, i === rows.length - 1))
     .join('');
 
   return `
-    <p>Bonjour ${escapeHtml(params.firstName)},</p>
+    <p>Bonjour,</p>
 
     <p>
       Merci pour votre intérêt pour Rabotka Business. Votre demande de démo
-      pour <strong>${escapeHtml(params.company)}</strong> est bien reçue.
+      est bien reçue.
     </p>
 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0;border-collapse:separate;background:#f1f4f8;border-radius:12px;">

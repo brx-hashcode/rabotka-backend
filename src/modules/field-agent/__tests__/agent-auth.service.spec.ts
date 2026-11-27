@@ -5,7 +5,7 @@ import { AgentAuthService } from '../agent-auth.service';
 
 jest.mock('../../auth/otp-store', () => ({
   assertCanSendOtp: jest.fn().mockResolvedValue(undefined),
-  consumeOtp: jest.fn().mockResolvedValue(true),
+  consumeOtpWithLockout: jest.fn().mockResolvedValue(true),
   generateOtp: jest.fn().mockReturnValue('123456'),
   storeOtp: jest.fn().mockResolvedValue(undefined),
 }));
@@ -133,10 +133,28 @@ describe('AgentAuthService', () => {
     });
 
     it('refuses a wrong code', async () => {
-      (otpStore.consumeOtp as jest.Mock).mockResolvedValueOnce(false);
+      (otpStore.consumeOtpWithLockout as jest.Mock).mockResolvedValueOnce(
+        false,
+      );
       await expect(
         service.verifyOtp('awa@example.com', '000000'),
       ).rejects.toThrow(UnauthorizedException);
+      expect(jwt.sign).not.toHaveBeenCalled();
+    });
+
+    it('counts a wrong code toward the daily lockout, like every code login', async () => {
+      (otpStore.consumeOtpWithLockout as jest.Mock).mockRejectedValueOnce(
+        new Error('Trop de codes incorrects'),
+      );
+      await expect(
+        service.verifyOtp('awa@example.com', '123456'),
+      ).rejects.toThrow('Trop de codes incorrects');
+      expect(otpStore.consumeOtpWithLockout).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.stringContaining('awa@example.com'),
+        expect.stringContaining('awa@example.com'),
+        '123456',
+      );
       expect(jwt.sign).not.toHaveBeenCalled();
     });
 

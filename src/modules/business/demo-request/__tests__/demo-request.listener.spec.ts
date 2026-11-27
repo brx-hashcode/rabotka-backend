@@ -53,14 +53,22 @@ describe('DemoRequestListener', () => {
     expect(mail.subject).toBe(
       'Votre demande de démo Rabotka Business est bien reçue',
     );
-    expect(mail.html).toContain('Boulangerie du Plateau');
+    // Nothing the visitor typed: the address is not verified, so the mail
+    // must not carry their words (names, company, phone, message).
+    for (const typed of [
+      'Boulangerie du Plateau',
+      'Awa',
+      'Mboko',
+      'Gérante',
+      '123 45 67',
+      'Nous recrutons',
+      'vendeuses',
+    ]) {
+      expect(mail.html).not.toContain(typed);
+    }
     expect(mail.html).toContain('Analyse de CV');
     expect(mail.html).toContain('6 à 20 salariés');
-    expect(mail.html).toContain('+242 06 123 45 67');
-    expect(mail.html).toContain('Awa Mboko · Gérante');
     expect(mail.html).toContain('awa@example.com');
-    // The message is escaped, its line breaks kept.
-    expect(mail.html).toContain('Nous recrutons<br />3 vendeuses &lt;vite&gt;');
     // Contacted, not called, within 24 to 48 working hours.
     expect(mail.html).toContain(
       'vous contacte <strong>sous 24 à 48 h ouvrées</strong>',

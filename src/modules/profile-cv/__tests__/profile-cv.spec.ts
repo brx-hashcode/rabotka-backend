@@ -66,6 +66,11 @@ function setup(
       update: jest.fn(),
       // No plan running: nothing opens by itself.
       findFirst: jest.fn().mockResolvedValue(null),
+      // Every worker still on Rabotka (not archived, not banned).
+      findMany: jest.fn((args: { where: { id: { in: string[] } } }) =>
+        Promise.resolve(args.where.id.in.map((id) => ({ id }))),
+      ),
+      count: jest.fn().mockResolvedValue(1),
     },
     profileCv: {
       findFirst: jest.fn().mockResolvedValue(live),
@@ -343,6 +348,13 @@ describe('ProfileCvService — the candidate sheet and the admin', () => {
     await expect(service.candidateFile('e1', 'w1')).resolves.toMatchObject({
       contentType: 'application/pdf',
     });
+  });
+
+  it('shows nothing of a worker the platform archived or banned, contact held or not', async () => {
+    const { service, prisma } = candidate({ unlocked: true, retained: 1 });
+    prisma.profile.findMany.mockResolvedValue([]);
+    prisma.profile.count.mockResolvedValue(0);
+    await expect(service.forCandidate('e1', 'w1')).resolves.toBeNull();
   });
 
   it('keeps it shut for a profile that never applied, plan or not', async () => {

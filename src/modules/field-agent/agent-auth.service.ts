@@ -20,7 +20,7 @@ import {
 import { AuthService } from '../auth/auth.service';
 import {
   assertCanSendOtp,
-  consumeOtp,
+  consumeOtpWithLockout,
   generateOtp,
   storeOtp,
 } from '../auth/otp-store';
@@ -116,7 +116,9 @@ export class AgentAuthService {
     meta?: { ipAddress?: string; userAgent?: string },
   ): Promise<AgentTokens> {
     const normalized = normalizeAgentEmail(email);
-    const matched = await consumeOtp(
+    // With the daily lockout every other code login has: 20 wrong codes in
+    // a day stop this address (security audit run 2).
+    const matched = await consumeOtpWithLockout(
       this.redis,
       `${OTP_KEY_PREFIX}${normalized}`,
       `${OTP_ATTEMPTS_KEY_PREFIX}${normalized}`,

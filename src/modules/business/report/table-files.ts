@@ -70,6 +70,17 @@ export async function tablesXlsx(file: TableFile): Promise<Buffer> {
 }
 
 /**
+ * Text a spreadsheet will not run. A cell starting with = + - @ (or a tab or
+ * a carriage return) is read as a formula, and candidates' names and answers
+ * come from anonymous visitors (security audit run 2). An apostrophe in
+ * front keeps it text. A plain phone number (+242 06…) stays as it is.
+ */
+export function inertText(text: string): string {
+  if (/^\+[\d\s]+$/.test(text)) return text;
+  return /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+}
+
+/**
  * The tables one after the other, each under its name, in the format a
  * French spreadsheet opens as is: `;` between cells, a decimal comma, and a
  * BOM so the accents survive.
@@ -77,7 +88,8 @@ export async function tablesXlsx(file: TableFile): Promise<Buffer> {
 export function tablesCsv(file: TableFile): string {
   const cell = (v: Cell) => {
     if (v === null) return '';
-    const text = typeof v === 'number' ? String(v).replace('.', ',') : v;
+    const text =
+      typeof v === 'number' ? String(v).replace('.', ',') : inertText(v);
     return /[;"\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
   };
   const line = (cells: Cell[]) => cells.map(cell).join(';');

@@ -11,6 +11,7 @@ import { Inject, Logger } from '@nestjs/common';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { isSessionRevoked } from '../auth/session-revocation';
+import { memberRoom, socketProfile } from '../auth/socket-session';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
@@ -87,6 +88,7 @@ export class ClaimCommentsGateway
       void client.join(
         `${principal.type === 'admin' ? 'admin' : 'profile'}:${principal.sub}`,
       );
+      if (principal.mid) void client.join(memberRoom(principal.mid));
     }
     this.logger.debug(`Client ${client.id} joined room ${room}`);
   }
@@ -104,9 +106,8 @@ export class ClaimCommentsGateway
     if (!payload?.sub) return false;
 
     try {
-      if (await isSessionRevoked(this.redis, payload.jti)) return false;
-
       if (payload.type === 'admin') {
+        if (await isSessionRevoked(this.redis, payload.jti)) return false;
         const admin = await this.prisma.user.findUnique({
           where: { id: payload.sub },
           select: { is_active: true },
@@ -114,8 +115,10 @@ export class ClaimCommentsGateway
         return admin?.is_active === true;
       }
 
-      // Same default as `JwtAuthGuard`: a token with no type is a profile's.
-      if ((payload.type ?? 'profile') !== 'profile') return false;
+      // The same questions as the HTTP guards: see socket-session.ts.
+      if (!(await socketProfile(this.redis, this.prisma, payload))) {
+        return false;
+      }
 
       const claim = await this.prisma.claim.findUnique({
         where: { id: claimId },

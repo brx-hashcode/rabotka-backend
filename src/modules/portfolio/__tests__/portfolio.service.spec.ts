@@ -346,6 +346,21 @@ describe('PortfolioService', () => {
   });
 
   describe('getPublicBySlug', () => {
+    it.each([
+      ['archived', { deleted_at: new Date(), status: 'ACTIVE' }],
+      ['banned', { deleted_at: null, status: 'BANNED' }],
+    ])('has no public page for an %s worker', async (_label, state) => {
+      prisma.profile.findUnique.mockResolvedValue({
+        id: 'w1',
+        profile_type: ProfileType.WORKER,
+        portfolio_items: [],
+        ...state,
+      });
+      await expect(service.getPublicBySlug('jean')).rejects.toThrow(
+        'Portfolio introuvable',
+      );
+    });
+
     it('returns a curated view WITHOUT phone/email', async () => {
       prisma.profile.findUnique.mockResolvedValue({
         id: 'w1',

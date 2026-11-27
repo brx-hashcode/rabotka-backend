@@ -6,7 +6,10 @@ import {
 import { randomUUID } from 'node:crypto';
 import { ContactRecordOrigin } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
-import { CONTACTABLE_WORKER } from '../recommendation/contactable-worker';
+import {
+  CONTACTABLE_WORKER,
+  KEPT_CONTACT,
+} from '../recommendation/contactable-worker';
 import {
   openApplicants,
   openApplications,
@@ -32,6 +35,7 @@ export class BusinessContactsService {
       where: {
         employer_id: profileId,
         ...(workerId ? { worker_id: workerId } : {}),
+        worker: KEPT_CONTACT,
       },
       // Every record, without a cap: a contact obtained stays the business's,
       // plan or no plan, and a cap would silently drop the oldest ones.
