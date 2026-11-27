@@ -142,6 +142,46 @@ describe('CvRescoreService', () => {
     expect(spent.queue.addJob).not.toHaveBeenCalled();
   });
 
+  it('counts an offer with only profile applicants too, opening its counter', async () => {
+    const t = make({
+      rows: [{ kind: 'profile', id: 'a1', gridId: 'g0', screeningId: null }],
+    });
+    // No screening yet, then the one just opened, at zero.
+    t.grids.rescores
+      .mockResolvedValueOnce({ limit: 1, used: 0, counted: false })
+      .mockResolvedValueOnce({ limit: 1, used: 0, counted: true });
+    t.screenings.offerScreening = jest
+      .fn()
+      .mockResolvedValue({ id: 's-new', opened: true });
+
+    await t.service.start(found);
+
+    expect(t.screenings.offerScreening).toHaveBeenCalledWith(
+      found.businessId,
+      'o1',
+      expect.any(Function),
+    );
+    expect(t.prisma.cvScreening.updateMany.mock.calls[0][0]).toEqual({
+      where: { offer_id: 'o1', rescores: { lt: 1 } },
+      data: { rescores: { increment: 1 } },
+    });
+
+    // The next press, with the one free re-analysis spent, is refused.
+    const again = make({
+      rows: [{ kind: 'profile', id: 'a1', gridId: 'g0', screeningId: null }],
+    });
+    again.grids.rescores.mockResolvedValue({
+      limit: 1,
+      used: 1,
+      counted: true,
+    });
+    again.prisma.cvScreening.updateMany.mockResolvedValue({ count: 0 });
+    await expect(again.service.start(found)).rejects.toThrow(
+      BadRequestException,
+    );
+    expect(again.events.emit).not.toHaveBeenCalled();
+  });
+
   it('refuses when everyone is on these criteria already', async () => {
     const { service, queue } = make({
       rows: [{ kind: 'cv', id: 'r1', gridId: 'g2', screeningId: 's1' }],

@@ -3,10 +3,12 @@
  * opener, same origin) how it went, then closes. Static text only.
  */
 export type CallbackStatus =
-  'connected' | 'denied' | 'scope' | 'api_disabled' | 'error';
+  'connected' | 'denied' | 'scope' | 'api_disabled' | 'session' | 'error';
 
 const TEXT: Record<CallbackStatus, string> = {
   connected: 'Messagerie connectée. Vous pouvez fermer cette fenêtre.',
+  session:
+    'Ouvrez la connexion depuis votre espace Rabotka Business, dans le navigateur où vous êtes connecté, puis réessayez.',
   denied: 'Connexion annulée. Vous pouvez fermer cette fenêtre.',
   scope:
     'L’accès à vos e-mails n’a pas été autorisé : réessayez et cochez la case qui permet à Rabotka de lire vos e-mails.',

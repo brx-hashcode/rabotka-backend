@@ -2,11 +2,14 @@
  * The page LinkedIn's consent popup lands on: it tells the business space
  * (its opener, same origin) how it went, then closes. Static text only.
  */
-export type LinkedinCallbackStatus = 'connected' | 'denied' | 'error';
+export type LinkedinCallbackStatus =
+  'connected' | 'denied' | 'session' | 'error';
 
 const TEXT: Record<LinkedinCallbackStatus, string> = {
   connected: 'LinkedIn connecté. Vous pouvez fermer cette fenêtre.',
   denied: 'Connexion annulée. Vous pouvez fermer cette fenêtre.',
+  session:
+    'Ouvrez la connexion depuis votre espace Rabotka Business, dans le navigateur où vous êtes connecté, puis réessayez.',
   error: 'La connexion n’a pas abouti. Fermez cette fenêtre et réessayez.',
 };
 

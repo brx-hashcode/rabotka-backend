@@ -1706,8 +1706,9 @@ export class BusinessSubscriptionService implements OnModuleInit {
     role: BusinessMemberRole,
     message: (limit: number) => string,
     excludeMemberId?: string,
+    db: Db = this.prisma,
   ): Promise<{ subscriptionId: string }> {
-    const sub = await this.current(businessId);
+    const sub = await this.current(businessId, db);
     const limit = !sub
       ? 0
       : {
@@ -1717,11 +1718,7 @@ export class BusinessSubscriptionService implements OnModuleInit {
         }[role];
     if (!sub || limit === 0) throw new ForbiddenException(message(0));
     if (limit !== null) {
-      const used = await this.seatsInUse(
-        businessId,
-        this.prisma,
-        excludeMemberId,
-      );
+      const used = await this.seatsInUse(businessId, db, excludeMemberId);
       const taken = {
         ADMIN: used.admins,
         RECRUITER: used.recruiters,

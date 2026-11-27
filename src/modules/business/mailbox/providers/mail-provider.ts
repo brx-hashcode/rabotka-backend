@@ -37,7 +37,8 @@ export class MailboxAuthError extends Error {
  * app up) can do something about it: tick the mail permission on the consent
  * screen, or turn the mail API on for the OAuth app.
  */
-export type ConnectFailure = 'scope' | 'api_disabled';
+/** `session`: the consent link came back without the session that asked for it. */
+export type ConnectFailure = 'scope' | 'api_disabled' | 'session';
 
 export class MailboxConnectError extends Error {
   constructor(

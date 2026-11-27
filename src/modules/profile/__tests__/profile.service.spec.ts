@@ -760,7 +760,11 @@ describe('ProfileService', () => {
         expect(result).toEqual({ success: true, phone: NEW });
         expect(prisma.profile.update).toHaveBeenCalledWith(
           expect.objectContaining({
-            data: { phone: NEW, whatsapp_connected: true },
+            data: {
+              phone: NEW,
+              whatsapp_connected: true,
+              phone_verified_at: expect.any(Date),
+            },
           }),
         );
       });
@@ -862,6 +866,18 @@ describe('ProfileService', () => {
       prisma.profile.findUnique.mockResolvedValueOnce(null);
       await expect(service.updateProfileByAdmin('missing', {})).rejects.toThrow(
         'Profil non trouvé',
+      );
+    });
+
+    it('drops the proof of a number an admin types by hand', async () => {
+      await service.updateProfileByAdmin('p-1', { phone: '+242069999999' });
+      expect(prisma.profile.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            phone: '+242069999999',
+            phone_verified_at: null,
+          }),
+        }),
       );
     });
 

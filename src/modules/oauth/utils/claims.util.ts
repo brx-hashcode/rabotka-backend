@@ -11,6 +11,8 @@ export type ClaimSourceProfile = {
   first_name: string;
   last_name: string;
   phone: string;
+  /** When this phone number was proven by a WhatsApp code; null if never. */
+  phone_verified_at: Date | null;
   email: string | null;
   avatar_url: string | null;
   city: string | null;
@@ -76,12 +78,10 @@ export function buildClaims(
 
   if (granted.has('phone')) {
     claims.phone_number = profile.phone;
-    // Always true, and true for a specific reason rather than by assumption:
-    // reaching this point required an OTP that was delivered to this number
-    // over WhatsApp and typed back in. There is no path to a token that skips
-    // that — the session-cookie shortcut in `authorize` only reuses a session
-    // that was itself established the same way.
-    claims.phone_number_verified = true;
+    // True only when this exact number was proven by a WhatsApp code. It used
+    // to be always true, but a business proves an e-mail to sign in, and an
+    // admin can set a number by hand (security audit run 2). Fails closed.
+    claims.phone_number_verified = profile.phone_verified_at !== null;
   }
 
   // Both claims are omitted entirely when the profile has no email, rather than

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -41,6 +42,14 @@ import {
   postUrl,
   uploadImage,
 } from './linkedin-api';
+import type Redis from 'ioredis';
+import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
+import {
+  type CallbackSession,
+  connectMatches,
+  rememberConnect,
+  takeConnect,
+} from '../connect-session';
 
 const STATE_AUDIENCE = 'rabotka-linkedin-connect';
 /** Matches the queue's default attempts (queue.service.ts). */
@@ -57,6 +66,10 @@ export const EXPIRED_MESSAGE =
   'Votre connexion LinkedIn a expiré : connectez-la de nouveau.';
 
 /** The account holder has no member id: it is « holder ». */
+/** The callback tells this one apart, to show the « sign in again » page. */
+export const LINKEDIN_SESSION_MISMATCH =
+  'consent link not opened by the session that asked for it';
+
 export const personOf = (memberId: string | undefined): string =>
   memberId ?? 'holder';
 
@@ -100,6 +113,7 @@ export class LinkedinService implements OnModuleInit {
     private readonly queue: QueueService,
     private readonly events: EventEmitter2,
     config: ConfigService,
+    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
     // The offer's social visual (4:5), the post's picture by default.
     @Optional() private readonly posters?: CareersPageService,
   ) {
@@ -165,8 +179,16 @@ export class LinkedinService implements OnModuleInit {
     }
     const businessId = await this.businessId(profileId);
     await this.mustBeIncluded(businessId);
+    const n = randomUUID();
+    // One-time, and only for whoever asked (connect-session.ts).
+    await rememberConnect(this.redis, n, {
+      b: businessId,
+      p: profileId,
+      m: memberId ?? null,
+      v: 'linkedin',
+    });
     const state = await this.jwt.signAsync(
-      { b: businessId, p: personOf(memberId), n: randomUUID() } satisfies State,
+      { b: businessId, p: personOf(memberId), n } satisfies State,
       { audience: STATE_AUDIENCE, expiresIn: '10m' },
     );
     return {
@@ -175,7 +197,7 @@ export class LinkedinService implements OnModuleInit {
   }
 
   /** Back from the consent screen: the code becomes a sealed token. */
-  async complete(code: string, state: string) {
+  async complete(code: string, state: string, session: CallbackSession | null) {
     if (!this.available) {
       throw new ServiceUnavailableException('LinkedIn not configured');
     }
@@ -186,6 +208,15 @@ export class LinkedinService implements OnModuleInit {
       });
     } catch {
       throw new BadRequestException('Invalid or expired state');
+    }
+    // Taken before the code is used: once, and only in the session that
+    // asked for the link, whose person must be the state's.
+    const record = await takeConnect(this.redis, s.n);
+    if (
+      !connectMatches(record, session, s.b, 'linkedin') ||
+      personOf(session?.memberId ?? undefined) !== s.p
+    ) {
+      throw new ForbiddenException(LINKEDIN_SESSION_MISMATCH);
     }
     const token = await exchangeCode(
       this.clientId!,

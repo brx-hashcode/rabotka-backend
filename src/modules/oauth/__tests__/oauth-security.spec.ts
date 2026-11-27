@@ -162,6 +162,7 @@ describe('claims', () => {
     first_name: 'Amina',
     last_name: 'Nkemdirim',
     phone: '+237690000000',
+    phone_verified_at: new Date('2026-01-10T10:00:00Z') as Date | null,
     email: 'amina@example.com',
     avatar_url: 'https://cdn/a.jpg',
     city: 'Douala',
@@ -187,6 +188,16 @@ describe('claims', () => {
     const claims = buildClaims(profile, ['openid', 'phone'], 'sub-1');
     expect(claims.phone_number).toBe('+237690000000');
     expect(claims.phone_number_verified).toBe(true);
+  });
+
+  it('reports a number nobody proved as unverified: a business, an admin edit', () => {
+    const claims = buildClaims(
+      { ...profile, phone_verified_at: null },
+      ['openid', 'phone'],
+      'sub-1',
+    );
+    expect(claims.phone_number).toBe('+237690000000');
+    expect(claims.phone_number_verified).toBe(false);
   });
 
   it('reports email_verified false — Rabotka never confirms an address', () => {
