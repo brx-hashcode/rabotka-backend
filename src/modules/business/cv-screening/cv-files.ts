@@ -1,3 +1,4 @@
+import { isSafeDocx } from '../../../common/utils/docx-guard.util';
 import { sniffFileType } from '../../../common/utils/file-signature.util';
 
 export const DOCX_MIME =
@@ -21,7 +22,6 @@ export const MIN_TEXT_CHARS = 200;
 
 const MAX_TEXT_CHARS = 15_000;
 
-
 export function cvFileType(
   buffer: Buffer,
   declared: string,
@@ -34,7 +34,11 @@ export function cvFileType(
     buffer[1] === 0x4b &&
     buffer[2] === 0x03 &&
     buffer[3] === 0x04;
-  return isZip && declared === DOCX_MIME ? DOCX_MIME : null;
+  // A zip that inflates past the parser's bounds is refused here, before it
+  // is stored, shown to a recruiter or read by mammoth.
+  return isZip && declared === DOCX_MIME && isSafeDocx(buffer)
+    ? DOCX_MIME
+    : null;
 }
 
 export const CV_EXTENSION: Record<CvFileType, string> = {
@@ -45,7 +49,6 @@ export const CV_EXTENSION: Record<CvFileType, string> = {
   'image/png': 'png',
   'image/webp': 'webp',
 };
-
 
 export async function extractCvText(
   buffer: Buffer,
@@ -61,6 +64,8 @@ export async function extractCvText(
       const { text } = await extractText(pdf, { mergePages: true });
       raw = text;
     } else if (type === DOCX_MIME) {
+      // Files stored before the upload check, or typed by a caller, too.
+      if (!isSafeDocx(buffer)) return '';
       const mammoth = await import('mammoth');
       raw = (await mammoth.extractRawText({ buffer })).value;
     }
